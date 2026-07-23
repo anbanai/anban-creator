@@ -2,21 +2,16 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -219,113 +214,6 @@ func categorizeImageGenFailure(err error, refPath string) string {
 	return "provider"
 }
 
-func resolveTaskWorkspacePath(taskID, filePath string) (string, bool) {
-	if svcs == nil || svcs.TaskSvc == nil {
-		return filePath, false
-	}
-	return svcs.TaskSvc.ResolveWorkspacePath(taskID, filePath)
-}
-
-func resolveTaskWorkspaceReadablePath(ctx context.Context, taskID, filePath string) (string, func(), error) {
-	filePath = strings.TrimSpace(filePath)
-	if taskID == "" || filePath == "" || filepath.IsAbs(filePath) {
-		return filePath, nil, nil
-	}
-	if resolved, ok := resolveTaskWorkspacePath(taskID, filePath); ok {
-		return resolved, nil, nil
-	}
-	if svcs == nil || svcs.TaskSvc == nil || svcs.Store == nil || svcs.TaskSvc.Repository() == nil {
-		return filePath, nil, nil
-	}
-	cleanPath, err := service.CleanTaskFileRelativePath(filePath)
-	if err != nil {
-		return filePath, nil, nil
-	}
-	taskFile, err := svcs.TaskSvc.Repository().TaskFiles().FindExisting(ctx, taskID, cleanPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("find task file %s: %w", cleanPath, err)
-	}
-	if taskFile == nil || strings.TrimSpace(taskFile.OSSKey) == "" {
-		return filePath, nil, nil
-	}
-	data, err := svcs.Store.Read(ctx, taskFile.OSSKey)
-	if err != nil {
-		return "", nil, fmt.Errorf("read task file %s: %w", cleanPath, err)
-	}
-	return writeTaskFileTemp(data, cleanPath)
-}
-
-func resolveTaskWorkspaceReadablePaths(ctx context.Context, taskID string, filePaths []string) ([]string, func(), error) {
-	if len(filePaths) == 0 {
-		return nil, nil, nil
-	}
-	out := make([]string, 0, len(filePaths))
-	cleanups := make([]func(), 0)
-	for _, filePath := range filePaths {
-		resolved, cleanup, err := resolveTaskWorkspaceReadablePath(ctx, taskID, filePath)
-		if err != nil {
-			for _, fn := range cleanups {
-				fn()
-			}
-			return nil, nil, err
-		}
-		out = append(out, resolved)
-		if cleanup != nil {
-			cleanups = append(cleanups, cleanup)
-		}
-	}
-	if len(cleanups) == 0 {
-		return out, nil, nil
-	}
-	return out, func() {
-		for _, fn := range cleanups {
-			fn()
-		}
-	}, nil
-}
-
-func writeTaskFileTemp(data []byte, logicalPath string) (string, func(), error) {
-	ext := strings.ToLower(filepath.Ext(logicalPath))
-	if ext == "" {
-		ext = ".bin"
-	}
-	f, err := os.CreateTemp("", "anban-task-file-*"+ext)
-	if err != nil {
-		return "", nil, fmt.Errorf("create task file temp: %w", err)
-	}
-	path := f.Name()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return "", nil, fmt.Errorf("write task file temp: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", nil, fmt.Errorf("close task file temp: %w", err)
-	}
-	return path, func() { _ = os.Remove(path) }, nil
-}
-
-func validateImageToolTaskAccess(ctx context.Context, userID, taskID, projectID string) *mcp.CallToolResult {
-	if taskID == "" {
-		return nil
-	}
-	if svcs == nil || svcs.TaskSvc == nil {
-		return errorResult("task service not available")
-	}
-	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
-	if err != nil || task == nil {
-		return errorResult("task not found")
-	}
-	if userID != "" && task.UserID != userID {
-		return errorResult("task does not belong to user")
-	}
-	if projectID != "" && task.ProjectID != projectID {
-		return errorResult("task does not belong to the requested project")
-	}
-	return nil
-}
-
 func registerRenderedImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if svcs == nil || svcs.TaskSvc == nil {
 		return errorResult("task service not available"), nil
@@ -365,64 +253,37 @@ func registerRenderedImageHandler(ctx context.Context, req *mcp.CallToolRequest)
 }
 
 func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.ImageSvc == nil {
+	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	filePath, _ := args["file_path"].(string)
-	taskID, _ := args["task_id"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	if filePath == "" {
-		return errorResult("file_path is required"), nil
-	}
-	if errResult := validateImageToolTaskAccess(ctx, userID, taskID, projectID); errResult != nil {
-		return errResult, nil
-	}
-	filePath, _ = resolveTaskWorkspacePath(taskID, filePath)
-
-	result, err := svcs.ImageSvc.UploadImage(ctx, userID, projectID, filePath)
+	result, err := svcs.TaskImageOperationsSvc.Upload(ctx, service.UploadTaskImageRequest{
+		UserID: getUserID(ctx), ProjectID: stringArg(args, "project_id"),
+		TaskID: stringArg(args, "task_id"), FilePath: stringArg(args, "file_path"),
+	})
 	if err != nil {
-		return errorResult(fmt.Sprintf("upload image: %v", err)), nil
+		return errorResult(err.Error()), nil
 	}
-
 	return textResult(result)
 }
 
 func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.ImageSvc == nil {
+	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-
-	filePath, _ := args["file_path"].(string)
-	taskID, _ := args["task_id"].(string)
 	maxWidth := 0
 	if v, ok := args["max_width"].(float64); ok {
 		maxWidth = int(v)
 	}
-
-	if filePath == "" {
-		return errorResult("file_path is required"), nil
-	}
-	if errResult := validateImageToolTaskAccess(ctx, getUserID(ctx), taskID, ""); errResult != nil {
-		return errResult, nil
-	}
-	filePath, _ = resolveTaskWorkspacePath(taskID, filePath)
-
-	compressedPath, compressed, err := svcs.ImageSvc.CompressImage(filePath, maxWidth)
-	if err != nil {
-		return errorResult(fmt.Sprintf("compress image: %v", err)), nil
-	}
-
-	return textResult(map[string]any{
-		"file_path":  compressedPath,
-		"compressed": compressed,
+	result, err := svcs.TaskImageOperationsSvc.Compress(ctx, service.CompressTaskImageRequest{
+		UserID: getUserID(ctx), TaskID: stringArg(args, "task_id"),
+		FilePath: stringArg(args, "file_path"), MaxWidth: maxWidth,
 	})
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(result)
 }
 
 func generateImageInputSchema() map[string]any {
@@ -496,153 +357,16 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WritingSvc == nil {
+	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("writing/vision service not available"), nil
 	}
-	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	prompt, _ := args["prompt"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	if prompt == "" {
-		return errorResult("prompt is required"), nil
-	}
-
-	imageURL, _ := args["image_url"].(string)
-	filePath, _ := args["file_path"].(string)
-	taskID, _ := args["task_id"].(string)
-	if imageURL == "" && filePath == "" {
-		return errorResult("either image_url or file_path is required"), nil
-	}
-	if errResult := validateImageToolTaskAccess(ctx, userID, taskID, projectID); errResult != nil {
-		return errResult, nil
-	}
-	var imageSource string
-
-	if filePath != "" {
-		filePath, _ = resolveTaskWorkspacePath(taskID, filePath)
-		info, err := os.Stat(filePath)
-		if err != nil {
-			return errorResult(fmt.Sprintf("read image file: %v", err)), nil
-		}
-		if info.Size() > 10<<20 {
-			return errorResult("image file is too large for analysis (max 10MB)"), nil
-		}
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			return errorResult(fmt.Sprintf("read image file: %v", err)), nil
-		}
-		mimeType := http.DetectContentType(data)
-		if !strings.HasPrefix(mimeType, "image/") {
-			return errorResult("file is not an image"), nil
-		}
-		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
-	} else if imageURL != "" {
-		if !strings.HasPrefix(imageURL, "https://") {
-			return errorResult("image_url must be an HTTPS URL"), nil
-		}
-		data, err := downloadHTTPSImage(ctx, imageURL, 10<<20)
-		if err != nil {
-			return errorResult(fmt.Sprintf("download image: %v", err)), nil
-		}
-		mimeType := http.DetectContentType(data)
-		if !strings.HasPrefix(mimeType, "image/") {
-			return errorResult("downloaded file is not an image"), nil
-		}
-		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
-	}
-
-	providerRequestID := newUnderstandingProviderRequestID(model.OperationImageUnderstanding)
-	result, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
-	if err != nil {
-		recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, nil)
-		return errorResult(fmt.Sprintf("analyze image: %v", err)), nil
-	}
-	recordUnderstandingProviderCost(ctx, taskID, model.OperationImageUnderstanding, providerRequestID, &result.Usage)
-	return textResult(map[string]any{
-		"analysis": result.Text,
-		"usage":    result.Usage,
+	result, err := svcs.TaskImageOperationsSvc.Analyze(ctx, service.AnalyzeTaskImageRequest{
+		UserID: getUserID(ctx), ProjectID: stringArg(args, "project_id"), TaskID: stringArg(args, "task_id"),
+		ImageURL: stringArg(args, "image_url"), FilePath: stringArg(args, "file_path"), Prompt: stringArg(args, "prompt"),
 	})
-}
-
-// downloadHTTPSImage downloads an image from a public HTTPS URL.
-func downloadHTTPSImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			DialContext: publicOnlyDialContext,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return fmt.Errorf("too many redirects")
-			}
-			if req.URL.Scheme != "https" {
-				return fmt.Errorf("external image redirects must use https")
-			}
-			return nil
-		},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return errorResult(err.Error()), nil
 	}
-	if req.URL.Scheme != "https" || req.URL.Hostname() == "" || req.URL.User != nil {
-		return nil, fmt.Errorf("invalid external image URL")
-	}
-	req.Header.Set("Accept", "image/*")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download external image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download external image: unexpected status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("read external image: %w", err)
-	}
-	if int64(len(data)) > maxSize {
-		return nil, fmt.Errorf("external image exceeds max size")
-	}
-	return data, nil
-}
-
-// publicOnlyDialContext prevents SSRF by only connecting to public IP addresses.
-func publicOnlyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, fmt.Errorf("invalid address: %w", err)
-	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("resolve host: %w", err)
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("host did not resolve")
-	}
-	for _, addr := range ips {
-		if !isPublicIP(addr.IP) {
-			return nil, fmt.Errorf("external image host resolves to a non-public address")
-		}
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-}
-
-func isPublicIP(ip net.IP) bool {
-	return ip.IsGlobalUnicast() &&
-		!ip.IsPrivate() &&
-		!ip.IsLoopback() &&
-		!ip.IsLinkLocalUnicast() &&
-		!ip.IsLinkLocalMulticast() &&
-		!ip.IsUnspecified() &&
-		!ip.IsMulticast()
+	return textResult(result)
 }

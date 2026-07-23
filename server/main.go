@@ -649,7 +649,6 @@ func main() {
 
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
-			Store:                  store,
 			TaskSvc:                taskSvc,
 			PlanSvc:                planSvc,
 			ImageSvc:               imageSvc,
@@ -673,6 +672,10 @@ func main() {
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
 			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
+			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, writingSvc, fixedBilling.Cost, service.TaskImageOperationsConfig{
+				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
+				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+			}, log),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)

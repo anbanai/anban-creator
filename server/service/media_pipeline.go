@@ -9,11 +9,10 @@ import (
 type MediaPipelineStatusRequest struct{}
 
 type MediaPipelineStatusResult struct {
-	StorageConfigured bool              `json:"storage_configured"`
-	OSSDirectUpload   bool              `json:"oss_direct_upload"`
-	TingWuConfigured  bool              `json:"tingwu_configured"`
-	Missing           []string          `json:"missing"`
-	Hints             map[string]string `json:"hints"`
+	StorageConfigured bool     `json:"storage_configured"`
+	OSSDirectUpload   bool     `json:"oss_direct_upload"`
+	TingWuConfigured  bool     `json:"tingwu_configured"`
+	Missing           []string `json:"missing"`
 }
 
 type MediaPipelineService struct {
@@ -31,18 +30,15 @@ func (s *MediaPipelineService) Status(context.Context, MediaPipelineStatusReques
 	tingwuConfigured := s != nil && s.tingwuConfigured
 	missing := []string{}
 	if !ossDirectUpload {
-		missing = append(missing, "oss storage for prepare_file_upload direct uploads")
+		missing = append(missing, "oss direct-upload storage")
 	}
 	if !tingwuConfigured {
-		missing = append(missing, "tingwu endpoint/region/app_key/access_key/access_secret for live-slicer")
+		missing = append(missing, "tingwu endpoint/region/app_key/access_key/access_secret")
 	}
 	return &MediaPipelineStatusResult{
 		StorageConfigured: storageConfigured,
 		OSSDirectUpload:   ossDirectUpload,
 		TingWuConfigured:  tingwuConfigured,
 		Missing:           missing,
-		Hints: map[string]string{
-			"live_audio_upload": "Use prepare_file_upload(purpose=\"live_audio\"), PUT the agent-local audio file to upload_url, then pass audio_key to create_live_analysis_task.",
-		},
 	}
 }

@@ -87,17 +87,19 @@ func (s *TaskService) RegisterRenderedImage(ctx context.Context, req RegisterRen
 
 	var file *model.TaskFile
 	if req.ExecutionID != "" {
-		file, err = s.UploadExecutionTaskFileFromReader(ctx, req.TaskID, req.UserID, req.ExecutionID, name, bytes.NewReader(data), mimeType, int64(len(data)))
+		if err := s.ValidateAgentExecutionAccess(ctx, req.UserID, task.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+			return nil, err
+		}
+		file, err = s.uploadTaskFileFromReader(ctx, task, req.TaskID, req.UserID, req.ExecutionID, name, bytes.NewReader(data), mimeType, int64(len(data)), nil, taskFileUploadOptions{
+			Role: role, ContentAddressedObject: true, CleanupOnPersistFailure: true,
+		})
 	} else {
-		file, err = s.UploadTaskFileFromReader(ctx, req.TaskID, req.UserID, name, bytes.NewReader(data), mimeType, int64(len(data)))
+		file, err = s.uploadTaskFileFromReader(ctx, nil, req.TaskID, req.UserID, "", name, bytes.NewReader(data), mimeType, int64(len(data)), nil, taskFileUploadOptions{
+			Role: role, ContentAddressedObject: true, CleanupOnPersistFailure: true,
+		})
 	}
 	if err != nil {
 		return nil, fmt.Errorf("register task file: %w", err)
-	}
-	s.EnrichFilesWithURLs(ctx, []*model.TaskFile{file})
-	file, err = s.UpdateTaskFileMetadata(ctx, file, role, file.MediaID, file.WechatURL)
-	if err != nil {
-		return nil, err
 	}
 	s.EnrichFilesWithURLs(ctx, []*model.TaskFile{file})
 	return &RegisterRenderedImageResult{

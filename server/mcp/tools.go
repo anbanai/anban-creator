@@ -12,7 +12,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
-	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // ImageModelResolver selects one immutable provider/model descriptor before an
@@ -45,7 +44,6 @@ type ImageGenerator interface {
 // Services holds the service instances needed by MCP tools.
 type Services struct {
 	ProjectSvc             *service.ProjectService
-	Store                  storage.Provider
 	TaskSvc                *service.TaskService
 	PlanSvc                *service.PlanService
 	ImageSvc               *service.ImageService
@@ -69,6 +67,7 @@ type Services struct {
 	SeednoteExportSvc      *service.SeednoteExportService
 	ResourceCatalogSvc     *service.ResourceCatalogService
 	TaskImageSvc           *service.TaskImageService
+	TaskImageOperationsSvc *service.TaskImageOperationsService
 }
 
 // RegisterTools registers all MCP tools on the server.

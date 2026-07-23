@@ -184,11 +184,7 @@ func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolReque
 		return textResult(map[string]any{"available": false, "logged_in": false, "message": result.Message})
 	}
 
-	msg := "已登录"
-	if !result.Value {
-		msg = "未登录，请使用 get_seednote_login_qrcode 获取二维码扫描登录"
-	}
-	return textResult(map[string]any{"available": true, "logged_in": result.Value, "message": msg})
+	return textResult(map[string]any{"available": true, "logged_in": result.Value})
 }
 
 func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -206,7 +202,6 @@ func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.ImageContent{Data: []byte(result.Value), MIMEType: "image/png"},
-			&mcp.TextContent{Text: "请用种草笔记 App 扫描二维码登录。登录后使用 check_seednote_login_status 确认状态。"},
 		},
 	}, nil
 }

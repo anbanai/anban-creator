@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,14 +25,14 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"accountInfoHandler":                   "svcs.AgentProjectProfileSvc.Get",
 	"addTopicHandler":                      "svcs.TopicPoolSvc.Add",
 	"agentFeedbackSubmitHandler":           "svcs.AgentFeedbackSvc.Create",
-	"analyzeImageHandler":                  "svcs.WritingSvc.AnalyzeImageDetailed",
+	"analyzeImageHandler":                  "svcs.TaskImageOperationsSvc.Analyze",
 	"buildLiveClipManifestHandler":         "svcs.LiveSliceSvc.BuildLiveClipManifest",
 	"buildLiveClipPlanHandler":             "svcs.LiveSliceSvc.BuildLiveClipPlan",
 	"buildLiveSubjectClipPlanHandler":      "svcs.LiveSliceSvc.BuildLiveSubjectClipPlan",
 	"checkSeednoteLoginStatusHandler":      "svcs.SeednoteCapabilitySvc.LoginStatus",
 	"claimTopicHandler":                    "svcs.TopicPoolSvc.ClaimTopic",
 	"completeLiveSubjectHandler":           "svcs.LiveSliceSvc.CompleteLiveSubject",
-	"compressImageHandler":                 "svcs.ImageSvc.CompressImage",
+	"compressImageHandler":                 "svcs.TaskImageOperationsSvc.Compress",
 	"convertMarkdownHandler":               "svcs.WritingSvc.ConvertMarkdown",
 	"createLiveAnalysisTaskHandler":        "svcs.LiveSliceSvc.CreateLiveAnalysisTask",
 	"downloadImageHandler":                 "svcs.ImageSvc.DownloadImage",
@@ -71,7 +72,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"taskListHandler":                      "svcs.TaskSvc.List",
 	"titleFinalizeHandler":                 "svcs.TaskSvc.FinalizeTitle",
 	"titleListHandler":                     "svcs.TaskSvc.ListTitlesForUser",
-	"uploadImageHandler":                   "svcs.ImageSvc.UploadImage",
+	"uploadImageHandler":                   "svcs.TaskImageOperationsSvc.Upload",
 	"uploadLiveAudioHandler":               "svcs.LiveSliceSvc.UploadLiveAudio",
 }
 
@@ -82,11 +83,16 @@ var reviewedNonToolHandlerExclusions = map[string]string{
 func TestEveryMCPHandlerHasReviewedCapabilityBoundary(t *testing.T) {
 	files := parseProductionMCPFiles(t)
 	handlers := map[string]*ast.FuncDecl{}
+	functions := map[string]*ast.FuncDecl{}
 	exclusions := map[string]bool{}
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !strings.HasSuffix(fn.Name.Name, "Handler") {
+			if !ok || fn.Recv != nil {
+				continue
+			}
+			functions[fn.Name.Name] = fn
+			if !strings.HasSuffix(fn.Name.Name, "Handler") {
 				continue
 			}
 			if _, excluded := reviewedNonToolHandlerExclusions[fn.Name.Name]; excluded {
@@ -122,7 +128,7 @@ func TestEveryMCPHandlerHasReviewedCapabilityBoundary(t *testing.T) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		calls := directApplicationCapabilityCalls(handlers[name])
+		calls := applicationCapabilityCallsForHandler(handlers[name], functions)
 		if len(calls) > 1 {
 			t.Errorf("%s directly calls %d application capabilities (%s); want at most one", name, len(calls), strings.Join(calls, ", "))
 			continue
@@ -131,6 +137,36 @@ func TestEveryMCPHandlerHasReviewedCapabilityBoundary(t *testing.T) {
 		if len(calls) != 1 || calls[0] != want {
 			t.Errorf("%s capability calls = %v, want exactly [%s]", name, calls, want)
 		}
+	}
+}
+
+func TestCapabilityBoundaryDetectsApplicationCallsHiddenBehindMCPHelpers(t *testing.T) {
+	source := `package mcp
+func hiddenHandler() {
+	loadTask()
+	recordCost()
+}
+func loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`
+	file, err := parser.ParseFile(token.NewFileSet(), "hidden.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := map[string]*ast.FuncDecl{}
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok {
+			functions[fn.Name.Name] = fn
+		}
+	}
+
+	got := applicationCapabilityCallsForHandler(functions["hiddenHandler"], functions)
+	want := []string{
+		"svcs.ProviderCostSvc.RecordProviderTokenUsage",
+		"svcs.TaskSvc.GetByID",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("transitive application capability calls = %v, want %v", got, want)
 	}
 }
 
@@ -219,6 +255,33 @@ func directApplicationCapabilityCalls(fn *ast.FuncDecl) []string {
 		}
 		return true
 	})
+	sort.Strings(calls)
+	return calls
+}
+
+func applicationCapabilityCallsForHandler(fn *ast.FuncDecl, functions map[string]*ast.FuncDecl) []string {
+	calls := make([]string, 0, 2)
+	visited := map[string]bool{}
+	var visit func(*ast.FuncDecl)
+	visit = func(current *ast.FuncDecl) {
+		if current == nil || visited[current.Name.Name] {
+			return
+		}
+		visited[current.Name.Name] = true
+		calls = append(calls, directApplicationCapabilityCalls(current)...)
+		ast.Inspect(current.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			identifier, ok := call.Fun.(*ast.Ident)
+			if ok {
+				visit(functions[identifier.Name])
+			}
+			return true
+		})
+	}
+	visit(fn)
 	sort.Strings(calls)
 	return calls
 }

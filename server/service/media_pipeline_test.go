@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -28,8 +30,8 @@ func TestMediaPipelineStatusReportsAtomicReadiness(t *testing.T) {
 			want: MediaPipelineStatusResult{
 				StorageConfigured: true,
 				Missing: []string{
-					"oss storage for prepare_file_upload direct uploads",
-					"tingwu endpoint/region/app_key/access_key/access_secret for live-slicer",
+					"oss direct-upload storage",
+					"tingwu endpoint/region/app_key/access_key/access_secret",
 				},
 			},
 		},
@@ -46,5 +48,23 @@ func TestMediaPipelineStatusReportsAtomicReadiness(t *testing.T) {
 				t.Fatalf("Status = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMediaPipelineStatusPublicResultContainsStateOnly(t *testing.T) {
+	for _, result := range []*MediaPipelineStatusResult{
+		NewMediaPipelineService(&fakeTaskStorage{name: "oss"}, true).Status(context.Background(), MediaPipelineStatusRequest{}),
+		NewMediaPipelineService(&fakeTaskStorage{name: "local"}, false).Status(context.Background(), MediaPipelineStatusRequest{}),
+	} {
+		raw, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := strings.ToLower(string(raw))
+		for _, forbidden := range []string{"hints", "prepare_file_upload", "create_live_analysis_task", "then pass"} {
+			if strings.Contains(payload, forbidden) {
+				t.Fatalf("media pipeline public result contains workflow orchestration %q: %s", forbidden, raw)
+			}
+		}
 	}
 }
