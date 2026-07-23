@@ -527,6 +527,39 @@ func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *tes
 	}
 }
 
+func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
+	} {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"failure-state.json",
+			`"status":"recoverable_failure"`,
+			`"resume_from"`,
+			"article_cover_generation_failed",
+			"article_content_images_failed",
+			"article_draft_creation_failed",
+			"不得请求用户协助",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing managed zero-interaction failure term %q", path, required)
+			}
+		}
+		for _, forbidden := range []string{
+			"暂停流程请求用户协助",
+			"暂停流程，请求用户协助",
+			"仍失败则请求用户协助",
+			"暂停流程，分析原因",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s still contains mid-run user assistance path %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, path := range []string{

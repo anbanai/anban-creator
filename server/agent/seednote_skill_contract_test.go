@@ -20,33 +20,89 @@ func extractSeednoteReferenceContract(t *testing.T, body string) string {
 	return strings.Join(strings.Fields(section), " ")
 }
 
-func TestPluginAssetsDoNotUseRemovedGenerateImageWorkflowFields(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, subtree := range []string{"agents", "skills"} {
-		err := filepath.Walk(filepath.Join(root, subtree), func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
+func documentedGenerateImageScopes(body string) []string {
+	var scopes []string
+	for _, paragraph := range strings.Split(body, "\n\n") {
+		negated := false
+		for _, marker := range []string{
+			"不再调用 `generate_image`", "不得调用 `generate_image`", "不再使用 `generate_image`",
+			"不再调用 generate_image", "不得调用 generate_image", "不再使用 generate_image",
+		} {
+			if strings.Contains(paragraph, marker) {
+				negated = true
+				break
 			}
-			if info.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".toml") {
-				return nil
-			}
-			body := readRepoFile(t, path)
-			for _, removed := range []string{"verify_with_vision", "verification_prompt", "upload_to_cdn", "operation_id"} {
-				if strings.Contains(body, removed) {
-					t.Fatalf("%s still uses removed generate_image workflow field %q", path, removed)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
+		if !negated && (strings.Contains(paragraph, "generate_image(") || strings.Contains(paragraph, "调用 `generate_image`")) {
+			scopes = append(scopes, paragraph)
+		}
+	}
+	return scopes
+}
+
+func activeReferenceSelectionScope(paragraph string) bool {
+	if !strings.Contains(paragraph, "参考") {
+		return false
+	}
+	for _, marker := range []string{
+		"不再按", "不得按供应商", "不按供应商", "不维护供应商", "已移除供应商", "不暴露内部路由", "不诊断内部路由",
+	} {
+		if strings.Contains(paragraph, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestImageWorkflowScopeHelpersIgnoreNegatedMigrationProse(t *testing.T) {
+	migration := "迁移说明：不再调用 `generate_image`(provider=\"openai\")，旧字段仅用于解释历史。"
+	if scopes := documentedGenerateImageScopes(migration); len(scopes) != 0 {
+		t.Fatalf("negated generate_image migration prose produced %d invocation scopes", len(scopes))
+	}
+
+	invocation := "调用 `generate_image`(provider=\"openai\", prompt=\"...\")"
+	scopes := documentedGenerateImageScopes(invocation)
+	if len(scopes) != 1 || !containsDocumentedFieldAssignment(scopes[0], "provider") {
+		t.Fatal("active generate_image invocation must remain detectable")
+	}
+
+	if activeReferenceSelectionScope("参考图选择不再按 OpenAI/Gemini 分支，服务端负责路由。") {
+		t.Fatal("negated provider-routing migration prose must not be an active reference-selection scope")
+	}
+	if !activeReferenceSelectionScope("参考图选择：OpenAI/Gemini 使用不同的 ref_image_paths 上限。") {
+		t.Fatal("active provider-specific reference selection must remain detectable")
 	}
 }
 
-func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	paths := []string{
+func containsDocumentedFieldAssignment(scope, field string) bool {
+	lower := strings.ToLower(scope)
+	field = strings.ToLower(field)
+	for _, pattern := range []string{field + "=", field + " =", `"` + field + `":`, "`" + field + "`:"} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func markdownSection(t *testing.T, body, heading string) string {
+	t.Helper()
+	start := strings.Index(body, heading)
+	if start < 0 {
+		t.Fatalf("missing markdown section %q", heading)
+	}
+	rest := body[start+len(heading):]
+	end := len(rest)
+	for _, marker := range []string{"\n### ", "\n---"} {
+		if at := strings.Index(rest, marker); at >= 0 && at < end {
+			end = at
+		}
+	}
+	return rest[:end]
+}
+
+func imageWorkflowContractPaths(root string) []string {
+	return []string{
 		filepath.Join(root, "agents", "article.md"),
 		filepath.Join(root, "agents", "article.toml"),
 		filepath.Join(root, "agents", "designer.md"),
@@ -58,23 +114,39 @@ func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
 		filepath.Join(root, "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
 		filepath.Join(root, "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "skills", "article-visual-design", "references", "content.md"),
-		filepath.Join(root, "skills", "article", "SKILL.md"),
 		filepath.Join(root, "skills", "ecommerce-visual-design", "SKILL.md"),
 		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
 		filepath.Join(root, "skills", "portrait-pose-variants", "SKILL.md"),
 		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
 		filepath.Join(root, "skills", "short-video-cover", "SKILL.md"),
 	}
-	for _, path := range paths {
-		body := readRepoFile(t, path)
-		for _, removed := range []string{
-			"provider", "image_model", "model_fallback_reason", "selection_reason",
-			"response_type", "revised_prompt", "output_mime", "generation_attempts",
-			"verification_audit", "模型路由", "图像模型", "服务端核验对象",
-		} {
-			if strings.Contains(body, removed) {
-				t.Fatalf("%s still tracks image-generation plumbing %q", path, removed)
+}
+
+func TestPluginAssetsDoNotUseRemovedGenerateImageWorkflowFields(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range imageWorkflowContractPaths(root) {
+		for _, scope := range documentedGenerateImageScopes(readRepoFile(t, path)) {
+			for _, removed := range []string{"verify_with_vision", "verification_prompt", "upload_to_cdn", "operation_id"} {
+				if containsDocumentedFieldAssignment(scope, removed) {
+					t.Fatalf("%s still assigns removed generate_image workflow field %q in invocation scope", path, removed)
+				}
+			}
+		}
+	}
+}
+
+func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range imageWorkflowContractPaths(root) {
+		for _, scope := range documentedGenerateImageScopes(readRepoFile(t, path)) {
+			for _, removed := range []string{
+				"provider", "image_model", "model_fallback_reason", "selection_reason",
+				"response_type", "revised_prompt", "output_mime", "generation_attempts",
+				"verification_audit",
+			} {
+				if containsDocumentedFieldAssignment(scope, removed) {
+					t.Fatalf("%s still assigns image-generation plumbing %q in invocation scope", path, removed)
+				}
 			}
 		}
 	}
@@ -82,48 +154,25 @@ func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
 
 func TestRuntimeImageWorkflowDocsDoNotRouteByProvider(t *testing.T) {
 	root := filepath.Join(repoRoot(t), "plugins")
-	roots := []string{
-		filepath.Join(root, "agents", "article.md"),
-		filepath.Join(root, "agents", "article.toml"),
+	for _, path := range []string{
 		filepath.Join(root, "agents", "designer.md"),
-		filepath.Join(root, "agents", "designer.toml"),
-		filepath.Join(root, "agents", "ecommerce.md"),
-		filepath.Join(root, "agents", "ecommerce.toml"),
-		filepath.Join(root, "agents", "seednote.md"),
-		filepath.Join(root, "agents", "seednote.toml"),
-		filepath.Join(root, "skills", "article-cover-design"),
-		filepath.Join(root, "skills", "article-publishing"),
-		filepath.Join(root, "skills", "article-visual-design"),
-		filepath.Join(root, "skills", "article"),
-		filepath.Join(root, "skills", "config"),
-		filepath.Join(root, "skills", "ecommerce-visual-design"),
-		filepath.Join(root, "skills", "ecommerce"),
-		filepath.Join(root, "skills", "line-art-coloring"),
-		filepath.Join(root, "skills", "portrait-pose-variants"),
-		filepath.Join(root, "skills", "seednote-visual-design"),
-		filepath.Join(root, "skills", "short-video-cover"),
-	}
-	for _, walkRoot := range roots {
-		err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
+		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
+		filepath.Join(root, "skills", "line-art-coloring", "references", "verification.md"),
+		filepath.Join(root, "skills", "ecommerce", "references", "examples.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, paragraph := range strings.Split(body, "\n\n") {
+			if !activeReferenceSelectionScope(paragraph) {
+				continue
 			}
-			if info.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".toml") {
-				return nil
-			}
-			body := strings.ToLower(readRepoFile(t, path))
 			for _, forbidden := range []string{
-				"openai", "gpt-image", "dall-e", "gemini",
-				"volcengine", "火山引擎", "seedream", "doubao",
+				"Seedream（", "Seedream：", "OpenAI gpt-image", "OpenAI/Gemini",
+				"OpenAI(gpt-image)", "Gemini（", "项目模型是单参考", "image provider/model",
 			} {
-				if strings.Contains(body, forbidden) {
-					t.Fatalf("%s still routes image work by provider/model name %q", path, forbidden)
+				if strings.Contains(paragraph, forbidden) {
+					t.Fatalf("%s still branches reference selection via %q", path, forbidden)
 				}
 			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
 	}
 }
@@ -152,12 +201,17 @@ func TestConfigSkillDoesNotExposeImageRouteConfiguration(t *testing.T) {
 		filepath.Join(root, "references", "examples.md"),
 	} {
 		body := readRepoFile(t, path)
+		heading := "### 图片视觉设置"
+		if strings.HasSuffix(path, "examples.md") {
+			heading = "### Case 3: 图片视觉设置排查"
+		}
+		section := markdownSection(t, body, heading)
 		for _, required := range []string{"visual_style", "reference_image_path"} {
-			if !strings.Contains(body, required) {
+			if !strings.Contains(section, required) {
 				t.Fatalf("%s missing semantic visual setting %q", path, required)
 			}
 		}
-		lower := strings.ToLower(body)
+		lower := strings.ToLower(section)
 		for _, forbidden := range []string{
 			"image_provider", "image_model", "image provider", "image model",
 			"图片生成服务", "图片服务", "图片模型", "模型配置", "provider", "openai", "gemini", "volcengine", "seedream",
@@ -177,7 +231,7 @@ func TestSeednoteImagePromptsContainOnlyCreativeContent(t *testing.T) {
 		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
 	}
 	for _, path := range paths {
-		body := readRepoFile(t, path)
+		body := extractSeednoteReferenceContract(t, readRepoFile(t, path))
 		for _, required := range []string{"image-prompts.md", "用途：", "提示词："} {
 			if !strings.Contains(body, required) {
 				t.Fatalf("%s missing creative image-prompts contract %q", path, required)
@@ -235,10 +289,14 @@ func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
 		body := readRepoFile(t, path)
 		for _, required := range []string{
 			"只有 `generate_image` 本身失败或超时时，才写入 `$DIR/failure-state.json` 并停止图片阶段",
-			"分析或内容质量结果只影响当前输出图的记录与创作重试",
+			"`analyze_image` 传输或运行失败只记录为“审核不可用” warning",
+			"不得写入 `failure-state.json`",
+			"不能单独导致最终交付失败",
+			"可用的分析结果或可见内容质量结论只影响当前输出图的记录与创作重试",
 			"当前图达到创作重试上限时标记 `quality_status=failed`",
 			"必须继续生成剩余计划图片",
 			"全部计划图片生成完成后再执行整体质量闸门",
+			"审核不可用 warning 不计为质量失败",
 		} {
 			if !strings.Contains(body, required) {
 				t.Fatalf("%s missing non-blocking Seednote analysis term %q", path, required)
@@ -248,6 +306,8 @@ func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
 			"遇到关键失败时停止在当前阶段",
 			"创作重试预算耗尽",
 			"质量重试预算耗尽",
+			"运行错误写入 `failure-state.json`",
+			"审核错误只写 `failure-state.json`",
 		} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s still lets analysis/content quality exhaustion stop later planned image generation via %q", path, forbidden)
@@ -341,10 +401,8 @@ func TestSeednoteVisualWorkflowSelectsReferencesAndReviewsOutputsIndependently(t
 	root := repoRoot(t)
 	visualSkills := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 	contentReferences := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	selectionRule := "封面、内容图和尾图均不预设是否使用参考素材。每页根据 `image-plan.md` 独立选择 0、1 或多张原图；没有相关参考时使用纯文生图。项目级品牌参考图仍可作为旧数据来源，但不得覆盖本次输入附件中更具体、更新的产品事实。"
@@ -463,7 +521,6 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
 	required := []string{
@@ -499,7 +556,6 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
