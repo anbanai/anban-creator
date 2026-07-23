@@ -143,6 +143,31 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	}
 }
 
+func TestEcommerceProductAnalysisPreservesBootstrapInputDirectory(t *testing.T) {
+	root := repoRoot(t)
+	relativePath := "plugins/skills/ecommerce-product-analysis/SKILL.md"
+	body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+
+	for _, forbidden := range []string{
+		"output/.anban-creator/products/index.json",
+		"output/.anban-creator/products/product_01.png",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("%s incorrectly relocates bootstrap input under output: %q", relativePath, forbidden)
+		}
+	}
+	for _, required := range []string{
+		"`$PRODUCT_PHOTO_DIR/index.json`",
+		"`$PRODUCT_PHOTO_DIR/product_01.png`",
+		"`output/product-photos.md`",
+		"`output/product-bible.md`",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("%s missing product photo path contract %q", relativePath, required)
+		}
+	}
+}
+
 func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{"plugins/CODEX.md", "plugins/docs/codex-installation.md"} {
