@@ -481,6 +481,35 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 	}
 }
 
+func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
+		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
+	} {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"generate_image",
+			"analyze_image",
+			"upload_image",
+			"可见内容质量结论",
+			"上传失败只重试上传，不重新生成",
+			"failure-state.json",
+			"不得请求用户中途协助",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing independent article image reference term %q", path, required)
+			}
+		}
+		lower := strings.ToLower(body)
+		for _, forbidden := range []string{"vision", "verification", "vision-score.md", "请求用户协助"} {
+			if strings.Contains(lower, forbidden) {
+				t.Fatalf("%s still contains stale article image review term %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, path := range []string{

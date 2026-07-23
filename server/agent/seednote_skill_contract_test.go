@@ -80,6 +80,95 @@ func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
 	}
 }
 
+func TestRuntimeImageWorkflowDocsDoNotRouteByProvider(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	roots := []string{
+		filepath.Join(root, "agents", "article.md"),
+		filepath.Join(root, "agents", "article.toml"),
+		filepath.Join(root, "agents", "designer.md"),
+		filepath.Join(root, "agents", "designer.toml"),
+		filepath.Join(root, "agents", "ecommerce.md"),
+		filepath.Join(root, "agents", "ecommerce.toml"),
+		filepath.Join(root, "agents", "seednote.md"),
+		filepath.Join(root, "agents", "seednote.toml"),
+		filepath.Join(root, "skills", "article-cover-design"),
+		filepath.Join(root, "skills", "article-publishing"),
+		filepath.Join(root, "skills", "article-visual-design"),
+		filepath.Join(root, "skills", "article"),
+		filepath.Join(root, "skills", "config"),
+		filepath.Join(root, "skills", "ecommerce-visual-design"),
+		filepath.Join(root, "skills", "ecommerce"),
+		filepath.Join(root, "skills", "line-art-coloring"),
+		filepath.Join(root, "skills", "portrait-pose-variants"),
+		filepath.Join(root, "skills", "seednote-visual-design"),
+		filepath.Join(root, "skills", "short-video-cover"),
+	}
+	for _, walkRoot := range roots {
+		err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".toml") {
+				return nil
+			}
+			body := strings.ToLower(readRepoFile(t, path))
+			for _, forbidden := range []string{
+				"openai", "gpt-image", "dall-e", "gemini",
+				"volcengine", "火山引擎", "seedream", "doubao",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s still routes image work by provider/model name %q", path, forbidden)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestReferenceSelectionUsesSemanticOrderAndServerOwnedLimits(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range []string{
+		filepath.Join(root, "agents", "designer.md"),
+		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
+		filepath.Join(root, "skills", "line-art-coloring", "references", "verification.md"),
+		filepath.Join(root, "skills", "ecommerce", "references", "examples.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, required := range []string{"参考图按语义相关性排序", "服务端负责路由与数量限制"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing semantic reference ownership term %q", path, required)
+			}
+		}
+	}
+}
+
+func TestConfigSkillDoesNotExposeImageRouteConfiguration(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins", "skills", "config")
+	for _, path := range []string{
+		filepath.Join(root, "SKILL.md"),
+		filepath.Join(root, "references", "examples.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, required := range []string{"visual_style", "reference_image_path"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing semantic visual setting %q", path, required)
+			}
+		}
+		lower := strings.ToLower(body)
+		for _, forbidden := range []string{
+			"image_provider", "image_model", "image provider", "image model",
+			"图片生成服务", "图片服务", "图片模型", "模型配置", "provider", "openai", "gemini", "volcengine", "seedream",
+		} {
+			if strings.Contains(lower, forbidden) {
+				t.Fatalf("%s still exposes image route configuration %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestSeednoteImagePromptsContainOnlyCreativeContent(t *testing.T) {
 	root := filepath.Join(repoRoot(t), "plugins")
 	paths := []string{
@@ -132,6 +221,29 @@ func TestImageCapabilitiesRemainIndependent(t *testing.T) {
 			if !strings.Contains(body, required) {
 				t.Fatalf("%s missing independent analysis contract %q", path, required)
 			}
+		}
+	}
+}
+
+func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	for _, path := range []string{
+		filepath.Join(root, "agents", "seednote.md"),
+		filepath.Join(root, "agents", "seednote.toml"),
+		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
+	} {
+		body := readRepoFile(t, path)
+		for _, required := range []string{
+			"分析或内容质量结果只影响当前输出图的记录与创作重试",
+			"必须继续生成剩余计划图片",
+			"全部计划图片生成完成后再执行整体质量闸门",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing non-blocking Seednote analysis term %q", path, required)
+			}
+		}
+		if strings.Contains(body, "遇到关键失败时停止在当前阶段") {
+			t.Fatalf("%s still lets analysis/content quality stop later planned image generation", path)
 		}
 	}
 }
