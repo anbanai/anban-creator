@@ -50,7 +50,7 @@ func TestRuntimeSmokeDockerAbsenceIsTheOnlySuccessfulSkip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("missing Docker CLI returned %v: %s", err, output)
 		}
-		if !strings.Contains(string(output), "SKIP") || !strings.Contains(string(output), "Docker-compatible CLI") {
+		if !strings.Contains(string(output), "SKIP") || !strings.Contains(string(output), "Docker CLI") {
 			t.Fatalf("missing Docker CLI output = %q, want explicit skip", output)
 		}
 	})
@@ -138,20 +138,22 @@ create_project article marker
 
 func TestRuntimeSmokePollWaitsForExpectedAttemptAndInspectsItWhileActive(t *testing.T) {
 	testDir := t.TempDir()
+	const taskID = "11111111-1111-4111-8111-111111111111"
+	const projectID = "22222222-2222-4222-8222-222222222222"
 	stateFile := filepath.Join(testDir, "queries")
 	if err := os.WriteFile(stateFile, []byte("0"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	inspectLog := filepath.Join(testDir, "inspect.log")
-	podmanPath := filepath.Join(testDir, "podman")
-	podman := `#!/bin/sh
+	dockerPath := filepath.Join(testDir, "docker")
+	docker := `#!/bin/sh
 printf '%s\n' "$*" >>"$TEST_INSPECT_LOG"
 if [ "$1 $2 $3" != "container inspect workload-2" ]; then
   exit 1
 fi
-printf '%s\n' '[{"Id":"instance-2","Image":"sha256:resolved-attempt-2","State":{"Running":true},"Config":{"Labels":{"anban.ai/execution-id":"execution-2","anban.ai/task-id":"task-1","anban.ai/project-id":"project-1"}}}]'
+printf '%s\n' "[{\"Id\":\"instance-2\",\"Image\":\"sha256:resolved-attempt-2\",\"State\":{\"Running\":true},\"Config\":{\"Labels\":{\"anban.ai/execution-id\":\"execution-2\",\"anban.ai/task-id\":\"$TEST_TASK_ID\",\"anban.ai/project-id\":\"$TEST_PROJECT_ID\"}}}]"
 `
-	if err := os.WriteFile(podmanPath, []byte(podman), 0o755); err != nil {
+	if err := os.WriteFile(dockerPath, []byte(docker), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	body := `
@@ -167,13 +169,14 @@ query_execution() {
     printf '%s\n' 'execution-2|2|execution-1|article|creator-agent-article:latest|docker|workload-2|instance-2|running'
   fi
 }
-row=$(poll_execution_identity task-1 2 task-1 project-1)
+row=$(poll_execution_identity "$TEST_TASK_ID" 2 "$TEST_TASK_ID" "$TEST_PROJECT_ID")
 printf '%s|queries=%s' "$row" "$(cat "$TEST_STATE_FILE")"
 `
 	output, exitCode := runtimeSmokeShell(t, body,
 		"TEST_STATE_FILE="+stateFile,
 		"TEST_INSPECT_LOG="+inspectLog,
-		"DOCKER_CLI=podman",
+		"TEST_TASK_ID="+taskID,
+		"TEST_PROJECT_ID="+projectID,
 		"PATH="+testDir+":"+os.Getenv("PATH"),
 	)
 	if exitCode != 0 {
@@ -188,6 +191,22 @@ printf '%s|queries=%s' "$row" "$(cat "$TEST_STATE_FILE")"
 	}
 	if strings.TrimSpace(string(inspects)) != "container inspect workload-2" {
 		t.Fatalf("runtime inspect order = %q, want only expected attempt 2", inspects)
+	}
+}
+
+func TestRuntimeSmokeRejectsMalformedTaskIDBeforeSQL(t *testing.T) {
+	sqlCalled := filepath.Join(t.TempDir(), "sql-called")
+	body := `
+MYSQL_ROOT_PASSWORD=test-password
+compose() { : >"$TEST_SQL_CALLED"; }
+query_execution "not-a-uuid' OR 1=1 --"
+`
+	output, exitCode := runtimeSmokeShell(t, body, "TEST_SQL_CALLED="+sqlCalled)
+	if exitCode == 0 {
+		t.Fatalf("malformed task ID unexpectedly reached SQL: %q", output)
+	}
+	if _, err := os.Stat(sqlCalled); !os.IsNotExist(err) {
+		t.Fatalf("malformed task ID invoked Compose/SQL: %v", err)
 	}
 }
 
@@ -252,8 +271,8 @@ func TestRuntimeSmokeLabeledCleanupReportsRemovalFailure(t *testing.T) {
 	if err := os.MkdirAll(smokeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	podmanPath := filepath.Join(testDir, "podman")
-	podman := `#!/bin/sh
+	dockerPath := filepath.Join(testDir, "docker")
+	docker := `#!/bin/sh
 if [ "$1 $2" = "container ls" ]; then
   printf '%s\n' 'container-1'
 elif [ "$1 $2" = "container inspect" ]; then
@@ -262,10 +281,12 @@ elif [ "$1 $2 $3" = "container rm -f" ]; then
   exit 73
 fi
 `
-	if err := os.WriteFile(podmanPath, []byte(podman), 0o755); err != nil {
+	if err := os.WriteFile(dockerPath, []byte(docker), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	body := `
+CLEANUP_MAX_ATTEMPTS=2
+CLEANUP_INTERVAL_SECONDS=0
 SMOKE_DIR="$TEST_SMOKE_DIR"
 COMPOSE_FILE=
 TASK_IDS='task-1'
@@ -274,7 +295,6 @@ cleanup 0
 `
 	output, exitCode := runtimeSmokeShell(t, body,
 		"TEST_SMOKE_DIR="+smokeDir,
-		"DOCKER_CLI=podman",
 		"PATH="+testDir+":"+os.Getenv("PATH"),
 	)
 	if exitCode == 0 {
@@ -285,47 +305,115 @@ cleanup 0
 	}
 }
 
-func TestRuntimeSmokeMakeUsesConfiguredDockerCompatibleCLI(t *testing.T) {
-	repoRoot := runtimeSmokeRepoRoot(t)
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "calls.log")
-	writeExecutable := func(name, body string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
+func TestRuntimeSmokeCleanupStopsServerThenRemovesLateProjectAndTaskResources(t *testing.T) {
+	testDir := t.TempDir()
+	smokeDir := filepath.Join(testDir, "anban-runtime-smoke.test")
+	if err := os.MkdirAll(smokeDir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	writeExecutable("podman", "#!/bin/sh\nprintf 'podman %s\\n' \"$*\" >>\"$FAKE_CALL_LOG\"\n")
-	writeExecutable("git", "#!/bin/sh\nprintf 'git %s\\n' \"$*\" >>\"$FAKE_CALL_LOG\"\n")
-	env := append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"), "FAKE_CALL_LOG="+logPath)
-	cmd := exec.Command("make", "--no-print-directory", "docker-agent-image", "docker-seednote-agent-image", "docker-montage-agent-image", "DOCKER_CLI=podman")
-	cmd.Dir = repoRoot
-	cmd.Env = env
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("configured CLI image targets failed: %v\n%s", err, output)
+	composeFile := filepath.Join(smokeDir, "compose.yaml")
+	if err := os.WriteFile(composeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	data, err := os.ReadFile(logPath)
+	logPath := filepath.Join(testDir, "cleanup.log")
+	stoppedPath := filepath.Join(testDir, "server-stopped")
+	containerState := filepath.Join(testDir, "container-state")
+	volumeState := filepath.Join(testDir, "volume-state")
+	body := `
+CLEANUP_MAX_ATTEMPTS=3
+CLEANUP_INTERVAL_SECONDS=0
+SMOKE_DIR="$TEST_SMOKE_DIR"
+COMPOSE_FILE="$TEST_COMPOSE_FILE"
+COMPOSE_PROJECT=runtime-smoke-test
+PROJECT_IDS="$TEST_PROJECT_ID"
+TASK_IDS="$TEST_TASK_ID"
+compose() {
+  printf 'compose %s\n' "$*" >>"$TEST_CLEANUP_LOG"
+  if [[ "$1 $2" == "stop server" ]]; then
+    : >"$TEST_SERVER_STOPPED"
+    printf '%s\n' late-container >"$TEST_CONTAINER_STATE"
+    printf '%s\n' late-volume >"$TEST_VOLUME_STATE"
+  elif [[ "$1" == "down" ]]; then
+    [[ ! -s "$TEST_CONTAINER_STATE" && ! -s "$TEST_VOLUME_STATE" ]]
+  fi
+}
+docker() {
+  printf 'docker %s\n' "$*" >>"$TEST_CLEANUP_LOG"
+  [[ -f "$TEST_SERVER_STOPPED" ]] || return 88
+  local last="${!#}"
+  if [[ "$1 $2" == "container ls" ]]; then
+    [[ "$last" == "label=anban.ai/project-id=$TEST_PROJECT_ID" && -s "$TEST_CONTAINER_STATE" ]] && cat "$TEST_CONTAINER_STATE"
+  elif [[ "$1 $2" == "container inspect" ]]; then
+    printf '%s\n' "$TEST_PROJECT_ID"
+  elif [[ "$1 $2 $3" == "container rm -f" ]]; then
+    : >"$TEST_CONTAINER_STATE"
+  elif [[ "$1 $2" == "volume ls" ]]; then
+    [[ "$last" == "label=anban.ai/task-id=$TEST_TASK_ID" && -s "$TEST_VOLUME_STATE" ]] && cat "$TEST_VOLUME_STATE"
+  elif [[ "$1 $2" == "volume inspect" ]]; then
+    printf '%s\n' "$TEST_TASK_ID"
+  elif [[ "$1 $2" == "volume rm" ]]; then
+    : >"$TEST_VOLUME_STATE"
+  fi
+  return 0
+}
+cleanup 0
+`
+	const projectID = "22222222-2222-4222-8222-222222222222"
+	const taskID = "11111111-1111-4111-8111-111111111111"
+	output, exitCode := runtimeSmokeShell(t, body,
+		"TEST_SMOKE_DIR="+smokeDir,
+		"TEST_COMPOSE_FILE="+composeFile,
+		"TEST_CLEANUP_LOG="+logPath,
+		"TEST_SERVER_STOPPED="+stoppedPath,
+		"TEST_CONTAINER_STATE="+containerState,
+		"TEST_VOLUME_STATE="+volumeState,
+		"TEST_PROJECT_ID="+projectID,
+		"TEST_TASK_ID="+taskID,
+	)
+	if exitCode != 0 {
+		t.Fatalf("quiesce-first cleanup exited %d: %s", exitCode, output)
+	}
+	logData, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := string(data)
-	for _, dockerfile := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
-		if !strings.Contains(calls, "podman build") || !strings.Contains(calls, dockerfile) {
-			t.Errorf("configured CLI did not build %s; calls:\n%s", dockerfile, calls)
+	log := string(logData)
+	if !strings.HasPrefix(log, "compose stop server\n") {
+		t.Fatalf("cleanup did not stop server first:\n%s", log)
+	}
+	for _, want := range []string{
+		"container ls -aq --filter label=anban.ai/project-id=" + projectID,
+		"container ls -aq --filter label=anban.ai/task-id=" + taskID,
+		"volume ls -q --filter label=anban.ai/project-id=" + projectID,
+		"volume ls -q --filter label=anban.ai/task-id=" + taskID,
+		"container rm -f late-container",
+		"volume rm late-volume",
+		"compose down -v --remove-orphans",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("cleanup log missing %q:\n%s", want, log)
 		}
 	}
+	if _, err := os.Stat(smokeDir); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left temp dir behind: %v", err)
+	}
+}
 
-	dryRun := exec.Command("make", "--no-print-directory", "-n", "docker-runtime-smoke", "DOCKER_CLI=podman")
-	dryRun.Dir = repoRoot
-	dryRun.Env = env
-	output, err := dryRun.CombinedOutput()
-	if err != nil {
-		t.Fatalf("configured CLI dependency dry-run failed: %v\n%s", err, output)
+func TestRuntimeSmokeMakeReachesDockerOnlySkipBeforeAnyBuild(t *testing.T) {
+	repoRoot := runtimeSmokeRepoRoot(t)
+	binDir := t.TempDir()
+	if err := os.Symlink("/bin/bash", filepath.Join(binDir, "bash")); err != nil {
+		t.Fatal(err)
 	}
-	for _, dockerfile := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
-		if !strings.Contains(string(output), dockerfile) {
-			t.Errorf("docker-runtime-smoke omitted %s prerequisite with DOCKER_CLI=podman:\n%s", dockerfile, output)
-		}
+	cmd := exec.Command("make", "--no-print-directory", "docker-runtime-smoke")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "PATH="+binDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Docker-only smoke skip failed before script: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "SKIP: Docker CLI is not installed") {
+		t.Fatalf("Docker-only smoke output = %q, want script-owned skip", output)
 	}
 }
 
@@ -358,32 +446,38 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 	if strings.Count(script, "create_task ") < 3 {
 		t.Error("runtime-smoke.sh must submit one task for each managed profile")
 	}
+	for _, forbidden := range []string{"DOCKER_" + "CLI", "Docker-" + "compatible", "ANBAN_RUNTIME_SMOKE_" + "SKIP_IMAGE_BUILD"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("runtime-smoke.sh contains unsupported portability contract %q", forbidden)
+		}
+	}
 }
 
-func TestRuntimeSmokeMakeTargetBuildsAllManagedImages(t *testing.T) {
+func TestRuntimeSmokeMakeTargetDelegatesBuildsToDockerOnlyScript(t *testing.T) {
 	repoRoot := runtimeSmokeRepoRoot(t)
-	data, err := os.ReadFile(filepath.Join(repoRoot, "Makefile"))
+	makeData, err := os.ReadFile(filepath.Join(repoRoot, "Makefile"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	makefile := string(data)
-	for _, want := range []string{".PHONY: docker-runtime-smoke", "docker-runtime-smoke: $(DOCKER_RUNTIME_SMOKE_DEPS)", "deploy/docker/runtime-smoke.sh"} {
+	scriptData, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "runtime-smoke.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	makefile := string(makeData)
+	script := string(scriptData)
+	for _, want := range []string{".PHONY: docker-runtime-smoke", "docker-runtime-smoke:\n\t@deploy/docker/runtime-smoke.sh"} {
 		if !strings.Contains(makefile, want) {
 			t.Errorf("Makefile missing runtime smoke contract %q", want)
 		}
 	}
-	depsStart := strings.Index(makefile, "DOCKER_RUNTIME_SMOKE_DEPS :=")
-	if depsStart < 0 {
-		t.Fatal("Makefile runtime smoke dependency declaration is missing")
+	for _, forbidden := range []string{"DOCKER_RUNTIME_SMOKE_" + "DEPS", "DOCKER_" + "CLI", "ANBAN_RUNTIME_SMOKE_" + "SKIP_IMAGE_BUILD"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Errorf("Makefile contains unsupported runtime smoke indirection %q", forbidden)
+		}
 	}
-	depsEnd := strings.Index(makefile[depsStart:], "\n")
-	if depsEnd < 0 {
-		t.Fatal("Makefile runtime smoke dependency declaration is missing")
-	}
-	deps := makefile[depsStart : depsStart+depsEnd]
-	for _, want := range []string{"docker-agent-image", "docker-seednote-agent-image", "docker-montage-agent-image"} {
-		if !strings.Contains(deps, want) {
-			t.Errorf("runtime smoke dependencies missing %q", want)
+	for _, dockerfile := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+		if !strings.Contains(script, "docker build") || !strings.Contains(script, dockerfile) {
+			t.Errorf("runtime smoke script does not own Docker build for %s", dockerfile)
 		}
 	}
 }

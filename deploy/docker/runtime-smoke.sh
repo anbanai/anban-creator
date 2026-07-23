@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 
-DOCKER_CLI="${DOCKER_CLI:-docker}"
 POLL_DEADLINE_SECONDS="${ANBAN_RUNTIME_SMOKE_POLL_DEADLINE_SECONDS:-900}"
 POLL_INTERVAL_SECONDS="${ANBAN_RUNTIME_SMOKE_POLL_INTERVAL_SECONDS:-2}"
-
-docker() {
-  command "$DOCKER_CLI" "$@"
-}
+CLEANUP_MAX_ATTEMPTS="${ANBAN_RUNTIME_SMOKE_CLEANUP_MAX_ATTEMPTS:-5}"
+CLEANUP_INTERVAL_SECONDS="${ANBAN_RUNTIME_SMOKE_CLEANUP_INTERVAL_SECONDS:-1}"
 
 fail() {
   printf 'runtime smoke FAILED: %s\n' "$*" >&2
@@ -67,6 +64,10 @@ create_task() {
 
 query_execution() {
   local task_id="$1"
+  if [[ ! "$task_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+    fail "task ID is not a canonical UUID"
+    return 1
+  fi
   compose exec -T -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql \
     mysql -uroot --batch --skip-column-names anban_creator \
     -e "SELECT CONCAT_WS('|',id,attempt,COALESCE(parent_execution_id,''),runtime_profile,runtime_image,runtime_scope,runtime_workload,COALESCE(runtime_instance_id,''),status) FROM task_executions WHERE task_id='$task_id' ORDER BY attempt DESC LIMIT 1"
@@ -169,68 +170,106 @@ poll_container_removed() {
   fail "terminal execution container $workload was not removed before the bounded deadline"
 }
 
+list_labeled_resources() {
+  local kind="$1" label_key="$2" owner_id="$3"
+  if [[ "$kind" == "container" ]]; then
+    docker container ls -aq --filter "label=anban.ai/$label_key-id=$owner_id"
+  else
+    docker volume ls -q --filter "label=anban.ai/$label_key-id=$owner_id"
+  fi
+}
+
+inspect_resource_owner() {
+  local kind="$1" label_key="$2" resource="$3"
+  if [[ "$kind" == "container" ]]; then
+    docker container inspect --format "{{ index .Config.Labels \"anban.ai/$label_key-id\" }}" "$resource"
+  else
+    docker volume inspect --format "{{ index .Labels \"anban.ai/$label_key-id\" }}" "$resource"
+  fi
+}
+
+remove_owned_resource() {
+  local kind="$1" resource="$2"
+  if [[ "$kind" == "container" ]]; then
+    docker container rm -f "$resource"
+  else
+    docker volume rm "$resource"
+  fi
+}
+
 cleanup_labeled_resources() {
-  local id resource label resources cleanup_status=0 cleanup_step_status
-  for id in ${TASK_IDS:-}; do
-    resources="$(docker container ls -aq --filter "label=anban.ai/task-id=$id" 2>/dev/null)"
-    cleanup_step_status=$?
-    if (( cleanup_step_status != 0 )); then
-      (( cleanup_status == 0 )) && cleanup_status=$cleanup_step_status
-      continue
-    fi
-    for resource in $resources; do
-      label="$(docker container inspect --format '{{ index .Config.Labels "anban.ai/task-id" }}' "$resource" 2>/dev/null)"
-      cleanup_step_status=$?
-      if (( cleanup_step_status != 0 )); then
-        (( cleanup_status == 0 )) && cleanup_status=$cleanup_step_status
-        continue
-      fi
-      if [[ "$label" != "$id" ]]; then
-        (( cleanup_status == 0 )) && cleanup_status=1
-        continue
-      fi
-      docker container rm -f "$resource" >/dev/null 2>&1
-      cleanup_step_status=$?
-      if (( cleanup_status == 0 && cleanup_step_status != 0 )); then
-        cleanup_status=$cleanup_step_status
-      fi
+  local attempt kind label_key ids owner_id resource owner resources seen
+  local found cleanup_step_status sweep_status last_status=1
+  for (( attempt = 1; attempt <= CLEANUP_MAX_ATTEMPTS; attempt++ )); do
+    found=0
+    sweep_status=0
+    seen=" "
+    for kind in container volume; do
+      for label_key in project task; do
+        if [[ "$label_key" == "project" ]]; then
+          ids="${PROJECT_IDS:-}"
+        else
+          ids="${TASK_IDS:-}"
+        fi
+        for owner_id in $ids; do
+          resources="$(list_labeled_resources "$kind" "$label_key" "$owner_id" 2>/dev/null)"
+          cleanup_step_status=$?
+          if (( cleanup_step_status != 0 )); then
+            found=1
+            (( sweep_status == 0 )) && sweep_status=$cleanup_step_status
+            continue
+          fi
+          for resource in $resources; do
+            if [[ "$seen" == *" $kind:$resource "* ]]; then
+              continue
+            fi
+            seen+="$kind:$resource "
+            found=1
+            owner="$(inspect_resource_owner "$kind" "$label_key" "$resource" 2>/dev/null)"
+            cleanup_step_status=$?
+            if (( cleanup_step_status != 0 )); then
+              (( sweep_status == 0 )) && sweep_status=$cleanup_step_status
+              continue
+            fi
+            if [[ "$owner" != "$owner_id" ]]; then
+              (( sweep_status == 0 )) && sweep_status=1
+              continue
+            fi
+            remove_owned_resource "$kind" "$resource" >/dev/null 2>&1
+            cleanup_step_status=$?
+            if (( sweep_status == 0 && cleanup_step_status != 0 )); then
+              sweep_status=$cleanup_step_status
+            fi
+          done
+        done
+      done
     done
-  done
-  for id in ${PROJECT_IDS:-}; do
-    resources="$(docker volume ls -q --filter "label=anban.ai/project-id=$id" 2>/dev/null)"
-    cleanup_step_status=$?
-    if (( cleanup_step_status != 0 )); then
-      (( cleanup_status == 0 )) && cleanup_status=$cleanup_step_status
-      continue
+    if (( found == 0 && sweep_status == 0 )); then
+      return 0
     fi
-    for resource in $resources; do
-      label="$(docker volume inspect --format '{{ index .Labels "anban.ai/project-id" }}' "$resource" 2>/dev/null)"
-      cleanup_step_status=$?
-      if (( cleanup_step_status != 0 )); then
-        (( cleanup_status == 0 )) && cleanup_status=$cleanup_step_status
-        continue
-      fi
-      if [[ "$label" != "$id" ]]; then
-        (( cleanup_status == 0 )) && cleanup_status=1
-        continue
-      fi
-      docker volume rm "$resource" >/dev/null 2>&1
-      cleanup_step_status=$?
-      if (( cleanup_status == 0 && cleanup_step_status != 0 )); then
-        cleanup_status=$cleanup_step_status
-      fi
-    done
+    (( sweep_status != 0 )) && last_status=$sweep_status
+    if (( attempt < CLEANUP_MAX_ATTEMPTS )); then
+      sleep "$CLEANUP_INTERVAL_SECONDS"
+    fi
   done
-  return "$cleanup_status"
+  fail "owned Docker resources remain after $CLEANUP_MAX_ATTEMPTS cleanup attempts"
+  return "$last_status"
 }
 
 cleanup() {
   local status="${1:-$?}" smoke_basename cleanup_status=0 cleanup_step_status
   trap - EXIT INT TERM
   set +e
+  if [[ -n "${COMPOSE_FILE:-}" && -f "$COMPOSE_FILE" ]]; then
+    compose stop server >/dev/null 2>&1
+    cleanup_step_status=$?
+    if (( cleanup_step_status != 0 )); then
+      cleanup_status=$cleanup_step_status
+    fi
+  fi
   cleanup_labeled_resources
   cleanup_step_status=$?
-  if (( cleanup_step_status != 0 )); then
+  if (( cleanup_status == 0 && cleanup_step_status != 0 )); then
     cleanup_status=$cleanup_step_status
   fi
   if [[ -n "${COMPOSE_FILE:-}" && -f "$COMPOSE_FILE" ]]; then
@@ -395,8 +434,8 @@ YAML
 }
 
 runtime_smoke_main() {
-  if ! type -P -- "$DOCKER_CLI" >/dev/null 2>&1; then
-    printf 'SKIP: Docker-compatible CLI is not installed (%s)\n' "$DOCKER_CLI"
+  if ! type -P -- docker >/dev/null 2>&1; then
+    printf 'SKIP: Docker CLI is not installed\n'
     return 0
   fi
   [[ -n "${CLAUDE_CODE_AUTH_TOKEN:-}" ]] || fail "missing required configuration: CLAUDE_CODE_AUTH_TOKEN"
@@ -410,16 +449,21 @@ runtime_smoke_main() {
     ''|*[!0-9]*) fail "ANBAN_RUNTIME_SMOKE_POLL_DEADLINE_SECONDS must be a positive integer" ;;
     0) fail "ANBAN_RUNTIME_SMOKE_POLL_DEADLINE_SECONDS must be a positive integer" ;;
   esac
+  case "$CLEANUP_MAX_ATTEMPTS" in
+    ''|*[!0-9]*) fail "ANBAN_RUNTIME_SMOKE_CLEANUP_MAX_ATTEMPTS must be a positive integer" ;;
+    0) fail "ANBAN_RUNTIME_SMOKE_CLEANUP_MAX_ATTEMPTS must be a positive integer" ;;
+  esac
+  case "$CLEANUP_INTERVAL_SECONDS" in
+    ''|*[!0-9]*) fail "ANBAN_RUNTIME_SMOKE_CLEANUP_INTERVAL_SECONDS must be a non-negative integer" ;;
+  esac
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  if [[ "${ANBAN_RUNTIME_SMOKE_SKIP_IMAGE_BUILD:-0}" != "1" ]]; then
-    git -C "$REPO_ROOT" submodule update --init --recursive \
-      third_party/claude-agent-sdk-go third_party/Agent-Reach third_party/OpenMontage
-    docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-article" -t creator-agent-article:latest "$REPO_ROOT"
-    docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-seednote" -t creator-agent-seednote:latest "$REPO_ROOT"
-    docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-montage" -t creator-agent-montage:latest "$REPO_ROOT"
-  fi
+  git -C "$REPO_ROOT" submodule update --init --recursive \
+    third_party/claude-agent-sdk-go third_party/Agent-Reach third_party/OpenMontage
+  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-article" -t creator-agent-article:latest "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-seednote" -t creator-agent-seednote:latest "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-montage" -t creator-agent-montage:latest "$REPO_ROOT"
 
   SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anban-runtime-smoke.XXXXXX")"
   COMPOSE_PROJECT="anban-runtime-smoke-$(date +%s)-$$"
