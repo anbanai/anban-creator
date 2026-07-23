@@ -344,7 +344,7 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 		{
 			name:         "article",
 			anchor:       "**产出**：`output/draft.json`",
-			summaryTerms: []string{"所选模板", "草稿状态", "Vision 校验通过率"},
+			summaryTerms: []string{"所选模板", "草稿状态", "内容审核通过率"},
 		},
 		{
 			name:         "designer",

@@ -443,7 +443,7 @@ func TestArticleSkillContracts_WechatCoverEffectivenessReference(t *testing.T) {
 				"generic_swap_test",
 				"promise_proof_test",
 				"audience_motivation_test",
-				"仅有旧的 6 维 vision 全 high 不得通过",
+				"仅有旧的 6 维视觉评分全为 high 不得通过",
 				"缺 `viral-audit.md` 不得发布",
 			} {
 				if !strings.Contains(ref, term) {
@@ -471,7 +471,7 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 				"visual_quality_scorecard",
 				"viral-audit.md",
 				"缺 `viral-audit.md` 不得发布",
-				"仅有旧的 6 维 vision 全 high 不得通过",
+				"仅有旧的 6 维视觉评分全为 high 不得通过",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing hard publish gate term %q", path, term)

@@ -40,6 +40,10 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 				t.Errorf("%s contains forbidden managed-workspace pattern %s", filepath.ToSlash(relativePath), pattern)
 			}
 		}
+		if (strings.HasPrefix(filepath.ToSlash(relativePath), "plugins/agents/") ||
+			strings.HasPrefix(filepath.ToSlash(relativePath), "plugins/skills/")) && bareFailureStatePattern.Match(body) {
+			t.Errorf("%s contains a failure-state.json instruction outside canonical output/", filepath.ToSlash(relativePath))
+		}
 		return nil
 	})
 	if err != nil {
@@ -62,6 +66,8 @@ func managedWorkspaceForbiddenPatterns() []*regexp.Regexp {
 		regexp.MustCompile(`(?i)(?:\bCWD\b[^\n]*(?:\bTASK_ID\b|任务[ \t]*ID)|(?:\bTASK_ID\b|任务[ \t]*ID)[^\n]*\bCWD\b)`),
 	}
 }
+
+var bareFailureStatePattern = regexp.MustCompile(`(?m)(?:^|[^[:alnum:]_./-])failure-state\.json`)
 
 func TestManagedWorkspaceForbiddenPatterns(t *testing.T) {
 	tests := []struct {
@@ -104,6 +110,25 @@ func TestManagedWorkspaceForbiddenPatterns(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("managed workspace prohibition match for %q = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBareFailureStatePattern(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "bare", body: "write failure-state.json", want: true},
+		{name: "quoted bare", body: "write `failure-state.json`", want: true},
+		{name: "canonical", body: "write output/failure-state.json", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bareFailureStatePattern.MatchString(tt.body); got != tt.want {
+				t.Fatalf("bare failure-state match for %q = %v, want %v", tt.body, got, tt.want)
 			}
 		})
 	}
