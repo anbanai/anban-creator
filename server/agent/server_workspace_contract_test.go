@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -112,6 +113,70 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
+	root := repoRoot(t)
+	for _, agentName := range []string{
+		"article",
+		"designer",
+		"ecommerce",
+		"live-slicer",
+		"moments",
+		"montage",
+		"seednote",
+	} {
+		t.Run(agentName, func(t *testing.T) {
+			markdownPath := "plugins/agents/" + agentName + ".md"
+			tomlPath := "plugins/agents/" + agentName + ".toml"
+			markdownOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(markdownPath))))
+			tomlOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(tomlPath))))
+			if strings.Join(markdownOutputs, "\n") != strings.Join(tomlOutputs, "\n") {
+				t.Errorf("native agent output path mismatch:\n%s: %v\n%s: %v", markdownPath, markdownOutputs, tomlPath, tomlOutputs)
+			}
+
+			if agentName != "seednote" {
+				return
+			}
+			for _, required := range []string{
+				"output/cover.png",
+				"output/image_01.png",
+				"output/image_02.png",
+				"output/image_03.png",
+				"output/tail.png",
+			} {
+				if !containsOutputPath(markdownOutputs, required) {
+					t.Errorf("%s missing mode-dependent Seednote image path %q", markdownPath, required)
+				}
+				if !containsOutputPath(tomlOutputs, required) {
+					t.Errorf("%s missing mode-dependent Seednote image path %q", tomlPath, required)
+				}
+			}
+		})
+	}
+}
+
+func explicitOutputPaths(body string) []string {
+	matches := regexp.MustCompile(`\boutput/[A-Za-z0-9._/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+\b`).FindAllString(body, -1)
+	seen := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		seen[match] = struct{}{}
+	}
+	outputs := make([]string, 0, len(seen))
+	for output := range seen {
+		outputs = append(outputs, output)
+	}
+	sort.Strings(outputs)
+	return outputs
+}
+
+func containsOutputPath(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
