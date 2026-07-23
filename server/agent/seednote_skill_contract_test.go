@@ -234,7 +234,9 @@ func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
 	} {
 		body := readRepoFile(t, path)
 		for _, required := range []string{
+			"只有 `generate_image` 本身失败或超时时，才写入 `$DIR/failure-state.json` 并停止图片阶段",
 			"分析或内容质量结果只影响当前输出图的记录与创作重试",
+			"当前图达到创作重试上限时标记 `quality_status=failed`",
 			"必须继续生成剩余计划图片",
 			"全部计划图片生成完成后再执行整体质量闸门",
 		} {
@@ -242,8 +244,14 @@ func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
 				t.Fatalf("%s missing non-blocking Seednote analysis term %q", path, required)
 			}
 		}
-		if strings.Contains(body, "遇到关键失败时停止在当前阶段") {
-			t.Fatalf("%s still lets analysis/content quality stop later planned image generation", path)
+		for _, forbidden := range []string{
+			"遇到关键失败时停止在当前阶段",
+			"创作重试预算耗尽",
+			"质量重试预算耗尽",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s still lets analysis/content quality exhaustion stop later planned image generation via %q", path, forbidden)
+			}
 		}
 	}
 }

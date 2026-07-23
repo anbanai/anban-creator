@@ -483,10 +483,11 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 
 func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	for _, path := range []string{
+	capabilityPaths := []string{
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
-	} {
+	}
+	for _, path := range capabilityPaths {
 		body := readArticleContractFile(t, path)
 		for _, required := range []string{
 			"generate_image",
@@ -501,10 +502,26 @@ func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *tes
 				t.Fatalf("%s missing independent article image reference term %q", path, required)
 			}
 		}
-		lower := strings.ToLower(body)
+	}
+
+	reviewPaths := append(capabilityPaths,
+		filepath.Join(root, "plugins", "skills", "article-viral-strategy", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "article-viral-strategy", "references", "viral-audit.md"),
+	)
+	for _, path := range reviewPaths {
+		lower := strings.ToLower(readArticleContractFile(t, path))
 		for _, forbidden := range []string{"vision", "verification", "vision-score.md", "请求用户协助"} {
 			if strings.Contains(lower, forbidden) {
 				t.Fatalf("%s still contains stale article image review term %q", path, forbidden)
+			}
+		}
+	}
+
+	for _, path := range reviewPaths[len(capabilityPaths):] {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{"Agent 自主完成可见内容审查", "可见内容质量评分表"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing Agent-owned visible-content review term %q", path, required)
 			}
 		}
 	}
