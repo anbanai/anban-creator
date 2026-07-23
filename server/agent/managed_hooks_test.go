@@ -75,16 +75,16 @@ func TestManagedTaskStopHookSkipsTaskTypesWithoutGate(t *testing.T) {
 	}
 }
 
-func TestSeednoteQualityGateAcceptsServerVerificationSchema(t *testing.T) {
+func TestSeednoteQualityGateAcceptsRecordedQualityStatus(t *testing.T) {
 	workspace := t.TempDir()
 	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
 	output := runSeednoteQualityGate(t, workspace)
 	if strings.TrimSpace(output) != "" {
-		t.Fatalf("quality gate blocked a passing verification in %s: %s", seednoteDir, output)
+		t.Fatalf("quality gate blocked an accepted quality status in %s: %s", seednoteDir, output)
 	}
 }
 
-func TestSeednoteQualityGateBlocksFailedServerVerification(t *testing.T) {
+func TestSeednoteQualityGateBlocksFailedQualityStatus(t *testing.T) {
 	workspace := t.TempDir()
 	writeSeednoteGateFixture(t, workspace, false)
 	output := runSeednoteQualityGate(t, workspace)
@@ -92,8 +92,17 @@ func TestSeednoteQualityGateBlocksFailedServerVerification(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("parse quality gate output %q: %v", output, err)
 	}
-	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "passed=False") {
-		t.Fatalf("quality gate output = %#v, want failed verification block", result)
+	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "quality_status=failed") {
+		t.Fatalf("quality gate output = %#v, want failed quality-status block", result)
+	}
+}
+
+func TestSeednoteQualityGateContainsNoEmbeddedImageVerificationContract(t *testing.T) {
+	script := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	for _, forbidden := range []string{`output.get("verification")`, "generate_image 原子视觉核验"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("seednote quality gate still contains legacy embedded verification contract %q", forbidden)
+		}
 	}
 }
 
@@ -252,8 +261,9 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 	summary, err := json.Marshal(map[string]any{
 		"version": "1.0",
 		"outputs": []any{map[string]any{
-			"file_name":    "cover.png",
-			"verification": map[string]any{"passed": passed, "score": "high"},
+			"file_name":      "cover.png",
+			"quality_status": map[bool]string{true: "accepted", false: "failed"}[passed],
+			"quality_notes":  "visible content quality was reviewed by the agent workflow",
 		}},
 	})
 	if err != nil {
