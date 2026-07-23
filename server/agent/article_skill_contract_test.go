@@ -556,6 +556,58 @@ func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testin
 	}
 }
 
+func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
+		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
+	}
+
+	for _, path := range paths {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"托管上下文提供的项目 ID",
+			"恰好一个归属当前用户的 Article 项目",
+			"零个或多个归属当前用户的 Article 项目",
+			"不得让用户选择",
+			"article_project_resolution_failed",
+			`"stage":"project_resolution"`,
+			`"resume_from":"project_resolution"`,
+			"必需 MCP 能力调用不可用或失败",
+			"article_mcp_call_failed",
+			"调用成功但缺少可选语义配置",
+			"Agent 默认值",
+			"只有这种成功响应中的可选字段缺失",
+			"`upload_image` 调用失败时只重试上传",
+			"article_image_upload_failed",
+			"`analyze_image` 的传输或运行时失败",
+			"记录为警告",
+			"不得阻塞后续已规划的图片生成",
+			"最终质量判断由 Agent 负责",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing managed Article resolution term %q", path, required)
+			}
+		}
+
+		for _, forbidden := range []string{
+			"向用户展示所有可选项目",
+			"项目选择是唯一例外",
+			"如返回错误可忽略，用空列表继续",
+			"如果 MCP 工具因配置问题失败，直接报告错误信息并继续流程",
+			"自动重试 + 降级，非关键步骤跳过继续",
+			"如果 MCP 工具不可用或调用失败，立即停止并报告错误",
+			"`render_template` 不可用的旧版 server 上作为兼容降级路径",
+			"render_template 不可用的旧版 server 上作为兼容降级路径",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s still contains contradictory managed Article clause %q", path, forbidden)
+			}
+		}
+	}
+}
+
 func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, path := range []string{
