@@ -60,7 +60,6 @@ type Services struct {
 	GenerateImageTimeout time.Duration
 	WritingSvc           *service.WritingService
 	PublishingSvc        *service.PublishingService
-	WorkspaceSvc         *service.WorkspaceService
 	TemplateSvc          *service.TemplateService
 	LiveSliceSvc         *service.LiveSliceService
 	SeednoteClient       *seednote.Client
@@ -78,7 +77,6 @@ func RegisterTools(server *mcp.Server) {
 	registerImageTools(server)
 	registerWritingTools(server)
 	registerPublishingTools(server)
-	registerWorkspaceTools(server)
 	registerSeednoteFormatTools(server)
 	registerTemplateTools(server)
 	registerResourceTools(server)

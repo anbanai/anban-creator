@@ -130,7 +130,6 @@ func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
 		"generate_image",
 		"get_project_profile",
 		"list_project_titles",
-		"prepare_workspace",
 		"submit_agent_feedback",
 		"update_task_progress",
 	}

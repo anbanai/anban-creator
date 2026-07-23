@@ -309,7 +309,6 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
-	workspaceSvc := service.NewWorkspaceService()
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		projectSvc = service.NewProjectService(repo, log)
@@ -651,7 +650,6 @@ func main() {
 			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
 			WritingSvc:           writingSvc,
 			PublishingSvc:        publishingSvc,
-			WorkspaceSvc:         workspaceSvc,
 			TemplateSvc:          templateSvc,
 			LiveSliceSvc:         liveSliceSvc,
 			SeednoteClient:       seednoteClient,

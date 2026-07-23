@@ -66,36 +66,30 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		})
 	}
 
-	workflowPaths := []string{
-		"plugins/agents/seednote.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/moments.md",
-		"plugins/agents/article.md",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/agents/moments.toml",
-		"plugins/agents/article.toml",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
+	workflowOutputs := map[string][]string{
+		"plugins/agents/article.md":       {"output/04-article-final.md", "output/05-article.html", "output/final-review.md"},
+		"plugins/agents/article.toml":     {"output/04-article-final.md", "output/05-article.html", "output/final-review.md"},
+		"plugins/agents/seednote.md":      {"output/content.md", "output/image-plan.md", "output/failure-state.json"},
+		"plugins/agents/seednote.toml":    {"output/content.md", "output/image-plan.md", "output/failure-state.json"},
+		"plugins/agents/moments.md":       {"output/material-analysis.md", "output/content.md", "output/quality-review.md"},
+		"plugins/agents/moments.toml":     {"output/material-analysis.md", "output/content.md", "output/quality-review.md"},
+		"plugins/agents/ecommerce.md":     {"output/product-bible.md", "output/copywriting.md", "output/manifest.json"},
+		"plugins/agents/ecommerce.toml":   {"output/product-bible.md", "output/copywriting.md", "output/manifest.json"},
+		"plugins/agents/designer.md":      {"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"},
+		"plugins/agents/designer.toml":    {"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"},
+		"plugins/agents/montage.md":       {"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"},
+		"plugins/agents/montage.toml":     {"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"},
+		"plugins/agents/live-slicer.md":   {"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"},
+		"plugins/agents/live-slicer.toml": {"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"},
 	}
-	for _, relativePath := range workflowPaths {
-		t.Run(relativePath+"/canonical-output", func(t *testing.T) {
+	for relativePath, requiredOutputs := range workflowOutputs {
+		t.Run(relativePath+"/explicit-output", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
-			for _, term := range []string{
-				"prepare_workspace",
-				"$TASK_ID",
-				"$DIR",
-				"task_files",
-				"execution_id",
-				"OSS",
-			} {
-				if !strings.Contains(body, term) {
-					t.Errorf("%s missing canonical server task output term %q", relativePath, term)
+			for _, requiredOutput := range requiredOutputs {
+				if !strings.Contains(body, requiredOutput) {
+					t.Errorf("%s missing explicit managed-runtime artifact path %q", relativePath, requiredOutput)
 				}
 			}
-			assertNoDeliverableRelocationCommands(t, relativePath, body)
 		})
 	}
 
@@ -156,7 +150,7 @@ func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
 				if regexp.MustCompile(`(?i)\bArchive\b`).MatchString(pipeline) {
 					t.Errorf("%s contains legacy Archive pipeline step: %s", relativePath, pipeline)
 				}
-				for _, required := range []string{"$DIR", "delivery validation"} {
+				for _, required := range []string{"output/", "delivery validation"} {
 					if !strings.Contains(strings.ToLower(pipeline), strings.ToLower(required)) {
 						t.Errorf("%s pipeline missing canonical delivery term %q: %s", relativePath, required, pipeline)
 					}
@@ -185,33 +179,6 @@ func lineContaining(t *testing.T, body, needle string) string {
 	return ""
 }
 
-func TestDeliverableRelocationCommandDetection(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want bool
-	}{
-		{name: "move deliverable set to archive", body: `mv "$DIR"/* "$ARCHIVE_DIR"/`, want: true},
-		{name: "copy result directory to archive", body: `cp -R "$DIR" "$ARCHIVE_DIR"`, want: true},
-		{name: "rsync result directory to archive", body: `rsync -a "$DIR/" "$ARCHIVE_DIR/"`, want: true},
-		{name: "move result to title suffix", body: `mv "$DIR" "$DIR-$TITLE"`, want: true},
-		{name: "move result to archive suffix", body: `mv "$DIR" "$DIR_ARCHIVE"`, want: true},
-		{name: "move braced result to suffix", body: `mv "${DIR}" "${DIR}-archive"`, want: true},
-		{name: "copy download into result file", body: `cp "$DOWNLOAD" "$DIR/cover.png"`, want: false},
-		{name: "move temporary file within result", body: `mv "$DIR/.tmp" "$DIR/final.json"`, want: false},
-		{name: "normal non result command", body: `mv "$DOWNLOAD.tmp" "$DOWNLOAD"`, want: false},
-		{name: "prose policy", body: "不得移动、复制或按标题重命名成果目录", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := findDeliverableRelocationCommand(tt.body) != ""
-			if got != tt.want {
-				t.Fatalf("findDeliverableRelocationCommand(%q) = %v, want %v", tt.body, got, tt.want)
-			}
-		})
-	}
-}
-
 func assertVariableDefinedBeforeUse(t *testing.T, path, body, variable, definition string) {
 	t.Helper()
 	definitionAt := strings.Index(body, definition)
@@ -221,54 +188,6 @@ func assertVariableDefinedBeforeUse(t *testing.T, path, body, variable, definiti
 	if strings.Contains(body[:definitionAt], variable) {
 		t.Fatalf("%s uses %s before its definition", path, variable)
 	}
-}
-
-func assertNoDeliverableRelocationCommands(t *testing.T, path, body string) {
-	t.Helper()
-	if match := findDeliverableRelocationCommand(body); match != "" {
-		t.Errorf("%s contains deliverable relocation command %q", path, match)
-	}
-}
-
-func findDeliverableRelocationCommand(body string) string {
-	commands := regexp.MustCompile("(?m)(?:^|[\\x60;&|]\\s*)((?:mv|cp|rsync)\\s+[^\\n\\x60]+)").FindAllStringSubmatch(body, -1)
-	fields := regexp.MustCompile(`(?:"[^"]*"|'[^']*'|[^\s"']+)+`)
-	for _, match := range commands {
-		command := match[1]
-		tokens := fields.FindAllString(command, -1)
-		if len(tokens) < 3 {
-			continue
-		}
-		args := make([]string, 0, len(tokens)-1)
-		for _, token := range tokens[1:] {
-			if strings.HasPrefix(token, "-") {
-				continue
-			}
-			args = append(args, token)
-		}
-		if len(args) < 2 {
-			continue
-		}
-		destination := normalizeShellPath(args[len(args)-1])
-		if isUnderDIR(destination) {
-			continue
-		}
-		for _, source := range args[:len(args)-1] {
-			if isUnderDIR(normalizeShellPath(source)) {
-				return command
-			}
-		}
-	}
-	return ""
-}
-
-func normalizeShellPath(path string) string {
-	return strings.Trim(strings.ReplaceAll(path, `"`, ""), "' ,.;")
-}
-
-func isUnderDIR(path string) bool {
-	return path == "$DIR" || strings.HasPrefix(path, "$DIR/") ||
-		path == "${DIR}" || strings.HasPrefix(path, "${DIR}/")
 }
 
 func indexAfterText(body, needle string, after int) int {

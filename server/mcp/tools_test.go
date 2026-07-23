@@ -50,6 +50,19 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	return taskSvc, projectSvc, repo, cleanup
 }
 
+func TestMCPToolListDoesNotContainPrepareWorkspace(t *testing.T) {
+	tools := listMCPToolsForTest(t, NewMCPHandler(nil, "test-key", nil))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if tool["name"] == "prepare_workspace" {
+			t.Fatal("MCP tool list contains forbidden prepare_workspace tool")
+		}
+	}
+}
+
 func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
