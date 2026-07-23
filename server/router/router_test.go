@@ -186,6 +186,13 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestRouterEnablesRequestBodyStreaming(t *testing.T) {
+	app := NewRouter(&Services{Config: &config.Config{}})
+	if !app.Config().StreamRequestBody {
+		t.Fatal("StreamRequestBody must be enabled")
+	}
+}
+
 func TestBillingRoutes(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

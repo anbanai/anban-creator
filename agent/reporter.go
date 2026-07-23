@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +89,41 @@ func (r *Reporter) PrepareArtifactUpload(ctx context.Context, req ArtifactPrepar
 		return nil, err
 	}
 	return &env.Data, nil
+}
+
+func (r *Reporter) StreamArtifactContent(ctx context.Context, req ArtifactStreamRequest, body io.Reader) (*ArtifactStreamResponse, error) {
+	if body == nil {
+		return nil, fmt.Errorf("artifact body is required")
+	}
+	if req.Size <= 0 {
+		return nil, fmt.Errorf("artifact size must be positive")
+	}
+	req.TaskID = r.cfg.TaskID
+	req.ExecutionID = r.cfg.ExecutionID
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.ServerURL+"/api/v1/agent/artifacts/content", io.LimitReader(body, req.Size))
+	if err != nil {
+		return nil, fmt.Errorf("create artifact stream request: %w", err)
+	}
+	httpRequest.ContentLength = req.Size
+	httpRequest.Header.Set("Authorization", "Bearer "+r.cfg.APIKey)
+	httpRequest.Header.Set("Content-Type", req.ContentType)
+	httpRequest.Header.Set("X-Anban-Artifact-Path", req.RelativePath)
+	httpRequest.Header.Set("X-Anban-Artifact-Size", strconv.FormatInt(req.Size, 10))
+	httpRequest.Header.Set("X-Anban-Artifact-SHA256", req.SHA256)
+
+	response, err := r.client.Do(httpRequest)
+	if err != nil {
+		return nil, fmt.Errorf("send artifact stream request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, &httpStatusError{code: response.StatusCode}
+	}
+	var envelope apiEnvelope[ArtifactStreamResponse]
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("decode artifact stream response: %w", err)
+	}
+	return &envelope.Data, nil
 }
 
 func (r *Reporter) ReportArtifactManifest(ctx context.Context, req ArtifactManifestRequest) error {

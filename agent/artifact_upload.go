@@ -62,6 +62,22 @@ type ArtifactManifestFile struct {
 	Role         string `json:"role,omitempty"`
 }
 
+type ArtifactStreamRequest struct {
+	TaskID       string
+	ExecutionID  string
+	RelativePath string
+	ContentType  string
+	Size         int64
+	SHA256       string
+}
+
+type ArtifactStreamResponse struct {
+	ObjectKey   string `json:"object_key"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+}
+
 type WorkspaceArtifact struct {
 	LocalPath    string
 	RelativePath string
@@ -73,6 +89,7 @@ type WorkspaceArtifact struct {
 
 type ArtifactReporter interface {
 	PrepareArtifactUpload(context.Context, ArtifactPrepareRequest) (*ArtifactPrepareResponse, error)
+	StreamArtifactContent(context.Context, ArtifactStreamRequest, io.Reader) (*ArtifactStreamResponse, error)
 	ReportArtifactManifest(context.Context, ArtifactManifestRequest) error
 	ReportProgress(context.Context, string) error
 }
@@ -124,7 +141,7 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 		if err := artifactContextCause(ctx); err != nil {
 			return err
 		}
-		prepared, err := u.reporter.PrepareArtifactUpload(ctx, ArtifactPrepareRequest{
+		request := ArtifactPrepareRequest{
 			TaskID:       u.cfg.TaskID,
 			ExecutionID:  u.cfg.ExecutionID,
 			RelativePath: file.RelativePath,
@@ -132,33 +149,16 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 			ContentType:  file.ContentType,
 			Size:         file.Size,
 			SHA256:       file.SHA256,
-		})
-		if err != nil {
-			return fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, err)
 		}
-		if err := artifactContextCause(ctx); err != nil {
-			return err
-		}
-		if prepared == nil {
-			return fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
-		}
-		if prepared.MaxSize > 0 && file.Size > prepared.MaxSize {
-			return fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
-		}
-		contentType := prepared.Headers["Content-Type"]
-		if contentType == "" {
-			contentType = file.ContentType
-		}
-		etag, err := u.putObject(ctx, prepared, file.LocalPath, contentType)
+		objectKey, contentType, etag, err := u.uploadArtifact(ctx, request, file)
 		if err != nil {
 			return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
 		}
 		if err := artifactContextCause(ctx); err != nil {
 			return err
 		}
-		objectKey := strings.TrimSpace(prepared.Key)
 		if objectKey == "" {
-			return fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+			return fmt.Errorf("artifact upload %s returned empty object key", file.RelativePath)
 		}
 		manifest.Files = append(manifest.Files, ArtifactManifestFile{
 			RelativePath: file.RelativePath,
@@ -177,6 +177,54 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 	}
 	_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("uploaded %d workspace artifact(s)", len(manifest.Files)))
 	return nil
+}
+
+func (u *ArtifactUploader) uploadArtifact(ctx context.Context, request ArtifactPrepareRequest, file WorkspaceArtifact) (string, string, string, error) {
+	switch u.cfg.ArtifactUploadMode {
+	case ArtifactUploadDirect:
+		prepared, err := u.reporter.PrepareArtifactUpload(ctx, request)
+		if err != nil {
+			return "", "", "", fmt.Errorf("prepare upload: %w", err)
+		}
+		if prepared == nil {
+			return "", "", "", fmt.Errorf("prepare upload returned empty response")
+		}
+		if prepared.MaxSize > 0 && file.Size > prepared.MaxSize {
+			return "", "", "", fmt.Errorf("artifact exceeds prepared upload limit")
+		}
+		contentType := prepared.Headers["Content-Type"]
+		if contentType == "" {
+			contentType = file.ContentType
+		}
+		etag, err := u.putObject(ctx, prepared, file.LocalPath, contentType)
+		if err != nil {
+			return "", "", "", err
+		}
+		return strings.TrimSpace(prepared.Key), contentType, etag, nil
+	case ArtifactUploadStream:
+		body, err := openArtifactFile(file.LocalPath)
+		if err != nil {
+			return "", "", "", fmt.Errorf("open artifact: %w", err)
+		}
+		defer body.Close()
+		result, err := u.reporter.StreamArtifactContent(ctx, ArtifactStreamRequest{
+			TaskID: request.TaskID, ExecutionID: request.ExecutionID,
+			RelativePath: request.RelativePath, ContentType: request.ContentType,
+			Size: request.Size, SHA256: request.SHA256,
+		}, body)
+		if err != nil {
+			return "", "", "", err
+		}
+		if result == nil {
+			return "", "", "", fmt.Errorf("stream upload returned empty response")
+		}
+		if result.Size != file.Size || !strings.EqualFold(result.SHA256, file.SHA256) {
+			return "", "", "", fmt.Errorf("stream upload response does not match artifact")
+		}
+		return strings.TrimSpace(result.ObjectKey), firstNonEmpty(result.ContentType, file.ContentType), "", nil
+	default:
+		return "", "", "", fmt.Errorf("unsupported artifact upload mode %q", u.cfg.ArtifactUploadMode)
+	}
 }
 
 func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]WorkspaceArtifact, error) {

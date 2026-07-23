@@ -363,6 +363,9 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if !validBootstrapTaskType(response.TaskType) {
 		return fmt.Errorf("bootstrap task type is invalid")
 	}
+	if response.ArtifactTransport.Mode != ArtifactUploadDirect && response.ArtifactTransport.Mode != ArtifactUploadStream {
+		return fmt.Errorf("bootstrap artifact transport is invalid")
+	}
 	if strings.TrimSpace(response.Prompt) == "" || len(response.Prompt) > maxBootstrapPromptBytes {
 		return fmt.Errorf("bootstrap prompt is invalid")
 	}

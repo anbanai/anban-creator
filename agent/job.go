@@ -70,7 +70,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		ResumeSessionID:     response.ResumeSessionID,
 		ResumeContextPath:   response.ResumeContextPath,
 		MaxTurns:            response.MaxTurns,
-		ArtifactUploadMode:  ArtifactUploadDirect,
+		ArtifactUploadMode:  response.ArtifactTransport.Mode,
 	}
 	if response.TaskType == "montage" {
 		cfg.Env = response.Env

@@ -32,6 +32,15 @@ type BootstrapFile struct {
 	MaxBytes     int64  `json:"max_bytes,omitempty"`
 }
 
+const (
+	ArtifactTransportDirect = "direct"
+	ArtifactTransportStream = "stream"
+)
+
+type ArtifactTransport struct {
+	Mode string `json:"mode"`
+}
+
 type AgentBootstrapResponse struct {
 	ExecutionToken      string                                    `json:"execution_token"`
 	TaskID              string                                    `json:"task_id"`
@@ -48,6 +57,7 @@ type AgentBootstrapResponse struct {
 	ModelUsageAliases   map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
 	Env                 map[string]string                         `json:"env,omitempty"`
 	Files               []BootstrapFile                           `json:"files"`
+	ArtifactTransport   ArtifactTransport                         `json:"artifact_transport"`
 }
 
 type AgentBootstrapConfig struct {
@@ -316,7 +326,14 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files}, nil
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()}}, nil
+}
+
+func (s *AgentBootstrapService) artifactTransportMode() string {
+	if s != nil && s.cfg.Store != nil && strings.EqualFold(strings.TrimSpace(s.cfg.Store.Name()), "oss") {
+		return ArtifactTransportDirect
+	}
+	return ArtifactTransportStream
 }
 
 func cloneBootstrapModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {

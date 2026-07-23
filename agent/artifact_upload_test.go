@@ -20,6 +20,8 @@ import (
 
 type fakeArtifactReporter struct {
 	prepared []ArtifactPrepareRequest
+	streamed []ArtifactStreamRequest
+	bodies   []string
 	manifest ArtifactManifestRequest
 	progress []string
 }
@@ -39,6 +41,21 @@ func (f *fakeArtifactReporter) PrepareArtifactUpload(_ context.Context, req Arti
 func (f *fakeArtifactReporter) ReportArtifactManifest(_ context.Context, req ArtifactManifestRequest) error {
 	f.manifest = req
 	return nil
+}
+
+func (f *fakeArtifactReporter) StreamArtifactContent(_ context.Context, req ArtifactStreamRequest, body io.Reader) (*ArtifactStreamResponse, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	f.streamed = append(f.streamed, req)
+	f.bodies = append(f.bodies, string(data))
+	return &ArtifactStreamResponse{
+		ObjectKey:   "uploads/users/u/projects/p/tasks/" + req.TaskID + "/executions/" + req.ExecutionID + "/artifacts/" + req.RelativePath,
+		ContentType: req.ContentType,
+		Size:        req.Size,
+		SHA256:      req.SHA256,
+	}, nil
 }
 
 func (f *fakeArtifactReporter) ReportProgress(_ context.Context, message string) error {
@@ -162,7 +179,7 @@ func TestJobArtifactUploaderUsesCanonicalWorkspaceOutput(t *testing.T) {
 	}
 	reporter := &fakeArtifactReporter{}
 	uploader := NewArtifactUploader(&Config{
-		TaskID: "task-1", ExecutionID: "execution-1", TaskType: "montage", Workspace: root,
+		TaskID: "task-1", ExecutionID: "execution-1", TaskType: "montage", Workspace: root, ArtifactUploadMode: ArtifactUploadDirect,
 	}, reporter)
 	uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
 		return "etag", nil
@@ -282,7 +299,7 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
 	reporter := &fakeArtifactReporter{}
 	var uploaded []string
-	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root, ArtifactUploadMode: ArtifactUploadDirect}, reporter)
 	uploader.putObject = func(_ context.Context, prepared *ArtifactPrepareResponse, localPath string, contentType string) (string, error) {
 		uploaded = append(uploaded, prepared.Key+"|"+filepath.Base(localPath)+"|"+contentType)
 		return "etag-1", nil
@@ -306,11 +323,44 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 }
 
+func TestArtifactUploaderUsesProviderMode(t *testing.T) {
+	for _, mode := range []string{ArtifactUploadDirect, ArtifactUploadStream} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			writeAgentArtifactTestFile(t, root, "output/article.md", "artifact-body")
+			reporter := &fakeArtifactReporter{}
+			uploader := NewArtifactUploader(&Config{
+				TaskID: "task-1", ExecutionID: "execution-1", TaskType: "article",
+				Workspace: root, ArtifactUploadMode: mode,
+			}, reporter)
+			directCalls := 0
+			uploader.putObject = func(context.Context, *ArtifactPrepareResponse, string, string) (string, error) {
+				directCalls++
+				return "etag", nil
+			}
+
+			if err := uploader.UploadWorkspaceArtifacts(t.Context(), &serveragent.ExecutionResult{WorkDir: root}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == ArtifactUploadDirect {
+				if directCalls != 1 || len(reporter.prepared) != 1 || len(reporter.streamed) != 0 {
+					t.Fatalf("direct calls=%d prepared=%d streamed=%d", directCalls, len(reporter.prepared), len(reporter.streamed))
+				}
+			} else if directCalls != 0 || len(reporter.prepared) != 0 || len(reporter.streamed) != 1 || reporter.bodies[0] != "artifact-body" {
+				t.Fatalf("stream calls=%d prepared=%d streamed=%d bodies=%#v", directCalls, len(reporter.prepared), len(reporter.streamed), reporter.bodies)
+			}
+			if len(reporter.manifest.Files) != 1 || reporter.manifest.Files[0].ObjectKey == "" {
+				t.Fatalf("manifest = %#v", reporter.manifest)
+			}
+		})
+	}
+}
+
 func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing.T) {
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/failure-state.json", `{"stage":"quality-gate"}`)
 	reporter := &fakeArtifactReporter{}
-	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
+	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root, ArtifactUploadMode: ArtifactUploadDirect}, reporter)
 	uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, _ string, _ string) (string, error) {
 		return "etag-failure", nil
 	}

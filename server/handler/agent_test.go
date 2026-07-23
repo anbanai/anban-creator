@@ -30,13 +30,21 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-type executionScopeTestStore struct{ *fakeAgentArtifactStorage }
+type executionScopeTestStore struct {
+	*fakeAgentArtifactStorage
+	uploadedKey  string
+	uploadedBody []byte
+}
 
 func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
+	s.uploadedKey = key
+	s.uploadedBody = append([]byte(nil), data...)
+	s.fakeAgentArtifactStorage.uploadedKey = key
+	s.fakeAgentArtifactStorage.uploadedBody = append([]byte(nil), data...)
 	return &storage.UploadResult{Key: key, URL: s.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
 }
 
@@ -449,10 +457,11 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	h.SetDirectUploadConfig(service.DirectUploadConfig{Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", STSRoleArn: "role"}, CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
 		return &service.UploadCredential{AccessKeyID: "ak", AccessKeySecret: "secret", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
 	})})
-	app := fiber.New()
+	app := fiber.New(fiber.Config{StreamRequestBody: true})
 	app.Post("/agent/progress", h.AuthMiddleware, h.Progress)
 	app.Post("/agent/upload", h.AuthMiddleware, h.Upload)
 	app.Post("/agent/artifacts/prepare", h.AuthMiddleware, h.PrepareArtifactUpload)
+	app.Post("/agent/artifacts/content", h.AuthMiddleware, h.StreamArtifactContent)
 	app.Post("/agent/artifacts/manifest", h.AuthMiddleware, h.ReportArtifactManifest)
 	app.Post("/agent/complete", h.AuthMiddleware, h.Complete)
 	return app, repo, task, executionID, token, rawAPIKey, store.fakeAgentArtifactStorage
@@ -610,6 +619,8 @@ func ptrTime(t time.Time) *time.Time { return &t }
 type fakeAgentArtifactStorage struct {
 	uploadKey         string
 	uploadContentType string
+	uploadedKey       string
+	uploadedBody      []byte
 	stats             map[string]*storage.ObjectInfo
 	statErr           error
 }

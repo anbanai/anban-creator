@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func testModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
@@ -53,6 +54,7 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".task-context", "text": "TASK_ID=task-1\n", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(),
 			"runtime_env":         testClaudeRuntimeEnv(),
+			"artifact_transport":  map[string]any{"mode": "direct"},
 		}})
 	}))
 	defer server.Close()
@@ -87,6 +89,7 @@ func TestBootstrapCreatesRuntimeOwnedOutput(t *testing.T) {
 			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
 			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
 	defer server.Close()
@@ -124,6 +127,7 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 			"prompt": "render", "model": "sonnet", "max_turns": 40, "agent_flag": "anban:montage",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": "montage-input.json", "text": "{}", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
 	defer server.Close()
@@ -309,6 +313,7 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
 			ModelUsageAliases: testModelUsageAliases(),
 			RuntimeEnv:        testClaudeRuntimeEnv(),
+			ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
 		}
 	}
 	tests := []struct {
@@ -343,6 +348,8 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			r.Env = map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
 		}},
 		{"too many files", func(r *BootstrapResponse) { r.Files = make([]BootstrapFile, maxBootstrapFiles+1) }},
+		{"missing artifact transport", func(r *BootstrapResponse) { r.ArtifactTransport.Mode = "" }},
+		{"unknown artifact transport", func(r *BootstrapResponse) { r.ArtifactTransport.Mode = "proxy" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -369,6 +376,7 @@ func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
 		ModelUsageAliases:   testModelUsageAliases(),
 		RuntimeEnv:          testClaudeRuntimeEnv(),
 		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
+		ArtifactTransport:   service.ArtifactTransport{Mode: ArtifactUploadStream},
 	}
 	if err := validateBootstrapResponse("execution-1", &response); err != nil {
 		t.Fatalf("validate bootstrap response: %v", err)
