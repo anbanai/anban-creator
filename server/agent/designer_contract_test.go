@@ -33,15 +33,17 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 		"`generate_image`",
 		"`analyze_image`",
 		"`download_image`",
-		"`prepare_workspace`",
 		"`update_task_progress`",
+		"output/input-manifest.md",
+		"output/color-bible.md",
+		"output/colored_00.png",
+		"output/consistency-report.md",
 		"ANBAN_API_URL",
 		"ANBAN_DEFAULT_PROJECT",
 		"ANBAN_API_KEY",
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
-		"prepare_workspace 返回的 path 可能是相对路径",
 		"如果为空，调用 `list_projects`",
 	}
 	if !strings.Contains(frontmatter, "\nskills:") {
@@ -124,7 +126,9 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 		"upload_image",
 		"output_path` 是 MCP 服务器端路径",
 		"/tmp/anban-creator-line-art",
-		"prepare_workspace 返回的 path 可能是相对路径",
+		"output/color-bible.md",
+		"output/colored_00.png",
+		"output/consistency-report.md",
 		"size` 是宽高比提示",
 		"从原始线稿推断最接近的支持比例",
 		"Prompt 控制在 500 词以内",
@@ -195,8 +199,8 @@ func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) 
 		"先为原始线稿生成线稿指纹",
 		"将上色图审计结果与线稿指纹逐项比对",
 		"同时传 `file_path` 和 `image_url` 时服务端只会使用 `file_path`",
-		"不能把 `download_image` 当作写入 `$DIR/colored_NN.png` 的本地归档步骤",
-		"下载 `download_url` 到 `$DIR/colored_NN.png`",
+		"不能把 `download_image` 当作写入 `output/colored_NN.png` 的本地归档步骤",
+		"下载 `download_url` 到 `output/colored_NN.png`",
 	}
 	for _, term := range required {
 		if !strings.Contains(all, term) {
@@ -219,7 +223,6 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "server", "mcp", "image_tools.go"),
-		filepath.Join(root, "server", "mcp", "workspace_tools.go"),
 	}
 
 	var body strings.Builder
@@ -243,7 +246,6 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 		"Use file_path returned by generate_image/download_image",
 		"file_path analysis is limited to 10MB",
 		"compress_image first or upload_image and retry with image_url",
-		"relative path rooted at the agent task workspace/current working directory",
 	}
 	all := body.String()
 	for _, term := range required {

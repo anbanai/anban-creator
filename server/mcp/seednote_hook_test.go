@@ -343,7 +343,7 @@ func validateSeednoteRuntimeDocument(body string) error {
 		section := sectionUntilHeading(body, bounds[0], regexp.MustCompile(`(?m)^#{3,4} .*?(?:图片生成|生成图片).*$`))
 		for _, required := range []string{
 			"finalize_task_title",
-			"$DIR/failure-state.json",
+			"output/failure-state.json",
 			"recoverable_failure",
 			"title_finalization",
 			"error_code",
@@ -385,8 +385,8 @@ func validateSeednoteRuntimeDocument(body string) error {
 		return fmt.Errorf("Seednote template save must not pass unsupported structure")
 	}
 	for _, required := range []string{
-		"$DIR/viral-template.json",
-		"$DIR/template-meta.json",
+		"output/viral-template.json",
+		"output/template-meta.json",
 		"type=",
 		"name=",
 		"category=",
@@ -468,8 +468,8 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 			body: strings.Replace(valid, `"message":"<原始错误摘要>"`, `"detail":"<原始错误摘要>"`, 1),
 		},
 		{
-			name: "canonical result directory missing",
-			body: strings.Replace(valid, "成果目录（`$DIR`）", "成果目录", 1),
+			name: "explicit content path missing",
+			body: strings.Replace(valid, "output/content.md", "content.md", 1),
 		},
 	}
 	for _, tt := range tests {
@@ -493,7 +493,7 @@ func validateSeednoteFinalizationContract(body string) error {
 	if titleStageAt < 0 || imageStageAt <= titleStageAt {
 		return fmt.Errorf("seednote must finalize the title after writing and before image generation")
 	}
-	lastWritingAt := strings.LastIndex(body[:titleStageAt], "**产出**：`$DIR/content.md`")
+	lastWritingAt := strings.LastIndex(body[:titleStageAt], "**产出**：`output/content.md`")
 	finalizeCall := regexp.MustCompile(`finalize_task_title\s*\(`).FindStringIndex(titleStage)
 	if lastWritingAt < 0 || finalizeCall == nil {
 		return fmt.Errorf("seednote must finalize the title after writing and before image generation")
@@ -504,7 +504,7 @@ func validateSeednoteFinalizationContract(body string) error {
 		}
 	}
 	duplicateAt := strings.Index(titleStage, "返回 `duplicate title` 错误时")
-	contentAt := indexAfter(titleStage, "`$DIR/content.md`", duplicateAt)
+	contentAt := indexAfter(titleStage, "`output/content.md`", duplicateAt)
 	firstLineAt := indexAfter(titleStage, "第一行为新标题", contentAt)
 	humanizeAt := indexAfter(titleStage, "轻量去 AI", firstLineAt)
 	complianceAt := indexAfter(titleStage, "标题合规", humanizeAt)
@@ -517,7 +517,7 @@ func validateSeednoteFinalizationContract(body string) error {
 			return fmt.Errorf("seednote title finalization stage missing stable error code %s", code)
 		}
 	}
-	failureAt := strings.Index(titleStage, "写入 `$DIR/failure-state.json`")
+	failureAt := strings.Index(titleStage, "写入 `output/failure-state.json`")
 	stopAt := strings.Index(titleStage, "随后停止")
 	noImagesAt := strings.Index(titleStage, "不得进入图片生成")
 	if failureAt < 0 || stopAt <= failureAt || noImagesAt <= stopAt {
@@ -572,7 +572,7 @@ func validateSeednoteDeliveryContract(body string) error {
 		}
 	}
 	for _, required := range []string{
-		"`$DIR/content.md`",
+		"`output/content.md`",
 		"逐项校验",
 		"verification.passed=true",
 		"failure-state.json",
@@ -582,8 +582,14 @@ func validateSeednoteDeliveryContract(body string) error {
 			return fmt.Errorf("seednote delivery validation missing %q", required)
 		}
 	}
-	if !strings.Contains(body, "成果目录（`$DIR`）") {
-		return fmt.Errorf("seednote final report must identify 成果目录（`$DIR`）")
+	finalReport, err := markdownSection(body, "#### 步骤 12：最终报告", "\n---")
+	if err != nil {
+		return err
+	}
+	for _, required := range []string{"output/content.md", "output/image-plan.md"} {
+		if !strings.Contains(finalReport, required) {
+			return fmt.Errorf("seednote final report missing explicit artifact path %q", required)
+		}
 	}
 	return nil
 }
@@ -601,7 +607,7 @@ func validateSeednoteTemplateSaveContract(body string) error {
 			return fmt.Errorf("seednote save_template missing schema field %q", field)
 		}
 	}
-	for _, phrase := range []string{"`$DIR/viral-template.json`", "`$DIR/template-meta.json`", "重复", "resume", "同一 template ID", "created", "existing"} {
+	for _, phrase := range []string{"`output/viral-template.json`", "`output/template-meta.json`", "重复", "resume", "同一 template ID", "created", "existing"} {
 		if !strings.Contains(templateStage, phrase) {
 			return fmt.Errorf("seednote template save contract missing %q", phrase)
 		}

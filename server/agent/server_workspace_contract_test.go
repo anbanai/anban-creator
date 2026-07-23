@@ -66,26 +66,30 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		})
 	}
 
-	workflowOutputs := map[string][]string{
-		"plugins/agents/article.md":       {"output/04-article-final.md", "output/05-article.html", "output/final-review.md"},
-		"plugins/agents/article.toml":     {"output/04-article-final.md", "output/05-article.html", "output/final-review.md"},
-		"plugins/agents/seednote.md":      {"output/content.md", "output/image-plan.md", "output/failure-state.json"},
-		"plugins/agents/seednote.toml":    {"output/content.md", "output/image-plan.md", "output/failure-state.json"},
-		"plugins/agents/moments.md":       {"output/material-analysis.md", "output/content.md", "output/quality-review.md"},
-		"plugins/agents/moments.toml":     {"output/material-analysis.md", "output/content.md", "output/quality-review.md"},
-		"plugins/agents/ecommerce.md":     {"output/product-bible.md", "output/copywriting.md", "output/manifest.json"},
-		"plugins/agents/ecommerce.toml":   {"output/product-bible.md", "output/copywriting.md", "output/manifest.json"},
-		"plugins/agents/designer.md":      {"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"},
-		"plugins/agents/designer.toml":    {"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"},
-		"plugins/agents/montage.md":       {"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"},
-		"plugins/agents/montage.toml":     {"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"},
-		"plugins/agents/live-slicer.md":   {"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"},
-		"plugins/agents/live-slicer.toml": {"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"},
+	workflowOutputs := []struct {
+		path    string
+		outputs []string
+	}{
+		{path: "plugins/agents/article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "plugins/agents/article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "plugins/agents/seednote.md", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "plugins/agents/seednote.toml", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "plugins/agents/moments.md", outputs: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md"}},
+		{path: "plugins/agents/moments.toml", outputs: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md"}},
+		{path: "plugins/agents/ecommerce.md", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "plugins/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "plugins/agents/designer.md", outputs: []string{"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"}},
+		{path: "plugins/agents/designer.toml", outputs: []string{"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"}},
+		{path: "plugins/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
+		{path: "plugins/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
+		{path: "plugins/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
+		{path: "plugins/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 	}
-	for relativePath, requiredOutputs := range workflowOutputs {
+	for _, workflow := range workflowOutputs {
+		relativePath := workflow.path
 		t.Run(relativePath+"/explicit-output", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
-			for _, requiredOutput := range requiredOutputs {
+			for _, requiredOutput := range workflow.outputs {
 				if !strings.Contains(body, requiredOutput) {
 					t.Errorf("%s missing explicit managed-runtime artifact path %q", relativePath, requiredOutput)
 				}

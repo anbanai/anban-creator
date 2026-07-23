@@ -137,7 +137,7 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 				"封面关·配图开",
 				"不传",
 				"链到首张已生成图",
-				"不存在的 `$DIR/cover.png`",
+				"不存在的 `output/cover.png`",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing content-only ref_image_path guard term %q", path, term)
@@ -536,7 +536,7 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"get_resource(category=\"writers\"",
 			"render_template",
 			"convert_markdown",
-			"$DIR/03-article.md",
+			"output/03-article.md",
 		)...)
 
 		topic := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "topic-research", "SKILL.md"))
@@ -545,14 +545,14 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"list_project_titles",
 			"list_drafts",
 			"list_published_articles",
-			"$DIR/01-research.md",
-			"$DIR/02-outline.md",
+			"output/01-research.md",
+			"output/02-outline.md",
 		)...)
 
 		seo := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "seo-optimization", "SKILL.md"))
 		assertArticleContractContainsAll(t, plugin+" seo-optimization", seo, append(requiredSections,
 			"MCP is not used for SEO generation",
-			"$DIR/seo-result.md",
+			"output/seo-result.md",
 			"CTR",
 		)...)
 	}
