@@ -181,6 +181,7 @@ type TaskFileRepository interface {
 	FindAnyByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindAllByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)

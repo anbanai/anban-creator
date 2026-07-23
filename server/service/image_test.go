@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -397,43 +396,6 @@ func TestGenerateImageUsesResolvedDescriptor(t *testing.T) {
 	}
 }
 
-// timeoutNetErr is a minimal net.Error whose Timeout()==true, exercising the
-// net-timeout branch of isTransientImageError without spinning up a socket.
-type timeoutNetErr struct{}
-
-func (timeoutNetErr) Error() string   { return "i/o timeout" }
-func (timeoutNetErr) Timeout() bool   { return true }
-func (timeoutNetErr) Temporary() bool { return false }
-
-func Test_isTransientImageError(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"server_error", &appimage.GenerateError{Code: "server_error", Message: "503 no available channel"}, true},
-		{"rate_limit", &appimage.GenerateError{Code: "rate_limit"}, true},
-		{"network_error", &appimage.GenerateError{Code: "network_error"}, true},
-		{"unknown_transient_code", &appimage.GenerateError{Code: "timeout"}, false},
-		{"safety_blocked", &appimage.GenerateError{Code: "safety_blocked"}, false},
-		{"bad_request", &appimage.GenerateError{Code: "bad_request"}, false},
-		{"unauthorized", &appimage.GenerateError{Code: "unauthorized"}, false},
-		{"payment_required", &appimage.GenerateError{Code: "payment_required"}, false},
-		{"context_deadline", context.DeadlineExceeded, true},
-		{"context_canceled", context.Canceled, false},
-		{"net_timeout", timeoutNetErr{}, true},
-		{"plain_error", fmt.Errorf("something else"), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isTransientImageError(tc.err); got != tc.want {
-				t.Fatalf("isTransientImageError(%v) = %v, want %v", tc.err, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestProviderAttemptTimeoutUsesResolvedImageType(t *testing.T) {
 	resolved := &ResolvedImageModel{Config: &srvconfig.ImageAPIConfig{
 		Cover:   &appconfig.ImageAPI{TimeoutSec: 120},
@@ -447,152 +409,27 @@ func TestProviderAttemptTimeoutUsesResolvedImageType(t *testing.T) {
 	}
 }
 
-// TestGenerateWithRetry_TransientRetrySucceeds: the SAME provider closure is
-// retried on a transient error and succeeds on the second attempt, returning the
-// result untouched. Backoffs are zeroed so the test is instant.
-func TestGenerateWithRetry_TransientRetrySucceeds(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{
-		logger: &logger,
-		imageRetry: &imageRetryConfig{
-			MaxAttempts: 3,
-			Backoffs:    []time.Duration{0, 0, 0},
-		},
-	}
+func TestGenerateProviderImageDoesNotOwnWorkflowRetry(t *testing.T) {
+	svc := &ImageService{}
 	calls := 0
-	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
+	firstErr := &appimage.GenerateError{Code: "server_error", Message: "503"}
+	_, err := svc.generateProviderImage(context.Background(), 5*time.Minute, func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
 		if calls == 1 {
-			return nil, &appimage.GenerateError{Code: "server_error", Message: "503"}
+			return nil, firstErr
 		}
-		return &appimage.GenerateRawResult{URL: "x", Provider: "openai", Model: "gpt-image-2"}, nil
-	}
-
-	got, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
-	if err != nil {
-		t.Fatalf("generateWithRetry error = %v, want nil", err)
-	}
-	if calls != 2 {
-		t.Fatalf("closure called %d times, want 2 (1 transient fail + 1 success)", calls)
-	}
-	if got.Provider != "openai" || got.Model != "gpt-image-2" {
-		t.Fatalf("result = %+v, want provider=openai model=gpt-image-2", got)
-	}
-}
-
-// TestGenerateWithRetry_ExhaustsAttemptsOnPersistentTransient: a provider that
-// keeps returning a transient error is retried up to MaxAttempts, then surfaces a
-// "failed after N attempts" wrapper around the last error.
-func TestGenerateWithRetry_ExhaustsAttemptsOnPersistentTransient(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{
-		logger: &logger,
-		imageRetry: &imageRetryConfig{
-			MaxAttempts: 3,
-			Backoffs:    []time.Duration{0, 0, 0},
-		},
-	}
-	calls := 0
-	last := &appimage.GenerateError{Code: "server_error", Message: "503"}
-	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
-		calls++
-		return nil, last
-	}
-
-	_, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
-	if err == nil {
-		t.Fatal("generateWithRetry error = nil, want error")
-	}
-	if calls != 3 {
-		t.Fatalf("closure called %d times, want 3 (MaxAttempts)", calls)
-	}
-	if !strings.Contains(err.Error(), "failed after 3 attempts") {
-		t.Fatalf("err = %q, want it to mention 'failed after 3 attempts'", err.Error())
-	}
-	if !errors.Is(err, last) {
-		t.Fatalf("err chain does not wrap the last GenerateError: %v", err)
-	}
-}
-
-// TestGenerateWithRetry_NonRetryableFailFast: a content-policy / auth error is
-// NOT retried — the closure runs exactly once and the original error is returned
-// (wrapped only with "generate image:").
-func TestGenerateWithRetry_NonRetryableFailFast(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{
-		logger: &logger,
-		imageRetry: &imageRetryConfig{
-			MaxAttempts: 3,
-			Backoffs:    []time.Duration{0, 0, 0},
-		},
-	}
-	calls := 0
-	refused := &appimage.GenerateError{Code: "safety_blocked", Message: "violation"}
-	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
-		calls++
-		return nil, refused
-	}
-
-	_, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "cover")
-	if err == nil {
-		t.Fatal("generateWithRetry error = nil, want error")
-	}
+		return &appimage.GenerateRawResult{Provider: "openai", Model: "gpt-image-2"}, nil
+	}, "cover")
 	if calls != 1 {
-		t.Fatalf("closure called %d times, want 1 (non-retryable must fail fast)", calls)
+		t.Fatalf("provider calls=%d, want exactly 1 so Agent/Skill owns retry", calls)
 	}
-	if !strings.Contains(err.Error(), "generate image:") {
-		t.Fatalf("err = %q, want 'generate image:' wrapper", err.Error())
-	}
-	if !errors.Is(err, refused) {
-		t.Fatalf("err chain does not wrap the refused GenerateError: %v", err)
+	if !errors.Is(err, firstErr) {
+		t.Fatalf("error=%v, want first provider error", err)
 	}
 }
 
-// TestGenerateWithRetry_ContextCancelAbortsBackoff: cancelling the context
-// during a backoff wait returns ctx.Err() promptly and does NOT make another
-// generation attempt. Guards against a cancelled task pointlessly retrying.
-func TestGenerateWithRetry_ContextCancelAbortsBackoff(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{
-		logger: &logger,
-		imageRetry: &imageRetryConfig{
-			MaxAttempts: 3,
-			Backoffs:    []time.Duration{0, 200 * time.Millisecond, 200 * time.Millisecond},
-		},
-	}
-	calls := 0
-	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
-		calls++
-		return nil, &appimage.GenerateError{Code: "server_error", Message: "503"}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(5*time.Millisecond, cancel)
-
-	start := time.Now()
-	_, err := svc.generateWithRetry(ctx, 5*time.Minute, gen, "cover")
-	elapsed := time.Since(start)
-
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
-	}
-	if calls != 1 {
-		t.Fatalf("closure called %d times, want 1 (cancel must abort before attempt 2)", calls)
-	}
-	if elapsed >= 200*time.Millisecond {
-		t.Fatalf("returned after %v, want it to abort the backoff well under 200ms", elapsed)
-	}
-}
-
-// TestGenerateWithRetry_PreCancelledContextNoAttempt: a context already
-// cancelled before the first attempt must return ctx.Err() immediately without
-// calling gen() once — no generation burned on a dead task (the ctx.Err() guard).
-func TestGenerateWithRetry_PreCancelledContextNoAttempt(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{
-		logger:     &logger,
-		imageRetry: &imageRetryConfig{MaxAttempts: 3, Backoffs: []time.Duration{0, 0, 0}},
-	}
+func TestGenerateProviderImagePreCancelledContextMakesNoAttempt(t *testing.T) {
+	svc := &ImageService{}
 	calls := 0
 	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
 		calls++
@@ -601,7 +438,7 @@ func TestGenerateWithRetry_PreCancelledContextNoAttempt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := svc.generateWithRetry(ctx, 5*time.Minute, gen, "cover")
+	_, err := svc.generateProviderImage(ctx, 5*time.Minute, gen, "cover")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -610,49 +447,10 @@ func TestGenerateWithRetry_PreCancelledContextNoAttempt(t *testing.T) {
 	}
 }
 
-// TestGenerateWithRetry_DefaultsWhenRetryConfigNil: production leaves imageRetry
-// nil; the loop must still apply the package defaults (retry, not no-op). We
-// temporarily shorten the package-default backoffs so the test is instant while
-// still exercising the real nil-config → defaults code path (not a fast stub).
-func TestGenerateWithRetry_DefaultsWhenRetryConfigNil(t *testing.T) {
-	savedAttempts, savedBackoffs := defaultImageRetryMaxAttempts, defaultImageRetryBackoffs
-	defaultImageRetryMaxAttempts = 3
-	defaultImageRetryBackoffs = []time.Duration{0, 0, 0}
-	defer func() {
-		defaultImageRetryMaxAttempts = savedAttempts
-		defaultImageRetryBackoffs = savedBackoffs
-	}()
-
-	logger := zerolog.Nop()
-	svc := &ImageService{logger: &logger} // imageRetry nil → defaults
-	calls := 0
-	gen := func(context.Context) (*appimage.GenerateRawResult, error) {
-		calls++
-		if calls == 1 {
-			return nil, &appimage.GenerateError{Code: "rate_limit"}
-		}
-		return &appimage.GenerateRawResult{Provider: "volcengine"}, nil
-	}
-	got, err := svc.generateWithRetry(context.Background(), 5*time.Minute, gen, "content")
-	if err != nil {
-		t.Fatalf("generateWithRetry error = %v, want nil", err)
-	}
-	if calls != 2 {
-		t.Fatalf("closure called %d times, want 2 (default policy must retry)", calls)
-	}
-	if got.Provider != "volcengine" {
-		t.Fatalf("result.Provider = %q, want volcengine", got.Provider)
-	}
-}
-
-func TestGenerateWithRetryBoundsProviderAttempt(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{logger: &logger, imageRetry: &imageRetryConfig{
-		MaxAttempts: 1,
-		Backoffs:    []time.Duration{0},
-	}}
+func TestGenerateProviderImageBoundsProviderAttempt(t *testing.T) {
+	svc := &ImageService{}
 	started := time.Now()
-	_, err := svc.generateWithRetry(context.Background(), 20*time.Millisecond, func(ctx context.Context) (*appimage.GenerateRawResult, error) {
+	_, err := svc.generateProviderImage(context.Background(), 20*time.Millisecond, func(ctx context.Context) (*appimage.GenerateRawResult, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}, "cover")
@@ -661,23 +459,5 @@ func TestGenerateWithRetryBoundsProviderAttempt(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
 		t.Fatalf("provider attempt returned after %s, want bounded near 20ms", elapsed)
-	}
-}
-
-func TestGenerateWithRetryDoesNotStartAttemptWithoutBudget(t *testing.T) {
-	logger := zerolog.Nop()
-	svc := &ImageService{logger: &logger, imageRetry: &imageRetryConfig{
-		MaxAttempts: 3,
-		Backoffs:    []time.Duration{0, 10 * time.Millisecond},
-	}}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	calls := 0
-	_, _ = svc.generateWithRetry(ctx, 20*time.Millisecond, func(context.Context) (*appimage.GenerateRawResult, error) {
-		calls++
-		return nil, &appimage.GenerateError{Code: "network_error", Message: "temporary"}
-	}, "cover")
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1", calls)
 	}
 }

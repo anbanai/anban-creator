@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1552,16 +1553,69 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		}
 	}
 
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
+	storageKeys := make(map[string]struct{})
+	files, err := s.repo.TaskFiles().FindAllByTaskID(ctx, id)
 	if err != nil {
-		s.logger.Error().Err(err).Str("task_id", id).Msg("failed to list task files for deletion")
+		return fmt.Errorf("list task files for deletion: %w", err)
 	}
-
 	for _, f := range files {
-		if f.OSSKey != "" && s.store != nil {
-			if delErr := s.store.Delete(ctx, f.OSSKey); delErr != nil {
-				s.logger.Error().Err(delErr).Str("key", f.OSSKey).Msg("failed to delete storage file")
+		if f.OSSKey == "" && f.CleanupOSSKey == "" {
+			continue
+		}
+		if s.store == nil || f.StorageProvider == "" || f.StorageProvider != s.store.Name() {
+			return fmt.Errorf("storage provider %q is unavailable for task file %s", f.StorageProvider, f.ID)
+		}
+		for _, key := range []string{f.OSSKey, f.CleanupOSSKey} {
+			if key != "" {
+				storageKeys[key] = struct{}{}
 			}
+		}
+	}
+	settlements, err := s.repo.Billing().ListSettlementsByTask(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list task operation objects for deletion: %w", err)
+	}
+	for _, settlement := range settlements {
+		if settlement.AttemptID == nil || len(settlement.ResultSnapshot) == 0 {
+			continue
+		}
+		var snapshot struct {
+			OperationObject json.RawMessage `json:"operation_object"`
+		}
+		if err := json.Unmarshal(settlement.ResultSnapshot, &snapshot); err != nil {
+			return fmt.Errorf("decode task operation object settlement %s: %w", settlement.ID, err)
+		}
+		if len(snapshot.OperationObject) == 0 || string(snapshot.OperationObject) == "null" {
+			continue
+		}
+		var object taskFileOperationObjectSnapshot
+		if err := json.Unmarshal(snapshot.OperationObject, &object); err != nil {
+			return fmt.Errorf("decode task operation object %s: %w", settlement.ID, err)
+		}
+		expectedPrefix := buildTaskMCPArtifactStoragePrefix(task, *settlement.AttemptID) + "operation-objects/"
+		if object.OSSKey == "" || object.StorageProvider == "" || s.store == nil || object.StorageProvider != s.store.Name() ||
+			!strings.HasPrefix(filepath.ToSlash(object.OSSKey), expectedPrefix) || !isImmutableOperationObjectKey(object.OSSKey) {
+			return fmt.Errorf("invalid task operation object in settlement %s", settlement.ID)
+		}
+		storageKeys[object.OSSKey] = struct{}{}
+	}
+	if len(storageKeys) > 0 && s.store == nil {
+		return fmt.Errorf("storage provider is required to delete task files")
+	}
+	if s.store != nil {
+		keys := make([]string, 0, len(storageKeys))
+		for key := range storageKeys {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		var cleanupErrors []error
+		for _, key := range keys {
+			if delErr := s.store.Delete(ctx, key); delErr != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("delete storage file %s: %w", key, delErr))
+			}
+		}
+		if err := errors.Join(cleanupErrors...); err != nil {
+			return err
 		}
 	}
 

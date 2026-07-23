@@ -1532,6 +1532,8 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	if err != nil {
 		t.Fatal(err)
 	}
+	operationObjectKey := generated.OSSKey
+	operationContentHash := generated.ContentHash
 
 	settlementKey := billingFingerprint(task.ID, executionID, operationID)
 	if processed, err := fixture.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
@@ -1623,8 +1625,8 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	}
 	svc.EnrichFilesWithURLs(ctx, []*model.TaskFile{replayFile})
 	replay.DownloadURL = replayFile.URL
-	if replayFile.ID != generated.ID || replayFile.OSSKey != workspaceKey || replayFile.ContentHash != newHash || replay.DownloadURL != store.GetURL(workspaceKey) {
-		t.Fatalf("operation replay = file %#v snapshot %#v, want stable ID and latest workspace delivery", replayFile, replay)
+	if replayFile.ID != generated.ID || replayFile.OSSKey != operationObjectKey || replayFile.ContentHash != operationContentHash || replay.DownloadURL != store.GetURL(operationObjectKey) {
+		t.Fatalf("operation replay = file %#v snapshot %#v, want stable ID and immutable operation delivery", replayFile, replay)
 	}
 	if store.uploadCalls != uploadsBeforeReplay {
 		t.Fatalf("operation replay upload calls = %d, want unchanged %d", store.uploadCalls, uploadsBeforeReplay)

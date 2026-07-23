@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -43,6 +44,13 @@ type taskImageGeneratorFake struct {
 	uploadCalls  int
 	prompts      []string
 }
+
+type failingTaskImageDeleteStorage struct {
+	storage.Provider
+	err error
+}
+
+func (s *failingTaskImageDeleteStorage) Delete(context.Context, string) error { return s.err }
 
 func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, _ []string, _, _ string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
 	f.calls++
@@ -188,20 +196,223 @@ func TestGenerateTaskImageReplaysIdenticalSemanticRequest(t *testing.T) {
 
 func TestGenerateTaskImageChangedPromptCreatesNewOperation(t *testing.T) {
 	f := newTaskImageFixture(t)
-	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
+	ctx := context.Background()
+	originalBytes := append([]byte(nil), taskImageTinyPNG()...)
+	original := f.request()
+	first, err := f.service.Generate(ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.generator.result.LocalFilePath, []byte("second-image"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	changed := f.request()
 	changed.Prompt = "draw a different tea cover"
-	if _, err := f.service.Generate(context.Background(), changed); err != nil {
+	second, err := f.service.Generate(ctx, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := f.service.Generate(ctx, original)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if f.generator.calls != 2 {
 		t.Fatalf("generator calls=%d, want 2", f.generator.calls)
 	}
+	if first.DownloadURL == second.DownloadURL {
+		t.Fatalf("distinct paid operations share mutable delivery URL %q", first.DownloadURL)
+	}
+	if replayed.DownloadURL != first.DownloadURL {
+		t.Fatalf("replayed download URL=%q, want original %q", replayed.DownloadURL, first.DownloadURL)
+	}
+	operationID, fingerprint, err := taskImageOperationIdentity(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayFile, _, err := f.service.tasks.FindExecutionTaskFileSettlement(
+		ctx, f.taskID, f.executionID, operationID, fingerprint, "image", taskImageSettlementScope,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayBytes, err := f.service.tasks.Storage().Read(ctx, replayFile.OSSKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(replayBytes) != string(originalBytes) {
+		t.Fatalf("replayed bytes=%q, want original image bytes", replayBytes)
+	}
 	var settlements int64
 	if err := f.db.Model(&model.BillingSettlementOutbox{}).Count(&settlements).Error; err != nil || settlements != 2 {
 		t.Fatalf("settlements=%d err=%v", settlements, err)
+	}
+}
+
+func TestTaskDeleteRemovesEveryImmutableImageOperationObject(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	if _, err := f.service.Generate(ctx, f.request()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.generator.result.LocalFilePath, []byte("second-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed := f.request()
+	changed.Prompt = "draw a different tea cover"
+	if _, err := f.service.Generate(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+
+	var settlements []model.BillingSettlementOutbox
+	if err := f.db.Where("task_id = ?", f.taskID).Order("created_at ASC").Find(&settlements).Error; err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, len(settlements))
+	for _, settlement := range settlements {
+		var snapshot struct {
+			OperationObject taskFileOperationObjectSnapshot `json:"operation_object"`
+		}
+		if err := json.Unmarshal(settlement.ResultSnapshot, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, snapshot.OperationObject.OSSKey)
+	}
+	if len(keys) != 2 || keys[0] == "" || keys[1] == "" || keys[0] == keys[1] {
+		t.Fatalf("operation object keys = %v, want two unique keys", keys)
+	}
+	collectedKey := "uploads/users/" + f.userID + "/tasks/" + f.taskID + "/collected.md"
+	cleanupKey := "uploads/users/" + f.userID + "/tasks/" + f.taskID + "/superseded.md"
+	if _, err := f.service.tasks.Storage().Upload(ctx, collectedKey, strings.NewReader("collected"), "text/markdown"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.tasks.Storage().Upload(ctx, cleanupKey, strings.NewReader("superseded"), "text/markdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: "collected-execution",
+		State: model.TaskFileStateCollected, Role: model.FileRoleMarkdown,
+		FilePath: "output/collected.md", FileName: "collected.md", MimeType: "text/markdown",
+		FileSize: 9, ContentHash: strings.Repeat("a", 64), OSSKey: collectedKey,
+		CleanupOSSKey: cleanupKey, StorageProvider: "local",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	keys = append(keys, collectedKey, cleanupKey)
+	if err := f.repo.Tasks().UpdateStatus(ctx, f.taskID, model.TaskStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.tasks.Delete(ctx, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if _, err := f.service.tasks.Storage().Read(ctx, key); err == nil {
+			t.Errorf("immutable operation object %q still exists after task deletion", key)
+		}
+	}
+}
+
+func TestTaskDeleteRetainsReferencesWhenOperationObjectDeletionFails(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	if _, err := f.service.Generate(ctx, f.request()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Tasks().UpdateStatus(ctx, f.taskID, model.TaskStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	f.service.tasks.store = &failingTaskImageDeleteStorage{
+		Provider: f.service.tasks.store,
+		err:      errors.New("storage unavailable"),
+	}
+	if err := f.service.tasks.Delete(ctx, f.taskID); err == nil {
+		t.Fatal("task deletion succeeded despite operation object cleanup failure")
+	}
+	if _, err := f.repo.Tasks().FindByID(ctx, f.taskID); err != nil {
+		t.Fatalf("task reference was removed after cleanup failure: %v", err)
+	}
+	var files int64
+	if err := f.db.Model(&model.TaskFile{}).Where("task_id = ?", f.taskID).Count(&files).Error; err != nil || files != 1 {
+		t.Fatalf("task files after cleanup failure = %d, %v; want one retained row", files, err)
+	}
+}
+
+func TestTaskDeleteRejectsUnknownTaskFileStorageProvider(t *testing.T) {
+	for _, provider := range []string{"", "other"} {
+		t.Run("provider="+provider, func(t *testing.T) {
+			f := newTaskImageFixture(t)
+			ctx := context.Background()
+			if _, err := f.service.Generate(ctx, f.request()); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.repo.Tasks().UpdateStatus(ctx, f.taskID, model.TaskStatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.db.Model(&model.TaskFile{}).Where("task_id = ?", f.taskID).Update("storage_provider", provider).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := f.service.tasks.Delete(ctx, f.taskID); err == nil {
+				t.Fatal("task deletion accepted an unknown task-file storage provider")
+			}
+			if _, err := f.repo.Tasks().FindByID(ctx, f.taskID); err != nil {
+				t.Fatalf("task reference was removed after provider mismatch: %v", err)
+			}
+			var files int64
+			if err := f.db.Model(&model.TaskFile{}).Where("task_id = ?", f.taskID).Count(&files).Error; err != nil || files != 1 {
+				t.Fatalf("task files after provider mismatch = %d, %v; want one retained row", files, err)
+			}
+		})
+	}
+}
+
+func TestRegisterRenderedImageRejectsReservedOperationObjectPath(t *testing.T) {
+	f := newTaskImageFixture(t)
+	_, err := f.service.tasks.RegisterRenderedImage(context.Background(), RegisterRenderedImageRequest{
+		UserID: f.userID, ProjectID: f.projectID, TaskID: f.taskID, ExecutionID: f.executionID,
+		Name: "operation-objects/cover.png", Role: model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(taskImageTinyPNG()),
+	})
+	if err == nil {
+		t.Fatal("rendered image was accepted in reserved operation-objects namespace")
+	}
+}
+
+func TestGeneratedOperationReplaySurvivesRenderedImageReplacement(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	req := f.request()
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	operationID, fingerprint, err := taskImageOperationIdentity(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalFile, _, err := f.service.tasks.FindExecutionTaskFileSettlement(
+		ctx, f.taskID, f.executionID, operationID, fingerprint, "image", taskImageSettlementScope,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	variant := append(append([]byte(nil), taskImageTinyPNG()...), []byte("rendered-variant")...)
+	if _, err := f.service.tasks.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: f.userID, ProjectID: f.projectID, TaskID: f.taskID, ExecutionID: f.executionID,
+		Name: "output/cover.png", Role: model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(variant),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	replayed, _, err := f.service.tasks.FindExecutionTaskFileSettlement(
+		ctx, f.taskID, f.executionID, operationID, fingerprint, "image", taskImageSettlementScope,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := f.service.tasks.Storage().Read(ctx, replayed.OSSKey)
+	if err != nil {
+		t.Fatalf("read immutable operation object after rendered replacement: %v", err)
+	}
+	if replayed.OSSKey != originalFile.OSSKey || string(data) != string(taskImageTinyPNG()) {
+		t.Fatalf("replayed object=%q bytes=%q, want original %q", replayed.OSSKey, data, originalFile.OSSKey)
 	}
 }
 

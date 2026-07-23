@@ -237,6 +237,14 @@ func (r *taskFileRepository) FindByTaskID(ctx context.Context, taskID string) ([
 	return files, nil
 }
 
+func (r *taskFileRepository) FindAllByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
+	var files []*model.TaskFile
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Find(&files).Error; err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 func (r *taskFileRepository) FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
 	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStateCollected).Find(&files).Error; err != nil {

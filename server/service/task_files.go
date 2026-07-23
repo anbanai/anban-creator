@@ -227,6 +227,18 @@ type GenericTaskFileOperationSettlement struct {
 	ResultSnapshot                                    []byte
 }
 
+type taskFileOperationObjectSnapshot struct {
+	StorageProvider string `json:"storage_provider"`
+	OSSKey          string `json:"oss_key"`
+	OSSURL          string `json:"oss_url,omitempty"`
+	FilePath        string `json:"file_path"`
+	FileName        string `json:"file_name"`
+	MimeType        string `json:"mime_type"`
+	FileSize        int64  `json:"file_size"`
+	ContentHash     string `json:"content_hash"`
+	Role            string `json:"role"`
+}
+
 func (s *TaskService) FindTaskFileOperationSettlement(ctx context.Context, taskID, executionID, operationID, requestFingerprint string) (*model.TaskFile, []byte, error) {
 	return s.FindExecutionTaskFileSettlement(ctx, taskID, executionID, operationID, requestFingerprint, "image", "mcp-image-settlement")
 }
@@ -247,15 +259,27 @@ func (s *TaskService) FindExecutionTaskFileSettlement(ctx context.Context, taskI
 		*settlement.TaskID != taskID || *settlement.AttemptID != executionID || *settlement.ToolCallID != operationID || settlement.ResourceType != resourceType || settlement.RequestFingerprint != requestFingerprint {
 		return nil, nil, ErrBillingConflict
 	}
-	file, err := s.repo.TaskFiles().FindByIDForExecution(ctx, settlement.ResourceID, taskID, executionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if file == nil || file.TaskID != taskID || file.ExecutionID != executionID {
-		return nil, nil, ErrBillingConflict
-	}
 	if len(settlement.ResultSnapshot) == 0 || !json.Valid(settlement.ResultSnapshot) {
 		return nil, nil, ErrBillingConflict
+	}
+	var stored struct {
+		OperationObject taskFileOperationObjectSnapshot `json:"operation_object"`
+	}
+	if err := json.Unmarshal(settlement.ResultSnapshot, &stored); err != nil {
+		return nil, nil, ErrBillingConflict
+	}
+	object := stored.OperationObject
+	if settlement.ResourceID == "" || object.StorageProvider == "" || object.OSSKey == "" ||
+		object.FilePath == "" || object.FileName == "" || object.MimeType == "" ||
+		object.FileSize <= 0 || object.ContentHash == "" || object.Role == "" ||
+		s.store == nil || object.StorageProvider != s.store.Name() {
+		return nil, nil, ErrBillingConflict
+	}
+	file := &model.TaskFile{
+		ID: settlement.ResourceID, TaskID: taskID, ExecutionID: executionID,
+		StorageProvider: object.StorageProvider, OSSKey: object.OSSKey, OSSURL: object.OSSURL,
+		FilePath: object.FilePath, FileName: object.FileName, MimeType: object.MimeType,
+		FileSize: object.FileSize, ContentHash: object.ContentHash, Role: object.Role,
 	}
 	return file, append([]byte(nil), settlement.ResultSnapshot...), nil
 }
@@ -309,7 +333,7 @@ func (s *TaskService) UploadExecutionTaskFileWithOperationSettlementFromReader(c
 	if err != nil {
 		return nil, fmt.Errorf("marshal operation result snapshot: %w", err)
 	}
-	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, intent, taskFileUploadOptions{})
+	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, intent, taskFileUploadOptions{CleanupOnPersistFailure: true})
 }
 
 type taskFileUploadOptions struct {
@@ -326,6 +350,9 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 	cleanRelPath, err := CleanTaskFileRelativePath(relPath)
 	if err != nil {
 		return nil, err
+	}
+	if executionID != "" && settlement == nil && isReservedMCPArtifactRelativePath(cleanRelPath) {
+		return nil, fmt.Errorf("relative path %q uses the reserved operation object namespace", cleanRelPath)
 	}
 
 	filename := filepath.Base(cleanRelPath)
@@ -413,6 +440,10 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		}
 		ossKey = buildTaskMCPArtifactStoragePrefix(task, executionID) + filepath.ToSlash(cleanRelPath)
 	}
+	if settlement != nil {
+		ext := filepath.Ext(ossKey)
+		ossKey = buildTaskMCPArtifactStoragePrefix(task, executionID) + "operation-objects/" + uuid.NewString() + ext
+	}
 	if options.ContentAddressedObject {
 		ext := filepath.Ext(ossKey)
 		ossKey = strings.TrimSuffix(ossKey, ext) + "-" + contentHash + ext
@@ -440,7 +471,7 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 	}
 
 	cleanupOSSKey := ""
-	if options.ContentAddressedObject && existing != nil && existing.OSSKey != "" && existing.OSSKey != ossKey &&
+	if options.ContentAddressedObject && existing != nil && existing.OSSKey != "" && existing.OSSKey != ossKey && !isImmutableOperationObjectKey(existing.OSSKey) &&
 		(existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
 		cleanupOSSKey = existing.OSSKey
 	}
@@ -472,6 +503,17 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		snapshot["download_url"] = ""
 		if s.store.HasCustomDomain() || s.store.Name() == "local" {
 			snapshot["download_url"] = s.store.GetURL(ossKey)
+		}
+		snapshot["operation_object"] = taskFileOperationObjectSnapshot{
+			StorageProvider: taskFile.StorageProvider,
+			OSSKey:          taskFile.OSSKey,
+			OSSURL:          taskFile.OSSURL,
+			FilePath:        taskFile.FilePath,
+			FileName:        taskFile.FileName,
+			MimeType:        taskFile.MimeType,
+			FileSize:        taskFile.FileSize,
+			ContentHash:     taskFile.ContentHash,
+			Role:            taskFile.Role,
 		}
 		settlement.ResultSnapshot, err = json.Marshal(snapshot)
 		if err != nil {
@@ -612,7 +654,8 @@ func (s *TaskService) uploadContentAddressedTaskFile(
 			persisted, won, err = s.repo.TaskFiles().InsertIfAbsent(ctx, candidate)
 		} else {
 			candidate.ID, candidate.State = existing.ID, existing.State
-			if existing.OSSKey != "" && existing.OSSKey != ossKey && (existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
+			if existing.OSSKey != "" && existing.OSSKey != ossKey && !isImmutableOperationObjectKey(existing.OSSKey) &&
+				(existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
 				candidate.CleanupOSSKey = existing.OSSKey
 			}
 			persisted, won, err = s.repo.TaskFiles().ReplaceIfCurrent(ctx, existing, candidate)
@@ -717,6 +760,12 @@ func (s *TaskService) CleanupSupersededTaskFileObjects(ctx context.Context, limi
 		cleanupErrors = append(cleanupErrors, fmt.Errorf("find queued task file objects: %w", findErr))
 	} else {
 		for _, cleanup := range queued {
+			if isImmutableOperationObjectKey(cleanup.OSSKey) {
+				if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("drop immutable operation cleanup %s: %w", cleanup.ID, err))
+				}
+				continue
+			}
 			current, currentErr := s.repo.TaskFiles().FindAnyByID(ctx, cleanup.TaskFileID)
 			if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
 				cleanupErrors = append(cleanupErrors, fmt.Errorf("load task file %s for queued cleanup: %w", cleanup.TaskFileID, currentErr))
@@ -750,6 +799,13 @@ func (s *TaskService) cleanupSupersededTaskFileObject(ctx context.Context, file 
 	if key == file.OSSKey {
 		return false, fmt.Errorf("refusing to delete current task file object %q", key)
 	}
+	if isImmutableOperationObjectKey(key) {
+		cleared, err := s.repo.TaskFiles().ClearPendingObjectCleanup(ctx, file.ID, key)
+		if err != nil {
+			return false, fmt.Errorf("clear immutable operation cleanup intent: %w", err)
+		}
+		return cleared, nil
+	}
 	if file.StorageProvider != "" && file.StorageProvider != s.store.Name() {
 		return false, fmt.Errorf("storage provider %q is unavailable", file.StorageProvider)
 	}
@@ -761,6 +817,28 @@ func (s *TaskService) cleanupSupersededTaskFileObject(ctx context.Context, file 
 		return false, fmt.Errorf("clear cleanup intent: %w", err)
 	}
 	return cleared, nil
+}
+
+func isImmutableOperationObjectKey(key string) bool {
+	parts := strings.Split(filepath.ToSlash(strings.TrimSpace(key)), "/")
+	if len(parts) != 13 || parts[0] != "uploads" || parts[1] != "users" || parts[3] != "projects" ||
+		parts[5] != "tasks" || parts[7] != "executions" || parts[9] != "artifacts" ||
+		parts[10] != "mcp" || parts[11] != "operation-objects" {
+		return false
+	}
+	for _, index := range []int{2, 4, 6, 8} {
+		if strings.TrimSpace(parts[index]) == "" {
+			return false
+		}
+	}
+	name := strings.TrimSuffix(parts[12], filepath.Ext(parts[12]))
+	_, err := uuid.Parse(name)
+	return err == nil
+}
+
+func isReservedMCPArtifactRelativePath(relPath string) bool {
+	clean := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(relPath)), "./")
+	return clean == "operation-objects" || strings.HasPrefix(clean, "operation-objects/")
 }
 
 // UpdateTaskFileMetadata updates publication-facing metadata on a task file

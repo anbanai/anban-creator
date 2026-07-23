@@ -10,7 +10,6 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -100,29 +99,7 @@ type ImageService struct {
 	modelConfigSvc  *ModelConfigService
 	logger          *zerolog.Logger
 	providerCostSvc *ProviderCostService
-	// imageRetry optionally overrides the same-provider backoff-retry policy used
-	// by generateWithRetry. nil ⇒ package defaults (3 attempts, 0/5s/15s backoff).
-	// The SAME provider is always retried — never switched — so a successful
-	// retry is visually identical to a first-try success.
-	imageRetry *imageRetryConfig
 }
-
-// imageRetryConfig tunes the same-provider backoff retry around GenerateRaw.
-// Leaving it zero/nil keeps the package defaults; tests inject short backoffs.
-type imageRetryConfig struct {
-	MaxAttempts int             // total attempts including the first; must be ≥ 1
-	Backoffs    []time.Duration // wait before attempt N (index 0 unused); clamped
-}
-
-// Default same-provider retry policy. Three attempts (one initial + two retries)
-// with backoffs of 5s then 15s cover the vast majority of transient blips seen
-// in production (intermittent relay 503 "no available channel", 429 rate limits,
-// brief network/timeout hiccups) without dragging a task out — worst case ~20s,
-// far under the configurable 60min task deadline.
-var (
-	defaultImageRetryMaxAttempts = 3
-	defaultImageRetryBackoffs    = []time.Duration{0, 5 * time.Second, 15 * time.Second}
-)
 
 // NewImageService creates a new ImageService.
 func NewImageService(
@@ -420,112 +397,34 @@ func (s *ImageService) buildProcessorForResolved(
 	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
 }
 
-// isTransientImageError reports whether err is worth a same-provider retry:
-// the SAME model/config is reused, so retrying never alters the visual result.
-// It returns true for context deadline/cancellation, net timeouts, and any
-// image.GenerateError whose Code is server_error / rate_limit / network_error
-// (provider.go Retryable). Content-policy and auth errors return false → the
-// caller fails fast instead of hammering a deterministic refusal.
-//
-// Do NOT reuse categorizeImageGenFailure (server/mcp/image_tools.go): it maps
-// errors to log labels, not retry decisions.
-func isTransientImageError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	var ge *image.GenerateError
-	if errors.As(err, &ge) {
-		return ge.Retryable()
-	}
-	return false
-}
-
-// generateWithRetry calls gen with exponential backoff, retrying ONLY transient
-// errors against the SAME provider (the caller's gen closure always invokes the
-// one processor built for this request, with its ref/watermark state intact).
-// Non-retryable errors fail fast; ctx cancellation aborts the backoff wait so a
-// cancelled task returns promptly. On success the result is returned as-is.
-func (s *ImageService) generateWithRetry(
+// generateProviderImage bounds one provider call. Agent and Skill workflows own
+// every retry and stop/continue decision above this application capability.
+func (s *ImageService) generateProviderImage(
 	ctx context.Context,
 	attemptTimeout time.Duration,
 	gen func(context.Context) (*image.GenerateRawResult, error),
-	imageType string,
+	_ string,
 ) (*image.GenerateRawResult, error) {
 	if attemptTimeout <= 0 {
 		attemptTimeout = 5 * time.Minute
 	}
-	maxAttempts := defaultImageRetryMaxAttempts
-	backoffs := defaultImageRetryBackoffs
-	if cfg := s.imageRetry; cfg != nil {
-		if cfg.MaxAttempts > 0 {
-			maxAttempts = cfg.MaxAttempts
-		}
-		if len(cfg.Backoffs) > 0 {
-			backoffs = cfg.Backoffs
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	var (
-		result *image.GenerateRawResult
-		err    error
-	)
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Honor a cancelled/expired task context up front: never burn a generation
-		// attempt on a task nobody wants anymore. (Processor.GenerateRaw currently
-		// runs against context.Background, so a ctx error won't come from gen()
-		// itself — but guarding here makes the retry correct independent of the
-		// backoff config, including the zero-backoff case.)
-		if cerr := ctx.Err(); cerr != nil {
-			return nil, cerr
-		}
-		if attempt > 0 {
-			// Wait grows with each retry; clamp to the last configured value so
-			// an under-sized backoffs slice doesn't index out of range. A
-			// client/task cancellation short-circuits the wait immediately.
-			wait := backoffs[min(attempt, len(backoffs)-1)]
-			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= wait+attemptTimeout {
-				return nil, fmt.Errorf("generate image: insufficient operation budget for retry: %w", err)
-			}
-			if wait > 0 {
-				select {
-				case <-time.After(wait):
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			}
-		}
-
-		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
-		result, err = gen(attemptCtx)
-		attemptErr := attemptCtx.Err()
-		cancel()
-		if err == nil {
-			return result, nil
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		if attemptErr != nil {
-			err = fmt.Errorf("provider attempt %d timed out after %s: %w", attempt+1, attemptTimeout, attemptErr)
-		}
-		if !isTransientImageError(err) {
-			return nil, fmt.Errorf("generate image: %w", err)
-		}
-		s.logger.Warn().
-			Int("attempt", attempt+1).
-			Int("max_attempts", maxAttempts).
-			Str("image_type", imageType).
-			Err(err).
-			Msg("image gen transient error, retrying same provider")
+	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+	result, err := gen(attemptCtx)
+	attemptErr := attemptCtx.Err()
+	cancel()
+	if err == nil {
+		return result, nil
 	}
-	return nil, fmt.Errorf("generate image (failed after %d attempts): %w", maxAttempts, err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if attemptErr != nil {
+		err = fmt.Errorf("provider attempt timed out after %s: %w", attemptTimeout, attemptErr)
+	}
+	return nil, fmt.Errorf("generate image: %w", err)
 }
 
 func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time.Duration {
@@ -570,11 +469,10 @@ func (s *ImageService) GenerateImage(
 	}
 	processor.SetWatermark(watermark)
 
-	// Generate with same-provider backoff retry: the closure always calls the ONE
-	// processor built above (same provider/model/ref/watermark), so a retry never
-	// changes the visual result — it only rides out transient 5xx/429/network blips.
+	// Invoke the selected provider exactly once. A stochastic retry is a new
+	// workflow decision and therefore belongs to the calling Agent or Skill.
 	providerRequestID := "internal:image:" + uuid.NewString()
-	rawResult, err := s.generateWithRetry(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
+	rawResult, err := s.generateProviderImage(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
 		if size != "" {
 			return processor.GenerateRawWithSize(attemptCtx, prompt, size)
 		}
