@@ -67,6 +67,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
+		&model.TaskFileObjectCleanup{},
 		&model.TopicPool{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
 	); err != nil {

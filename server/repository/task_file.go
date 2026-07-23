@@ -71,6 +71,152 @@ func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (
 	return &persisted, nil
 }
 
+func (r *taskFileRepository) InsertIfAbsent(ctx context.Context, file *model.TaskFile) (*model.TaskFile, bool, error) {
+	if err := validateTaskFileMutation(file); err != nil {
+		return nil, false, err
+	}
+	if file.ID == "" {
+		file.ID = uuid.NewString()
+	}
+	var persisted model.TaskFile
+	insert := func(tx *gorm.DB) (bool, error) {
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "task_id"}, {Name: "execution_id"}, {Name: "file_path"}},
+			DoNothing: true,
+		}).Create(file)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if err := tx.Where("task_id = ? AND execution_id = ? AND file_path = ?", file.TaskID, file.ExecutionID, file.FilePath).First(&persisted).Error; err != nil {
+			return false, err
+		}
+		return result.RowsAffected == 1, nil
+	}
+	inserted := false
+	if file.ExecutionID == "" {
+		var err error
+		inserted, err = insert(r.db.WithContext(ctx))
+		return &persisted, inserted, err
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, file.TaskID, file.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestSealed || (execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending) {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		file.State = model.TaskFileStatePending
+		inserted, err = insert(tx)
+		if err != nil || execution.ManifestStatus != "" {
+			return err
+		}
+		statusResult := tx.Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ''", file.ExecutionID).Update("manifest_status", model.TaskExecutionManifestPending)
+		if statusResult.Error != nil {
+			return statusResult.Error
+		}
+		if statusResult.RowsAffected != 1 {
+			return ErrTaskFileManifestState
+		}
+		return nil
+	})
+	return &persisted, inserted, err
+}
+
+func (r *taskFileRepository) ReplaceIfCurrent(ctx context.Context, expected, replacement *model.TaskFile) (*model.TaskFile, bool, error) {
+	if expected == nil || replacement == nil || expected.ID == "" {
+		return nil, false, fmt.Errorf("expected and replacement task files are required")
+	}
+	if err := validateTaskFileMutation(replacement); err != nil {
+		return nil, false, err
+	}
+	if expected.ID != replacement.ID || expected.TaskID != replacement.TaskID || expected.ExecutionID != replacement.ExecutionID || expected.FilePath != replacement.FilePath {
+		return nil, false, fmt.Errorf("replacement task file identity does not match expected row")
+	}
+	var persisted model.TaskFile
+	replace := func(tx *gorm.DB) (bool, error) {
+		result := tx.Model(&model.TaskFile{}).
+			Where("id = ? AND task_id = ? AND execution_id = ? AND file_path = ? AND state = ? AND oss_key = ? AND content_hash = ? AND cleanup_oss_key = ?",
+				expected.ID, expected.TaskID, expected.ExecutionID, expected.FilePath, expected.State, expected.OSSKey, expected.ContentHash, expected.CleanupOSSKey).
+			Updates(map[string]any{
+				"file_name": replacement.FileName, "mime_type": replacement.MimeType, "file_size": replacement.FileSize,
+				"oss_key": replacement.OSSKey, "cleanup_oss_key": replacement.CleanupOSSKey, "oss_url": replacement.OSSURL,
+				"storage_provider": replacement.StorageProvider, "role": replacement.Role, "content_hash": replacement.ContentHash,
+				"media_id": replacement.MediaID, "wechat_url": replacement.WechatURL,
+			})
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if err := tx.Where("task_id = ? AND execution_id = ? AND file_path = ?", expected.TaskID, expected.ExecutionID, expected.FilePath).First(&persisted).Error; err != nil {
+			return false, err
+		}
+		return result.RowsAffected == 1, nil
+	}
+	replaced := false
+	if expected.ExecutionID == "" {
+		var err error
+		replaced, err = replace(r.db.WithContext(ctx))
+		return &persisted, replaced, err
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, expected.TaskID, expected.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestSealed || (execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending) {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		replaced, err = replace(tx)
+		return err
+	})
+	return &persisted, replaced, err
+}
+
+func (r *taskFileRepository) UpdateRoleIfCurrent(ctx context.Context, expected *model.TaskFile, role string) (*model.TaskFile, bool, error) {
+	if expected == nil || expected.ID == "" {
+		return nil, false, fmt.Errorf("expected task file is required")
+	}
+	var persisted model.TaskFile
+	updated := false
+	update := func(tx *gorm.DB) error {
+		result := tx.Model(&model.TaskFile{}).
+			Where("id = ? AND task_id = ? AND execution_id = ? AND file_path = ? AND state = ? AND oss_key = ? AND content_hash = ? AND cleanup_oss_key = ?",
+				expected.ID, expected.TaskID, expected.ExecutionID, expected.FilePath, expected.State, expected.OSSKey, expected.ContentHash, expected.CleanupOSSKey).
+			Update("role", role)
+		if result.Error != nil {
+			return result.Error
+		}
+		updated = result.RowsAffected == 1
+		return tx.Where("task_id = ? AND execution_id = ? AND file_path = ?", expected.TaskID, expected.ExecutionID, expected.FilePath).First(&persisted).Error
+	}
+	if expected.ExecutionID == "" {
+		if err := update(r.db.WithContext(ctx)); err != nil {
+			return nil, false, err
+		}
+		return &persisted, updated, nil
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, expected.TaskID, expected.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if execution.ManifestSealed || (execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending) {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		return update(tx)
+	})
+	return &persisted, updated, err
+}
+
 // FindExisting returns an existing task file record matching (taskID, filePath), or nil if none exists.
 func (r *taskFileRepository) FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error) {
 	var file model.TaskFile
@@ -124,6 +270,32 @@ func (r *taskFileRepository) ClearPendingObjectCleanup(ctx context.Context, id, 
 		Where("id = ? AND cleanup_oss_key = ?", id, expectedOSSKey).
 		Update("cleanup_oss_key", "")
 	return result.RowsAffected == 1, result.Error
+}
+
+func (r *taskFileRepository) QueueObjectCleanup(ctx context.Context, cleanup *model.TaskFileObjectCleanup) error {
+	if cleanup == nil || cleanup.TaskFileID == "" || cleanup.StorageProvider == "" || cleanup.OSSKey == "" {
+		return fmt.Errorf("complete task file object cleanup intent is required")
+	}
+	if cleanup.ID == "" {
+		cleanup.ID = uuid.NewString()
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "storage_provider"}, {Name: "oss_key"}},
+		DoNothing: true,
+	}).Create(cleanup).Error
+}
+
+func (r *taskFileRepository) FindQueuedObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFileObjectCleanup, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var cleanups []*model.TaskFileObjectCleanup
+	err := r.db.WithContext(ctx).Where("storage_provider = ?", storageProvider).Order("created_at ASC").Order("id ASC").Limit(limit).Find(&cleanups).Error
+	return cleanups, err
+}
+
+func (r *taskFileRepository) DeleteQueuedObjectCleanup(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.TaskFileObjectCleanup{}).Error
 }
 
 // PublishCurrentExecution is the guarded Task 8 publication contract. It locks
@@ -624,6 +796,14 @@ func validateTaskFileRelativePath(filePath string) error {
 func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.TaskFile, error) {
 	var file model.TaskFile
 	if err := r.db.WithContext(ctx).Where("id = ? AND state IN ?", id, []string{model.TaskFileStatePublished, model.TaskFileStateCollected}).First(&file).Error; err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+func (r *taskFileRepository) FindAnyByID(ctx context.Context, id string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&file).Error; err != nil {
 		return nil, err
 	}
 	return &file, nil

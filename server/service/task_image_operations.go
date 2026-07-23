@@ -76,16 +76,20 @@ type taskImageOperationsCost interface {
 }
 
 type TaskImageOperationsService struct {
-	tasks   *TaskService
-	images  taskImageOperationsImage
-	writing taskImageOperationsWriting
-	costs   taskImageOperationsCost
-	config  TaskImageOperationsConfig
-	logger  *zerolog.Logger
+	tasks                 *TaskService
+	images                taskImageOperationsImage
+	writing               taskImageOperationsWriting
+	costs                 taskImageOperationsCost
+	config                TaskImageOperationsConfig
+	logger                *zerolog.Logger
+	downloadAnalysisImage func(context.Context, string, int64) ([]byte, error)
 }
 
 func NewTaskImageOperationsService(tasks *TaskService, images taskImageOperationsImage, writing taskImageOperationsWriting, costs taskImageOperationsCost, cfg TaskImageOperationsConfig, logger *zerolog.Logger) *TaskImageOperationsService {
-	return &TaskImageOperationsService{tasks: tasks, images: images, writing: writing, costs: costs, config: cfg, logger: logger}
+	return &TaskImageOperationsService{
+		tasks: tasks, images: images, writing: writing, costs: costs, config: cfg, logger: logger,
+		downloadAnalysisImage: downloadTaskAnalysisImage,
+	}
 }
 
 func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskImageRequest) (*UploadImageResult, error) {
@@ -208,7 +212,11 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, tas
 	if !strings.HasPrefix(imageURL, "https://") {
 		return "", errors.New("image_url must be an HTTPS URL")
 	}
-	data, err := downloadTaskAnalysisImage(ctx, imageURL, maxAnalyzedTaskImageBytes)
+	downloader := s.downloadAnalysisImage
+	if downloader == nil {
+		downloader = downloadTaskAnalysisImage
+	}
+	data, err := downloader(ctx, imageURL, maxAnalyzedTaskImageBytes)
 	if err != nil {
 		return "", fmt.Errorf("download image: %w", err)
 	}
@@ -252,17 +260,9 @@ func (s *TaskImageOperationsService) recordAnalysisCost(ctx context.Context, tas
 
 func downloadTaskAnalysisImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
 	client := &http.Client{
-		Timeout:   15 * time.Second,
-		Transport: &http.Transport{DialContext: publicTaskAnalysisDialContext},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return errors.New("too many redirects")
-			}
-			if req.URL.Scheme != "https" {
-				return errors.New("external image redirects must use https")
-			}
-			return nil
-		},
+		Timeout:       15 * time.Second,
+		Transport:     &http.Transport{DialContext: publicTaskAnalysisDialContext},
+		CheckRedirect: validateTaskAnalysisRedirect,
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
@@ -288,6 +288,16 @@ func downloadTaskAnalysisImage(ctx context.Context, imageURL string, maxSize int
 		return nil, errors.New("external image exceeds max size")
 	}
 	return data, nil
+}
+
+func validateTaskAnalysisRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 3 {
+		return errors.New("too many redirects")
+	}
+	if req == nil || req.URL == nil || req.URL.Scheme != "https" {
+		return errors.New("external image redirects must use https")
+	}
+	return nil
 }
 
 func publicTaskAnalysisDialContext(ctx context.Context, network, address string) (net.Conn, error) {

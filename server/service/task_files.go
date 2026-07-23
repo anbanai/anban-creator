@@ -348,7 +348,15 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 		return nil, fmt.Errorf("compute content hash: %w", err)
 	}
 	contentHash := hex.EncodeToString(h.Sum(nil))
-	reader = io.MultiReader(&buf, reader)
+	payload := append([]byte(nil), buf.Bytes()...)
+	reader = bytes.NewReader(payload)
+	role := DetermineTaskFileRole(filename, mimeType)
+	if options.Role != "" {
+		role = options.Role
+	}
+	if options.ContentAddressedObject && settlement == nil {
+		return s.uploadContentAddressedTaskFile(ctx, task, taskID, userID, executionID, cleanRelPath, filename, mimeType, fileSize, contentHash, role, payload, options)
+	}
 
 	var existing *model.TaskFile
 	if executionID == "" {
@@ -367,10 +375,6 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 				break
 			}
 		}
-	}
-	role := DetermineTaskFileRole(filename, mimeType)
-	if options.Role != "" {
-		role = options.Role
 	}
 	if existing != nil && existing.ContentHash == contentHash && settlement == nil {
 		if options.Role == "" || existing.Role == role {
@@ -528,6 +532,150 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 	return persisted, nil
 }
 
+const contentAddressedTaskFileMaxAttempts = 4
+
+func (s *TaskService) uploadContentAddressedTaskFile(
+	ctx context.Context,
+	task *model.Task,
+	taskID, userID, executionID, cleanRelPath, filename, mimeType string,
+	fileSize int64,
+	contentHash, role string,
+	payload []byte,
+	options taskFileUploadOptions,
+) (*model.TaskFile, error) {
+	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
+	if executionID != "" {
+		if task == nil {
+			return nil, fmt.Errorf("task is required for execution artifact upload")
+		}
+		ossKey = buildTaskMCPArtifactStoragePrefix(task, executionID) + filepath.ToSlash(cleanRelPath)
+	}
+	ext := filepath.Ext(ossKey)
+	ossKey = strings.TrimSuffix(ossKey, ext) + "-" + contentHash + ext
+
+	roleOnly := false
+	for attempt := 0; attempt < contentAddressedTaskFileMaxAttempts; attempt++ {
+		existing, err := s.findContentAddressedTaskFile(ctx, taskID, executionID, cleanRelPath)
+		if err != nil {
+			return nil, err
+		}
+		if !roleOnly && existing != nil && existing.ContentHash == contentHash {
+			roleOnly = true
+		}
+		if roleOnly && existing != nil {
+			if existing.Role == role {
+				return existing, nil
+			}
+			persisted, updated, updateErr := s.repo.TaskFiles().UpdateRoleIfCurrent(ctx, existing, role)
+			if updateErr != nil {
+				return nil, fmt.Errorf("persist task file role %s: %w", cleanRelPath, updateErr)
+			}
+			if updated {
+				return persisted, nil
+			}
+			continue
+		}
+		if existing != nil && existing.CleanupOSSKey != "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			cleaned, cleanupErr := s.cleanupSupersededTaskFileObject(cleanupCtx, existing)
+			cancel()
+			if cleanupErr != nil {
+				return nil, fmt.Errorf("cleanup previously superseded task file object: %w", cleanupErr)
+			}
+			if !cleaned {
+				continue
+			}
+			continue
+		}
+
+		uploaded, err := s.store.Upload(ctx, ossKey, bytes.NewReader(payload), mimeType)
+		if err != nil {
+			return nil, fmt.Errorf("upload file %s: %w", cleanRelPath, err)
+		}
+		effectiveSize := fileSize
+		if uploaded.Size > 0 {
+			effectiveSize = uploaded.Size
+		}
+		candidate := &model.TaskFile{
+			TaskID: taskID, ExecutionID: executionID, Role: role, FileName: filename,
+			MimeType: mimeType, FileSize: effectiveSize, ContentHash: contentHash,
+			OSSKey: ossKey, OSSURL: uploaded.URL, StorageProvider: s.store.Name(), FilePath: cleanRelPath,
+		}
+		var persisted *model.TaskFile
+		var won bool
+		if existing == nil {
+			persisted, won, err = s.repo.TaskFiles().InsertIfAbsent(ctx, candidate)
+		} else {
+			candidate.ID, candidate.State = existing.ID, existing.State
+			if existing.OSSKey != "" && existing.OSSKey != ossKey && (existing.StorageProvider == "" || existing.StorageProvider == s.store.Name()) {
+				candidate.CleanupOSSKey = existing.OSSKey
+			}
+			persisted, won, err = s.repo.TaskFiles().ReplaceIfCurrent(ctx, existing, candidate)
+		}
+		if err != nil {
+			s.cleanupUnpublishedTaskFileObject(ctx, candidate, ossKey)
+			return nil, fmt.Errorf("persist task file %s: %w", cleanRelPath, err)
+		}
+		if won {
+			if persisted.CleanupOSSKey != "" {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				if _, cleanupErr := s.cleanupSupersededTaskFileObject(cleanupCtx, persisted); cleanupErr != nil {
+					if s.logger != nil {
+						s.logger.Warn().Err(cleanupErr).Str("oss_key", persisted.CleanupOSSKey).Msg("delete superseded task file object")
+					}
+				} else {
+					persisted.CleanupOSSKey = ""
+				}
+				cancel()
+			}
+			return persisted, nil
+		}
+		if persisted != nil && persisted.OSSKey == ossKey {
+			roleOnly = true
+			continue
+		}
+		if cleanupErr := s.cleanupUnpublishedTaskFileObject(ctx, persisted, ossKey); cleanupErr != nil {
+			return nil, cleanupErr
+		}
+	}
+	return nil, fmt.Errorf("task file %s changed concurrently too many times", cleanRelPath)
+}
+
+func (s *TaskService) findContentAddressedTaskFile(ctx context.Context, taskID, executionID, cleanRelPath string) (*model.TaskFile, error) {
+	if executionID == "" {
+		existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
+		if err != nil {
+			return nil, fmt.Errorf("check existing task file: %w", err)
+		}
+		return existing, nil
+	}
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("check existing execution task file: %w", err)
+	}
+	for _, file := range files {
+		if file != nil && file.TaskID == taskID && file.FilePath == cleanRelPath {
+			return file, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *TaskService) cleanupUnpublishedTaskFileObject(ctx context.Context, current *model.TaskFile, ossKey string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := s.store.Delete(cleanupCtx, ossKey); err == nil {
+		return nil
+	} else if current == nil || current.ID == "" {
+		return fmt.Errorf("delete unpublished task file object %q: %w", ossKey, err)
+	} else if queueErr := s.repo.TaskFiles().QueueObjectCleanup(cleanupCtx, &model.TaskFileObjectCleanup{
+		TaskFileID: current.ID, StorageProvider: s.store.Name(), OSSKey: ossKey,
+	}); queueErr != nil {
+		return errors.Join(fmt.Errorf("delete unpublished task file object %q: %w", ossKey, err), fmt.Errorf("queue object cleanup: %w", queueErr))
+	}
+	return nil
+}
+
 // CleanupSupersededTaskFileObjects retries durable cleanup intents left by
 // successful content-addressed replacements whose old object deletion failed.
 func (s *TaskService) CleanupSupersededTaskFileObjects(ctx context.Context, limit int) (int, error) {
@@ -551,6 +699,39 @@ func (s *TaskService) CleanupSupersededTaskFileObjects(ctx context.Context, limi
 		}
 		if cleared {
 			cleaned++
+		}
+	}
+	remaining := limit - len(files)
+	if limit <= 0 {
+		remaining = 100
+	}
+	if remaining > 0 {
+		queued, findErr := s.repo.TaskFiles().FindQueuedObjectCleanup(ctx, s.store.Name(), remaining)
+		if findErr != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("find queued task file objects: %w", findErr))
+		} else {
+			for _, cleanup := range queued {
+				current, currentErr := s.repo.TaskFiles().FindAnyByID(ctx, cleanup.TaskFileID)
+				if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("load task file %s for queued cleanup: %w", cleanup.TaskFileID, currentErr))
+					continue
+				}
+				if current != nil && current.OSSKey == cleanup.OSSKey {
+					if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
+						cleanupErrors = append(cleanupErrors, fmt.Errorf("drop re-owned cleanup %s: %w", cleanup.ID, err))
+					}
+					continue
+				}
+				if err := s.store.Delete(ctx, cleanup.OSSKey); err != nil {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("delete queued object %s: %w", cleanup.OSSKey, err))
+					continue
+				}
+				if err := s.repo.TaskFiles().DeleteQueuedObjectCleanup(ctx, cleanup.ID); err != nil {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("clear queued cleanup %s: %w", cleanup.ID, err))
+					continue
+				}
+				cleaned++
+			}
 		}
 	}
 	return cleaned, errors.Join(cleanupErrors...)

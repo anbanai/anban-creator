@@ -951,6 +951,31 @@ func TestTaskFileRepositoryUpdatePendingExecutionMetadataChangesOnlyMetadata(t *
 	}
 }
 
+func TestTaskFileRepositoryRoleCASRejectsSealedExecution(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "cover.png",
+		OSSKey: "mcp/cover.png", ContentHash: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", "e1").Update("manifest_sealed", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, updated, err := repo.TaskFiles().UpdateRoleIfCurrent(ctx, original, model.FileRoleCover)
+	if !errors.Is(err, ErrTaskFileManifestState) || updated {
+		t.Fatalf("sealed role CAS = %v, %v; want manifest-state rejection", updated, err)
+	}
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 || rows[0].Role != model.FileRoleImage {
+		t.Fatalf("sealed role CAS mutated row: %#v, %v", rows, err)
+	}
+}
+
 func TestTaskFileRepositoryPrefixReplacementScopesPreservationAndKeepsWorkspacePrecedence(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()

@@ -173,8 +173,12 @@ type TaskRepository interface {
 type TaskFileRepository interface {
 	Create(ctx context.Context, file *model.TaskFile) error
 	Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error)
+	InsertIfAbsent(ctx context.Context, file *model.TaskFile) (*model.TaskFile, bool, error)
+	ReplaceIfCurrent(ctx context.Context, expected, replacement *model.TaskFile) (*model.TaskFile, bool, error)
+	UpdateRoleIfCurrent(ctx context.Context, expected *model.TaskFile, role string) (*model.TaskFile, bool, error)
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
+	FindAnyByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
@@ -183,6 +187,9 @@ type TaskFileRepository interface {
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
 	FindPendingObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFile, error)
 	ClearPendingObjectCleanup(ctx context.Context, id, expectedOSSKey string) (bool, error)
+	QueueObjectCleanup(ctx context.Context, cleanup *model.TaskFileObjectCleanup) error
+	FindQueuedObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFileObjectCleanup, error)
+	DeleteQueuedObjectCleanup(ctx context.Context, id string) error
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)

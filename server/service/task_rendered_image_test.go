@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,6 +23,56 @@ type renderedImageLifecycleStorage struct {
 	*fakeTaskStorage
 	uploadCalls    int
 	deleteFailures int
+}
+
+type concurrentRenderedImageStorage struct {
+	*fakeTaskStorage
+	mu             sync.Mutex
+	uploadCalls    int
+	uploadedKeys   []string
+	blockFromCall  int
+	blockCallCount int
+	arrived        chan struct{}
+	release        chan struct{}
+	deleteFailures int
+}
+
+func (s *concurrentRenderedImageStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	s.mu.Lock()
+	s.uploadCalls++
+	call := s.uploadCalls
+	s.uploadedKeys = append(s.uploadedKeys, key)
+	shouldBlock := s.blockFromCall > 0 && call >= s.blockFromCall && call < s.blockFromCall+s.blockCallCount
+	s.mu.Unlock()
+	if shouldBlock {
+		s.arrived <- struct{}{}
+		<-s.release
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fakeTaskStorage.Upload(ctx, key, reader, contentType)
+}
+
+func (s *concurrentRenderedImageStorage) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deletedKeys = append(s.deletedKeys, key)
+	if s.deleteFailures > 0 {
+		s.deleteFailures--
+		return errors.New("injected superseded object delete failure")
+	}
+	delete(s.files, key)
+	return nil
+}
+
+func (s *concurrentRenderedImageStorage) snapshot() (map[string][]byte, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files := make(map[string][]byte, len(s.files))
+	for key, data := range s.files {
+		files[key] = append([]byte(nil), data...)
+	}
+	return files, append([]string(nil), s.uploadedKeys...)
 }
 
 func (s *renderedImageLifecycleStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
@@ -216,7 +267,7 @@ func TestRegisterRenderedImageFailedReplacementPreservesExistingObject(t *testin
 	}
 
 	persistFailure := errors.New("injected replacement persistence failure")
-	if err := db.Callback().Create().Before("gorm:create").Register("fail_rendered_image_replacement", func(tx *gorm.DB) {
+	if err := db.Callback().Update().Before("gorm:update").Register("fail_rendered_image_replacement", func(tx *gorm.DB) {
 		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_files" {
 			tx.AddError(persistFailure)
 		}
@@ -351,6 +402,171 @@ func TestRegisterRenderedImageDeleteFailureLeavesRecoverableCleanupIntent(t *tes
 	}
 	if cleanupKey != "" {
 		t.Fatalf("cleanup intent remains after successful retry: %q", cleanupKey)
+	}
+}
+
+func TestRegisterRenderedImageConcurrentReplacementsDoNotLeakCASLoser(t *testing.T) {
+	db := setupTaskTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	base := mustDecodeRenderedPNG(t)
+	if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+		UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+		ImageBase64: base64.StdEncoding.EncodeToString(base),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.blockFromCall, store.blockCallCount = 2, 2
+	store.arrived, store.release = make(chan struct{}, 2), make(chan struct{})
+
+	errCh := make(chan error, 2)
+	for _, suffix := range []byte{1, 2} {
+		payload := append(append([]byte(nil), base...), suffix)
+		go func() {
+			_, registerErr := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+				UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+				ImageBase64: base64.StdEncoding.EncodeToString(payload),
+			})
+			errCh <- registerErr
+		}()
+	}
+	<-store.arrived
+	<-store.arrived
+	close(store.release)
+	for range 2 {
+		if err := <-errCh; err != nil {
+			t.Fatalf("concurrent replacement: %v", err)
+		}
+	}
+	current, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+	if err != nil || current == nil {
+		t.Fatalf("find current replacement: %#v, %v", current, err)
+	}
+	files, uploaded := store.snapshot()
+	for _, key := range uploaded[1:] {
+		if key == current.OSSKey || key == current.CleanupOSSKey {
+			continue
+		}
+		if _, leaked := files[key]; leaked {
+			t.Fatalf("noncurrent uploaded object %q is neither deleted nor durably queued; current=%#v uploaded=%v", key, current, uploaded)
+		}
+	}
+}
+
+func TestRegisterRenderedImageRoleUpdateRacingReplacementPreservesCurrentIdentity(t *testing.T) {
+	for _, replacementFirst := range []bool{false, true} {
+		name := "role_first"
+		if replacementFirst {
+			name = "replacement_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			repo := repository.New(db)
+			logger := zerolog.New(io.Discard)
+			store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}, deleteFailures: 1}
+			svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+			if err := repo.Tasks().Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			base := mustDecodeRenderedPNG(t)
+			if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+				UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+				ImageBase64: base64.StdEncoding.EncodeToString(base),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			original, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+			if err != nil || original == nil {
+				t.Fatalf("find original: %#v, %v", original, err)
+			}
+			replacement := append(append([]byte(nil), base...), 9)
+			roleDone, replaceDone := make(chan error, 1), make(chan error, 1)
+
+			if replacementFirst {
+				type queryBarrierKey struct{}
+				arrived, release := make(chan struct{}, 1), make(chan struct{})
+				var blockOnce sync.Once
+				if err := db.Callback().Query().After("gorm:query").Register("block_stale_role_after_read", func(tx *gorm.DB) {
+					if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_files" && tx.Statement.Context.Value(queryBarrierKey{}) != nil {
+						blockOnce.Do(func() {
+							arrived <- struct{}{}
+							<-release
+						})
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				roleCtx := context.WithValue(ctx, queryBarrierKey{}, true)
+				go func() {
+					_, roleErr := svc.RegisterRenderedImage(roleCtx, RegisterRenderedImageRequest{
+						UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleOther,
+						ImageBase64: base64.StdEncoding.EncodeToString(base),
+					})
+					roleDone <- roleErr
+				}()
+				<-arrived
+				_, err = svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+					UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+					ImageBase64: base64.StdEncoding.EncodeToString(replacement),
+				})
+				if err != nil {
+					t.Fatalf("replacement: %v", err)
+				}
+				close(release)
+				if err := <-roleDone; err != nil {
+					t.Fatalf("role update: %v", err)
+				}
+			} else {
+				store.blockFromCall, store.blockCallCount = 2, 1
+				store.arrived, store.release = make(chan struct{}, 1), make(chan struct{})
+				go func() {
+					_, replaceErr := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+						UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleCover,
+						ImageBase64: base64.StdEncoding.EncodeToString(replacement),
+					})
+					replaceDone <- replaceErr
+				}()
+				<-store.arrived
+				if _, err := svc.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
+					UserID: userID, ProjectID: projectID, TaskID: task.ID, Name: "cover.png", Role: model.FileRoleOther,
+					ImageBase64: base64.StdEncoding.EncodeToString(base),
+				}); err != nil {
+					t.Fatalf("role update: %v", err)
+				}
+				close(store.release)
+				if err := <-replaceDone; err != nil {
+					t.Fatalf("replacement: %v", err)
+				}
+			}
+			current, err := repo.TaskFiles().FindExisting(ctx, task.ID, "cover.png")
+			if err != nil || current == nil {
+				t.Fatalf("find current: %#v, %v", current, err)
+			}
+			if current.OSSKey == original.OSSKey || current.ContentHash == original.ContentHash {
+				t.Fatalf("stale role update restored original identity: current=%#v original=%#v", current, original)
+			}
+			if current.CleanupOSSKey != original.OSSKey {
+				t.Fatalf("cleanup intent = %q, want original key %q", current.CleanupOSSKey, original.OSSKey)
+			}
+		})
 	}
 }
 

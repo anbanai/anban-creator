@@ -88,10 +88,13 @@ func TestEveryMCPHandlerHasReviewedCapabilityBoundary(t *testing.T) {
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil {
+			if !ok {
 				continue
 			}
-			functions[fn.Name.Name] = fn
+			functions[localFunctionIndexKey(fn)] = fn
+			if fn.Recv != nil {
+				continue
+			}
 			if !strings.HasSuffix(fn.Name.Name, "Handler") {
 				continue
 			}
@@ -141,32 +144,112 @@ func TestEveryMCPHandlerHasReviewedCapabilityBoundary(t *testing.T) {
 }
 
 func TestCapabilityBoundaryDetectsApplicationCallsHiddenBehindMCPHelpers(t *testing.T) {
-	source := `package mcp
+	tests := map[string]string{
+		"plain helper": `package mcp
 func hiddenHandler() {
 	loadTask()
 	recordCost()
 }
 func loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
 func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+	`,
+		"receiver method": `package mcp
+type localHelper struct{}
+func hiddenHandler() { var helper localHelper; helper.loadTask(); recordCost() }
+func (localHelper) loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`,
+		"function alias": `package mcp
+func hiddenHandler() { load := loadTask; load(); recordCost() }
+func loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`,
+		"closure": `package mcp
+func hiddenHandler() {
+	load := func() { svcs.TaskSvc.GetByID(nil, "task") }
+	load()
+	recordCost()
+}
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`,
+		"generic instantiation": `package mcp
+func hiddenHandler() { loadTask[int](); recordCost() }
+func loadTask[T any]() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`,
+	}
+	want := []string{
+		"svcs.ProviderCostSvc.RecordProviderTokenUsage",
+		"svcs.TaskSvc.GetByID",
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "hidden.go", source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			functions := map[string]*ast.FuncDecl{}
+			for _, declaration := range file.Decls {
+				if fn, ok := declaration.(*ast.FuncDecl); ok {
+					functions[localFunctionIndexKey(fn)] = fn
+				}
+			}
+
+			got := applicationCapabilityCallsForHandler(functions["hiddenHandler"], functions)
+			if !slices.Equal(got, want) {
+				t.Fatalf("transitive application capability calls = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestCapabilityBoundaryResolvesSameNamedMethodsByReceiverType(t *testing.T) {
+	source := `package mcp
+type safeHelper struct{}
+type capabilityHelper struct{}
+func hiddenHandler() { var helper safeHelper; helper.loadTask(); recordCost() }
+func (safeHelper) loadTask() {}
+func (capabilityHelper) loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
 `
-	file, err := parser.ParseFile(token.NewFileSet(), "hidden.go", source, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "same_method.go", source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	functions := map[string]*ast.FuncDecl{}
 	for _, declaration := range file.Decls {
 		if fn, ok := declaration.(*ast.FuncDecl); ok {
-			functions[fn.Name.Name] = fn
+			functions[localFunctionIndexKey(fn)] = fn
 		}
 	}
-
 	got := applicationCapabilityCallsForHandler(functions["hiddenHandler"], functions)
-	want := []string{
-		"svcs.ProviderCostSvc.RecordProviderTokenUsage",
-		"svcs.TaskSvc.GetByID",
-	}
+	want := []string{"svcs.ProviderCostSvc.RecordProviderTokenUsage"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("transitive application capability calls = %v, want %v", got, want)
+		t.Fatalf("receiver-specific capability calls = %v, want %v", got, want)
+	}
+}
+
+func TestCapabilityBoundaryFailsClosedOnChainedLocalReceiver(t *testing.T) {
+	source := `package mcp
+type localHelper struct{}
+func hiddenHandler() { newHelper().loadTask(); recordCost() }
+func newHelper() localHelper { return localHelper{} }
+func (localHelper) loadTask() { svcs.TaskSvc.GetByID(nil, "task") }
+func recordCost() { svcs.ProviderCostSvc.RecordProviderTokenUsage(nil, service.RecordProviderTokenCostRequest{}) }
+`
+	file, err := parser.ParseFile(token.NewFileSet(), "chained_receiver.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := map[string]*ast.FuncDecl{}
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok {
+			functions[localFunctionIndexKey(fn)] = fn
+		}
+	}
+	got := applicationCapabilityCallsForHandler(functions["hiddenHandler"], functions)
+	if !slices.Contains(got, "unsupported-local-call:loadTask") || !slices.Contains(got, "svcs.ProviderCostSvc.RecordProviderTokenUsage") {
+		t.Fatalf("chained receiver calls = %v, want explicit fail-closed marker and direct capability", got)
 	}
 }
 
@@ -260,30 +343,186 @@ func directApplicationCapabilityCalls(fn *ast.FuncDecl) []string {
 }
 
 func applicationCapabilityCallsForHandler(fn *ast.FuncDecl, functions map[string]*ast.FuncDecl) []string {
-	calls := make([]string, 0, 2)
-	visited := map[string]bool{}
+	callSet := make(map[string]struct{}, 2)
+	visited := map[*ast.FuncDecl]bool{}
 	var visit func(*ast.FuncDecl)
 	visit = func(current *ast.FuncDecl) {
-		if current == nil || visited[current.Name.Name] {
+		if current == nil || visited[current] {
 			return
 		}
-		visited[current.Name.Name] = true
-		calls = append(calls, directApplicationCapabilityCalls(current)...)
+		visited[current] = true
+		for _, capability := range directApplicationCapabilityCalls(current) {
+			callSet[capability] = struct{}{}
+		}
+		aliases := localFunctionAliases(current.Body, functions)
+		receiverTypes := localReceiverTypes(current)
 		ast.Inspect(current.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
-			identifier, ok := call.Fun.(*ast.Ident)
-			if ok {
-				visit(functions[identifier.Name])
+			fun := unwrapGenericCall(call.Fun)
+			switch target := fun.(type) {
+			case *ast.Ident:
+				if alias, ok := aliases[target.Name]; ok {
+					visit(alias)
+				} else {
+					visit(functions[target.Name])
+				}
+			case *ast.SelectorExpr:
+				receiver, ok := target.X.(*ast.Ident)
+				if !ok {
+					if hasLocalMethodNamed(functions, target.Sel.Name) {
+						callSet["unsupported-local-call:"+target.Sel.Name] = struct{}{}
+					}
+					return true
+				}
+				receiverType := receiverTypes[receiver.Name]
+				if receiverType != "" {
+					visit(functions[receiverType+"."+target.Sel.Name])
+					return true
+				}
+				if hasLocalMethodNamed(functions, target.Sel.Name) {
+					callSet["unsupported-local-call:"+target.Sel.Name] = struct{}{}
+				}
 			}
 			return true
 		})
 	}
 	visit(fn)
+	calls := make([]string, 0, len(callSet))
+	for capability := range callSet {
+		calls = append(calls, capability)
+	}
 	sort.Strings(calls)
 	return calls
+}
+
+func localFunctionIndexKey(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		if fn == nil {
+			return ""
+		}
+		return fn.Name.Name
+	}
+	return localReceiverTypeName(fn.Recv.List[0].Type) + "." + fn.Name.Name
+}
+
+func localReceiverTypeName(expr ast.Expr) string {
+	switch value := expr.(type) {
+	case *ast.StarExpr:
+		return localReceiverTypeName(value.X)
+	case *ast.IndexExpr:
+		return localReceiverTypeName(value.X)
+	case *ast.IndexListExpr:
+		return localReceiverTypeName(value.X)
+	default:
+		return selectorPath(expr)
+	}
+}
+
+func localReceiverTypes(fn *ast.FuncDecl) map[string]string {
+	types := make(map[string]string)
+	addFields := func(fields *ast.FieldList) {
+		if fields == nil {
+			return
+		}
+		for _, field := range fields.List {
+			typeName := localReceiverTypeName(field.Type)
+			for _, name := range field.Names {
+				types[name.Name] = typeName
+			}
+		}
+	}
+	addFields(fn.Recv)
+	addFields(fn.Type.Params)
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch declaration := node.(type) {
+		case *ast.ValueSpec:
+			typeName := localReceiverTypeName(declaration.Type)
+			if typeName == "" && len(declaration.Values) == 1 {
+				if literal, ok := declaration.Values[0].(*ast.CompositeLit); ok {
+					typeName = localReceiverTypeName(literal.Type)
+				}
+			}
+			for _, name := range declaration.Names {
+				if typeName != "" {
+					types[name.Name] = typeName
+				}
+			}
+		case *ast.AssignStmt:
+			for index, lhs := range declaration.Lhs {
+				if index >= len(declaration.Rhs) {
+					continue
+				}
+				name, ok := lhs.(*ast.Ident)
+				literal, literalOK := declaration.Rhs[index].(*ast.CompositeLit)
+				if ok && literalOK {
+					types[name.Name] = localReceiverTypeName(literal.Type)
+				}
+			}
+		}
+		return true
+	})
+	return types
+}
+
+func hasLocalMethodNamed(functions map[string]*ast.FuncDecl, method string) bool {
+	for _, fn := range functions {
+		if fn.Recv != nil && fn.Name.Name == method {
+			return true
+		}
+	}
+	return false
+}
+
+func unwrapGenericCall(expr ast.Expr) ast.Expr {
+	switch value := expr.(type) {
+	case *ast.IndexExpr:
+		return unwrapGenericCall(value.X)
+	case *ast.IndexListExpr:
+		return unwrapGenericCall(value.X)
+	case *ast.ParenExpr:
+		return unwrapGenericCall(value.X)
+	default:
+		return expr
+	}
+}
+
+func localFunctionAliases(body *ast.BlockStmt, functions map[string]*ast.FuncDecl) map[string]*ast.FuncDecl {
+	aliases := make(map[string]*ast.FuncDecl)
+	if body == nil {
+		return aliases
+	}
+	ast.Inspect(body, func(node ast.Node) bool {
+		var names []*ast.Ident
+		var values []ast.Expr
+		switch declaration := node.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range declaration.Lhs {
+				if name, ok := lhs.(*ast.Ident); ok {
+					names = append(names, name)
+				}
+			}
+			values = declaration.Rhs
+		case *ast.ValueSpec:
+			names, values = declaration.Names, declaration.Values
+		default:
+			return true
+		}
+		for index, name := range names {
+			if index >= len(values) {
+				continue
+			}
+			if target, ok := unwrapGenericCall(values[index]).(*ast.Ident); ok {
+				if fn := functions[target.Name]; fn != nil {
+					aliases[name.Name] = fn
+				}
+			}
+		}
+		return true
+	})
+	return aliases
 }
 
 func selectorPath(expr ast.Expr) string {
