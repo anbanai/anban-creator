@@ -40,8 +40,12 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 				t.Errorf("%s contains forbidden managed-workspace pattern %s", filepath.ToSlash(relativePath), pattern)
 			}
 		}
-		if (strings.HasPrefix(filepath.ToSlash(relativePath), "plugins/agents/") ||
-			strings.HasPrefix(filepath.ToSlash(relativePath), "plugins/skills/")) && bareFailureStatePattern.Match(body) {
+		pluginPath := filepath.ToSlash(relativePath)
+		bareFailureState := bareFailureStatePattern.Match(body)
+		if strings.HasPrefix(pluginPath, "plugins/hooks/") {
+			bareFailureState = bareFailureStateHookInstructionPattern.Match(body)
+		}
+		if bareFailureState {
 			t.Errorf("%s contains a failure-state.json instruction outside canonical output/", filepath.ToSlash(relativePath))
 		}
 		return nil
@@ -68,6 +72,7 @@ func managedWorkspaceForbiddenPatterns() []*regexp.Regexp {
 }
 
 var bareFailureStatePattern = regexp.MustCompile(`(?m)(?:^|[^[:alnum:]_./-])failure-state\.json`)
+var bareFailureStateHookInstructionPattern = regexp.MustCompile(`(?im)(?:write|写(?:入)?)[^\n]{0,120}(?:^|[^[:alnum:]_./-])failure-state\.json`)
 
 func TestManagedWorkspaceForbiddenPatterns(t *testing.T) {
 	tests := []struct {
@@ -129,6 +134,26 @@ func TestBareFailureStatePattern(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := bareFailureStatePattern.MatchString(tt.body); got != tt.want {
 				t.Fatalf("bare failure-state match for %q = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBareFailureStateHookInstructionPattern(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "bare write instruction", body: "only failures write structured failure-state.json", want: true},
+		{name: "bare Chinese write instruction", body: "只有失败才写结构化 failure-state.json", want: true},
+		{name: "canonical write instruction", body: "write output/failure-state.json"},
+		{name: "canonical path construction", body: `failure_path = root / "output" / "failure-state.json"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bareFailureStateHookInstructionPattern.MatchString(tt.body); got != tt.want {
+				t.Fatalf("bare hook failure-state instruction match for %q = %v, want %v", tt.body, got, tt.want)
 			}
 		})
 	}

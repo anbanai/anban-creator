@@ -175,7 +175,7 @@ func isDeliverableArtifact(path string) bool {
 		return false
 	}
 	switch base {
-	case "claude.md", ".task-context", "settings.json", ".mcp.json":
+	case "claude.md", "settings.json", ".mcp.json":
 		return false
 	default:
 		return true

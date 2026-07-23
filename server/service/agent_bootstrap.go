@@ -245,7 +245,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
 	}
-	files := []BootstrapFile{{Path: ".task-context", Text: "TASK_ID=" + task.ID + "\n", Mode: 0644}}
+	var files []BootstrapFile
 	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, referenceAsset != nil)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)

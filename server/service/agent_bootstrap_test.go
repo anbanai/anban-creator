@@ -139,6 +139,32 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 	}
 }
 
+func TestBootstrapDoesNotMaterializeLegacyTaskContext(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, SkipReferenceImage: true}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		Model:             "claude-test",
+		Store:             &signFakeStore{},
+		TokenTTL:          time.Hour,
+		RuntimeEnv:        bootstrapTestRuntimeEnv(),
+		ModelUsageAliases: bootstrapTestModelUsageAliases(),
+	}, zerolog.Nop())
+
+	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+	for _, file := range response.Files {
+		if file.Path == ".task-context" {
+			t.Fatalf("bootstrap files retain legacy task context: %#v", response.Files)
+		}
+	}
+}
+
 func TestBootstrapRejectsReferenceAssetOwnershipAndPurpose(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

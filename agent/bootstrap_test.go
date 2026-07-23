@@ -52,7 +52,7 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
 			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
-			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".task-context", "text": "TASK_ID=task-1\n", "mode": 420}},
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".anban-creator/runtime-note.txt", "text": "managed\n", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(),
 			"runtime_env":         testClaudeRuntimeEnv(),
 			"artifact_transport":  map[string]any{"mode": "direct"},
@@ -67,8 +67,8 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	if response.ExecutionToken != executionToken {
 		t.Fatal("execution token was not returned")
 	}
-	got, err := os.ReadFile(filepath.Join(workspace, ".task-context"))
-	if err != nil || string(got) != "TASK_ID=task-1\n" {
+	got, err := os.ReadFile(filepath.Join(workspace, ".anban-creator", "runtime-note.txt"))
+	if err != nil || string(got) != "managed\n" {
 		t.Fatalf("materialized=%q err=%v", got, err)
 	}
 	projected, _ := os.ReadFile(tokenFile)

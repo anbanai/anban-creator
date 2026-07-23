@@ -87,6 +87,7 @@ func TestSyncMontageTaskInputsMergesManagedWorkspaceFiles(t *testing.T) {
 	for path, body := range map[string]string{
 		filepath.Join(workspace, "montage-input.json"):                    "{}",
 		filepath.Join(workspace, ".anban-creator", "resume", "latest.md"): "continue",
+		filepath.Join(workspace, ".task-context"):                         "TASK_ID=legacy-task\n",
 		filepath.Join(workspace, "CLAUDE.md"):                             "project rules",
 		filepath.Join(runtimePath, "CLAUDE.md"):                           "upstream rules",
 	} {
@@ -108,6 +109,9 @@ func TestSyncMontageTaskInputsMergesManagedWorkspaceFiles(t *testing.T) {
 	claudeBody, err := os.ReadFile(filepath.Join(runtimePath, "CLAUDE.md"))
 	if err != nil || !strings.Contains(string(claudeBody), "upstream rules") || !strings.Contains(string(claudeBody), "project rules") {
 		t.Fatalf("merged CLAUDE.md = %q, err=%v", claudeBody, err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimePath, ".task-context")); !os.IsNotExist(err) {
+		t.Fatalf("Montage runtime inherited legacy task context: %v", err)
 	}
 	for _, name := range []string{"montage-input.json", "CLAUDE.md", ".anban-creator"} {
 		if _, err := os.Stat(filepath.Join(workspace, name)); !os.IsNotExist(err) {
