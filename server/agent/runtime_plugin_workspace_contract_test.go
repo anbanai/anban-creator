@@ -43,7 +43,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 		pluginPath := filepath.ToSlash(relativePath)
 		bareFailureState := bareFailureStatePattern.Match(body)
 		if strings.HasPrefix(pluginPath, "plugins/hooks/") {
-			bareFailureState = bareFailureStateHookInstructionPattern.Match(body)
+			bareFailureState = containsBareFailureStateHookInstruction(body)
 		}
 		if bareFailureState {
 			t.Errorf("%s contains a failure-state.json instruction outside canonical output/", filepath.ToSlash(relativePath))
@@ -72,7 +72,75 @@ func managedWorkspaceForbiddenPatterns() []*regexp.Regexp {
 }
 
 var bareFailureStatePattern = regexp.MustCompile(`(?m)(?:^|[^[:alnum:]_./-])failure-state\.json`)
-var bareFailureStateHookInstructionPattern = regexp.MustCompile(`(?im)(?:write|写(?:入)?)[^\n]{0,120}(?:^|[^[:alnum:]_./-])failure-state\.json`)
+var (
+	bareFailureStateFilenamePattern      = regexp.MustCompile(`(?i)(?:^|[^[:alnum:]_./-])(failure-state\.json)`)
+	hookFailureStateEnglishActionPattern = regexp.MustCompile(`(?i)(?:^|[^[:alnum:]_.-])(create|emit|persist|save|write)\b`)
+	hookFailureStateObservationPattern   = regexp.MustCompile(`(?i)\b(?:check(?:ed|ing)?|document(?:ed|ing)?|inspect(?:ed|ing)?|mention(?:ed|ing)?|read(?:ing)?|reference(?:d|ing)?|whether)\b`)
+)
+
+var hookFailureStateChineseActions = []string{"持久化", "写入", "创建", "生成", "保存", "写"}
+
+var hookFailureStateChineseObservations = []string{"检查", "查看", "读取", "提及", "说明", "文档", "是否"}
+
+func containsBareFailureStateHookInstruction(body []byte) bool {
+	for _, line := range strings.Split(string(body), "\n") {
+		for _, match := range bareFailureStateFilenamePattern.FindAllStringSubmatchIndex(line, -1) {
+			filenameStart := match[2]
+			actionStart, actionEnd := nearestHookFailureStateAction(line[:filenameStart])
+			if actionStart < 0 {
+				continue
+			}
+			if isHookFailureStateTargetPhrase(line[actionEnd:filenameStart]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nearestHookFailureStateAction(prefix string) (int, int) {
+	nearestStart, nearestEnd := -1, -1
+	for _, match := range hookFailureStateEnglishActionPattern.FindAllStringSubmatchIndex(prefix, -1) {
+		if match[2] > nearestStart || match[2] == nearestStart && match[3] > nearestEnd {
+			nearestStart, nearestEnd = match[2], match[3]
+		}
+	}
+	for _, action := range hookFailureStateChineseActions {
+		start := strings.LastIndex(prefix, action)
+		if start < 0 || precededByIdentifierPunctuation(prefix, start) {
+			continue
+		}
+		end := start + len(action)
+		if start > nearestStart || start == nearestStart && end > nearestEnd {
+			nearestStart, nearestEnd = start, end
+		}
+	}
+	return nearestStart, nearestEnd
+}
+
+func precededByIdentifierPunctuation(text string, index int) bool {
+	if index == 0 {
+		return false
+	}
+	previous := text[index-1]
+	return previous == '.' || previous == '_' || previous >= '0' && previous <= '9' ||
+		previous >= 'A' && previous <= 'Z' || previous >= 'a' && previous <= 'z'
+}
+
+func isHookFailureStateTargetPhrase(phrase string) bool {
+	if len([]rune(phrase)) > 80 || strings.ContainsAny(phrase, "\n;；.!?。！？") {
+		return false
+	}
+	if hookFailureStateObservationPattern.MatchString(phrase) {
+		return false
+	}
+	for _, observation := range hookFailureStateChineseObservations {
+		if strings.Contains(phrase, observation) {
+			return false
+		}
+	}
+	return true
+}
 
 func TestManagedWorkspaceForbiddenPatterns(t *testing.T) {
 	tests := []struct {
@@ -147,12 +215,23 @@ func TestBareFailureStateHookInstructionPattern(t *testing.T) {
 	}{
 		{name: "bare write instruction", body: "only failures write structured failure-state.json", want: true},
 		{name: "bare Chinese write instruction", body: "只有失败才写结构化 failure-state.json", want: true},
+		{name: "bare create instruction", body: "On failure, create `failure-state.json` with the recovery payload.", want: true},
+		{name: "bare emit instruction", body: "Emit failure-state.json when the task can be resumed.", want: true},
+		{name: "bare persist instruction", body: "Persist the structured failure to failure-state.json.", want: true},
+		{name: "bare save instruction", body: "Save recovery details in `failure-state.json`.", want: true},
+		{name: "bare Chinese save instruction", body: "失败时将结构化状态保存到 `failure-state.json`。", want: true},
+		{name: "bare Chinese generate instruction", body: "失败时生成 failure-state.json 并停止。", want: true},
 		{name: "canonical write instruction", body: "write output/failure-state.json"},
+		{name: "canonical save instruction", body: "save recovery details in output/failure-state.json"},
 		{name: "canonical path construction", body: `failure_path = root / "output" / "failure-state.json"`},
+		{name: "canonical path construction and write", body: "failure_path = root / \"output\" / \"failure-state.json\"\nfailure_path.write_text(payload)"},
+		{name: "observation prose", body: "The write policy is documented; failure-state.json is only the historical basename."},
+		{name: "logging code", body: `logger.write("failure-state.json missing")`},
+		{name: "unrelated write and check sequence", body: "Write the report before checking whether failure-state.json exists."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := bareFailureStateHookInstructionPattern.MatchString(tt.body); got != tt.want {
+			if got := containsBareFailureStateHookInstruction([]byte(tt.body)); got != tt.want {
 				t.Fatalf("bare hook failure-state instruction match for %q = %v, want %v", tt.body, got, tt.want)
 			}
 		})
