@@ -16,4 +16,22 @@ describe('Studio nginx backend proxy contract', () => {
     expect(deployment).toContain('- name: BACKEND_SCHEME\n              value: https')
     expect(deployment).toContain('- name: BACKEND_PORT\n              value: "8443"')
   })
+
+  it('proxies the exact MCP endpoint to the backend as an unbuffered HTTP stream', () => {
+    const template = readFileSync('default.conf.template', 'utf8')
+    const mcpLocation = template.match(/location = \/mcp \{([\s\S]*?)\n    \}/)?.[1]
+
+    expect(mcpLocation).toBeDefined()
+    expect(mcpLocation).toContain(
+      'proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};',
+    )
+    expect(mcpLocation).toContain('proxy_http_version 1.1;')
+    expect(mcpLocation).toContain('proxy_set_header Host $host;')
+    expect(mcpLocation).toContain('proxy_set_header X-Forwarded-Proto $scheme;')
+    expect(mcpLocation).toContain('proxy_buffering off;')
+    expect(mcpLocation).toContain('proxy_cache off;')
+    expect(mcpLocation).toContain('proxy_read_timeout 1h;')
+    expect(mcpLocation).toContain('proxy_send_timeout 1h;')
+    expect(mcpLocation).not.toContain('proxy_set_header Authorization')
+  })
 })

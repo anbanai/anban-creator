@@ -61,6 +61,21 @@ server {
         proxy_send_timeout 1h;
     }
 
+    # MCP Streamable HTTP. Keep this exact path out of the SPA fallback and
+    # stream JSON/SSE responses without proxy buffering.
+    location = /mcp {
+        proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
     # WebSocket (parity with the vite dev proxy; unused by studio today).
     location /ws {
         proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};
