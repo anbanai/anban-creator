@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -22,6 +23,16 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestBillingRepositoryDoesNotProvisionWallets(t *testing.T) {
+	source, err := os.ReadFile("billing.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), "EnsureAccount") {
+		t.Fatal("billing repository still exposes lazy wallet provisioning")
+	}
+}
 
 func TestBillingRepositoryAccessorParity(t *testing.T) {
 	db := setupTestDB(t)
@@ -63,29 +74,6 @@ func TestBillingRepositoryAccessorParity(t *testing.T) {
 	}
 	if _, err := repo.Billing().FindAccount(ctx, "committed-wallet"); err != nil {
 		t.Fatalf("transaction-scoped billing write missing after commit: %v", err)
-	}
-}
-
-func TestBillingRepositoryEnsureAccountRequiresTransactionAndIsIdempotent(t *testing.T) {
-	repo := New(setupTestDB(t))
-	ctx := context.Background()
-	if err := repo.Billing().EnsureAccount(ctx, "u-ensure"); !errors.Is(err, ErrBillingRequiresTransaction) {
-		t.Fatalf("root EnsureAccount error = %v", err)
-	}
-	if err := repo.WithTx(ctx, func(tx Repository) error {
-		if err := tx.Billing().EnsureAccount(ctx, "u-ensure"); err != nil {
-			return err
-		}
-		if err := tx.Billing().EnsureAccount(ctx, "u-ensure"); err != nil {
-			return err
-		}
-		account, err := tx.Billing().LockAccount(ctx, "u-ensure")
-		if err != nil || account.UserID != "u-ensure" {
-			t.Fatalf("ensured account = %+v, %v", account, err)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
