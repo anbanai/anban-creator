@@ -131,6 +131,100 @@ func TestSeednoteQualityGateBlocksMissingRuntimeWorkspaceInjection(t *testing.T)
 	}
 }
 
+func TestSeednoteQualityGateBlockOutputUsesCanonicalFailureStatePath(t *testing.T) {
+	tests := []struct {
+		name               string
+		failureBody        string
+		injectWorkspace    bool
+		wantReasonFragment string
+	}{
+		{
+			name:               "missing runtime workspace",
+			wantReasonFragment: "missing runtime workspace injection",
+		},
+		{
+			name:               "invalid failure state",
+			failureBody:        `{not-json`,
+			injectWorkspace:    true,
+			wantReasonFragment: "失败态文件无效",
+		},
+		{
+			name:               "incomplete failure state",
+			failureBody:        `{"status":"recoverable_failure","stage":"visual_generation"}`,
+			injectWorkspace:    true,
+			wantReasonFragment: "失败态文件不完整",
+		},
+		{
+			name:               "missing delivery artifacts",
+			injectWorkspace:    true,
+			wantReasonFragment: "content.md（缺少最终正文）",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if tt.failureBody != "" {
+				outputDir := filepath.Join(workspace, "output")
+				if err := os.MkdirAll(outputDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(outputDir, "failure-state.json"), []byte(tt.failureBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			workspaceEnv := []string(nil)
+			if tt.injectWorkspace {
+				workspaceEnv = []string{workspace}
+			}
+			output := runSeednoteQualityGateInvocation(
+				t,
+				workspace,
+				`{"agent_type":"anban:seednote","managed_main_session":true}`,
+				workspaceEnv...,
+			)
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, tt.wantReasonFragment) {
+				t.Fatalf("quality gate output = %#v, want block containing %q", result, tt.wantReasonFragment)
+			}
+			assertCanonicalFailureStateReferences(t, result)
+		})
+	}
+}
+
+func assertCanonicalFailureStateReferences(t *testing.T, value any) {
+	t.Helper()
+	switch value := value.(type) {
+	case map[string]any:
+		for _, field := range value {
+			assertCanonicalFailureStateReferences(t, field)
+		}
+	case []any:
+		for _, item := range value {
+			assertCanonicalFailureStateReferences(t, item)
+		}
+	case string:
+		const filename = "failure-state.json"
+		const canonicalPrefix = "output/"
+		remaining := value
+		for {
+			index := strings.Index(remaining, filename)
+			if index < 0 {
+				return
+			}
+			if index < len(canonicalPrefix) || remaining[index-len(canonicalPrefix):index] != canonicalPrefix {
+				t.Fatalf("hook output contains non-canonical failure-state reference %q", value)
+			}
+			remaining = remaining[index+len(filename):]
+		}
+	}
+}
+
 func TestSeednoteQualityGateSkipsNonSeednoteWithoutRuntimeWorkspaceInjection(t *testing.T) {
 	output := runSeednoteQualityGateInvocation(
 		t,
