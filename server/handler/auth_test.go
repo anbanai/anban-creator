@@ -3,7 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,6 +19,69 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestAuthUserCreationUsesProvisioningService(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve auth test path")
+	}
+	authPath := filepath.Join(filepath.Dir(currentFile), "auth.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), authPath, nil, 0)
+	if err != nil {
+		t.Fatalf("parse auth.go: %v", err)
+	}
+
+	creationEntrypoints := map[string]bool{
+		"Register":        false,
+		"CodeLogin":       false,
+		"WXLogin":         false,
+		"QRLoginCallback": false,
+	}
+	for _, declaration := range parsed.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Body == nil {
+			continue
+		}
+		if _, tracked := creationEntrypoints[fn.Name.Name]; !tracked {
+			continue
+		}
+
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if selector.Sel.Name == "createUser" {
+				if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Name == "h" {
+					creationEntrypoints[fn.Name.Name] = true
+				}
+			}
+			if selector.Sel.Name == "Create" && isAuthUsersCall(selector.X) {
+				t.Errorf("%s directly creates a user; call h.createUser instead", fn.Name.Name)
+			}
+			return true
+		})
+	}
+
+	for entrypoint, usesProvisioning := range creationEntrypoints {
+		if !usesProvisioning {
+			t.Errorf("%s does not call h.createUser", entrypoint)
+		}
+	}
+}
+
+func isAuthUsersCall(expression ast.Expr) bool {
+	call, ok := expression.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "Users"
+}
 
 func TestGenerateTokenPairDoesNotExposeWalletLedger(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
