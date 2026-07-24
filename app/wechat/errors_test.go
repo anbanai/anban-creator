@@ -1,12 +1,15 @@
 package wechat
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseWechatError(t *testing.T) {
@@ -132,5 +135,76 @@ func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
 	}
 	if dlErr.BodyPreview == "" || len(dlErr.BodyPreview) > 80 {
 		t.Fatalf("BodyPreview = %q, want short preview", dlErr.BodyPreview)
+	}
+}
+
+func TestDownloadFileContextHonorsCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type result struct {
+		path string
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		path, err := DownloadFileContext(ctx, srv.URL+"/generated.png")
+		resultCh <- result{path: path, err: err}
+	}()
+
+	cancel()
+	select {
+	case result := <-resultCh:
+		defer os.Remove(result.path)
+		if !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("DownloadFileContext error = %v, want context.Canceled", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DownloadFileContext did not return after cancellation")
+	}
+}
+
+func TestDownloadFileRemainsSingleAttempt(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	path, err := DownloadFile(srv.URL + "/generated.png")
+	defer os.Remove(path)
+	if err == nil {
+		t.Fatal("DownloadFile error = nil, want error")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("request count = %d, want 1", got)
+	}
+}
+
+func TestDownloadFileContextRemovesPartialFile(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "64")
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer srv.Close()
+
+	path, err := DownloadFileContext(context.Background(), srv.URL+"/generated.png")
+	defer os.Remove(path)
+	if err == nil {
+		t.Fatal("DownloadFileContext error = nil, want error")
+	}
+	entries, err := os.ReadDir(os.Getenv("TMPDIR"))
+	if err != nil {
+		t.Fatalf("read temp directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temp directory entries = %d, want 0", len(entries))
 	}
 }
