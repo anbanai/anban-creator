@@ -19,6 +19,44 @@ type projectMemoryLifecycleFake struct {
 	err error
 }
 
+type projectDeleteRepositoryOverride struct {
+	repository.Repository
+	projects repository.ProjectRepository
+	plans    repository.PlanRepository
+}
+
+func (r projectDeleteRepositoryOverride) Projects() repository.ProjectRepository {
+	if r.projects != nil {
+		return r.projects
+	}
+	return r.Repository.Projects()
+}
+
+func (r projectDeleteRepositoryOverride) Plans() repository.PlanRepository {
+	if r.plans != nil {
+		return r.plans
+	}
+	return r.Repository.Plans()
+}
+
+type failingProjectStatsRepository struct {
+	repository.ProjectRepository
+	err error
+}
+
+func (r failingProjectStatsRepository) GetStats(context.Context, string) (*repository.ProjectStats, error) {
+	return nil, r.err
+}
+
+type failingProjectPlanCountRepository struct {
+	repository.PlanRepository
+	err error
+}
+
+func (r failingProjectPlanCountRepository) CountByUserID(context.Context, string, string) (int64, error) {
+	return 0, r.err
+}
+
 type rejectingProjectCASRepository struct {
 	repository.ProjectRepository
 }
@@ -68,7 +106,7 @@ func TestProjectDeleteRemovesDeterministicMemoryPVC(t *testing.T) {
 	}
 }
 
-func TestProjectDeleteSurfacesMemoryIdentityMismatchAfterDatabaseDelete(t *testing.T) {
+func TestProjectDeleteMemoryFailurePreservesProjectForRetry(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
@@ -89,6 +127,78 @@ func TestProjectDeleteSurfacesMemoryIdentityMismatchAfterDatabaseDelete(t *testi
 	}
 	if len(memory.ids) != 1 {
 		t.Fatalf("memory deletions=%v", memory.ids)
+	}
+	if _, err := repo.Projects().FindByID(ctx, project.ID); err != nil {
+		t.Fatalf("project authority removed after memory failure: %v", err)
+	}
+
+	memory.err = nil
+	if err := svc.Delete(ctx, user.ID, project.ID); err != nil {
+		t.Fatalf("retry Delete: %v", err)
+	}
+	if len(memory.ids) != 2 {
+		t.Fatalf("memory deletions after retry=%v", memory.ids)
+	}
+	if _, err := repo.Projects().FindByID(ctx, project.ID); err == nil {
+		t.Fatal("project still exists after successful memory cleanup retry")
+	}
+}
+
+func TestProjectDeleteDependencyCheckFailurePreservesProjectMemory(t *testing.T) {
+	tests := []struct {
+		name     string
+		override func(repository.Repository, error) repository.Repository
+	}{
+		{
+			name: "task stats",
+			override: func(repo repository.Repository, err error) repository.Repository {
+				return projectDeleteRepositoryOverride{
+					Repository: repo,
+					projects:   failingProjectStatsRepository{ProjectRepository: repo.Projects(), err: err},
+				}
+			},
+		},
+		{
+			name: "plan count",
+			override: func(repo repository.Repository, err error) repository.Repository {
+				return projectDeleteRepositoryOverride{
+					Repository: repo,
+					plans:      failingProjectPlanCountRepository{PlanRepository: repo.Plans(), err: err},
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTaskTestDB(t)
+			baseRepo := repository.New(db)
+			ctx := context.Background()
+			user := &model.User{ID: uuid.NewString(), Email: uuid.NewString() + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12]}
+			if err := baseRepo.Users().Create(ctx, user); err != nil {
+				t.Fatal(err)
+			}
+			project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+			if err := baseRepo.Projects().Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			dependencyErr := errors.New("dependency query unavailable")
+			logger := zerolog.New(io.Discard)
+			svc := NewProjectService(tc.override(baseRepo, dependencyErr), &logger)
+			memory := &projectMemoryLifecycleFake{}
+			svc.SetProjectMemoryLifecycle(memory)
+
+			err := svc.Delete(ctx, user.ID, project.ID)
+			if !errors.Is(err, dependencyErr) {
+				t.Fatalf("Delete error = %v, want dependency query error", err)
+			}
+			if len(memory.ids) != 0 {
+				t.Fatalf("memory deleted without authoritative dependency check: %v", memory.ids)
+			}
+			if _, err := baseRepo.Projects().FindByID(ctx, project.ID); err != nil {
+				t.Fatalf("project removed after dependency check failure: %v", err)
+			}
+		})
 	}
 }
 

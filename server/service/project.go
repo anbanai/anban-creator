@@ -313,7 +313,7 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 	// Check if the project has associated tasks.
 	stats, err := s.repo.Projects().GetStats(ctx, projectID)
 	if err != nil {
-		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to get project stats before delete")
+		return fmt.Errorf("get project stats before delete: %w", err)
 	}
 	if stats != nil && stats.TotalTasks > 0 {
 		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated tasks; archive it instead", stats.TotalTasks)}
@@ -322,19 +322,19 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 	// Check if the project has associated plans.
 	planCount, err := s.repo.Plans().CountByUserID(ctx, userID, projectID)
 	if err != nil {
-		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to count plans before delete")
+		return fmt.Errorf("count project plans before delete: %w", err)
 	}
 	if planCount > 0 {
 		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated plans; archive it instead", planCount)}
 	}
 
-	if err := s.repo.Projects().Delete(ctx, projectID); err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
 	if s.memory != nil {
 		if err := s.memory.DeleteProjectMemory(ctx, projectID); err != nil {
 			return fmt.Errorf("delete project memory: %w", err)
 		}
+	}
+	if err := s.repo.Projects().Delete(ctx, projectID); err != nil {
+		return fmt.Errorf("delete project: %w", err)
 	}
 	return nil
 }

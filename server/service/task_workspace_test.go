@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -61,5 +62,146 @@ func TestTaskDeleteSurfacesWorkspaceIdentityMismatch(t *testing.T) {
 	}
 	if _, err := repo.Tasks().FindByID(ctx, task.ID); err != nil {
 		t.Fatalf("task was deleted after workspace ownership failure: %v", err)
+	}
+}
+
+func TestTaskDeleteAbortsWhileRuntimePreparationIsInFlight(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	ctx := context.Background()
+	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionStarting}, model.TaskExecutionDispatching, model.ExecutionTransition{}); err != nil || !won {
+		t.Fatalf("move execution to dispatching: won=%v err=%v", won, err)
+	}
+	if won, err := repo.TaskExecutions().ClaimDispatch(ctx, execution.ID, "delete-in-flight-prepare", time.Minute); err != nil || !won {
+		t.Fatalf("claim dispatch: won=%v err=%v", won, err)
+	}
+	svc.SetRuntimeDispatchLease(time.Minute)
+	dispatcher := &cancelOrderingDispatcher{repo: repo}
+	svc.SetRuntimeDispatcher(dispatcher)
+	workspace := &taskWorkspaceLifecycleFake{}
+	svc.SetTaskWorkspaceLifecycle(workspace)
+
+	err := svc.Delete(ctx, task.ID)
+	if !errors.Is(err, ErrRuntimePreparationInFlight) {
+		t.Fatalf("Delete error = %v, want ErrRuntimePreparationInFlight", err)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); err != nil {
+		t.Fatalf("task authority removed after prepare barrier: %v", err)
+	}
+	if _, err := repo.TaskExecutions().FindByID(ctx, execution.ID); err != nil {
+		t.Fatalf("execution authority removed after prepare barrier: %v", err)
+	}
+	if len(workspace.tasks) != 0 {
+		t.Fatalf("workspace deleted before runtime preparation settled: %#v", workspace.tasks)
+	}
+}
+
+func TestTaskDeleteRetriesCancelledRuntimeCleanupBeforeRemovingAuthority(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	dispatcher := &cancelOrderingDispatcher{repo: repo, deleteErr: errors.New("runtime provider unavailable")}
+	svc.SetRuntimeDispatcher(dispatcher)
+	svc.cleanupRetryBackoff = time.Millisecond
+	workspace := &taskWorkspaceLifecycleFake{}
+	svc.SetTaskWorkspaceLifecycle(workspace)
+
+	err := svc.Delete(ctx, task.ID)
+	if err == nil || !strings.Contains(err.Error(), "runtime provider unavailable") {
+		t.Fatalf("first Delete error = %v, want runtime cleanup failure", err)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); err != nil {
+		t.Fatalf("task authority removed after runtime cleanup failure: %v", err)
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatalf("execution authority removed after runtime cleanup failure: %v", err)
+	}
+	if foundExecution.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup status = %q, want pending", foundExecution.CleanupStatus)
+	}
+	if len(workspace.tasks) != 0 {
+		t.Fatalf("workspace deleted after runtime cleanup failure: %#v", workspace.tasks)
+	}
+
+	dispatcher.deleteErr = nil
+	time.Sleep(2 * time.Millisecond)
+	if err := svc.Delete(ctx, task.ID); err != nil {
+		t.Fatalf("retry Delete: %v", err)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); err == nil {
+		t.Fatal("task still exists after successful runtime cleanup retry")
+	}
+	if len(workspace.tasks) != 1 || workspace.tasks[0].ID != task.ID {
+		t.Fatalf("workspace deletions after retry = %#v", workspace.tasks)
+	}
+}
+
+func TestTaskDeleteWaitsForFailedRuntimeCleanupBeforeRemovingAuthority(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	ctx := context.Background()
+	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionRunning}, model.TaskExecutionFailed,
+		model.ExecutionTransition{CleanupStatus: model.TaskExecutionCleanupPending}); err != nil || !won {
+		t.Fatalf("fail execution: won=%v err=%v", won, err)
+	}
+	if err := repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusFailed); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+	svc.SetRuntimeDispatcher(&cancelOrderingDispatcher{repo: repo})
+	workspace := &taskWorkspaceLifecycleFake{}
+	svc.SetTaskWorkspaceLifecycle(workspace)
+
+	err := svc.Delete(ctx, task.ID)
+	if err == nil || !strings.Contains(err.Error(), "runtime cleanup is not complete") {
+		t.Fatalf("Delete error = %v, want incomplete runtime cleanup", err)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); err != nil {
+		t.Fatalf("task authority removed while failed runtime cleanup is pending: %v", err)
+	}
+	if _, err := repo.TaskExecutions().FindByID(ctx, execution.ID); err != nil {
+		t.Fatalf("execution authority removed while failed runtime cleanup is pending: %v", err)
+	}
+	if len(workspace.tasks) != 0 {
+		t.Fatalf("workspace deleted while failed runtime cleanup is pending: %#v", workspace.tasks)
+	}
+
+	const token = "delete-after-reconcile"
+	if won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, token, time.Minute); err != nil || !won {
+		t.Fatalf("claim cleanup: won=%v err=%v", won, err)
+	}
+	if won, err := repo.TaskExecutions().CompleteCleanup(ctx, execution.ID, token); err != nil || !won {
+		t.Fatalf("complete cleanup: won=%v err=%v", won, err)
+	}
+	if err := svc.Delete(ctx, task.ID); err != nil {
+		t.Fatalf("Delete after reconciled cleanup: %v", err)
+	}
+	if len(workspace.tasks) != 1 || workspace.tasks[0].ID != task.ID {
+		t.Fatalf("workspace deletions after cleanup = %#v", workspace.tasks)
+	}
+}
+
+func TestTaskDeleteDoesNotBypassManagedCleanupWithoutDispatcher(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	ctx := context.Background()
+	workspace := &taskWorkspaceLifecycleFake{}
+	svc.SetTaskWorkspaceLifecycle(workspace)
+
+	err := svc.Delete(ctx, task.ID)
+	if err == nil || !strings.Contains(err.Error(), "runtime cleanup is not complete") {
+		t.Fatalf("Delete error = %v, want incomplete runtime cleanup", err)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); err != nil {
+		t.Fatalf("task authority removed without runtime dispatcher: %v", err)
+	}
+	if _, err := repo.TaskExecutions().FindByID(ctx, execution.ID); err != nil {
+		t.Fatalf("execution authority removed without runtime dispatcher: %v", err)
+	}
+	if len(workspace.tasks) != 0 {
+		t.Fatalf("workspace deleted without runtime dispatcher: %#v", workspace.tasks)
+	}
+
+	svc.SetRuntimeDispatcher(&cancelOrderingDispatcher{repo: repo})
+	if err := svc.Delete(ctx, task.ID); err != nil {
+		t.Fatalf("Delete after dispatcher recovery: %v", err)
 	}
 }

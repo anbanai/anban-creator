@@ -622,7 +622,7 @@ func (h *ProjectHandler) Delete(c fiber.Ctx) error {
 			return Error(c, fiber.StatusConflict, err.Error())
 		}
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("delete project failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		return Error(c, fiber.StatusInternalServerError, "failed to delete project")
 	}
 
 	return Success(c, fiber.Map{"message": "project deleted"})

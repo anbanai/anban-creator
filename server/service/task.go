@@ -1445,9 +1445,30 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("find task: %w", err)
 	}
 
-	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusPending {
-		if cancelErr := s.Cancel(ctx, id); cancelErr != nil {
-			s.logger.Error().Err(cancelErr).Str("task_id", id).Msg("failed to cancel task before delete")
+	managedExecution := task.CurrentExecutionID != nil
+	requiresCancel := task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusPending
+	var execution *model.TaskExecution
+	if managedExecution {
+		execution, err = s.repo.TaskExecutions().FindByID(ctx, *task.CurrentExecutionID)
+		if err != nil {
+			return fmt.Errorf("find current execution before task delete: %w", err)
+		}
+		if task.Status == model.TaskStatusCancelled && execution.CleanupStatus != model.TaskExecutionCleanupDone {
+			requiresCancel = true
+		}
+	}
+	if requiresCancel {
+		if err := s.Cancel(ctx, id); err != nil {
+			return fmt.Errorf("cancel task before delete: %w", err)
+		}
+	}
+	if managedExecution {
+		execution, err = s.repo.TaskExecutions().FindByID(ctx, *task.CurrentExecutionID)
+		if err != nil {
+			return fmt.Errorf("find current execution before task authority removal: %w", err)
+		}
+		if execution.CleanupStatus != model.TaskExecutionCleanupDone {
+			return fmt.Errorf("cancel task before delete: runtime cleanup is not complete")
 		}
 	}
 	if s.taskWorkspace != nil {
