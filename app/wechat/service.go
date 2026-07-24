@@ -2,6 +2,7 @@ package wechat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -9,6 +10,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/anbanai/anban-creator/app/config"
@@ -289,6 +291,15 @@ func (s *Service) UploadMaterialWithRetry(filePath string, maxRetries int) (*Upl
 
 // DownloadFile 下载文件到临时目录
 func DownloadFile(url string) (string, error) {
+	return DownloadFileContext(context.Background(), url)
+}
+
+// DownloadFileContext 下载文件到临时目录，并支持取消请求。
+func DownloadFileContext(ctx context.Context, url string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	client := resty.New().
 		SetTimeout(60*time.Second).
 		SetHeader("User-Agent", "Mozilla/5.0 (compatible; AnbanCreator/1.0; +https://anbanai.com)").
@@ -316,6 +327,7 @@ func DownloadFile(url string) (string, error) {
 
 	start := time.Now()
 	resp, err := client.R().
+		SetContext(ctx).
 		SetResponseSaveFileName(tmpPath).
 		Get(url)
 	elapsed := time.Since(start)
@@ -340,6 +352,25 @@ func DownloadFile(url string) (string, error) {
 			Location:      resp.Header().Get("Location"),
 			BodyPreview:   truncateDownloadBodyPreview(resp.Bytes(), 80),
 			Elapsed:       elapsed,
+		}
+	}
+	if expectedSize, err := strconv.ParseInt(resp.Header().Get("Content-Length"), 10, 64); err == nil && expectedSize >= 0 {
+		info, err := os.Stat(tmpPath)
+		if err != nil || info.Size() != expectedSize {
+			os.Remove(tmpPath)
+			if err == nil {
+				err = fmt.Errorf("downloaded file size %d does not match content length %d", info.Size(), expectedSize)
+			}
+			return "", &DownloadError{
+				URL:           url,
+				ContentType:   resp.Header().Get("Content-Type"),
+				ContentLength: resp.Header().Get("Content-Length"),
+				Server:        resp.Header().Get("Server"),
+				CFRay:         resp.Header().Get("Cf-Ray"),
+				Location:      resp.Header().Get("Location"),
+				Elapsed:       elapsed,
+				Original:      err,
+			}
 		}
 	}
 
