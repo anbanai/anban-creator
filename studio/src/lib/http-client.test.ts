@@ -54,6 +54,16 @@ describe('getApiErrorMessage', () => {
     expect(getApiErrorMessage(axiosError, '默认错误')).toBe('默认错误')
   })
 
+  it('falls back to error when response msg is empty', () => {
+    const axiosError = {
+      response: {
+        data: { msg: '', error: '请求失败，请稍后重试' },
+      },
+    }
+
+    expect(getApiErrorMessage(axiosError, '默认错误')).toBe('请求失败，请稍后重试')
+  })
+
   it('extracts message from standard Error', () => {
     expect(getApiErrorMessage(new Error('网络错误'), '默认')).toBe('网络错误')
   })

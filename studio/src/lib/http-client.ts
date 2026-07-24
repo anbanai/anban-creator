@@ -254,7 +254,7 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
     if (code === 50000 || code === 50001) return fallback
   }
 
-  const responseMessage = body?.msg ?? body?.error
+  const responseMessage = typeof body?.msg === 'string' && body.msg.trim() ? body.msg : body?.error
   if (responseMessage) return sanitizeUserFacingErrorMessage(responseMessage, fallback)
 
   if (isNetworkError(err)) return '网络连接失败，请检查网络后重试'
