@@ -174,7 +174,6 @@ func (h *AuthHandler) createUser(ctx context.Context, user *model.User, inviter 
 	inviterID := ""
 	if inviter != nil {
 		inviterID = inviter.ID
-		user.InvitedBy = inviter.ID
 	}
 	return h.userProvisioning.Create(ctx, user, inviterID, h.maxInvitePerUser)
 }
@@ -553,7 +552,7 @@ func (h *AuthHandler) CodeLogin(c fiber.Ctx) error {
 			if errors.Is(err, service.ErrInviteLimitReached) {
 				return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
 			}
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
+			if repository.IsDuplicateKeyError(err) {
 				user, err = h.repo.Users().FindByEmail(ctx, req.Email)
 				if err != nil {
 					h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to find user after duplicate key")

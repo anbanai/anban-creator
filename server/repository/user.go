@@ -2,12 +2,37 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/anbanai/anban-creator/server/model"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const (
+	sqliteConstraintPrimaryKey = 1555
+	sqliteConstraintUnique     = 2067
+)
+
+// IsDuplicateKeyError reports duplicate-key violations across supported databases.
+func IsDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return true
+	}
+
+	var sqliteErr interface{ Code() int }
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code() == sqliteConstraintPrimaryKey || sqliteErr.Code() == sqliteConstraintUnique
+	}
+	return false
+}
 
 type userRepository struct {
 	db *gorm.DB

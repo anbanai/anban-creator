@@ -20,6 +20,7 @@ func NewUserProvisioningService(repo repository.Repository) *UserProvisioningSer
 }
 
 func (s *UserProvisioningService) Create(ctx context.Context, user *model.User, inviterID string, maxInvites int) error {
+	user.InvitedBy = inviterID
 	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		if err := tx.Users().Create(ctx, user); err != nil {
 			return err

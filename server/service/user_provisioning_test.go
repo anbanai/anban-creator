@@ -26,13 +26,18 @@ func TestUserProvisioningCreateCreatesUserWalletAndInvite(t *testing.T) {
 	}
 
 	user := newUserProvisioningTestUser("invitee@example.com", "INVITEE1")
+	user.InvitedBy = "stale-inviter"
 	service := NewUserProvisioningService(repo)
 	if err := service.Create(ctx, user, inviter.ID, 3); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := repo.Users().FindByID(ctx, user.ID); err != nil {
+	createdUser, err := repo.Users().FindByID(ctx, user.ID)
+	if err != nil {
 		t.Fatalf("created user missing: %v", err)
+	}
+	if createdUser.InvitedBy != inviter.ID {
+		t.Fatalf("created user InvitedBy = %q, want %q", createdUser.InvitedBy, inviter.ID)
 	}
 	account, err := repo.Billing().FindAccount(ctx, user.ID)
 	if err != nil {
