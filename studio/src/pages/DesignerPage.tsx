@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { PaintbrushIcon, SendIcon, XIcon } from 'lucide-react'
+import { PaintbrushIcon, SendIcon, WalletCardsIcon, XIcon } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { designerApi } from '@/lib/api/designer'
 import { uploadToOSS } from '@/lib/direct-upload'
-import { getApiErrorMessage, sanitizeUserFacingErrorMessage } from '@/lib/http-client'
+import { getApiErrorCode, getApiErrorMessage, sanitizeUserFacingErrorMessage } from '@/lib/http-client'
 import { buildDesignerRequestSize } from '@/lib/designer-size'
 import { clearActiveGeneration, loadActiveGeneration, saveActiveGeneration } from '@/lib/designer-session'
 import {
@@ -95,6 +96,7 @@ function awaitGenerationAttempt<T>(promise: Promise<T>, signal: AbortSignal): Pr
 }
 
 export default function DesignerPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedProviderId, setSelectedProviderId] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -132,10 +134,17 @@ export default function DesignerPage() {
     queryKey: ['projects', 'designer', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
   })
+  const { data: wallet, isError: walletError } = useQuery({
+    queryKey: ['billing', 'wallet'],
+    queryFn: () => api.billing.wallet(),
+  })
 
   const providerList: DesignerProvider[] = providers ?? []
   const activeProvider = providerList.find((provider) => provider.id === selectedProviderId && provider.enabled)
   const effectiveProvider = activeProvider ?? providerList.find((provider) => provider.enabled)
+  const hasInsufficientCredits = Boolean(
+    !walletError && wallet && effectiveProvider && wallet.balance < effectiveProvider.credits,
+  )
   const effectiveCaps = effectiveProvider?.capabilities
   const maxReferenceImages = maxReferenceImagesForProvider(effectiveProvider)
   const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
@@ -332,6 +341,17 @@ export default function DesignerPage() {
     startPolling(generationID, attempt)
   }, [isGenerationAttemptActive, startPolling])
 
+  const showGenerationError = useCallback((error: unknown) => {
+    const message = getApiErrorMessage(error, '图片服务暂时不可用，请稍后重试')
+    if (getApiErrorCode(error) === 40203) {
+      toast.error(message, {
+        action: { label: '去充值', onClick: () => navigate('/billing') },
+      })
+      return
+    }
+    toast.error(message)
+  }, [navigate])
+
   const handleGenerate = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider) {
       toast.error('没有可用的图片模型')
@@ -383,9 +403,9 @@ export default function DesignerPage() {
     } catch (error) {
       if (!isGenerationAttemptActive(attempt)) return
       setIsGenerating(false)
-      toast.error(getApiErrorMessage(error, '图片生成失败，请重试'))
+      showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, projectID, referenceCapacity, settings, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider || !editingImage) return
@@ -443,9 +463,9 @@ export default function DesignerPage() {
     } catch (error) {
       if (!isGenerationAttemptActive(attempt)) return
       setIsGenerating(false)
-      toast.error(getApiErrorMessage(error, '编辑图片失败，请重试'))
+      showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveProvider, isGenerationAttemptActive, projectID, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveProvider, isGenerationAttemptActive, projectID, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
     generationAttemptRef.current += 1
@@ -539,15 +559,27 @@ export default function DesignerPage() {
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}
                 submitting={isGenerating}
-                submitDisabled={!promptValue.prompt.trim() || !effectiveProvider}
+                submitDisabled={!promptValue.prompt.trim() || !effectiveProvider || hasInsufficientCredits}
                 ariaLabel="Designer prompt"
                 acceptedTypesLabel="图片"
                 onAttachmentRejected={handleAttachmentRejected}
-                status={isGenerating ? <span className="text-xs text-muted-foreground">正在生成...</span> : null}
+                status={isGenerating ? (
+                  <span className="text-xs text-muted-foreground">正在生成...</span>
+                ) : effectiveProvider ? (
+                  <span className="text-xs text-muted-foreground">
+                    {effectiveProvider.credits.toLocaleString()} 积分
+                    {wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
+                  </span>
+                ) : null}
                 trailingTools={isGenerating ? (
                   <Button type="button" size="sm" variant="ghost" aria-label="取消生成" onClick={handleCancel}>
                     <XIcon data-icon="inline-start" />
                     取消
+                  </Button>
+                ) : hasInsufficientCredits ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => navigate('/billing')}>
+                    <WalletCardsIcon data-icon="inline-start" />
+                    去充值
                   </Button>
                 ) : null}
               />

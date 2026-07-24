@@ -185,11 +185,10 @@ export default function DesignerToolbar({
   const caps = capabilities
 
   // Standalone designer operations are prepaid from the fixed-SKU wallet.
-  const { data: balanceData, isLoading: balanceLoading } = useQuery({
+  const { data: balanceData, isLoading: balanceLoading, isError: balanceError } = useQuery({
     queryKey: ['billing', 'wallet'],
     queryFn: () => api.billing.wallet(),
   })
-  const balance = balanceData?.balance ?? 0
 
   function update(patch: DesignerSettingsPatch) {
     onSettingsChange(patch)
@@ -227,10 +226,10 @@ export default function DesignerToolbar({
                 <TooltipTrigger>
                   <Badge variant="secondary" className="gap-1 text-[11px] font-medium">
                     <Coins className="h-3 w-3" />
-                    {balanceLoading ? <Skeleton className="h-3 w-8" /> : balance.toLocaleString()}
+                    {balanceLoading ? <Skeleton className="h-3 w-8" /> : balanceError ? '—' : balanceData?.balance.toLocaleString() ?? '—'}
                   </Badge>
                 </TooltipTrigger>
-                <TooltipContent>积分余额</TooltipContent>
+                <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
               </Tooltip>
             </div>
 
