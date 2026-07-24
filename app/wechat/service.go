@@ -363,7 +363,6 @@ func DownloadFileContext(ctx context.Context, url string) (string, error) {
 			}
 			return "", &DownloadError{
 				URL:           url,
-				StatusCode:    resp.StatusCode(),
 				ContentType:   resp.Header().Get("Content-Type"),
 				ContentLength: resp.Header().Get("Content-Length"),
 				Server:        resp.Header().Get("Server"),

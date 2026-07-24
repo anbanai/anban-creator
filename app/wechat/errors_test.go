@@ -139,7 +139,9 @@ func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
 }
 
 func TestDownloadFileContextHonorsCancellation(t *testing.T) {
+	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
@@ -157,7 +159,12 @@ func TestDownloadFileContextHonorsCancellation(t *testing.T) {
 		resultCh <- result{path: path, err: err}
 	}()
 
-	cancel()
+	select {
+	case <-started:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive download request")
+	}
 	select {
 	case result := <-resultCh:
 		defer os.Remove(result.path)
@@ -199,6 +206,19 @@ func TestDownloadFileContextRemovesPartialFile(t *testing.T) {
 	defer os.Remove(path)
 	if err == nil {
 		t.Fatal("DownloadFileContext error = nil, want error")
+	}
+	var dlErr *DownloadError
+	if !errors.As(err, &dlErr) {
+		t.Fatalf("error type = %T, want *DownloadError", err)
+	}
+	if dlErr.Original == nil {
+		t.Fatal("DownloadError.Original = nil, want size mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match content length") {
+		t.Fatalf("error = %q, want size mismatch text", err)
+	}
+	if dlErr.StatusCode != 0 {
+		t.Fatalf("StatusCode = %d, want 0 for body failure", dlErr.StatusCode)
 	}
 	entries, err := os.ReadDir(os.Getenv("TMPDIR"))
 	if err != nil {
