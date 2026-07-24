@@ -49,7 +49,7 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 	if slices.Contains(engine.calls, "container-start") {
 		t.Fatalf("container started during preparation: calls=%v", engine.calls)
 	}
-	if engine.createdConfig == nil || engine.createdConfig.Image != dockerDispatcherTestExecution().RuntimeImage {
+	if engine.createdConfig == nil || engine.createdConfig.Image != dockerDispatcherTestImageID {
 		t.Fatalf("created config = %#v", engine.createdConfig)
 	}
 	if !slices.Equal(engine.createdConfig.Env, []string{"PATH=/trusted/bin:/usr/bin", "HOME=/home/node"}) ||
@@ -98,6 +98,40 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCallSubsequence(t, engine.calls, "archive-copy", "container-start")
+}
+
+func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
+	const (
+		mutableTag   = "registry.example.com/creator-agent-article:latest"
+		racedImageID = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	)
+	engine := newFakeDockerEngine()
+	engine.images[mutableTag] = dockerDispatcherTestImage()
+	engine.createdImageIDs = map[string]string{
+		mutableTag:                  racedImageID,
+		dockerDispatcherTestImageID: dockerDispatcherTestImageID,
+	}
+	runtimeImages := dockerDispatcherTestImages()
+	runtimeImages[model.PlatformArticle] = mutableTag
+	dispatcher, err := NewDockerDispatcher(
+		runtimeImages, dockerDispatcherTestConfig(), "http://server:8080",
+		dockerDispatcherTestTokens(t), engine, time.Now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := dockerDispatcherTestExecution()
+	execution.RuntimeImage = mutableTag
+
+	if _, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if engine.createdConfig == nil || engine.createdConfig.Image != dockerDispatcherTestImageID {
+		t.Fatalf("ContainerCreate image = %#v, want inspected immutable ID %q", engine.createdConfig, dockerDispatcherTestImageID)
+	}
+	if !slices.Equal(engine.copiedImageIDs, []string{dockerDispatcherTestImageID}) {
+		t.Fatalf("workload token copied to image IDs %v, want only inspected immutable ID %q; raced image %q must receive no token", engine.copiedImageIDs, dockerDispatcherTestImageID, racedImageID)
+	}
 }
 
 func TestDockerDispatcherResolvePreparedIsLookupOnlyAndInstanceFenced(t *testing.T) {
@@ -692,8 +726,10 @@ type fakeDockerEngine struct {
 	containerID                 string
 	createdConfig               *containertypes.Config
 	createdHostConfig           *containertypes.HostConfig
+	createdImageIDs             map[string]string
 	copyDestinations            []string
 	copyOptions                 []containertypes.CopyToContainerOptions
+	copiedImageIDs              []string
 	archives                    [][]byte
 	stoppedContainers           []string
 	removedContainers           []string
@@ -800,7 +836,11 @@ func (e *fakeDockerEngine) ContainerCreate(ctx context.Context, config *containe
 	e.record(ctx, "container-create")
 	e.createdConfig = config
 	e.createdHostConfig = hostConfig
-	inspected := fakeDockerContainerInspect(e.containerID, name, dockerDispatcherTestImageID, config, hostConfig)
+	createdImageID := dockerDispatcherTestImageID
+	if resolved, ok := e.createdImageIDs[config.Image]; ok {
+		createdImageID = resolved
+	}
+	inspected := fakeDockerContainerInspect(e.containerID, name, createdImageID, config, hostConfig)
 	if e.foreignContainerOnConflict {
 		inspected.Config.Labels[dockerExecutionIDLabel] = "foreign"
 	}
@@ -813,10 +853,16 @@ func (e *fakeDockerEngine) ContainerCreate(ctx context.Context, config *containe
 	return containertypes.CreateResponse{ID: e.containerID}, nil
 }
 
-func (e *fakeDockerEngine) CopyToContainer(ctx context.Context, _ string, destination string, content io.Reader, options containertypes.CopyToContainerOptions) error {
+func (e *fakeDockerEngine) CopyToContainer(ctx context.Context, containerID string, destination string, content io.Reader, options containertypes.CopyToContainerOptions) error {
 	e.record(ctx, "archive-copy")
 	if e.copyError != nil {
 		return e.copyError
+	}
+	for _, candidate := range e.containers {
+		if candidate.ID == containerID {
+			e.copiedImageIDs = append(e.copiedImageIDs, candidate.Image)
+			break
+		}
 	}
 	raw, err := io.ReadAll(content)
 	if err != nil {
@@ -910,8 +956,8 @@ func fakeDockerContainerInspect(id, name, imageID string, config *containertypes
 
 func dockerIdentityInspect(execution *model.TaskExecution, id string, state *containertypes.State) containertypes.InspectResponse {
 	return containertypes.InspectResponse{
-		ContainerJSONBase: &containertypes.ContainerJSONBase{ID: id, Name: "/" + dockerRuntimeContainerName(execution.ID), State: state},
-		Config: &containertypes.Config{Image: execution.RuntimeImage, Labels: map[string]string{
+		ContainerJSONBase: &containertypes.ContainerJSONBase{ID: id, Name: "/" + dockerRuntimeContainerName(execution.ID), Image: dockerDispatcherTestImageID, State: state},
+		Config: &containertypes.Config{Image: dockerDispatcherTestImageID, Labels: map[string]string{
 			dockerExecutionIDLabel: execution.ID,
 			dockerTaskIDLabel:      execution.TaskID,
 			dockerProjectIDLabel:   "docker-project-1",

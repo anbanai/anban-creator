@@ -60,7 +60,7 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	useDockerInit := false
 	oomKillDisable := false
 	containerConfig := dockerContainerConfigFromImage(cfg.ImageConfig)
-	containerConfig.Image = dockerExecutionRuntimeImage(execution)
+	containerConfig.Image = cfg.ImageID
 	containerConfig.User = ContainerRuntimeUser
 	containerConfig.Entrypoint = []string{"tini", "--", AgentBinaryName}
 	containerConfig.Cmd = []string{
@@ -391,13 +391,6 @@ func dockerTaskUserID(task *model.Task) string {
 		return ""
 	}
 	return task.UserID
-}
-
-func dockerExecutionRuntimeImage(execution *model.TaskExecution) string {
-	if execution == nil {
-		return ""
-	}
-	return execution.RuntimeImage
 }
 
 func equalInt64Pointer(left, right *int64) bool {

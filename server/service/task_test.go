@@ -1441,7 +1441,7 @@ func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.
 	}
 }
 
-func TestTaskServiceJobDispatcherIgnoresLegacyProjectConcurrencyCap(t *testing.T) {
+func TestTaskServiceRuntimeDispatcherHonorsConfiguredProjectConcurrencyCap(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetProjectConcurrencyCap(1)
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
@@ -1472,8 +1472,8 @@ func TestTaskServiceJobDispatcherIgnoresLegacyProjectConcurrencyCap(t *testing.T
 	if err := svc.EnqueueExecution(ctx, pending, project); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
-		t.Fatalf("enqueued = %d, want 1 under configured project limit", got)
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
+		t.Fatalf("enqueued = %d, want 0 while configured cap is reached", got)
 	}
 }
 
@@ -1485,11 +1485,16 @@ func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
 	}
 	svc.SetProjectConcurrencyCap(1)
 	if got := svc.effectiveProjectMaxConcurrent(project); got != 1 {
-		t.Fatalf("legacy Kubernetes limit = %d, want 1", got)
+		t.Fatalf("configured runtime cap = %d, want 1", got)
 	}
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
-	if got := svc.effectiveProjectMaxConcurrent(project); got != 8 {
-		t.Fatalf("Job dispatcher configured limit = %d, want 8", got)
+	if got := svc.effectiveProjectMaxConcurrent(project); got != 1 {
+		t.Fatalf("dispatcher configured cap = %d, want 1", got)
+	}
+	uncapped, _ := setupTaskServiceWithEnqueuer(t)
+	uncapped.SetRuntimeDispatcher(&dispatchTestDispatcher{})
+	if got := uncapped.effectiveProjectMaxConcurrent(project); got != 8 {
+		t.Fatalf("uncapped dispatcher limit = %d, want project limit 8", got)
 	}
 }
 

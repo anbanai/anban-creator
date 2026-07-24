@@ -353,8 +353,8 @@ func main() {
 		projectSvc.SetProjectMemoryLifecycle(projectMemoryLifecycle)
 		runtimeReconciler = agent.NewRuntimeReconciler(runtimeDispatcher, taskSvc, reconcilerConfig, *log)
 		taskSvc.SetNASResumeEnabled(true)
-		if cfg.Claude.Executor == "kubernetes" {
-			taskSvc.SetProjectConcurrencyCap(1)
+		if cap := managedRuntimeProjectConcurrencyCap(cfg.Claude.Executor); cap > 0 {
+			taskSvc.SetProjectConcurrencyCap(cap)
 			log.Info().Msg("Kubernetes Job runtime enabled: project task concurrency capped at 1 per memory PVC")
 		}
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
@@ -893,6 +893,13 @@ func main() {
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
 	}
+}
+
+func managedRuntimeProjectConcurrencyCap(executor string) int {
+	if strings.TrimSpace(executor) == "kubernetes" {
+		return 1
+	}
+	return 0
 }
 
 func migrateModels(db *gorm.DB, migrate func(*gorm.DB) error) error {

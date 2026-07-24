@@ -101,7 +101,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		}
 	}
 	role := parsedDocs[2]
-	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "delete") {
+	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "update", "delete") {
 		t.Fatalf("Role must allow Job lifecycle management: %#v", role.Rules)
 	}
 	if !roleAllows(role, "persistentvolumeclaims", "get", "create", "delete") {

@@ -648,8 +648,10 @@ func verifyDockerExecutionContainer(inspected containertypes.InspectResponse, ex
 	if execution.RuntimeInstanceID != "" && inspected.ID != execution.RuntimeInstanceID {
 		return fmt.Errorf("Docker container %q instance identity mismatch", wantName)
 	}
-	if inspected.Config.Image != execution.RuntimeImage ||
-		inspected.Config.Labels[dockerExecutionIDLabel] != execution.ID ||
+	if strings.TrimSpace(inspected.Image) == "" || inspected.Config.Image != inspected.Image {
+		return fmt.Errorf("Docker container %q runtime image identity mismatch", wantName)
+	}
+	if inspected.Config.Labels[dockerExecutionIDLabel] != execution.ID ||
 		inspected.Config.Labels[dockerTaskIDLabel] != execution.TaskID ||
 		!isCanonicalDockerIdentity(inspected.Config.Labels[dockerProjectIDLabel]) ||
 		!isCanonicalDockerIdentity(inspected.Config.Labels[dockerUserIDLabel]) {

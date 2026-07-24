@@ -273,7 +273,7 @@ func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int 
 	if project != nil && project.MaxConcurrentTasks > 0 {
 		maxConcurrent = project.MaxConcurrentTasks
 	}
-	if s.runtimeDispatcher == nil && s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
+	if s.projectConcurrencyCap > 0 && s.projectConcurrencyCap < maxConcurrent {
 		return s.projectConcurrencyCap
 	}
 	return maxConcurrent

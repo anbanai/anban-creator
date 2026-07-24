@@ -62,8 +62,8 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	if spec.TaskVolume.Name != dockerTaskWorkspaceVolumeName(task.ID) {
 		t.Fatalf("task volume name = %q, want deterministic task name", spec.TaskVolume.Name)
 	}
-	if spec.ContainerConfig.Image != execution.RuntimeImage {
-		t.Fatalf("image = %q, want persisted runtime image %q", spec.ContainerConfig.Image, execution.RuntimeImage)
+	if spec.ContainerConfig.Image != cfg.ImageID {
+		t.Fatalf("create image = %q, want trusted inspected image ID %q", spec.ContainerConfig.Image, cfg.ImageID)
 	}
 	if spec.ImageID != cfg.ImageID {
 		t.Fatalf("image ID = %q, want trusted inspected image ID %q", spec.ImageID, cfg.ImageID)
