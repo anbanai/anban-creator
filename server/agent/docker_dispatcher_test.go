@@ -134,6 +134,25 @@ func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 	}
 }
 
+func TestDockerDispatcherActivateRejectsConfigImageMismatchWithActualImageID(t *testing.T) {
+	engine := newFakeDockerEngine()
+	execution := dockerDispatcherTestExecution()
+	execution.RuntimeScope = dockerRuntimeScope
+	execution.RuntimeWorkload = dockerRuntimeContainerName(execution.ID)
+	execution.RuntimeInstanceID = engine.containerID
+	inspected := dockerIdentityInspect(execution, engine.containerID, &containertypes.State{Status: containertypes.StateCreated})
+	inspected.Config.Image = execution.RuntimeImage
+	engine.containers[execution.RuntimeWorkload] = inspected
+
+	err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Activate(context.Background(), execution)
+	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "runtime image identity mismatch") {
+		t.Fatalf("Activate error = %v, want permanent Config.Image/actual Image identity mismatch", err)
+	}
+	if slices.Contains(engine.calls, "container-start") {
+		t.Fatalf("mismatched image container started: calls=%v", engine.calls)
+	}
+}
+
 func TestDockerDispatcherResolvePreparedIsLookupOnlyAndInstanceFenced(t *testing.T) {
 	ctx := context.Background()
 	engine := newFakeDockerEngine()
