@@ -1,11 +1,15 @@
-import { createElement } from 'react'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import { BrowserRouter } from 'react-router-dom'
+import { ThemeProvider } from 'next-themes'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DesignerPage from './DesignerPage'
+import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import { api } from '@/lib/api'
 import { designerApi } from '@/lib/api/designer'
-import { render } from '@/test/test-utils'
+import { createTestQueryClient, render } from '@/test/test-utils'
 
 const navigateMock = vi.fn()
 const toast = vi.hoisted(() => ({
@@ -13,6 +17,7 @@ const toast = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
 }))
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
@@ -20,6 +25,23 @@ vi.mock('react-router-dom', async () => {
 })
 
 vi.mock('sonner', () => ({ toast }))
+
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
+
+vi.mock('@/components/designer/InlineMaskEditor', async () => {
+  const React = await vi.importActual<typeof import('react')>('react')
+  return {
+    default: React.forwardRef((_props, ref) => {
+      React.useImperativeHandle(ref, () => ({
+        exportMask: async () => new File(['mask'], 'mask.png', { type: 'image/png' }),
+      }))
+      return <div data-testid="inline-mask-editor" />
+    }),
+  }
+})
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -80,6 +102,20 @@ const provider = {
   },
 }
 
+function renderWithQueryClient(queryClient: QueryClient) {
+  return testingRender(<DesignerPage />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
+          </ThemeProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    ),
+  })
+}
+
 describe('Designer billing guidance', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -92,6 +128,23 @@ describe('Designer billing guidance', () => {
       price_credits: provider.credits,
     })
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 1000, promotional: 0, debt: 0, balance: 1000 })
+    vi.mocked(designerApi.uploadReferenceFromUrl).mockResolvedValue({
+      file_id: 'source-file',
+      filename: 'source.png',
+      size: 5,
+    })
+    vi.mocked(designerApi.registerReference).mockResolvedValue({
+      file_id: 'mask-file',
+      filename: 'mask.png',
+      size: 4,
+    })
+    uploadToOSSMock.mockResolvedValue({
+      uploadId: 'mask-upload',
+      key: 'uploads/pending/user/mask.png',
+      publicUrl: 'https://cdn.example/mask.png',
+      contentType: 'image/png',
+      size: 4,
+    })
   })
 
   it('shows price and balance and disables generation when credits are insufficient', async () => {
@@ -124,6 +177,70 @@ describe('Designer billing guidance', () => {
     expect(screen.getByText('—')).toBeInTheDocument()
   })
 
+  it('does not show a stale wallet balance after a background refresh fails', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['billing', 'wallet'], { paid: 1000, promotional: 0, debt: 0, balance: 1000 })
+    vi.mocked(api.billing.wallet).mockRejectedValue(new Error('network'))
+
+    renderWithQueryClient(queryClient)
+
+    await screen.findAllByText('GPT Image 2')
+    await waitFor(() => expect(queryClient.getQueryState(['billing', 'wallet'])?.status).toBe('error'))
+    expect(screen.queryByText('500 积分 · 余额 1,000')).not.toBeInTheDocument()
+    expect(screen.getByText('500 积分')).toBeInTheDocument()
+  })
+
+  it('refreshes the wallet after a normal generation is accepted', async () => {
+    render(createElement(DesignerPage))
+
+    await screen.findAllByText('GPT Image 2')
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
+      target: { value: '生成海报' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.billing.wallet).toHaveBeenCalledTimes(2))
+  })
+
+  it('refreshes the wallet after an edit generation is accepted', async () => {
+    window.sessionStorage.setItem('designer_active_generation', JSON.stringify({
+      generationId: 'completed-generation',
+      startedAt: Date.now(),
+    }))
+    vi.mocked(designerApi.getGeneration).mockResolvedValue({
+      id: 'completed-generation',
+      user_id: 'user-1',
+      project_id: 'default',
+      prompt: '原图',
+      provider: 'openai',
+      model: 'gpt-image-2',
+      n: 1,
+      status: 'completed',
+      created_at: '2026-07-24T00:00:00Z',
+      updated_at: '2026-07-24T00:01:00Z',
+      results: [{
+        id: 1,
+        generation_id: 'completed-generation',
+        image_url: 'data:image/png;base64,aW1hZ2U=',
+        index: 0,
+      }],
+    })
+
+    render(createElement(DesignerPage))
+
+    await screen.findByAltText('生成图片 1')
+    fireEvent.click(screen.getByTitle('局部编辑'))
+    expect(await screen.findByTestId('inline-mask-editor')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述你想修改的区域...'), {
+      target: { value: '改成蓝色' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.billing.wallet).toHaveBeenCalledTimes(2))
+  })
+
   it('offers billing navigation when the server rejects for insufficient credits', async () => {
     vi.mocked(designerApi.generate).mockRejectedValue({
       response: { data: { code: 40203, msg: 'billing_insufficient_for_standalone_operation' } },
@@ -144,5 +261,6 @@ describe('Designer billing guidance', () => {
     const options = toast.error.mock.calls[0]?.[1] as { action?: { onClick?: () => void } }
     options.action?.onClick?.()
     expect(navigateMock).toHaveBeenCalledWith('/billing')
+    await waitFor(() => expect(api.billing.wallet).toHaveBeenCalledTimes(2))
   })
 })

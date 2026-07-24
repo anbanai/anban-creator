@@ -334,23 +334,29 @@ export default function DesignerPage() {
     })
   }, [finalizeGenerationAttempt, isGenerationAttemptActive, startGenerationAttempt, startPolling])
 
+  const refreshWallet = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['billing', 'wallet'] })
+  }, [queryClient])
+
   const beginGeneration = useCallback((generationID: string, attempt: GenerationAttempt) => {
     if (!isGenerationAttemptActive(attempt)) return
+    refreshWallet()
     setSelectedGenerationId(generationID)
     saveActiveGeneration(generationID)
     startPolling(generationID, attempt)
-  }, [isGenerationAttemptActive, startPolling])
+  }, [isGenerationAttemptActive, refreshWallet, startPolling])
 
   const showGenerationError = useCallback((error: unknown) => {
     const message = getApiErrorMessage(error, '图片服务暂时不可用，请稍后重试')
     if (getApiErrorCode(error) === 40203) {
+      refreshWallet()
       toast.error(message, {
         action: { label: '去充值', onClick: () => navigate('/billing') },
       })
       return
     }
     toast.error(message)
-  }, [navigate])
+  }, [navigate, refreshWallet])
 
   const handleGenerate = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveProvider) {
@@ -568,7 +574,7 @@ export default function DesignerPage() {
                 ) : effectiveProvider ? (
                   <span className="text-xs text-muted-foreground">
                     {effectiveProvider.credits.toLocaleString()} 积分
-                    {wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
+                    {!walletError && wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
                   </span>
                 ) : null}
                 trailingTools={isGenerating ? (
