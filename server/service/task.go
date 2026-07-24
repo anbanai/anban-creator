@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,8 @@ type TaskEnqueuer interface {
 type UniqueTaskEnqueuer interface {
 	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
 }
+
+var ErrTaskCapabilityAccessDenied = errors.New("task capability access denied")
 
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
@@ -80,7 +84,7 @@ type TaskService struct {
 	persistTimeout time.Duration
 	// defaultModel / maxTurnsOverrides feed the local-executor claim response
 	// (LocalExecutionConfig) so a desktop-built agent argv mirrors what the cloud
-	// managed bootstrap returns. Set via SetExecutorDefaults during wiring.
+	// DockerExecutor would pass. Set via SetExecutorDefaults during wiring.
 	defaultModel      string
 	maxTurnsOverrides map[string]int
 	nasResumeEnabled  bool
@@ -242,8 +246,9 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 	}
 }
 
-// SetExecutorDefaults wires the Claude model and per-type max-turns overrides
-// used to build standalone desktop Agent claim responses.
+// SetExecutorDefaults wires the Claude model + per-type max-turns overrides used
+// to build local-executor claim responses. Mirrors the values the cloud
+// DockerExecutor receives, so a desktop-spawned agent argv matches the cloud path.
 func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides map[string]int) {
 	s.defaultModel = defaultModel
 	s.maxTurnsOverrides = maxTurnsOverrides
@@ -256,16 +261,9 @@ func (s *TaskService) SetProjectConcurrencyCap(cap int) {
 	s.projectConcurrencyCap = cap
 }
 
-// SetNASResumeEnabled enables task continuation against durable managed
-// workspaces.
+// SetNASResumeEnabled enables task continuation against durable managed workspaces.
 func (s *TaskService) SetNASResumeEnabled(enabled bool) {
 	s.nasResumeEnabled = enabled
-}
-
-// ResolveWorkspacePath retains the MCP contract without claiming that the API
-// server can read a managed runtime's isolated workspace.
-func (s *TaskService) ResolveWorkspacePath(_ string, filePath string) (string, bool) {
-	return strings.TrimSpace(filePath), false
 }
 
 func (s *TaskService) effectiveProjectMaxConcurrent(project *model.Project) int {
@@ -314,7 +312,10 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
-var ErrMontageInput = errors.New("montage input invalid")
+var (
+	ErrMontageInput                = errors.New("montage input invalid")
+	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
+)
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 	return append([]model.EntryAttachment(nil), in...)
@@ -337,9 +338,15 @@ type CreateManualParams struct {
 	ImageModelKey         string
 	SkipRefImage          *bool
 	ReferenceImageAssetID string
+	// allowProjectReferenceAsset is set only by Clone after it derives a trusted
+	// match from the persisted source task. Create and plan paths keep it false.
+	allowProjectReferenceAsset bool
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
+	// InputSourceProjectID is the project that owns InputSourceTaskID. It is
+	// internal clone provenance and must be persisted with the source task ID.
+	InputSourceProjectID string
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
@@ -407,17 +414,21 @@ func validateTaskCreationProject(project *model.Project, userID, projectID strin
 		return ErrProjectOwnedByUser
 	}
 	if project.Status != model.ProjectStatusActive {
-		return fmt.Errorf("project is not active")
+		return ErrTaskCreationProjectInactive
 	}
 	return nil
 }
 
-func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
+func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot, allowProjectReferenceAsset bool) error {
+	taskAssetPurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	if allowProjectReferenceAsset {
+		taskAssetPurposes = append(taskAssetPurposes, DirectUploadPurposeProjectReference)
+	}
 	checks := []struct {
 		assetID string
 		allowed []string
 	}{
-		{assetID: taskAssetID, allowed: []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}},
+		{assetID: taskAssetID, allowed: taskAssetPurposes},
 	}
 	if snapshot != nil {
 		checks = append(checks, struct {
@@ -470,7 +481,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot, p.allowProjectReferenceAsset); err != nil {
 		return nil, err
 	}
 
@@ -590,6 +601,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageModelKey:            effectiveImageModelKey,
 			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
+			InputSourceProjectID:     p.InputSourceProjectID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
 			Goal:                     p.Goal,
@@ -624,7 +636,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
-	if err := s.persistTasksWithFixedAdmission(ctx, tasks); err != nil {
+	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage); err != nil {
 		if s.topicPoolSvc != nil {
 			for _, task := range tasks {
 				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
@@ -659,7 +671,7 @@ func (s *TaskService) persistTaskWithFixedAdmission(ctx context.Context, task *m
 	return s.persistTasksWithFixedAdmission(ctx, []*model.Task{task})
 }
 
-func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task) error {
+func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task, hasContentImageOverride ...*bool) error {
 	if len(tasks) == 0 {
 		return fmt.Errorf("at least one task is required")
 	}
@@ -668,10 +680,42 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return fmt.Errorf("task is required")
 		}
 	}
+	explicitlyDisableContentImage := len(hasContentImageOverride) > 0 && hasContentImageOverride[0] != nil && !*hasContentImageOverride[0]
+	lockProjectAdmission := func(repo repository.Repository) error {
+		project, err := repo.Projects().FindByIDForUpdate(ctx, tasks[0].ProjectID)
+		if err != nil {
+			return fmt.Errorf("lock project for task admission: %w", err)
+		}
+		if project.Status != model.ProjectStatusActive || project.DeletingAt != nil {
+			return fmt.Errorf("project is not active")
+		}
+		for _, task := range tasks {
+			if task.ProjectID != project.ID || task.UserID != project.UserID {
+				return fmt.Errorf("task admission project identity mismatch")
+			}
+		}
+		return nil
+	}
+	createTask := func(repo repository.Repository, task *model.Task) error {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			return err
+		}
+		if !explicitlyDisableContentImage {
+			return nil
+		}
+		// GORM applies the model's default:true tag to a false bool during Create.
+		// Save the explicit user choice inside the same admission transaction while
+		// retaining the true default for callers that omit the field.
+		task.HasContentImage = false
+		return repo.Tasks().Update(ctx, task)
+	}
 	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			if err := lockProjectAdmission(tx); err != nil {
+				return err
+			}
 			for _, task := range tasks {
-				if err := tx.Tasks().Create(ctx, task); err != nil {
+				if err := createTask(tx, task); err != nil {
 					return err
 				}
 			}
@@ -703,6 +747,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		admissions = append(admissions, admission{task: task, quote: quote, fingerprint: fingerprint})
 	}
 	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := lockProjectAdmission(tx); err != nil {
+			return err
+		}
 		for _, item := range admissions {
 			charge, err := s.billingWalletSvc.ChargeTaskAdmissionInTx(ctx, tx, TaskChargeRequest{
 				UserID: item.task.UserID, TaskID: item.task.ID, QuoteID: item.quote.ID,
@@ -715,7 +762,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			}
 			item.task.BillingQuoteID, item.task.BillingCatalogID, item.task.BillingSKUID = item.quote.ID, item.quote.CatalogID, item.quote.SKUID
 			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
-			if err := tx.Tasks().Create(ctx, item.task); err != nil {
+			if err := createTask(tx, item.task); err != nil {
 				return err
 			}
 		}
@@ -757,7 +804,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
-	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
 	var planMontageInput *model.MontageInput
@@ -878,6 +925,17 @@ func (s *TaskService) ListTitles(ctx context.Context, projectID string) ([]strin
 	return s.repo.Tasks().FindTitlesByProjectID(ctx, projectID)
 }
 
+func (s *TaskService) ListTitlesForUser(ctx context.Context, userID, projectID string) ([]string, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	if project.UserID != userID {
+		return nil, fmt.Errorf("project not owned by user")
+	}
+	return s.ListTitles(ctx, projectID)
+}
+
 var artifactTaskTitles = map[string]struct{}{
 	"图片内容规划":    {},
 	"标题候选与评分":   {},
@@ -968,8 +1026,17 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 	if userID != "" && taskErr == nil && task != nil && task.UserID != userID {
 		return fmt.Errorf("task not found")
 	}
-	if taskErr == nil && task != nil && task.CurrentExecutionID != nil && s.runtimeDispatcher != nil {
-		return s.cancelCloudExecution(ctx, task, userID)
+	if taskErr == nil && task != nil && task.CurrentExecutionID != nil {
+		execution, executionErr := s.repo.TaskExecutions().FindByID(ctx, *task.CurrentExecutionID)
+		if executionErr != nil {
+			return fmt.Errorf("find current execution before cancellation: %w", executionErr)
+		}
+		if execution.Target == model.ExecutionTargetLocalClaimed {
+			return s.cancelLocalExecution(ctx, task, execution, userID)
+		}
+		if s.runtimeDispatcher != nil {
+			return s.cancelCloudExecution(ctx, task, userID)
+		}
 	}
 
 	// Atomically transition status: only pending or running can be cancelled.
@@ -1091,6 +1158,13 @@ func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*mo
 	return files, nil
 }
 
+func (s *TaskService) GetVisibleFilesForUser(ctx context.Context, userID, taskID string) ([]*model.TaskFile, error) {
+	if _, err := s.ValidateAgentTaskAccess(ctx, taskID, userID); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrTaskCapabilityAccessDenied, err)
+	}
+	return s.GetVisibleFiles(ctx, taskID)
+}
+
 func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -1134,6 +1208,14 @@ func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) 
 // If the project's concurrent task limit is reached, the task stays in DB as "pending"
 // and will be dispatched later when a slot opens up.
 func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, project *model.Project) error {
+	authoritative, err := s.repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("find task before enqueue: %w", err)
+	}
+	if authoritative.DeletingAt != nil {
+		return ErrTaskDeleting
+	}
+	task = authoritative
 	// Load project if not provided, for concurrency check.
 	if project == nil && task.ProjectID != "" {
 		ch, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
@@ -1444,6 +1526,17 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
 	}
+	acquired, err := s.repo.Tasks().BeginDelete(ctx, id)
+	if err != nil {
+		return fmt.Errorf("begin task delete: %w", err)
+	}
+	task, err = s.repo.Tasks().FindByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("reload task delete authority: %w", err)
+	}
+	if !acquired && task.DeletingAt == nil {
+		return fmt.Errorf("begin task delete: deletion authority was not acquired")
+	}
 
 	managedExecution := task.CurrentExecutionID != nil
 	requiresCancel := task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusPending
@@ -1480,16 +1573,69 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("schedule task artifact cleanup: %w", err)
 	}
 
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
+	storageKeys := make(map[string]struct{})
+	files, err := s.repo.TaskFiles().FindAllByTaskID(ctx, id)
 	if err != nil {
-		s.logger.Error().Err(err).Str("task_id", id).Msg("failed to list task files for deletion")
+		return fmt.Errorf("list task files for deletion: %w", err)
 	}
-
 	for _, f := range files {
-		if f.OSSKey != "" && s.store != nil {
-			if delErr := s.store.Delete(ctx, f.OSSKey); delErr != nil {
-				s.logger.Error().Err(delErr).Str("key", f.OSSKey).Msg("failed to delete storage file")
+		if f.OSSKey == "" && f.CleanupOSSKey == "" {
+			continue
+		}
+		if s.store == nil || f.StorageProvider == "" || f.StorageProvider != s.store.Name() {
+			return fmt.Errorf("storage provider %q is unavailable for task file %s", f.StorageProvider, f.ID)
+		}
+		for _, key := range []string{f.OSSKey, f.CleanupOSSKey} {
+			if key != "" {
+				storageKeys[key] = struct{}{}
 			}
+		}
+	}
+	settlements, err := s.repo.Billing().ListSettlementsByTask(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list task operation objects for deletion: %w", err)
+	}
+	for _, settlement := range settlements {
+		if settlement.AttemptID == nil || len(settlement.ResultSnapshot) == 0 {
+			continue
+		}
+		var snapshot struct {
+			OperationObject json.RawMessage `json:"operation_object"`
+		}
+		if err := json.Unmarshal(settlement.ResultSnapshot, &snapshot); err != nil {
+			return fmt.Errorf("decode task operation object settlement %s: %w", settlement.ID, err)
+		}
+		if len(snapshot.OperationObject) == 0 || string(snapshot.OperationObject) == "null" {
+			continue
+		}
+		var object taskFileOperationObjectSnapshot
+		if err := json.Unmarshal(snapshot.OperationObject, &object); err != nil {
+			return fmt.Errorf("decode task operation object %s: %w", settlement.ID, err)
+		}
+		expectedPrefix := buildTaskMCPArtifactStoragePrefix(task, *settlement.AttemptID) + "operation-objects/"
+		if object.OSSKey == "" || object.StorageProvider == "" || s.store == nil || object.StorageProvider != s.store.Name() ||
+			!strings.HasPrefix(filepath.ToSlash(object.OSSKey), expectedPrefix) || !isImmutableOperationObjectKey(object.OSSKey) {
+			return fmt.Errorf("invalid task operation object in settlement %s", settlement.ID)
+		}
+		storageKeys[object.OSSKey] = struct{}{}
+	}
+	if len(storageKeys) > 0 && s.store == nil {
+		return fmt.Errorf("storage provider is required to delete task files")
+	}
+	if s.store != nil {
+		keys := make([]string, 0, len(storageKeys))
+		for key := range storageKeys {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		var cleanupErrors []error
+		for _, key := range keys {
+			if delErr := s.store.Delete(ctx, key); delErr != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("delete storage file %s: %w", key, delErr))
+			}
+		}
+		if err := errors.Join(cleanupErrors...); err != nil {
+			return err
 		}
 	}
 
@@ -1497,8 +1643,12 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete task files: %w", err)
 	}
 
-	if err := s.repo.Tasks().Delete(ctx, id); err != nil {
+	deleted, err := s.repo.Tasks().DeleteIfDeleting(ctx, id)
+	if err != nil {
 		return fmt.Errorf("delete task: %w", err)
+	}
+	if !deleted {
+		return fmt.Errorf("delete task: deletion authority was lost")
 	}
 	s.deregisterCancel(id)
 	return nil

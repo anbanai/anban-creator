@@ -238,15 +238,13 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 
 	required := []string{
 		"not a guaranteed line-art-only colorize tool",
-		"server-local path",
-		"Use a writable server path such as /tmp/",
+		"task-relative file_path is a durable logical path",
+		"not a server-local path",
+		"Use the download_url across runtime boundaries",
+		"absolute server-local file path",
 		"not the agent client's current working directory",
-		"Requested image aspect ratio hint",
-		"response size is provider-reported metadata",
-		"use response width and height as the actual saved dimensions",
-		"Use file_path returned by generate_image/download_image",
+		"Use file_path returned by download_image",
 		"file_path analysis is limited to 10MB",
-		"compress_image first or upload_image and retry with image_url",
 	}
 	all := body.String()
 	for _, term := range required {

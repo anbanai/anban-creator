@@ -489,7 +489,7 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 		"docker compose", "up -d", "creator-agent-article:latest",
 		"creator-agent-seednote:latest", "creator-agent-montage:latest",
 		"/api/v1/auth/register", "/api/admin/billing/topups", "/api/v1/projects", "/api/v1/tasks",
-		"/resume", "runtime_workload", "runtime_image", "output/",
+		"/resume", "runtime_workload", "runtime_image", "/workspace/output/runtime-smoke.txt",
 		"docker volume inspect", "docker container inspect",
 		"anban.ai/task-id", "anban.ai/project-id", "anban.ai/execution-id",
 		"poll_task", "POLL_DEADLINE_SECONDS", "cleanup",
@@ -505,7 +505,10 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 	if strings.Count(script, "create_task ") < 3 {
 		t.Error("runtime-smoke.sh must submit one task for each managed profile")
 	}
-	for _, forbidden := range []string{"DOCKER_" + "CLI", "Docker-" + "compatible", "ANBAN_RUNTIME_SMOKE_" + "SKIP_IMAGE_BUILD"} {
+	for _, forbidden := range []string{
+		"DOCKER_" + "CLI", "Docker-" + "compatible", "ANBAN_RUNTIME_SMOKE_" + "SKIP_IMAGE_BUILD",
+		"create output/", `find /workspace -path "*/output/runtime-smoke.txt"`,
+	} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("runtime-smoke.sh contains unsupported portability contract %q", forbidden)
 		}

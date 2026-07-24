@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
@@ -35,65 +34,6 @@ func SetBillingServices(modelConfigSvc *service.ModelConfigService, cfg *config.
 // SetLogger sets the package-level logger for MCP tool diagnostics.
 func SetLogger(log *zerolog.Logger) {
 	mcpLog = log
-}
-
-func understandingBillingRoute(opType string) (string, string, error) {
-	var provider, modelName string
-	switch opType {
-	case model.OperationImageUnderstanding:
-		provider = billSvc.config.ImageUnderstanding.ProviderKey
-		modelName = billSvc.config.ImageUnderstanding.Model
-	case model.OperationVideoUnderstanding:
-		provider = billSvc.config.VideoUnderstanding.ProviderKey
-		modelName = billSvc.config.VideoUnderstanding.Model
-	default:
-		return "", "", fmt.Errorf("unsupported understanding op type %s", opType)
-	}
-	if provider == "" || modelName == "" {
-		return "", "", fmt.Errorf("%s model route is not configured", opType)
-	}
-	return provider, modelName, nil
-}
-
-func newUnderstandingProviderRequestID(opType string) string {
-	return "internal:understanding:" + opType + ":" + uuid.NewString()
-}
-
-func recordUnderstandingProviderCost(ctx context.Context, taskID, opType, providerRequestID string, usage *config.TokenUsage) {
-	if svcs == nil || svcs.ProviderCostSvc == nil {
-		return
-	}
-	provider, modelName, err := understandingBillingRoute(opType)
-	if err != nil {
-		if mcpLog != nil {
-			mcpLog.Error().Err(err).Str("provider_request_id", providerRequestID).Msg("resolve understanding provider cost route")
-		}
-		return
-	}
-	if usage == nil || usage.TotalTokens <= 0 {
-		mediaKind := "image"
-		if opType == model.OperationVideoUnderstanding {
-			mediaKind = "video"
-		}
-		_, err = svcs.ProviderCostSvc.RecordMediaUnreconciled(ctx, service.RecordMediaUnreconciledRequest{
-			TaskID: taskID, Provider: provider, Model: modelName, ProviderRequestID: providerRequestID,
-			MediaKind: mediaKind, ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
-		})
-	} else {
-		cacheRead := usage.CacheReadInputTokens
-		if cacheRead == 0 {
-			cacheRead = usage.CachedInputTokens
-		}
-		_, err = svcs.ProviderCostSvc.RecordProviderTokenUsage(ctx, service.RecordProviderTokenCostRequest{
-			TaskID: taskID, Provider: provider, Model: modelName, ProviderRequestID: providerRequestID,
-			CatalogID: svcs.ProviderCostSvc.CatalogID(), IdempotencyKey: providerRequestID,
-			Usage:  service.TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
-			Source: string(model.BillingProviderCostSourceProviderResponse),
-		})
-	}
-	if err != nil && mcpLog != nil {
-		mcpLog.Error().Err(err).Str("task_id", taskID).Str("provider_request_id", providerRequestID).Str("operation", opType).Msg("record understanding provider cost; operation result remains valid")
-	}
 }
 
 func validateBillingTask(ctx context.Context, userID, taskID string) error {

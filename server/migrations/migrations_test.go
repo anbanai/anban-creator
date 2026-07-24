@@ -40,6 +40,46 @@ func TestPendingStartupMigrationSQLContract(t *testing.T) {
 	}
 }
 
+func TestWorkspaceManifestSealMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260723_workspace_manifest_seal.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"ALTER TABLE `task_executions`",
+		"ADD COLUMN `manifest_sealed` boolean NOT NULL DEFAULT false",
+	} {
+		if !strings.Contains(strings.ToLower(sql), strings.ToLower(fragment)) {
+			t.Errorf("workspace manifest seal migration missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"DROP COLUMN", "DROP TABLE", "UPDATE `task_executions`"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Errorf("workspace manifest seal migration contains destructive or backfill statement %q", forbidden)
+		}
+	}
+}
+
+func TestDeletionAuthorityMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260724_deletion_authority.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table `tasks`",
+		"add column `deleting_at` datetime(3) null",
+		"add index `idx_tasks_deleting_at` (`deleting_at`)",
+		"alter table `projects`",
+		"add index `idx_projects_deleting_at` (`deleting_at`)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("deletion authority migration missing %q", fragment)
+		}
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {
@@ -60,6 +100,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		"KEY `idx_upload_sessions_asset_id` (`asset_id`)",
 		"KEY `idx_upload_sessions_cleanup_claim_id` (`cleanup_claim_id`)",
 		"KEY `idx_upload_sessions_cleanup_claimed_at` (`cleanup_claimed_at`)",
+		"KEY `idx_upload_sessions_next_cleanup_at` (`next_cleanup_at`)",
 		"CREATE TABLE `assets`",
 		"UNIQUE KEY `idx_assets_storage_key` (`storage_key`)",
 		"KEY `idx_assets_user_id` (`user_id`)",
@@ -131,4 +172,40 @@ func TestRuntimeDispatchIdentityMigration(t *testing.T) {
 			t.Errorf("migration SQL contains compatibility fragment %q", forbidden)
 		}
 	}
+}
+
+func TestCloneInputSourceProjectMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260722_clone_input_source_project.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"ALTER TABLE `tasks`",
+		"ADD COLUMN `input_source_project_id` char(36) NOT NULL DEFAULT ''",
+		"ADD KEY `idx_tasks_input_source_project_id` (`input_source_project_id`)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("migration SQL missing %q", fragment)
+		}
+	}
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open schema parser: %v", err)
+	}
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(&model.Task{}); err != nil {
+		t.Fatalf("parse task schema: %v", err)
+	}
+	field := stmt.Schema.LookUpField("InputSourceProjectID")
+	if field == nil || field.DBName != "input_source_project_id" {
+		t.Fatalf("clone source project field = %#v, want input_source_project_id", field)
+	}
+	for _, index := range stmt.Schema.ParseIndexes() {
+		if index.Name == "idx_tasks_input_source_project_id" {
+			return
+		}
+	}
+	t.Fatal("task schema missing idx_tasks_input_source_project_id")
 }

@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -30,6 +29,8 @@ type ArtifactPrepareRequest struct {
 }
 
 type ArtifactPrepareResponse struct {
+	UploadRequired     bool              `json:"upload_required"`
+	ETag               string            `json:"etag,omitempty"`
 	UploadID           string            `json:"upload_id"`
 	Key                string            `json:"key"`
 	PublicURL          string            `json:"public_url"`
@@ -58,7 +59,6 @@ type ArtifactManifestFile struct {
 	ContentType  string `json:"content_type"`
 	Size         int64  `json:"size"`
 	SHA256       string `json:"sha256"`
-	ETag         string `json:"etag,omitempty"`
 	Role         string `json:"role,omitempty"`
 }
 
@@ -82,9 +82,6 @@ type WorkspaceArtifact struct {
 	LocalPath    string
 	RelativePath string
 	Filename     string
-	ContentType  string
-	Size         int64
-	SHA256       string
 }
 
 type ArtifactReporter interface {
@@ -97,18 +94,16 @@ type ArtifactReporter interface {
 type ArtifactUploader struct {
 	cfg       *Config
 	reporter  ArtifactReporter
-	putObject func(context.Context, *ArtifactPrepareResponse, string, string) (string, error)
+	putObject func(context.Context, *ArtifactPrepareResponse, io.Reader, string) (string, error)
 }
 
-var openArtifactFile = func(path string) (io.ReadCloser, error) {
-	return os.Open(path)
-}
+const artifactSHA256Header = "X-Oss-Meta-Sha256"
 
 func NewArtifactUploader(cfg *Config, reporter ArtifactReporter) *ArtifactUploader {
 	return &ArtifactUploader{
 		cfg:       cfg,
 		reporter:  reporter,
-		putObject: putOSSObjectFromFile,
+		putObject: putOSSObject,
 	}
 }
 
@@ -124,11 +119,33 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 	if err := artifactContextCause(ctx); err != nil {
 		return err
 	}
-	files, err := scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
+	var (
+		files []WorkspaceArtifact
+		err   error
+	)
+	if u.cfg.ExecutionID != "" {
+		outputDir := filepath.Join(workDir, "output")
+		info, statErr := os.Lstat(outputDir)
+		if cause := artifactContextCause(ctx); cause != nil {
+			return cause
+		}
+		switch {
+		case os.IsNotExist(statErr):
+			files = []WorkspaceArtifact{}
+		case statErr != nil:
+			return fmt.Errorf("inspect job output directory: %w", statErr)
+		case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("job output must be a real directory")
+		default:
+			files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
+		}
+	} else {
+		files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
+	}
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+	if len(files) == 0 && strings.TrimSpace(u.cfg.ExecutionID) == "" {
 		return nil
 	}
 
@@ -141,33 +158,11 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 		if err := artifactContextCause(ctx); err != nil {
 			return err
 		}
-		request := ArtifactPrepareRequest{
-			TaskID:       u.cfg.TaskID,
-			ExecutionID:  u.cfg.ExecutionID,
-			RelativePath: file.RelativePath,
-			Filename:     file.Filename,
-			ContentType:  file.ContentType,
-			Size:         file.Size,
-			SHA256:       file.SHA256,
-		}
-		objectKey, contentType, etag, err := u.uploadArtifact(ctx, request, file)
+		manifestFile, err := u.uploadWorkspaceArtifact(ctx, file)
 		if err != nil {
-			return fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
-		}
-		if err := artifactContextCause(ctx); err != nil {
 			return err
 		}
-		if objectKey == "" {
-			return fmt.Errorf("artifact upload %s returned empty object key", file.RelativePath)
-		}
-		manifest.Files = append(manifest.Files, ArtifactManifestFile{
-			RelativePath: file.RelativePath,
-			ObjectKey:    objectKey,
-			ContentType:  contentType,
-			Size:         file.Size,
-			SHA256:       file.SHA256,
-			ETag:         etag,
-		})
+		manifest.Files = append(manifest.Files, manifestFile)
 	}
 	if err := artifactContextCause(ctx); err != nil {
 		return err
@@ -175,56 +170,133 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 	if err := u.reporter.ReportArtifactManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("report artifact manifest: %w", err)
 	}
-	_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("uploaded %d workspace artifact(s)", len(manifest.Files)))
+	if len(manifest.Files) > 0 {
+		_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("collected %d workspace artifact(s)", len(manifest.Files)))
+	}
 	return nil
 }
 
-func (u *ArtifactUploader) uploadArtifact(ctx context.Context, request ArtifactPrepareRequest, file WorkspaceArtifact) (string, string, string, error) {
-	switch u.cfg.ArtifactUploadMode {
-	case ArtifactUploadDirect:
-		prepared, err := u.reporter.PrepareArtifactUpload(ctx, request)
+func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file WorkspaceArtifact) (ArtifactManifestFile, error) {
+	for attempt := 1; attempt <= maxArtifactSnapshotAttempts; attempt++ {
+		if err := artifactContextCause(ctx); err != nil {
+			return ArtifactManifestFile{}, err
+		}
+		snapshot, err := openArtifactSnapshot(ctx, file.LocalPath)
 		if err != nil {
-			return "", "", "", fmt.Errorf("prepare upload: %w", err)
+			if errors.Is(err, errArtifactSnapshotChanged) && !hasArtifactCloseError(err) {
+				continue
+			}
+			return ArtifactManifestFile{}, fmt.Errorf("snapshot artifact %s: %w", file.RelativePath, err)
 		}
-		if prepared == nil {
-			return "", "", "", fmt.Errorf("prepare upload returned empty response")
+
+		request := ArtifactPrepareRequest{
+			TaskID:       u.cfg.TaskID,
+			ExecutionID:  u.cfg.ExecutionID,
+			RelativePath: file.RelativePath,
+			Filename:     file.Filename,
+			ContentType:  snapshot.contentType,
+			Size:         snapshot.size,
+			SHA256:       snapshot.hash,
 		}
-		if prepared.MaxSize > 0 && file.Size > prepared.MaxSize {
-			return "", "", "", fmt.Errorf("artifact exceeds prepared upload limit")
+		var objectKey, contentType string
+		switch u.cfg.ArtifactUploadMode {
+		case ArtifactUploadDirect, "":
+			prepared, prepareErr := u.reporter.PrepareArtifactUpload(ctx, request)
+			if prepareErr != nil {
+				primary := fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, prepareErr)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			if cause := artifactContextCause(ctx); cause != nil {
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, cause)
+			}
+			if prepared == nil {
+				primary := fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			if prepared.MaxSize > 0 && snapshot.size > prepared.MaxSize {
+				primary := fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			objectKey = strings.TrimSpace(prepared.Key)
+			if objectKey == "" {
+				primary := fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			contentType = prepared.Headers["Content-Type"]
+			if contentType == "" {
+				contentType = snapshot.contentType
+			}
+			if prepared.UploadRequired {
+				preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
+				if preparedSHA256 == "" || preparedSHA256 != snapshot.hash {
+					primary := fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+					return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+				}
+				prepared.Headers[artifactSHA256Header] = preparedSHA256
+				if rewindErr := snapshot.rewind(); rewindErr != nil {
+					primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, rewindErr)
+					return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+				}
+				_, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
+			}
+		case ArtifactUploadStream:
+			if rewindErr := snapshot.rewind(); rewindErr != nil {
+				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, rewindErr)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			streamed, streamErr := u.reporter.StreamArtifactContent(ctx, ArtifactStreamRequest{
+				TaskID: request.TaskID, ExecutionID: request.ExecutionID, RelativePath: request.RelativePath,
+				ContentType: request.ContentType, Size: request.Size, SHA256: request.SHA256,
+			}, artifactUploadSource{ReadSeeker: snapshot.file})
+			if streamErr != nil {
+				err = streamErr
+				break
+			}
+			if streamed == nil {
+				err = fmt.Errorf("stream upload returned empty response")
+				break
+			}
+			if streamed.Size != snapshot.size || !strings.EqualFold(strings.TrimSpace(streamed.SHA256), snapshot.hash) {
+				err = fmt.Errorf("stream upload response does not match artifact")
+				break
+			}
+			objectKey = strings.TrimSpace(streamed.ObjectKey)
+			contentType = firstNonEmpty(streamed.ContentType, snapshot.contentType)
+			if objectKey == "" {
+				err = fmt.Errorf("stream upload returned empty object key")
+			}
+		default:
+			err = fmt.Errorf("unsupported artifact upload mode %q", u.cfg.ArtifactUploadMode)
 		}
-		contentType := prepared.Headers["Content-Type"]
-		if contentType == "" {
-			contentType = file.ContentType
-		}
-		etag, err := u.putObject(ctx, prepared, file.LocalPath, contentType)
+
+		stable, stabilityErr := snapshot.unchanged()
+		var operationErr error
 		if err != nil {
-			return "", "", "", err
+			operationErr = fmt.Errorf("upload artifact %s: %w", file.RelativePath, err)
 		}
-		return strings.TrimSpace(prepared.Key), contentType, etag, nil
-	case ArtifactUploadStream:
-		body, err := openArtifactFile(file.LocalPath)
-		if err != nil {
-			return "", "", "", fmt.Errorf("open artifact: %w", err)
+		if stabilityErr != nil {
+			stabilityErr = fmt.Errorf("recheck artifact %s: %w", file.RelativePath, stabilityErr)
+			operationErr = errors.Join(operationErr, stabilityErr)
 		}
-		defer body.Close()
-		result, err := u.reporter.StreamArtifactContent(ctx, ArtifactStreamRequest{
-			TaskID: request.TaskID, ExecutionID: request.ExecutionID,
-			RelativePath: request.RelativePath, ContentType: request.ContentType,
-			Size: request.Size, SHA256: request.SHA256,
-		}, body)
-		if err != nil {
-			return "", "", "", err
+		if operationErr == nil {
+			if err := artifactContextCause(ctx); err != nil {
+				operationErr = err
+			}
 		}
-		if result == nil {
-			return "", "", "", fmt.Errorf("stream upload returned empty response")
+		if err := closeArtifactFile(file.RelativePath, snapshot.file, operationErr); err != nil {
+			return ArtifactManifestFile{}, err
 		}
-		if result.Size != file.Size || !strings.EqualFold(result.SHA256, file.SHA256) {
-			return "", "", "", fmt.Errorf("stream upload response does not match artifact")
+		if stable {
+			return ArtifactManifestFile{
+				RelativePath: file.RelativePath,
+				ObjectKey:    objectKey,
+				ContentType:  contentType,
+				Size:         snapshot.size,
+				SHA256:       snapshot.hash,
+			}, nil
 		}
-		return strings.TrimSpace(result.ObjectKey), firstNonEmpty(result.ContentType, file.ContentType), "", nil
-	default:
-		return "", "", "", fmt.Errorf("unsupported artifact upload mode %q", u.cfg.ArtifactUploadMode)
 	}
+	return ArtifactManifestFile{}, fmt.Errorf("artifact %s changed during final collection", file.RelativePath)
 }
 
 func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]WorkspaceArtifact, error) {
@@ -245,28 +317,18 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 		return nil, err
 	}
 
+	scanDir := root
 	outputDir := filepath.Join(root, "output")
-	info, err := os.Lstat(outputDir)
-	if cause := artifactContextCause(ctx); cause != nil {
-		return nil, cause
+	if info, err := os.Stat(outputDir); err == nil && info.IsDir() {
+		scanDir = outputDir
 	}
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("inspect runtime output directory: %w", err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("runtime output must be a real directory")
-	}
-	scanDir := outputDir
 	if err := artifactContextCause(ctx); err != nil {
 		return nil, err
 	}
 
 	task := taskForArtifactFiltering(taskType)
 	var files []WorkspaceArtifact
-	err = filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
 		if cause := artifactContextCause(ctx); cause != nil {
 			return cause
 		}
@@ -293,7 +355,7 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 			return nil
 		}
 
-		artifact, err := describeWorkspaceArtifact(ctx, root, path, info)
+		artifact, err := describeWorkspaceArtifact(ctx, root, path)
 		if err != nil {
 			return err
 		}
@@ -315,7 +377,7 @@ func scanWorkspaceArtifacts(ctx context.Context, root, taskType string) ([]Works
 	return files, nil
 }
 
-func describeWorkspaceArtifact(ctx context.Context, root, path string, info fs.FileInfo) (WorkspaceArtifact, error) {
+func describeWorkspaceArtifact(ctx context.Context, root, path string) (WorkspaceArtifact, error) {
 	if err := artifactContextCause(ctx); err != nil {
 		return WorkspaceArtifact{}, err
 	}
@@ -324,60 +386,11 @@ func describeWorkspaceArtifact(ctx context.Context, root, path string, info fs.F
 		relPath = filepath.Base(path)
 	}
 	relPath = filepath.ToSlash(relPath)
-	hash, err := fileSHA256(ctx, path)
-	if err != nil {
-		return WorkspaceArtifact{}, err
-	}
-	if err := artifactContextCause(ctx); err != nil {
-		return WorkspaceArtifact{}, err
-	}
-	contentType := service.DetectTaskFileMIME(path)
-	if err := artifactContextCause(ctx); err != nil {
-		return WorkspaceArtifact{}, err
-	}
 	return WorkspaceArtifact{
 		LocalPath:    path,
 		RelativePath: relPath,
 		Filename:     filepath.Base(path),
-		ContentType:  contentType,
-		Size:         info.Size(),
-		SHA256:       hash,
 	}, nil
-}
-
-func fileSHA256(ctx context.Context, path string) (string, error) {
-	if err := artifactContextCause(ctx); err != nil {
-		return "", err
-	}
-	f, err := openArtifactFile(path)
-	if err != nil {
-		return "", fmt.Errorf("open artifact %s: %w", path, err)
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	buffer := make([]byte, 32*1024)
-	for {
-		if err := artifactContextCause(ctx); err != nil {
-			return "", err
-		}
-		// A kernel-blocked Read cannot be canceled portably; context checks
-		// between chunks keep the userspace hashing loop bounded.
-		n, readErr := f.Read(buffer)
-		if n > 0 {
-			_, _ = h.Write(buffer[:n])
-		}
-		if err := artifactContextCause(ctx); err != nil {
-			return "", err
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return "", fmt.Errorf("hash artifact %s: %w", path, readErr)
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func artifactContextCause(ctx context.Context) error {
@@ -392,7 +405,7 @@ func taskForArtifactFiltering(taskType string) *model.Task {
 	return &model.Task{Type: taskType}
 }
 
-func putOSSObjectFromFile(ctx context.Context, prepared *ArtifactPrepareResponse, localPath string, contentType string) (string, error) {
+func putOSSObject(ctx context.Context, prepared *ArtifactPrepareResponse, source io.Reader, contentType string) (string, error) {
 	if prepared == nil {
 		return "", fmt.Errorf("empty prepare response")
 	}
@@ -412,11 +425,18 @@ func putOSSObjectFromFile(ctx context.Context, prepared *ArtifactPrepareResponse
 	if err != nil {
 		return "", fmt.Errorf("open oss bucket: %w", err)
 	}
+	return putOSSObjectFromBucket(ctx, bucket, prepared.Key, source, contentType, prepared.Headers[artifactSHA256Header])
+}
+
+func putOSSObjectFromBucket(ctx context.Context, bucket *oss.Bucket, key string, source io.Reader, contentType, hash string) (string, error) {
 	options := []oss.Option{oss.WithContext(ctx)}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
 	}
-	if err := bucket.PutObjectFromFile(prepared.Key, localPath, options...); err != nil {
+	if hash != "" {
+		options = append(options, oss.Meta("sha256", strings.ToLower(hash)))
+	}
+	if err := bucket.PutObject(key, source, options...); err != nil {
 		return "", fmt.Errorf("put oss object: %w", err)
 	}
 	return "", nil

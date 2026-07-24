@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -365,6 +367,39 @@ func TestReclaimExpiredLocalTasks_LeavesClaimedAlone(t *testing.T) {
 	}
 	if got.Status != model.TaskStatusRunning {
 		t.Fatalf("status = %q, want running", got.Status)
+	}
+}
+
+func TestDeleteLocalClaimedTaskFinalizesCleanupWithoutManagedDispatcher(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("claimed task execution = %#v, %v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+	dispatcher := &cancelOrderingDispatcher{repo: repo}
+	svc.SetRuntimeDispatcher(dispatcher)
+
+	if err := svc.Delete(ctx, taskID); err != nil {
+		t.Fatalf("Delete local_claimed task: %v", err)
+	}
+
+	execution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatalf("find local execution after task delete: %v", err)
+	}
+	if execution.Status != model.TaskExecutionCancelled || execution.CleanupStatus != model.TaskExecutionCleanupDone {
+		t.Fatalf("local execution status=%q cleanup=%q, want cancelled/done", execution.Status, execution.CleanupStatus)
+	}
+	if dispatcher.resolveCalls != 0 || dispatcher.statusAtDelete != "" {
+		t.Fatalf("managed dispatcher used for local cleanup: resolve=%d delete_status=%q", dispatcher.resolveCalls, dispatcher.statusAtDelete)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, taskID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("task lookup after delete = %v, want record not found", err)
 	}
 }
 

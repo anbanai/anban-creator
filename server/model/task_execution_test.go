@@ -34,7 +34,7 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 		!db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimedAt") {
 		t.Fatal("dispatch lease columns missing")
 	}
-	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "RuntimeProfile", "RuntimeImage", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupToken", "CleanupNextAt", "PublishingStatus", "PublishingResult", "Result"} {
+	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "RuntimeProfile", "RuntimeImage", "ManifestSealed", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupToken", "CleanupNextAt", "PublishingStatus", "PublishingResult", "Result"} {
 		if !db.Migrator().HasColumn(&TaskExecution{}, column) {
 			t.Fatalf("task execution durability column %s missing", column)
 		}

@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func registerMediaPipelineTools(server *mcp.Server) {
@@ -17,26 +19,9 @@ func registerMediaPipelineTools(server *mcp.Server) {
 	}, getMediaPipelineStatusHandler)
 }
 
-func getMediaPipelineStatusHandler(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	storageConfigured := svcs != nil && svcs.Store != nil
-	ossDirectUpload := storageConfigured && svcs.Store.Name() == "oss"
-	tingwuConfigured := svcs != nil && svcs.TingWuConfigured
-
-	missing := []string{}
-	if !ossDirectUpload {
-		missing = append(missing, "oss storage for prepare_file_upload direct uploads")
+func getMediaPipelineStatusHandler(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.MediaPipelineSvc == nil {
+		return errorResult("media pipeline service not available"), nil
 	}
-	if !tingwuConfigured {
-		missing = append(missing, "tingwu endpoint/region/app_key/access_key/access_secret for live-slicer")
-	}
-
-	return textResult(map[string]any{
-		"storage_configured": storageConfigured,
-		"oss_direct_upload":  ossDirectUpload,
-		"tingwu_configured":  tingwuConfigured,
-		"missing":            missing,
-		"hints": map[string]string{
-			"live_audio_upload": "Use prepare_file_upload(purpose=\"live_audio\"), PUT the agent-local audio file to upload_url, then pass audio_key to create_live_analysis_task.",
-		},
-	})
+	return textResult(svcs.MediaPipelineSvc.Status(ctx, service.MediaPipelineStatusRequest{}))
 }

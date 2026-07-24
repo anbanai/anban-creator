@@ -23,6 +23,37 @@ func NewTopicPoolService(repo repository.Repository, logger *zerolog.Logger) *To
 
 const maxTopicLength = 500
 
+type ClaimTopicRequest struct {
+	UserID    string
+	ProjectID string
+	TaskID    string
+}
+
+type ClaimTopicResult struct {
+	Topic   string
+	TopicID *uint
+	TaskID  string
+}
+
+func (s *TopicPoolService) ClaimTopic(ctx context.Context, req ClaimTopicRequest) (*ClaimTopicResult, error) {
+	if req.TaskID != "" {
+		topic, err := s.ClaimForTask(ctx, req.UserID, req.ProjectID, req.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		return &ClaimTopicResult{Topic: topic, TaskID: req.TaskID}, nil
+	}
+	topic, id, err := s.Claim(ctx, req.UserID, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	result := &ClaimTopicResult{Topic: topic}
+	if topic != "" {
+		result.TopicID = &id
+	}
+	return result, nil
+}
+
 // Add creates one or more topics in the pool for the given project.
 func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, topics []string) ([]*model.TopicPool, error) {
 	if projectID == "" {

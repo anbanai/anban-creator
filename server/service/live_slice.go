@@ -77,10 +77,10 @@ type LiveAudioUploadResult struct {
 // UploadLiveAudio uploads local audio to OSS and returns a URL suitable for TingWu.
 func (s *LiveSliceService) UploadLiveAudio(ctx context.Context, filePath string, expiresSeconds int) (*LiveAudioUploadResult, error) {
 	if s.store == nil {
-		return nil, fmt.Errorf("legacy server-local upload_live_audio requires storage provider access; agent/client-local files should use prepare_file_upload(purpose=\"live_audio\"), PUT the file to upload_url, then call create_live_analysis_task with audio_key")
+		return nil, fmt.Errorf("storage provider is not configured")
 	}
 	if s.store.Name() != "oss" {
-		return nil, fmt.Errorf("legacy server-local upload_live_audio requires OSS storage because TingWu must fetch a public URL; configure OSS, or for agent/client-local files use prepare_file_upload(purpose=\"live_audio\"), PUT the file to upload_url, then call create_live_analysis_task with audio_key")
+		return nil, fmt.Errorf("OSS storage is required for live audio uploads")
 	}
 	if strings.TrimSpace(filePath) == "" {
 		return nil, fmt.Errorf("file_path is required")

@@ -21,6 +21,7 @@ type fakeTaskStorage struct {
 	signedKeys        []string
 	readKey           string
 	ownedPrefix       string
+	deletedKeys       []string
 }
 
 func (f *fakeTaskStorage) Name() string {
@@ -64,7 +65,11 @@ func (f *fakeTaskStorage) Read(_ context.Context, key string) ([]byte, error) {
 	}
 	return append([]byte(nil), data...), nil
 }
-func (f *fakeTaskStorage) Delete(context.Context, string) error { return nil }
+func (f *fakeTaskStorage) Delete(_ context.Context, key string) error {
+	f.deletedKeys = append(f.deletedKeys, key)
+	delete(f.files, key)
+	return nil
+}
 func (f *fakeTaskStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	f.signedKey = key
 	f.signedKeys = append(f.signedKeys, key)

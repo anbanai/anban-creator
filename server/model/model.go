@@ -12,6 +12,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Task{},
 		&TaskExecution{},
 		&TaskFile{},
+		&TaskFileObjectCleanup{},
 		&UploadSession{},
 		&Asset{},
 		&APIKey{},

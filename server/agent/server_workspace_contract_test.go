@@ -54,6 +54,8 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"与归档",
 		"归档交付",
 		"→ 归档",
+		"prepare_workspace",
+		"$DIR",
 	}
 
 	for _, relativePath := range paths {
@@ -95,6 +97,18 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 					t.Errorf("%s missing explicit managed-runtime artifact path %q", relativePath, requiredOutput)
 				}
 			}
+			for _, term := range []string{
+				"$TASK_ID",
+				"output/",
+			} {
+				if !strings.Contains(body, term) {
+					t.Errorf("%s missing canonical server task output term %q", relativePath, term)
+				}
+			}
+			if strings.Contains(relativePath, "/agents/") && !strings.Contains(strings.ToLower(body), "runtime") {
+				t.Errorf("%s missing runtime-owned workspace contract", relativePath)
+			}
+			assertNoDeliverableRelocationCommands(t, relativePath, body)
 		})
 	}
 
@@ -110,6 +124,22 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 			if regexp.MustCompile(`\[[0-9]+/[0-9]+\]`).MatchString(body) {
 				t.Errorf("%s contains a mode-inaccurate fixed progress denominator", relativePath)
+			}
+		})
+	}
+}
+
+func TestServerDoesNotExposeHostWorkspacePathResolution(t *testing.T) {
+	root := repoRoot(t)
+	for _, relativePath := range []string{
+		"server/service/task.go",
+		"server/service/task_image.go",
+		"server/service/task_image_operations.go",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			if strings.Contains(body, "ResolveWorkspacePath") {
+				t.Fatalf("%s still exposes server-side workspace path resolution", relativePath)
 			}
 		})
 	}
@@ -215,8 +245,8 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
-			if strings.Contains(body, "$DIR/.anban-creator/products") {
-				t.Fatalf("%s incorrectly resolves product photos under $DIR", relativePath)
+			if strings.Contains(body, "output/.anban-creator/products") {
+				t.Fatalf("%s incorrectly resolves product photos under output/", relativePath)
 			}
 			const definition = "将 `ecommerce.product_photo_dir` 读取为 `$PRODUCT_PHOTO_DIR`"
 			assertVariableDefinedBeforeUse(t, relativePath, body, "$PRODUCT_PHOTO_DIR", definition)
@@ -299,6 +329,31 @@ func lineContaining(t *testing.T, body, needle string) string {
 	return ""
 }
 
+func TestDeliverableRelocationCommandDetection(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "move deliverable set to archive", body: `mv output/* archive/`, want: true},
+		{name: "copy result directory to archive", body: `cp -R output archive`, want: true},
+		{name: "rsync result directory to archive", body: `rsync -a output/ archive/`, want: true},
+		{name: "move result to title suffix", body: `mv output output-title`, want: true},
+		{name: "move result to archive suffix", body: `mv output output-archive`, want: true},
+		{name: "copy download into result file", body: `cp "$DOWNLOAD" output/cover.png`, want: false},
+		{name: "move temporary file within result", body: `mv output/.tmp output/final.json`, want: false},
+		{name: "normal non result command", body: `mv "$DOWNLOAD.tmp" "$DOWNLOAD"`, want: false},
+		{name: "prose policy", body: "不得移动、复制或按标题重命名成果目录", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findDeliverableRelocationCommand(tt.body) != ""
+			if got != tt.want {
+				t.Fatalf("findDeliverableRelocationCommand(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
 func assertVariableDefinedBeforeUse(t *testing.T, path, body, variable, definition string) {
 	t.Helper()
 	definitionAt := strings.Index(body, definition)
@@ -310,6 +365,52 @@ func assertVariableDefinedBeforeUse(t *testing.T, path, body, variable, definiti
 	}
 }
 
+func assertNoDeliverableRelocationCommands(t *testing.T, path, body string) {
+	t.Helper()
+	if match := findDeliverableRelocationCommand(body); match != "" {
+		t.Errorf("%s contains deliverable relocation command %q", path, match)
+	}
+}
+
+func findDeliverableRelocationCommand(body string) string {
+	commands := regexp.MustCompile("(?m)(?:^|[\\x60;&|]\\s*)((?:mv|cp|rsync)\\s+[^\\n\\x60]+)").FindAllStringSubmatch(body, -1)
+	fields := regexp.MustCompile(`(?:"[^"]*"|'[^']*'|[^\s"']+)+`)
+	for _, match := range commands {
+		command := match[1]
+		tokens := fields.FindAllString(command, -1)
+		if len(tokens) < 3 {
+			continue
+		}
+		args := make([]string, 0, len(tokens)-1)
+		for _, token := range tokens[1:] {
+			if strings.HasPrefix(token, "-") {
+				continue
+			}
+			args = append(args, token)
+		}
+		if len(args) < 2 {
+			continue
+		}
+		destination := normalizeShellPath(args[len(args)-1])
+		if isUnderOutput(destination) {
+			continue
+		}
+		for _, source := range args[:len(args)-1] {
+			if isUnderOutput(normalizeShellPath(source)) {
+				return command
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeShellPath(path string) string {
+	return strings.Trim(strings.ReplaceAll(path, `"`, ""), "' ,.;")
+}
+
+func isUnderOutput(path string) bool {
+	return path == "output" || strings.HasPrefix(path, "output/")
+}
 func indexAfterText(body, needle string, after int) int {
 	if after < 0 || after >= len(body) {
 		return -1

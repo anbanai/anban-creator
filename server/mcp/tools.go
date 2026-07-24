@@ -3,21 +3,16 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/resources"
-	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
-	"github.com/anbanai/anban-creator/server/storage"
 )
-
-const referenceImageRuntimePath = ".anban-creator/reference.png"
 
 // ImageModelResolver selects one immutable provider/model descriptor before an
 // image request reaches billing or generation.
@@ -48,25 +43,30 @@ type ImageGenerator interface {
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ProjectSvc           *service.ProjectService
-	Store                storage.Provider
-	TaskSvc              *service.TaskService
-	PlanSvc              *service.PlanService
-	ImageSvc             *service.ImageService
-	ImageModelResolver   ImageModelResolver
-	ImageGenerator       ImageGenerator
-	ProviderCostSvc      *service.ProviderCostService
-	BillingCatalogSvc    *service.BillingCatalogService
-	GenerateImageTimeout time.Duration
-	WritingSvc           *service.WritingService
-	PublishingSvc        *service.PublishingService
-	TemplateSvc          *service.TemplateService
-	LiveSliceSvc         *service.LiveSliceService
-	SeednoteClient       *seednote.Client
-	SeednoteReadiness    service.Readiness
-	TopicPoolSvc         *service.TopicPoolService
-	AgentFeedbackSvc     *service.AgentFeedbackService
-	TingWuConfigured     bool
+	ProjectSvc             *service.ProjectService
+	TaskSvc                *service.TaskService
+	PlanSvc                *service.PlanService
+	ImageSvc               *service.ImageService
+	ImageModelResolver     ImageModelResolver
+	ImageGenerator         ImageGenerator
+	ProviderCostSvc        *service.ProviderCostService
+	BillingCatalogSvc      *service.BillingCatalogService
+	GenerateImageTimeout   time.Duration
+	WritingSvc             *service.WritingService
+	PublishingSvc          *service.PublishingService
+	TemplateSvc            *service.TemplateService
+	LiveSliceSvc           *service.LiveSliceService
+	SeednoteCapabilitySvc  *service.SeednoteCapabilityService
+	FileUploadSvc          *service.FileUploadService
+	MediaPipelineSvc       *service.MediaPipelineService
+	TopicPoolSvc           *service.TopicPoolService
+	AgentFeedbackSvc       *service.AgentFeedbackService
+	AgentProjectProfileSvc *service.AgentProjectProfileService
+	ArticleScoreSvc        *service.ArticleScoreService
+	SeednoteExportSvc      *service.SeednoteExportService
+	ResourceCatalogSvc     *service.ResourceCatalogService
+	TaskImageSvc           *service.TaskImageService
+	TaskImageOperationsSvc *service.TaskImageOperationsService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -158,8 +158,8 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Optional legacy output-shape hint."},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
 			"required": []any{"project_id"},
 		},
@@ -207,7 +207,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_project_titles",
-		Description: "List all recorded content titles for a project. Use this before selecting a new title to avoid duplicates within the same project.",
+		Description: "List all recorded content titles for a project for duplicate detection.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -219,7 +219,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "finalize_task_title",
-		Description: "Record the Agent-selected final content title before title-dependent artifacts are generated, so future tasks can deduplicate by canonical title.",
+		Description: "Record the Agent-selected final content title for canonical deduplication.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -232,7 +232,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_task_files",
-		Description: "List output files for a completed task. Returns file names, roles (cover, html, markdown, image), and sizes.",
+		Description: "List terminal task files owned by the authenticated user. Returns the latest successful published deliverables followed by collected files retained from failed attempts, including names, roles, states, sizes, and download URLs. This is a post-run inspection and recovery query, not a live workspace listing or upload-completion check; pending and superseded files are excluded.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -319,273 +319,18 @@ func projectGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 }
 
 func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	userID := getUserID(ctx)
-	info, errMsg := buildAccountInfo(ctx, userID, parseArgs(req.Params.Arguments))
-	if errMsg != "" {
-		return errorResult(errMsg), nil
+	if svcs == nil || svcs.AgentProjectProfileSvc == nil {
+		return errorResult("agent project profile service not available"), nil
 	}
-	return textResult(info)
-}
-
-// buildAccountInfo is the testable core of get_project_profile. It returns a
-// flat, fully resolved creation profile. For new rows, a supplied task_id applies
-// the task's frozen project_snapshot; old rows without snapshots fall back to
-// legacy task overrides over the current project. The same ResolveStyle primitive
-// feeds prompt/settings/MCP channels so they cannot disagree.
-func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
-	projectID, _ := args["project_id"].(string)
-	if projectID == "" {
-		return nil, "project_id is required"
-	}
-	taskID, _ := args["task_id"].(string)
-
-	if svcs.ProjectSvc == nil {
-		return nil, "project service not available"
-	}
-	ch, _, err := svcs.ProjectSvc.Get(ctx, userID, projectID)
+	args := parseArgs(req.Params.Arguments)
+	profile, err := svcs.AgentProjectProfileSvc.Get(ctx, service.AgentProjectProfileRequest{
+		UserID: getUserID(ctx), ProjectID: stringArg(args, "project_id"),
+		TaskID: stringArg(args, "task_id"), Scope: stringArg(args, "scope"),
+	})
 	if err != nil {
-		return nil, fmt.Sprintf("get project: %v", err)
+		return errorResult(err.Error()), nil
 	}
-	service.SanitizeProject(ch)
-
-	// Load the requested task (if any) so its frozen project snapshot surfaces.
-	// The task must belong to the same user+project, otherwise the call is rejected.
-	var task *model.Task
-	usesProjectSnapshot := false
-	if taskID != "" {
-		if svcs.TaskSvc == nil {
-			return nil, "task service not available"
-		}
-		var terr error
-		task, terr = svcs.TaskSvc.GetByID(ctx, taskID)
-		if terr != nil {
-			return nil, fmt.Sprintf("get task: %v", terr)
-		}
-		// Guard against cross-project/cross-user injection.
-		if task.UserID != userID || task.ProjectID != projectID {
-			return nil, "task does not belong to the requested project"
-		}
-		if snap := task.ProjectSnapshot.Data(); snap.Platform != "" {
-			ch = model.ProjectFromSnapshot(ch, snap)
-			usesProjectSnapshot = true
-		}
-	}
-	// The dimensions are independent — the writer key never drives the visual
-	// style, the author never equals the writer persona — and each carries its
-	// provenance.
-	r := service.ResolveStyle(ch, task)
-
-	// Flat profile. Every runtime style/theme/author dimension is exposed directly (no
-	// template_* namespace) with its own *_source provenance tag:
-	//   - visual_style   (图片视觉): free-text image visual style; empty = none
-	//   - writer     (写作者):   writer YAML resource key, e.g. "dan-koe"
-	//   - author         (作者署名): published author name; pass to publish_draft's author
-	//   - theme          (排版样式): theme resource key, e.g. "autumn-warm"
-	// Writer avatars/nicknames are Studio-only display metadata and must never
-	// enter Agent/MCP runtime profiles.
-	info := map[string]any{
-		"name":                ch.Name,
-		"positioning":         ch.Instructions,
-		"instructions":        ch.Instructions,
-		"keywords":            ch.Keywords,
-		"platform":            ch.Platform,
-		"visual_style":        r.VisualStyle,
-		"writer":              r.Writer,
-		"author":              r.Author,
-		"theme":               r.Theme,
-		"visual_style_source": r.VisualStyleSource,
-		"writer_source":       r.WriterSource,
-		"author_source":       r.AuthorSource,
-		"theme_source":        r.ThemeSource,
-	}
-	resolvedProfile := map[string]any{
-		"id":                    ch.ID,
-		"name":                  ch.Name,
-		"platform":              ch.Platform,
-		"profile_url":           ch.ProfileURL,
-		"avatar_url":            ch.AvatarURL,
-		"instructions":          ch.Instructions,
-		"positioning":           ch.Instructions,
-		"keywords":              ch.Keywords,
-		"visual_style":          r.VisualStyle,
-		"creative_constraints":  creativeConstraintsForProfile(ch.Platform, r.VisualStyle),
-		"visual_style_label":    "图片视觉",
-		"image_ratio":           ch.ImageRatio,
-		"uses_project_snapshot": usesProjectSnapshot,
-		"sources": map[string]any{
-			"visual_style": r.VisualStyleSource,
-			"instructions": profileSource(usesProjectSnapshot),
-			"keywords":     profileSource(usesProjectSnapshot),
-		},
-	}
-	hasReference := service.EffectiveReferenceAssetID(task) != ""
-	if hasReference {
-		resolvedProfile["reference_image_path"] = referenceImageRuntimePath
-	}
-	info["resolved_profile"] = resolvedProfile
-
-	switch ch.Platform {
-	case "seednote":
-		// For seednote, style is a visual/image style description used for image prompt generation.
-		imageConfig := map[string]any{}
-		if hasReference {
-			imageConfig["reference_image_path"] = referenceImageRuntimePath
-		}
-		info["image_config"] = imageConfig
-		if svcs.ImageModelResolver != nil {
-			imageModelKey := ""
-			if task != nil {
-				imageModelKey = task.ImageModelKey
-			}
-			resolved, resolveErr := svcs.ImageModelResolver.ResolveImageModelForGeneration(ctx, userID, imageModelKey, "content", 0)
-			if resolveErr != nil {
-				return nil, fmt.Sprintf("resolve image generation capability: %v", resolveErr)
-			}
-			if resolved == nil {
-				return nil, "resolve image generation capability: resolver returned no descriptor"
-			}
-			info["image_generation"] = map[string]any{
-				"provider":             resolved.Provider,
-				"model":                resolved.Model,
-				"supports_reference":   resolved.SupportsReference,
-				"max_reference_images": resolved.MaxReferenceImages,
-				"selection_reason":     resolved.SelectionReason,
-			}
-		}
-	case "moments":
-		imageConfig := map[string]any{"default_ratio": firstNonEmpty(ch.ImageRatio, "3:4")}
-		if hasReference {
-			imageConfig["reference_image_path"] = referenceImageRuntimePath
-		}
-		info["image_config"] = imageConfig
-		info["moments"] = map[string]any{
-			"required_artifacts": []string{
-				"material-analysis.md",
-				"content.md",
-				"quality-review.md",
-			},
-			"method": []string{
-				"六类素材：发售、人设、产品、案例、生活、认知",
-				"四层提炼：观点层、框架层、风格层、人设层",
-			},
-			"auto_publish":      false,
-			"scheduled_plans":   false,
-			"falsification_ban": "不伪造客户案例、成交数据、用户反馈",
-		}
-	case "ecommerce":
-		// E-commerce: surface the package config (selected modules, target
-		// platform, brand brief, language) plus the resolved image model and the
-		// workspace path where the executor materialized the product photos.
-		// The agent uses the concrete provider/model only to plan its independent
-		// product-photo workflow; task model keys remain server-owned. Product
-		// photos are downloaded by the executor into .anban-creator/products/ (see
-		// agent.DownloadProductImages); the agent reads index.json there for the
-		// exact filenames.
-		ec := map[string]any{
-			"product_photo_dir": ".anban-creator/products",
-			"consistency_audit": true, // verify_with_vision self-check loop
-		}
-		if task != nil {
-			provider, mdl := resolveEcommerceImageProvider(ctx, userID, task)
-			ec["image_model"] = map[string]any{
-				"provider": provider,
-				"model":    mdl,
-			}
-			cfg := task.Ecommerce.Data()
-			ec["selected_modules"] = cfg.SelectedModules
-			ec["product_photo_count"] = len(cfg.ProductPhotos)
-			if cfg.TargetPlatform != "" {
-				ec["target_platform"] = cfg.TargetPlatform
-			}
-			if cfg.SellingPoints != "" {
-				ec["selling_points"] = cfg.SellingPoints
-			}
-			if cfg.Language != "" {
-				ec["language"] = cfg.Language
-			}
-			if cfg.BrandBrief != "" {
-				ec["brand_brief"] = cfg.BrandBrief
-			}
-		}
-		info["ecommerce"] = ec
-	case model.PlatformMontage:
-		info["montage"] = buildMontageProfileBlock(ch, task)
-	}
-	// Available resource options for the platform (best-effort; the embedded
-	// resource manager may be nil in some test contexts).
-	mgr := resources.Manager()
-	if mgr != nil {
-		info["available_themes"] = mgr.ListByPlatform(resources.CategoryTheme, ch.Platform)
-		info["available_writers"] = mgr.ListByPlatform(resources.CategoryWriter, ch.Platform)
-		info["available_article_templates"] = mgr.ListByPlatform(resources.CategoryArticleTemplate, ch.Platform)
-
-		// Descriptions for the RESOLVED theme / writer key (not the raw project fields).
-		if r.Theme != "" {
-			if e := mgr.Get(resources.CategoryTheme, r.Theme); e != nil {
-				info["theme_description"] = e.Description
-			}
-		}
-		if r.Writer != "" {
-			if e := mgr.Get(resources.CategoryWriter, r.Writer); e != nil {
-				// writer_description describes the writing VOICE (tone/人设/调性) of
-				// the resolved writer resource key. It is independent of visual_style;
-				// the two describe different dimensions and must not be conflated.
-				info["writer_description"] = e.Description
-			}
-		}
-	}
-
-	return info, ""
-}
-
-func buildMontageProfileBlock(ch *model.Project, task *model.Task) map[string]any {
-	defaults := model.MontageDefaults{}
-	if ch != nil {
-		defaults = ch.MontageDefaults.Data()
-	}
-	input := model.MontageInput{}
-	if task != nil && model.IsMontagePlatform(task.Type) {
-		input = task.MontageInput.Data()
-	}
-	env := map[string]bool{}
-	toolPolicy := map[string]any{}
-	pipelineDefaults := map[string]any{}
-	if billSvc != nil && billSvc.config != nil {
-		env = billSvc.config.Montage.RedactedEnv()
-		for key, value := range billSvc.config.Montage.ToolPolicy {
-			toolPolicy[key] = value
-		}
-		for key, value := range billSvc.config.Montage.PipelineDefaults {
-			pipelineDefaults[key] = value
-		}
-	}
-	return map[string]any{
-		"defaults":               defaults,
-		"input":                  input,
-		"source_asset_count":     len(input.SourceAssets),
-		"workspace_input_file":   "montage-input.json",
-		"tool_policy_file":       "montage-tool-policy.json",
-		"pipeline_defaults_file": "montage-pipeline-defaults.json",
-		"project_manifest_file":  "montage-project.json",
-		"output_dir":             "output/montage",
-		"required_artifacts":     []string{"final.mp4", "delivery-manifest.json"},
-		"artifact_roles":         []string{"final_video", "delivery_manifest", "source_manifest", "timeline", "subtitles", "audio", "run_log", "failure_diagnosis"},
-		"env":                    env,
-		"tool_policy":            toolPolicy,
-		"pipeline_defaults":      pipelineDefaults,
-		"runner_contract":        "Agent prepares montage-input.json and montage-project.json, runs the Montage adapter from $ANBAN_MONTAGE_SUBMODULE_PATH when set, otherwise third_party/OpenMontage, then registers task files by artifact role.",
-	}
-}
-
-func profileSource(usesProjectSnapshot bool) string {
-	if usesProjectSnapshot {
-		return "snapshot"
-	}
-	return "project"
-}
-
-func creativeConstraintsForProfile(platform, visualStyle string) string {
-	return visualStyle
+	return textResult(profile)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -672,11 +417,7 @@ func titleListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult("project_id is required"), nil
 	}
 
-	if _, _, err := svcs.ProjectSvc.Get(context.Background(), userID, projectID); err != nil {
-		return errorResult(fmt.Sprintf("get project: %v", err)), nil
-	}
-
-	titles, err := svcs.TaskSvc.ListTitles(context.Background(), projectID)
+	titles, err := svcs.TaskSvc.ListTitlesForUser(context.Background(), userID, projectID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list titles: %v", err)), nil
 	}
@@ -709,12 +450,11 @@ func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
-	if _, err := svcs.TaskSvc.ValidateAgentTaskAccess(context.Background(), taskID, userID); err != nil {
-		return errorResult("task not found"), nil
-	}
-
-	files, err := svcs.TaskSvc.GetVisibleFiles(context.Background(), taskID)
+	files, err := svcs.TaskSvc.GetVisibleFilesForUser(context.Background(), userID, taskID)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskCapabilityAccessDenied) {
+			return errorResult("task not found"), nil
+		}
 		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
 	}
 	return textResult(map[string]any{"files": files, "count": len(files)})

@@ -7,9 +7,13 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/resources"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func TestGetResourceIncludesRawArticleTemplate(t *testing.T) {
+	useResourceCatalogService(t)
 	args := json.RawMessage(`{"category":"article_templates","name":"long-form-essay","include_raw":true}`)
 	result, err := getResourceHandler(context.Background(), &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
@@ -42,6 +46,7 @@ func TestGetResourceIncludesRawArticleTemplate(t *testing.T) {
 }
 
 func TestGetResourceExposesLayoutSchema(t *testing.T) {
+	useResourceCatalogService(t)
 	args := json.RawMessage(`{"category":"layouts","name":"cta"}`)
 	result, err := getResourceHandler(context.Background(), &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
@@ -65,6 +70,7 @@ func TestGetResourceExposesLayoutSchema(t *testing.T) {
 }
 
 func TestGetResourceExposesWriterMetadata(t *testing.T) {
+	useResourceCatalogService(t)
 	args := json.RawMessage(`{"category":"writers","name":"dan-koe"}`)
 	result, err := getResourceHandler(context.Background(), &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
@@ -85,4 +91,11 @@ func TestGetResourceExposesWriterMetadata(t *testing.T) {
 	if formulas, ok := parsed["title_formulas"].([]any); !ok || len(formulas) == 0 {
 		t.Fatalf("writer title_formulas missing: %#v", parsed["title_formulas"])
 	}
+}
+
+func useResourceCatalogService(t *testing.T) {
+	t.Helper()
+	old := svcs
+	svcs = &Services{ResourceCatalogSvc: service.NewResourceCatalogService(resources.Manager())}
+	t.Cleanup(func() { svcs = old })
 }

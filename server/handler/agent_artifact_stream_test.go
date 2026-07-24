@@ -89,7 +89,9 @@ func TestAgentArtifactStreamSupportsUnicodePathAndRejectsDeclaredSizeMismatch(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != fiber.StatusOK || !strings.Contains(store.uploadedKey, "/output/文章.md/attempts/") {
+	if response.StatusCode != fiber.StatusOK ||
+		!strings.Contains(store.uploadedKey, "/artifacts/staging/sha256/"+hex.EncodeToString(sum[:])+"/") ||
+		!strings.HasSuffix(store.uploadedKey, "/output/文章.md") {
 		responseBody, _ := io.ReadAll(response.Body)
 		t.Fatalf("unicode path status/key/body = %d/%q/%s", response.StatusCode, store.uploadedKey, responseBody)
 	}

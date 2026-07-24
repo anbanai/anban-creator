@@ -89,6 +89,7 @@ type Project struct {
 	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
 	MontageDefaultsSet   bool                                         `gorm:"-" json:"-"`
 	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	DeletingAt           *time.Time                                   `gorm:"index" json:"-"`
 	CreatedAt            time.Time                                    `json:"created_at"`
 	UpdatedAt            time.Time                                    `json:"updated_at"`
 }

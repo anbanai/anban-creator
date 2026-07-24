@@ -167,6 +167,30 @@ func TestMcpServerTypes(t *testing.T) {
 	}
 }
 
+func TestMcpHTTPServerConfigTimeoutJSON(t *testing.T) {
+	t.Run("serializes_non_zero_timeout_in_milliseconds", func(t *testing.T) {
+		config := &McpHTTPServerConfig{Type: McpServerTypeHTTP, URL: "https://example.com/mcp", Timeout: 900000}
+		data, err := json.Marshal(config)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		if !strings.Contains(string(data), `"timeout":900000`) {
+			t.Fatalf("HTTP MCP config = %s, want timeout in milliseconds", data)
+		}
+	})
+
+	t.Run("omits_zero_timeout", func(t *testing.T) {
+		config := &McpHTTPServerConfig{Type: McpServerTypeHTTP, URL: "https://example.com/mcp"}
+		data, err := json.Marshal(config)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+		if strings.Contains(string(data), "timeout") {
+			t.Fatalf("HTTP MCP config = %s, want zero timeout omitted", data)
+		}
+	})
+}
+
 // TestMcpServerConfigAlwaysLoad verifies that AlwaysLoad is wired through all
 // four MCP server config structs and round-trips through JSON correctly.
 // A false (default) value must be omitted from the marshaled output thanks to

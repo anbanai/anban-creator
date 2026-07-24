@@ -82,6 +82,7 @@ type PlanRepository interface {
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
@@ -139,6 +140,8 @@ type TaskRepository interface {
 	// claimed it). Used by the fallback worker before re-enqueueing an
 	// unclaimed local task.
 	ResetLocalTarget(ctx context.Context, taskID string) (bool, error)
+	BeginDelete(ctx context.Context, taskID string) (bool, error)
+	DeleteIfDeleting(ctx context.Context, taskID string) (bool, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
@@ -173,14 +176,24 @@ type TaskRepository interface {
 type TaskFileRepository interface {
 	Create(ctx context.Context, file *model.TaskFile) error
 	Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error)
+	InsertIfAbsent(ctx context.Context, file *model.TaskFile) (*model.TaskFile, bool, error)
+	ReplaceIfCurrent(ctx context.Context, expected, replacement *model.TaskFile) (*model.TaskFile, bool, error)
+	UpdateRoleIfCurrent(ctx context.Context, expected *model.TaskFile, role string) (*model.TaskFile, bool, error)
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
+	FindAnyByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindAllByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
+	FindPendingObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFile, error)
+	ClearPendingObjectCleanup(ctx context.Context, id, expectedOSSKey string) (bool, error)
+	QueueObjectCleanup(ctx context.Context, cleanup *model.TaskFileObjectCleanup) error
+	FindQueuedObjectCleanup(ctx context.Context, storageProvider string, limit int) ([]*model.TaskFileObjectCleanup, error)
+	DeleteQueuedObjectCleanup(ctx context.Context, id string) error
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
@@ -188,7 +201,9 @@ type TaskFileRepository interface {
 	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
+	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
 	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
+	ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
 
 // TaskExecutionRepository provides durable execution-attempt persistence.
@@ -232,19 +247,10 @@ type UploadSessionRepository interface {
 	FindForCleanup(ctx context.Context, expiredBefore, claimStaleBefore time.Time, limit int) ([]*model.UploadSession, error)
 	ClaimExpiration(ctx context.Context, id, claimID string, claimedAt, claimStaleBefore time.Time) (bool, error)
 	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
-	DeferExpiration(ctx context.Context, id, claimID string, retryAt time.Time) (bool, error)
 	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
-	AdoptTaskArtifactManifest(ctx context.Context, userID, executionPrefix string, claims []TaskArtifactSessionClaim, now time.Time) error
+	RescheduleExpiration(ctx context.Context, id, claimID string, nextCleanupAt time.Time) (bool, error)
 	ScheduleTaskArtifactExpiration(ctx context.Context, id string, expiresAt time.Time) error
 	ScheduleTaskArtifactPrefixExpiration(ctx context.Context, userID, stagingPrefix string, expiresAt time.Time) error
-}
-
-type TaskArtifactSessionClaim struct {
-	ID          string
-	StagingKey  string
-	FileName    string
-	ContentType string
-	Size        int64
 }
 
 // AssetRepository provides access to immutable finalized upload assets.

@@ -14,6 +14,7 @@ import (
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
@@ -33,6 +34,14 @@ func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
 func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, error) {
 	var task model.Task
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (r *taskRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error) {
+	var task model.Task
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&task).Error; err != nil {
 		return nil, err
 	}
 	return &task, nil
@@ -398,7 +407,7 @@ func (r *taskRepository) CountRunningByProject(ctx context.Context, projectID st
 func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
-		Where("project_id = ? AND status = ?", projectID, model.TaskStatusPending).
+		Where("project_id = ? AND status = ? AND deleting_at IS NULL", projectID, model.TaskStatusPending).
 		// Exclude tasks awaiting a desktop local-executor claim — those must not
 		// be scooped up by cloud DispatchPendingTasks. execution_target defaults
 		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
@@ -422,7 +431,7 @@ func (r *taskRepository) ClaimNextLocalTask(ctx context.Context, userID string, 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.Task
 		findErr := tx.
-			Where("user_id = ? AND status = ? AND execution_target = ?", userID, model.TaskStatusPending, model.ExecutionTargetLocal).
+			Where("user_id = ? AND status = ? AND execution_target = ? AND deleting_at IS NULL", userID, model.TaskStatusPending, model.ExecutionTargetLocal).
 			Where("local_claim_deadline IS NULL OR local_claim_deadline >= ?", time.Now()).
 			Order("created_at ASC").
 			First(&task).Error
@@ -442,7 +451,7 @@ func (r *taskRepository) ClaimNextLocalTask(ctx context.Context, userID string, 
 			updates["executor_info"] = string(executorInfo)
 		}
 		res := tx.Model(&model.Task{}).
-			Where("id = ? AND status = ?", task.ID, model.TaskStatusPending).
+			Where("id = ? AND status = ? AND deleting_at IS NULL", task.ID, model.TaskStatusPending).
 			Updates(updates)
 		if res.Error != nil {
 			return res.Error
@@ -470,7 +479,7 @@ func (r *taskRepository) ClaimNextLocalTask(ctx context.Context, userID string, 
 func (r *taskRepository) FindExpiredLocalTasks(ctx context.Context, now time.Time) ([]string, error) {
 	var ids []string
 	err := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("status = ? AND execution_target = ?", model.TaskStatusPending, model.ExecutionTargetLocal).
+		Where("status = ? AND execution_target = ? AND deleting_at IS NULL", model.TaskStatusPending, model.ExecutionTargetLocal).
 		Where("local_claim_deadline IS NOT NULL AND local_claim_deadline < ?", now).
 		Limit(100).
 		Pluck("id", &ids).Error
@@ -485,7 +494,7 @@ func (r *taskRepository) FindExpiredLocalTasks(ctx context.Context, now time.Tim
 // so would double-run the task on cloud + the desktop that just claimed it).
 func (r *taskRepository) ResetLocalTarget(ctx context.Context, taskID string) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ? AND status = ? AND execution_target = ?", taskID, model.TaskStatusPending, model.ExecutionTargetLocal).
+		Where("id = ? AND status = ? AND execution_target = ? AND deleting_at IS NULL", taskID, model.TaskStatusPending, model.ExecutionTargetLocal).
 		Updates(map[string]interface{}{
 			"execution_target":     model.ExecutionTargetCloud,
 			"local_claim_deadline": nil,
@@ -494,6 +503,27 @@ func (r *taskRepository) ResetLocalTarget(ctx context.Context, taskID string) (b
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+func (r *taskRepository) BeginDelete(ctx context.Context, taskID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND deleting_at IS NULL", taskID).
+		Update("deleting_at", time.Now())
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *taskRepository) DeleteIfDeleting(ctx context.Context, taskID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Where("id = ? AND deleting_at IS NOT NULL", taskID).
+		Delete(&model.Task{})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // FindTitlesByProjectID returns all recorded titles for a project, ordered by creation time descending.
@@ -561,7 +591,7 @@ func (r *taskRepository) CompareAndSwapStatusForUser(ctx context.Context, taskID
 func (r *taskRepository) CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("id = ? AND status = ?", taskID, expected).
+		Where("id = ? AND status = ? AND deleting_at IS NULL", taskID, expected).
 		Updates(map[string]interface{}{
 			"status":     newStatus,
 			"started_at": time.Now(),
@@ -593,7 +623,7 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 func (r *taskRepository) SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Where("id = ? AND status = ? AND deleting_at IS NULL", taskID, model.TaskStatusRunning).
 		Update("current_execution_id", executionID)
 	if result.Error != nil {
 		return false, result.Error
@@ -641,6 +671,7 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
+		Where("deleting_at IS NULL").
 		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
 		Updates(map[string]interface{}{
 			"status":                 model.TaskStatusPending,

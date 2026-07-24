@@ -1234,8 +1234,14 @@ func TestUploadLiveAudioRejectsLocalStorage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected local storage rejection")
 	}
-	if !strings.Contains(err.Error(), "configure OSS") {
-		t.Fatalf("error should guide OSS configuration, got: %v", err)
+	text := err.Error()
+	if !strings.Contains(text, "OSS storage is required") {
+		t.Fatalf("error should describe the OSS capability requirement, got: %v", err)
+	}
+	for _, forbidden := range []string{"prepare_file_upload", "create_live_analysis_task", "PUT", "audio_key", "then call", "configure OSS"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("error contains workflow directive %q: %v", forbidden, err)
+		}
 	}
 }
 

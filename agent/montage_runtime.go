@@ -67,16 +67,15 @@ func materializeMontageRuntime(workspace string) (string, error) {
 func ensureMontageOutputLink(runtimePath, canonicalOutput string) error {
 	linkPath := filepath.Join(runtimePath, "output")
 	info, err := os.Lstat(linkPath)
-	if os.IsNotExist(err) {
+	switch {
+	case os.IsNotExist(err):
 		if err := os.Symlink(canonicalOutput, linkPath); err != nil {
 			return fmt.Errorf("link Montage output to canonical output: %w", err)
 		}
 		return nil
-	}
-	if err != nil {
+	case err != nil:
 		return fmt.Errorf("inspect Montage output link: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
+	case info.Mode()&os.ModeSymlink == 0:
 		return fmt.Errorf("Montage output must link to canonical output")
 	}
 	target, err := os.Readlink(linkPath)

@@ -95,11 +95,13 @@ server-build:
 
 # Build and run the server
 server-run: server-build
-	./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+		./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
 
 # Run the server via go run (development)
 server-dev:
-	@cd server && go run . -config config.yaml
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+		cd server && go run . -config config.yaml
 
 # Run server tests
 server-test:

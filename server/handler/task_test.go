@@ -18,7 +18,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/auth"
+	"github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -32,8 +34,8 @@ type availableRuntimeDispatcher struct{}
 
 func (availableRuntimeDispatcher) Scope() string { return "docker" }
 
-func (availableRuntimeDispatcher) ResolveRuntime(string) config.RuntimeImageSelection {
-	return config.RuntimeImageSelection{Profile: "article", Image: "creator-agent-article:test"}
+func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
+	return config.RuntimeImageSelection{Profile: taskType, Image: "creator-agent-" + taskType + ":test"}
 }
 
 func (availableRuntimeDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
@@ -46,13 +48,11 @@ func (availableRuntimeDispatcher) ResolvePrepared(context.Context, *model.TaskEx
 
 func (availableRuntimeDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
 
-func (availableRuntimeDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }
-
-func (availableRuntimeDispatcher) DeleteProjectMemory(context.Context, string) error { return nil }
-
-func (availableRuntimeDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
-	return nil, nil
+func (availableRuntimeDispatcher) Inspect(context.Context, *model.TaskExecution) (*serveragent.RuntimeExecutionState, error) {
+	return &serveragent.RuntimeExecutionState{Phase: serveragent.RuntimePhasePending}, nil
 }
+
+func (availableRuntimeDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }
 
 func (noopTaskEnqueuer) Enqueue(string, []byte) error {
 	return nil
@@ -772,11 +772,10 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		return h.Clone(c)
 	})
 
-	req := httptest.NewRequest("POST", "/tasks/"+taskID+"/clone", nil)
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"prompt":"edited exact clone prompt",
+		"input_attachments":[{"type":"text","text":"edited exact attachment","file_name":"brief.txt"}]
+	}`)
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -791,6 +790,1168 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 	if env.Data.Status != model.TaskStatusPending {
 		t.Fatalf("new task status = %q, want pending", env.Data.Status)
+	}
+	if env.Data.ProjectID != projectID || env.Data.Type != model.PlatformArticle || env.Data.Prompt != "edited exact clone prompt" {
+		t.Fatalf("exact clone destination/config = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
+	}
+	attachments := env.Data.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Text != "edited exact attachment" {
+		t.Fatalf("exact clone attachments = %#v", attachments)
+	}
+}
+
+func TestCloneTask_FullEditableOverrides(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "editable-clone@example.com", Password: "hashed", InviteCode: "editableclone", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "Source seednote", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Platform:     model.PlatformArticle,
+		Name:         "Destination article",
+		Status:       model.ProjectStatusActive,
+		Instructions: "current destination instructions",
+		VisualStyle:  "current destination visual style",
+	}
+	for _, project := range []*model.Project{sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+	}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+	referenceAsset := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeTaskReference, "clone-ref.png", "image/png")
+	if err := repo.Assets().Create(ctx, referenceAsset); err != nil {
+		t.Fatalf("create reference asset: %v", err)
+	}
+
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	h.SetImagePresets([]config.ImageModelPreset{{Key: "free-image", Provider: "test", Model: "image-v1", MinTier: "free"}})
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{
+		"project_id":"`+destinationProject.ID+`",
+		"quantity":2,
+		"prompt":"edited full clone prompt",
+		"image_ratio":"1:1",
+		"image_model_key":"free-image",
+		"skip_reference_image":true,
+		"reference_image":{"asset_id":"`+referenceAsset.ID+`"},
+		"input_attachments":[{"type":"text","text":"validated attachment","file_name":"brief.txt"}],
+		"watermark":true,
+		"goal":"edited goal",
+		"goal_mode":true,
+		"has_content_image":false,
+		"has_tail_image":true,
+		"article_with_cover":false,
+		"article_with_content_images":false,
+		"execution_target":"local"
+	}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Data.ProjectID != destinationProject.ID || env.Data.Type != model.PlatformArticle || env.Data.Prompt != "edited full clone prompt" {
+		t.Fatalf("response task = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
+	}
+
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, destinationProject.ID, "", 0, 10)
+	if err != nil {
+		t.Fatalf("find destination tasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("destination tasks = %d, want 2", len(tasks))
+	}
+	for _, task := range tasks {
+		snapshot := task.ProjectSnapshot.Data()
+		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
+			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
+		}
+		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+			t.Fatalf("shared overrides = %#v", task)
+		}
+		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
+			t.Fatalf("goal/image overrides = %#v", task)
+		}
+		if task.ExecutionTarget != model.ExecutionTargetLocal || task.LocalClaimDeadline == nil {
+			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
+		}
+		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
+			t.Fatalf("attachments = %#v", got)
+		}
+		if task.InputSourceTaskID != source.ID || task.InputSourceProjectID != source.ProjectID {
+			t.Fatalf("source provenance = %q/%q", task.InputSourceTaskID, task.InputSourceProjectID)
+		}
+	}
+}
+
+func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "inherited-reference@example.com", Password: "hashed", InviteCode: "inheritedreference", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	inherited := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "inherited.png", "image/png")
+	unrelated := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "unrelated.png", "image/png")
+	foreign := cutoverAsset(uuid.NewString(), uuid.NewString(), service.DirectUploadPurposeProjectReference, "foreign.png", "image/png")
+	for _, asset := range []*model.Asset{inherited, unrelated, foreign} {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatalf("create asset %q: %v", asset.ID, err)
+		}
+	}
+
+	sourceProject := &model.Project{
+		ID:                    uuid.NewString(),
+		UserID:                userID,
+		Platform:              model.PlatformArticle,
+		Name:                  "source",
+		Status:                model.ProjectStatusActive,
+		ReferenceImageAssetID: inherited.ID,
+	}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	for _, project := range []*model.Project{sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+	}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
+
+	view, err := h.presentTaskReference(ctx, userID, source)
+	if err != nil || view == nil || view.AssetID != inherited.ID {
+		t.Fatalf("effective source reference = %#v, %v", view, err)
+	}
+	cloneBody := func(assetID string) string {
+		return `{"project_id":"` + destinationProject.ID + `","quantity":1,"prompt":"editable clone","reference_image":{"asset_id":"` + assetID + `"}}`
+	}
+	taskCount := func() int {
+		tasks, err := repo.Tasks().FindByUserID(ctx, userID, "", "", 0, 20)
+		if err != nil {
+			t.Fatalf("find tasks: %v", err)
+		}
+		return len(tasks)
+	}
+
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(inherited.ID))
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("trusted inherited clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var firstEnvelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&firstEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode first clone: %v", err)
+	}
+	resp.Body.Close()
+	if firstEnvelope.Data.ReferenceImage == nil || firstEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
+		t.Fatalf("first clone reference view = %#v, want %q", firstEnvelope.Data.ReferenceImage, inherited.ID)
+	}
+
+	firstClone, err := repo.Tasks().FindByID(ctx, firstEnvelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find first clone: %v", err)
+	}
+	if firstClone.ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("first persisted clone reference = %q, want %q", firstClone.ReferenceImageAssetID, inherited.ID)
+	}
+	firstClone.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
+		t.Fatalf("complete first clone: %v", err)
+	}
+	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", `{}`)
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("exact clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var exactEnvelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&exactEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode exact clone-of-clone: %v", err)
+	}
+	resp.Body.Close()
+	if exactEnvelope.Data.ReferenceImage == nil || exactEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
+		t.Fatalf("exact clone reference view = %#v, want %q", exactEnvelope.Data.ReferenceImage, inherited.ID)
+	}
+	firstClone.Status = model.TaskStatusFailed
+	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
+		t.Fatalf("fail first clone: %v", err)
+	}
+	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+firstClone.ID+`"]}`)
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("bulk clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var bulkEnvelope struct {
+		Data bulkTasksResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&bulkEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode bulk clone-of-clone: %v", err)
+	}
+	resp.Body.Close()
+	if bulkEnvelope.Data.Succeeded != 1 || len(bulkEnvelope.Data.Results) != 1 || !bulkEnvelope.Data.Results[0].OK {
+		t.Fatalf("bulk clone-of-clone result = %#v, want one success", bulkEnvelope.Data)
+	}
+	if taskCount() != 4 {
+		t.Fatalf("task count after bulk clone-of-clone = %d, want 4", taskCount())
+	}
+
+	for _, test := range []struct {
+		name       string
+		assetID    string
+		wantStatus int
+	}{
+		{name: "unrelated same-user project reference", assetID: unrelated.ID, wantStatus: fiber.StatusBadRequest},
+		{name: "foreign project reference", assetID: foreign.ID, wantStatus: fiber.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := taskCount()
+			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(test.assetID))
+			defer resp.Body.Close()
+			if resp.StatusCode != test.wantStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d body=%s", resp.StatusCode, test.wantStatus, body)
+			}
+			if got := taskCount(); got != before {
+				t.Fatalf("task count after rejected clone = %d, want %d", got, before)
+			}
+		})
+	}
+
+	beforeCreate := taskCount()
+	resp = postJSON(t, app, "/tasks", cloneBody(inherited.ID))
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create project reference status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	if got := taskCount(); got != beforeCreate {
+		t.Fatalf("task count after rejected create = %d, want %d", got, beforeCreate)
+	}
+}
+
+func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "ai-entry-clone@example.com", Password: "hashed", InviteCode: "aientryclone", Tier: model.TierFree}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	trusted := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeAIEntryAttachment, "trusted.png", "image/png")
+	unrelated := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeAIEntryAttachment, "unrelated.png", "image/png")
+	foreign := cutoverAsset(uuid.NewString(), uuid.NewString(), service.DirectUploadPurposeAIEntryAttachment, "foreign.png", "image/png")
+	for _, asset := range []*model.Asset{trusted, unrelated, foreign} {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatalf("create asset %q: %v", asset.ID, err)
+		}
+	}
+
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	for _, project := range []*model.Project{sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+	}
+	source := &model.Task{
+		ID:                    uuid.NewString(),
+		UserID:                userID,
+		ProjectID:             sourceProject.ID,
+		Type:                  sourceProject.Platform,
+		Status:                model.TaskStatusCompleted,
+		Prompt:                "AI entry source",
+		ReferenceImageAssetID: trusted.ID,
+	}
+	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	snapshotOnlySource := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+	snapshotOnlySource.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: unrelated.ID})
+	if err := repo.Tasks().Create(ctx, snapshotOnlySource); err != nil {
+		t.Fatalf("create snapshot-only source: %v", err)
+	}
+
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceSvc)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceSvc)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+	view, err := h.presentTaskReference(ctx, userID, source)
+	if err != nil || view == nil || view.AssetID != trusted.ID {
+		t.Fatalf("source reference view = %#v, %v", view, err)
+	}
+	cloneBody := func(assetID string) string {
+		return `{"project_id":"` + destinationProject.ID + `","quantity":1,"reference_image":{"asset_id":"` + assetID + `"}}`
+	}
+	taskCount := func() int64 {
+		count, err := repo.Tasks().CountByUserID(ctx, userID, "", "")
+		if err != nil {
+			t.Fatalf("count tasks: %v", err)
+		}
+		return count
+	}
+
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(trusted.ID))
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("trusted AI-entry clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode trusted AI-entry clone: %v", err)
+	}
+	resp.Body.Close()
+	if envelope.Data.ReferenceImage == nil || envelope.Data.ReferenceImage.AssetID != trusted.ID {
+		t.Fatalf("clone reference view = %#v, want %q", envelope.Data.ReferenceImage, trusted.ID)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, envelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find trusted AI-entry clone: %v", err)
+	}
+	if persisted.ReferenceImageAssetID != trusted.ID {
+		t.Fatalf("persisted clone reference = %q, want %q", persisted.ReferenceImageAssetID, trusted.ID)
+	}
+
+	for _, test := range []struct {
+		name       string
+		sourceID   string
+		assetID    string
+		wantStatus int
+	}{
+		{name: "unrelated same-user direct asset", sourceID: source.ID, assetID: unrelated.ID, wantStatus: fiber.StatusBadRequest},
+		{name: "foreign direct asset", sourceID: source.ID, assetID: foreign.ID, wantStatus: fiber.StatusForbidden},
+		{name: "snapshot-only match", sourceID: snapshotOnlySource.ID, assetID: unrelated.ID, wantStatus: fiber.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := taskCount()
+			resp := postJSON(t, app, "/tasks/"+test.sourceID+"/clone", cloneBody(test.assetID))
+			defer resp.Body.Close()
+			if resp.StatusCode != test.wantStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d body=%s", resp.StatusCode, test.wantStatus, body)
+			}
+			if got := taskCount(); got != before {
+				t.Fatalf("task count after rejected clone = %d, want %d", got, before)
+			}
+		})
+	}
+
+	beforeCreate := taskCount()
+	resp = postJSON(t, app, "/tasks", cloneBody(trusted.ID))
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create AI-entry reference status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	if got := taskCount(); got != beforeCreate {
+		t.Fatalf("task count after rejected create = %d, want %d", got, beforeCreate)
+	}
+}
+
+func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		platform   string
+		typeFields string
+		assert     func(t *testing.T, task *model.Task)
+	}{
+		{
+			name:       "ecommerce",
+			platform:   model.PlatformEcommerce,
+			typeFields: `"product_photos":["https://example.com/product.png"],"selected_modules":{"main_images":2},"target_platform":"amazon","selling_points":"durable","language":"en","provider_strategy_override":"balanced"`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || got.ProviderStrategyOverride != "balanced" || len(got.ProductPhotos) != 1 {
+					t.Fatalf("ecommerce config = %#v", got)
+				}
+			},
+		},
+		{
+			name:       "montage",
+			platform:   model.PlatformMontage,
+			typeFields: `"montage_input":{"brief":"edited montage brief","pipeline_key":"default","preferences":{"aspect_ratio":"16:9","duration_seconds":30}}`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.MontageInput.Data()
+				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+					t.Fatalf("montage input = %#v", got)
+				}
+			},
+		},
+		{
+			name:       "ecommerce language only",
+			platform:   model.PlatformEcommerce,
+			typeFields: `"language":"zh-CN"`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 1 || got.Language != "zh-CN" {
+					t.Fatalf("language-only ecommerce config = %#v", got)
+				}
+			},
+		},
+		{
+			name:       "ecommerce provider strategy only",
+			platform:   model.PlatformEcommerce,
+			typeFields: `"provider_strategy_override":"quality"`,
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 1 || got.ProviderStrategyOverride != "quality" {
+					t.Fatalf("provider-only ecommerce config = %#v", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			userID := uuid.NewString()
+			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: tt.name + "-clone@example.com", Password: "hashed", InviteCode: tt.name + "clone"}); err != nil {
+				t.Fatal(err)
+			}
+			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+			destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: tt.platform, Name: tt.name, Status: model.ProjectStatusActive}
+			if tt.platform == model.PlatformEcommerce {
+				destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
+			}
+			for _, project := range []*model.Project{sourceProject, destinationProject} {
+				if err := repo.Projects().Create(t.Context(), project); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+			if err := repo.Tasks().Create(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			if tt.platform == model.PlatformMontage {
+				taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+			}
+			h := NewTaskHandler(taskSvc, &logger)
+			h.SetRepository(repo)
+			app := fiber.New()
+			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"project_id":"`+destinationProject.ID+`","quantity":2,`+tt.typeFields+`}`)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d body=%s", resp.StatusCode, body)
+			}
+			tasks, err := repo.Tasks().FindByUserID(t.Context(), userID, destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+			tt.assert(t, tasks[0])
+		})
+	}
+}
+
+type cloneSourceReuseFixture struct {
+	repo               repository.Repository
+	app                *fiber.App
+	store              storage.Provider
+	signingStore       *cloneSourceReuseStorage
+	userID             string
+	rootProjectID      string
+	rootTaskID         string
+	source             *model.Task
+	destinationProject *model.Project
+}
+
+type cloneSourceReuseStorage struct {
+	*fakeStorageProvider
+	signedKeys []string
+	getURL     func(string) string
+}
+
+func (s *cloneSourceReuseStorage) GetURL(key string) string {
+	if s.getURL != nil {
+		return s.getURL(key)
+	}
+	return s.fakeStorageProvider.GetURL(key)
+}
+
+func (s *cloneSourceReuseStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	s.signedKeys = append(s.signedKeys, key)
+	return "https://signed.example.com/" + key, nil
+}
+
+func setupCloneSourceReuseFixture(t *testing.T, destinationPlatform string) *cloneSourceReuseFixture {
+	t.Helper()
+	store := &cloneSourceReuseStorage{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	return setupCloneSourceReuseFixtureWithStore(t, destinationPlatform, store)
+}
+
+func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform string, store storage.Provider) *cloneSourceReuseFixture {
+	t.Helper()
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@source-reuse.test", Password: "hashed", InviteCode: strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}); err != nil {
+		t.Fatal(err)
+	}
+	rootProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "root source", Status: model.ProjectStatusActive}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "intermediate source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: destinationPlatform, Name: "destination", Status: model.ProjectStatusActive}
+	if destinationPlatform == model.PlatformEcommerce {
+		destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
+	}
+	for _, project := range []*model.Project{rootProject, sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rootTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: rootProject.Platform, Status: model.TaskStatusCompleted}
+	source := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            sourceProject.ID,
+		Type:                 sourceProject.Platform,
+		Status:               model.TaskStatusCompleted,
+		InputSourceTaskID:    rootTask.ID,
+		InputSourceProjectID: rootProject.ID,
+	}
+	for _, task := range []*model.Task{rootTask, source} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	if destinationPlatform == model.PlatformMontage {
+		taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+	}
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	signingStore, _ := store.(*cloneSourceReuseStorage)
+	return &cloneSourceReuseFixture{
+		repo:               repo,
+		app:                app,
+		store:              store,
+		signingStore:       signingStore,
+		userID:             userID,
+		rootProjectID:      rootProject.ID,
+		rootTaskID:         rootTask.ID,
+		source:             source,
+		destinationProject: destinationProject,
+	}
+}
+
+func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixture, task *model.Task) {
+	t.Helper()
+	if fixture.signingStore == nil {
+		t.Fatal("bootstrap fixture requires signing storage")
+	}
+	executionID := uuid.NewString()
+	task.Status = model.TaskStatusRunning
+	task.CurrentExecutionID = &executionID
+	if err := fixture.repo.Tasks().Update(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repo.TaskExecutions().Create(t.Context(), &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionStarting,
+		RuntimeScope: "anban", RuntimeWorkload: "job-1", RuntimeInstanceID: "pod-uid-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeEnv := map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":           "test-token",
+		"ANTHROPIC_BASE_URL":             "https://anthropic.example.com",
+		"ANTHROPIC_MODEL":                "claude-test",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-test",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-test",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-test",
+	}
+	bootstrap := service.NewAgentBootstrapService(fixture.repo, tokens, service.AgentBootstrapConfig{
+		Model: "claude-test", TokenTTL: time.Hour, SignedURLTTL: 60, Store: fixture.store,
+		RuntimeEnv: runtimeEnv,
+		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+			"claude-test": {Provider: "anthropic", Model: "claude-test"},
+		},
+	}, zerolog.Nop())
+	response, err := bootstrap.Bootstrap(t.Context(), &serveragent.WorkloadIdentity{
+		Target: "kubernetes", RuntimeIdentity: model.RuntimeIdentity{Scope: "anban", Workload: "job-1", InstanceID: "pod-uid-1"},
+		ExecutionID: executionID, TaskID: task.ID, ProjectID: task.ProjectID, UserID: task.UserID,
+		Deadline: time.Now().Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("bootstrap cloned attachment: %v", err)
+	}
+	for _, file := range response.Files {
+		if strings.HasPrefix(file.Path, ".anban-creator/input-attachments/") && file.DownloadURL != "" {
+			if len(fixture.signingStore.signedKeys) != 1 || fixture.signingStore.signedKeys[0] != task.InputAttachments.Data()[0].Key {
+				t.Fatalf("signed keys = %#v, attachment = %#v", fixture.signingStore.signedKeys, task.InputAttachments.Data()[0])
+			}
+			return
+		}
+	}
+	t.Fatalf("bootstrap files have no signed attachment: %#v", response.Files)
+}
+
+func cloneSourceAttachmentAPIShape(t *testing.T, fixture *cloneSourceReuseFixture, attachment model.EntryAttachment) map[string]any {
+	t.Helper()
+	fixture.source.SetInputAttachments([]model.EntryAttachment{attachment})
+	response := taskAPIResponse(fixture.source, fixture.store)
+	attachments, ok := response["input_attachments"].([]any)
+	if !ok || len(attachments) != 1 {
+		t.Fatalf("task API input_attachments = %#v", response["input_attachments"])
+	}
+	result, ok := attachments[0].(map[string]any)
+	if !ok {
+		t.Fatalf("task API attachment = %#v", attachments[0])
+	}
+	return result
+}
+
+func cloneSourceAttachmentRequest(t *testing.T, projectID string, attachment map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"project_id":        projectID,
+		"quantity":          1,
+		"input_attachments": []any{attachment},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func assertCloneSourceReuseRejectedWithoutPersistence(t *testing.T, fixture *cloneSourceReuseFixture, requestBody string) {
+	t.Helper()
+	resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", requestBody)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	count, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "")
+	if err != nil || count != 0 {
+		t.Fatalf("destination task count = %d err=%v, want 0", count, err)
+	}
+	total, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, "", "")
+	if err != nil || total != 2 {
+		t.Fatalf("total task count = %d err=%v, want unchanged root+source tasks", total, err)
+	}
+}
+
+func cloneSourceTaskURL(userID, projectID, taskID, fileName string) string {
+	key := strings.Join([]string{"uploads", "users", userID, "projects", projectID, "tasks", taskID, "inputs", fileName}, "/")
+	return "/api/v1/files/" + key
+}
+
+func cloneSourceReuseRequest(platform, projectID, rawURL string) string {
+	switch platform {
+	case model.PlatformEcommerce:
+		return `{"project_id":"` + projectID + `","quantity":1,"product_photos":["` + rawURL + `"]}`
+	case model.PlatformMontage:
+		return `{"project_id":"` + projectID + `","quantity":1,"montage_input":{"brief":"reuse source","source_assets":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","mime_type":"image/png"}]}}`
+	default:
+		return `{"project_id":"` + projectID + `","quantity":1,"input_attachments":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","content_type":"image/png"}]}`
+	}
+}
+
+func TestCloneTask_FullEditableAllowsTrustedRootSourceReuse(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+		t.Run(platform, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, platform)
+			rawURL := cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png")
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+			got := tasks[0]
+			if got.InputSourceTaskID != fixture.rootTaskID || got.InputSourceProjectID != fixture.rootProjectID {
+				t.Fatalf("root source = %q/%q", got.InputSourceTaskID, got.InputSourceProjectID)
+			}
+			switch platform {
+			case model.PlatformEcommerce:
+				if photos := got.Ecommerce.Data().ProductPhotos; len(photos) != 1 || photos[0] != rawURL {
+					t.Fatalf("product photos = %#v", photos)
+				}
+			case model.PlatformMontage:
+				if assets := got.MontageInput.Data().SourceAssets; len(assets) != 1 || assets[0].URL != rawURL {
+					t.Fatalf("montage assets = %#v", assets)
+				}
+			default:
+				if attachments := got.InputAttachments.Data(); len(attachments) != 1 || attachments[0].URL != rawURL {
+					t.Fatalf("attachments = %#v", attachments)
+				}
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableAllowsTaskAPIAttachmentSourceReuse(t *testing.T) {
+	tests := []struct {
+		name       string
+		attachment func(*cloneSourceReuseFixture) model.EntryAttachment
+	}{
+		{
+			name: "owned URL and enriched matching key",
+			attachment: func(f *cloneSourceReuseFixture) model.EntryAttachment {
+				return model.EntryAttachment{
+					Type:        "image",
+					URL:         cloneSourceTaskURL(f.userID, f.rootProjectID, f.rootTaskID, "source.png"),
+					FileName:    "source.png",
+					ContentType: "image/png",
+				}
+			},
+		},
+		{
+			name: "trusted persisted key only",
+			attachment: func(f *cloneSourceReuseFixture) model.EntryAttachment {
+				return model.EntryAttachment{
+					Type:        "image",
+					Key:         strings.TrimPrefix(cloneSourceTaskURL(f.userID, f.rootProjectID, f.rootTaskID, "source.png"), "/api/v1/files/"),
+					FileName:    "source.png",
+					ContentType: "image/png",
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, tt.attachment(fixture))
+			if _, hasUploadID := apiAttachment["upload_id"]; hasUploadID {
+				t.Fatalf("task API attachment unexpectedly has upload_id: %#v", apiAttachment)
+			}
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s attachment=%#v", resp.StatusCode, body, apiAttachment)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+			got := tasks[0].InputAttachments.Data()
+			wantURL, _ := apiAttachment["url"].(string)
+			wantKey, _ := apiAttachment["key"].(string)
+			if len(got) != 1 || got[0].Key != wantKey || (wantURL != "" && got[0].URL != wantURL) {
+				t.Fatalf("persisted attachment = %#v, API attachment = %#v", got, apiAttachment)
+			}
+			bootstrapClonedSourceAttachment(t, fixture, tasks[0])
+			if got[0].URL == "" || !fixture.store.IsOwnedURL(got[0].URL) {
+				t.Fatalf("persisted attachment URL = %q, want provider-owned URL", got[0].URL)
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *testing.T) {
+	mismatches := []struct {
+		name string
+		ids  func(*cloneSourceReuseFixture) (string, string, string)
+	}{
+		{name: "wrong user", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return uuid.NewString(), f.rootProjectID, f.rootTaskID
+		}},
+		{name: "wrong project", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, uuid.NewString(), f.rootTaskID
+		}},
+		{name: "wrong task", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, f.rootProjectID, uuid.NewString()
+		}},
+	}
+	for _, mismatch := range mismatches {
+		t.Run(mismatch.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+			userID, projectID, taskID := mismatch.ids(fixture)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+				Type:        "image",
+				URL:         cloneSourceTaskURL(userID, projectID, taskID, "source.png"),
+				FileName:    "source.png",
+				ContentType: "image/png",
+			})
+			assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+		})
+	}
+
+	t.Run("URL and key identify different objects", func(t *testing.T) {
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+			Type:        "image",
+			URL:         cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"),
+			FileName:    "source.png",
+			ContentType: "image/png",
+		})
+		apiAttachment["key"] = strings.TrimPrefix(cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "other.png"), "/api/v1/files/")
+		assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+	})
+
+	t.Run("untrusted key only", func(t *testing.T) {
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+			Type:        "image",
+			Key:         strings.TrimPrefix(cloneSourceTaskURL(uuid.NewString(), fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
+			FileName:    "source.png",
+			ContentType: "image/png",
+		})
+		assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+	})
+}
+
+func TestCloneTask_FullEditableRejectsKeyOnlyReuseWithoutOwnedProviderURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		store storage.Provider
+	}{
+		{name: "missing storage"},
+		{
+			name: "empty provider URL",
+			store: &cloneSourceReuseStorage{
+				fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}},
+				getURL:              func(string) string { return "" },
+			},
+		},
+		{
+			name: "non-owned provider URL",
+			store: &cloneSourceReuseStorage{
+				fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}},
+				getURL:              func(string) string { return "https://public.example.com/source.png" },
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixtureWithStore(t, model.PlatformArticle, tt.store)
+			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
+				Type:        "image",
+				Key:         strings.TrimPrefix(cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
+				FileName:    "source.png",
+				ContentType: "image/png",
+			})
+			assertCloneSourceReuseRejectedWithoutPersistence(t, fixture, cloneSourceAttachmentRequest(t, fixture.destinationProject.ID, apiAttachment))
+		})
+	}
+}
+
+func TestCloneTask_FullEditableAllowsPublicExternalSourceURLs(t *testing.T) {
+	for _, platform := range []string{model.PlatformEcommerce, model.PlatformMontage} {
+		t.Run(platform, func(t *testing.T) {
+			fixture := setupCloneSourceReuseFixture(t, platform)
+			rawURL := "https://public.example.com/source.png"
+			resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+			}
+			tasks, err := fixture.repo.Tasks().FindByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "", 0, 10)
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("destination tasks = %d err=%v", len(tasks), err)
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableRejectsUntrustedTaskScopedSourceURLs(t *testing.T) {
+	mismatches := []struct {
+		name string
+		ids  func(*cloneSourceReuseFixture) (string, string, string)
+	}{
+		{name: "wrong user", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return uuid.NewString(), f.rootProjectID, f.rootTaskID
+		}},
+		{name: "wrong project", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, uuid.NewString(), f.rootTaskID
+		}},
+		{name: "wrong task", ids: func(f *cloneSourceReuseFixture) (string, string, string) {
+			return f.userID, f.rootProjectID, uuid.NewString()
+		}},
+	}
+	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+		for _, mismatch := range mismatches {
+			t.Run(platform+"/"+mismatch.name, func(t *testing.T) {
+				fixture := setupCloneSourceReuseFixture(t, platform)
+				userID, projectID, taskID := mismatch.ids(fixture)
+				rawURL := cloneSourceTaskURL(userID, projectID, taskID, "source.png")
+				resp := postJSON(t, fixture.app, "/tasks/"+fixture.source.ID+"/clone", cloneSourceReuseRequest(platform, fixture.destinationProject.ID, rawURL))
+				defer resp.Body.Close()
+				if resp.StatusCode != fiber.StatusBadRequest {
+					body, _ := io.ReadAll(resp.Body)
+					t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+				}
+				count, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, fixture.destinationProject.ID, "")
+				if err != nil || count != 0 {
+					t.Fatalf("destination task count = %d err=%v, want 0", count, err)
+				}
+				total, err := fixture.repo.Tasks().CountByUserID(t.Context(), fixture.userID, "", "")
+				if err != nil || total != 2 {
+					t.Fatalf("total task count = %d err=%v, want unchanged root+source tasks", total, err)
+				}
+			})
+		}
+	}
+}
+
+func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T) {
+	tests := []struct {
+		name       string
+		prepare    func(t *testing.T, repo repository.Repository, userID string, destination *model.Project) string
+		wantStatus int
+	}{
+		{
+			name: "foreign project",
+			prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+				destination.UserID = uuid.NewString()
+				if err := repo.Projects().Create(t.Context(), destination); err != nil {
+					t.Fatal(err)
+				}
+				return `{"project_id":"` + destination.ID + `","quantity":1}`
+			},
+			wantStatus: fiber.StatusForbidden,
+		},
+		{
+			name: "inactive project",
+			prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+				destination.Status = model.ProjectStatusArchived
+				if err := repo.Projects().Create(t.Context(), destination); err != nil {
+					t.Fatal(err)
+				}
+				return `{"project_id":"` + destination.ID + `","quantity":1}`
+			},
+			wantStatus: fiber.StatusBadRequest,
+		},
+		{name: "quantity zero", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":0}`
+		}, wantStatus: fiber.StatusBadRequest},
+		{name: "quantity above five", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":6}`
+		}, wantStatus: fiber.StatusBadRequest},
+		{name: "unavailable model", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":1,"image_model_key":"unknown"}`
+		}, wantStatus: fiber.StatusForbidden},
+		{name: "invalid goal", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":1,"goal_mode":true,"goal":"  "}`
+		}, wantStatus: fiber.StatusBadRequest},
+		{name: "unsafe attachment", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":1,"input_attachments":[{"type":"image","url":"file:///etc/passwd","file_name":"passwd.png","content_type":"image/png"}]}`
+		}, wantStatus: fiber.StatusBadRequest},
+		{name: "inaccessible reference", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
+			if err := repo.Projects().Create(t.Context(), destination); err != nil {
+				t.Fatal(err)
+			}
+			asset := cutoverAsset(uuid.NewString(), uuid.NewString(), service.DirectUploadPurposeTaskReference, "foreign.png", "image/png")
+			if err := repo.Assets().Create(t.Context(), asset); err != nil {
+				t.Fatal(err)
+			}
+			return `{"project_id":"` + destination.ID + `","quantity":1,"reference_image":{"asset_id":"` + asset.ID + `"}}`
+		}, wantStatus: fiber.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			userID := uuid.NewString()
+			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: tt.name + "@example.com", Password: "hashed", InviteCode: strings.ReplaceAll(tt.name, " ", "")}); err != nil {
+				t.Fatal(err)
+			}
+			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+			if err := repo.Projects().Create(t.Context(), sourceProject); err != nil {
+				t.Fatal(err)
+			}
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+			if err := repo.Tasks().Create(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			destination := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+			body := tt.prepare(t, repo, userID, destination)
+
+			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+			logger := zerolog.New(io.Discard)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
+			taskSvc.SetReferenceAssetService(referenceSvc)
+			h := NewTaskHandler(taskSvc, &logger)
+			h.SetRepository(repo)
+			h.SetStore(store)
+			h.SetReferenceAssetService(referenceSvc)
+			h.SetImagePresets([]config.ImageModelPreset{{Key: "free-image", Provider: "test", Model: "image-v1", MinTier: "free"}})
+			app := fiber.New()
+			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", body)
+			defer resp.Body.Close()
+			if resp.StatusCode != tt.wantStatus {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d body=%s", resp.StatusCode, tt.wantStatus, responseBody)
+			}
+			tasks, err := repo.Tasks().FindByUserID(t.Context(), userID, "", "", 0, 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 1 || tasks[0].ID != source.ID {
+				t.Fatalf("tasks after rejection = %#v, want only source", tasks)
+			}
+		})
+	}
+}
+
+func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-insufficient@example.com", Password: "hashed", InviteCode: "cloneinsufficient"}); err != nil {
+		t.Fatal(err)
+	}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	for _, project := range []*model.Project{sourceProject, destinationProject} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	bundle := billing.Bundle{
+		Policy: billing.PolicyCatalog{
+			Version:       "2026-07-22",
+			TaskAdmission: billing.TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
+			AcceptedTask:  billing.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
+			TopUp:         billing.TopUpPolicy{RepayDebtFirst: true},
+		},
+		Products: billing.ProductCatalog{
+			CatalogID: "clone-insufficient-v1",
+			Currency:  "credits",
+			SKUs: []billing.SKUConfig{{
+				ID: "task.article.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
+			}},
+		},
+	}
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	catalog := service.NewBillingCatalogService(repo, &bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := catalog.Publish(ctx); err != nil {
+		t.Fatalf("publish billing catalog: %v", err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: userID}); err != nil {
+		t.Fatalf("create empty wallet: %v", err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetBillingCatalogService(catalog)
+	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, &bundle, service.BillingWalletOptions{Now: func() time.Time { return now }}))
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"project_id":"`+destinationProject.ID+`","quantity":1,"prompt":"new task"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusPaymentRequired {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 402 body=%s", resp.StatusCode, body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, "", "", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != source.ID {
+		t.Fatalf("tasks after insufficient balance = %#v, want only source", tasks)
 	}
 }
 

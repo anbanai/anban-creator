@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
-	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,6 +64,29 @@ func (s *streamArtifactStorage) Delete(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
 	delete(s.objects, key)
 	return nil
+}
+func (s *streamArtifactStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	data, ok := s.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
+	}
+	digest := sha256.Sum256(data)
+	hash := hex.EncodeToString(digest[:])
+	return &storage.ObjectInfo{Key: key, Size: int64(len(data)), ContentType: "text/markdown", ETag: `"` + hash + `"`, SHA256: hash}, nil
+}
+func (s *streamArtifactStorage) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
+	info, err := s.StatObject(ctx, sourceKey)
+	if err != nil {
+		return nil, err
+	}
+	if info.ETag != expectedETag {
+		return nil, storage.ErrPromotionPreconditionFailed
+	}
+	if _, exists := s.objects[finalKey]; exists {
+		return nil, storage.ErrObjectAlreadyExists
+	}
+	s.objects[finalKey] = append([]byte(nil), s.objects[sourceKey]...)
+	return s.StatObject(ctx, finalKey)
 }
 func (s *streamArtifactStorage) DownloadURL(context.Context, string, int) (string, error) {
 	return "", errorsUnsupported("DownloadURL")
@@ -121,8 +144,8 @@ func TestStreamTaskArtifactUploadsWithoutOSS(t *testing.T) {
 	if got.ObjectKey == "" || got.Size != int64(len("artifact-body")) || got.SHA256 != req.SHA256 {
 		t.Fatalf("result = %#v", got)
 	}
-	if !strings.Contains(got.ObjectKey, "/output/article.md/attempts/") {
-		t.Fatalf("object key = %q, want attempt-scoped path namespace", got.ObjectKey)
+	if !strings.Contains(got.ObjectKey, "/artifacts/staging/sha256/"+req.SHA256+"/") || !strings.HasSuffix(got.ObjectKey, "/"+req.RelativePath) {
+		t.Fatalf("object key = %q, want hash-addressed staging namespace", got.ObjectKey)
 	}
 	stored, err := local.Read(t.Context(), got.ObjectKey)
 	if err != nil || string(stored) != "artifact-body" {
@@ -137,9 +160,13 @@ func TestStreamTaskArtifactUploadsWithoutOSS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("FinalizeTaskArtifactManifest: %v", err)
 	}
+	finalKey := buildTaskArtifactFinalStorageKey(task, executionID, req.SHA256, req.RelativePath)
 	pending, err := repo.TaskFiles().FindByExecutionID(t.Context(), executionID)
-	if err != nil || len(pending) != 1 || pending[0].OSSKey != got.ObjectKey {
+	if err != nil || len(pending) != 1 || pending[0].OSSKey != finalKey {
 		t.Fatalf("pending manifest = %#v, %v", pending, err)
+	}
+	if body, err := local.Read(t.Context(), finalKey); err != nil || string(body) != "artifact-body" {
+		t.Fatalf("immutable artifact = %q, %v", body, err)
 	}
 }
 
@@ -148,7 +175,7 @@ func TestFinalizeTaskArtifactManifestRejectsMalformedAttemptKey(t *testing.T) {
 	svc.store = &streamArtifactStorage{}
 	executionID := attachStreamArtifactExecution(t, svc, task)
 	req := streamArtifactRequest("artifact-body")
-	malformed := buildTaskArtifactStorageKey(task, executionID, req.RelativePath) + "/attempts/not-a-uuid"
+	malformed := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + req.SHA256 + "/not-a-uuid/" + req.RelativePath
 	err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
 		TaskID: task.ID, ExecutionID: executionID,
 		Files: []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: malformed, Size: req.Size, SHA256: req.SHA256}},
@@ -163,7 +190,7 @@ func TestFinalizeTaskArtifactManifestRejectsUnregisteredAttemptKey(t *testing.T)
 	svc.store = &streamArtifactStorage{}
 	executionID := attachStreamArtifactExecution(t, svc, task)
 	req := streamArtifactRequest("artifact-body")
-	unregistered := buildTaskArtifactStreamStorageKey(task, executionID, req.RelativePath, uuid.NewString())
+	unregistered := buildTaskArtifactStagingStorageKey(task, executionID, req.SHA256, uuid.NewString(), req.RelativePath)
 	err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
 		TaskID: task.ID, ExecutionID: executionID,
 		Files: []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: unregistered, Size: req.Size, SHA256: req.SHA256}},
@@ -233,6 +260,22 @@ func TestStreamTaskArtifactRequiresCurrentExecutionAuthorization(t *testing.T) {
 	}
 	if len(store.objects) != 0 {
 		t.Fatalf("unauthorized streams wrote objects: %#v", store.objects)
+	}
+}
+
+func TestTaskArtifactMutationsRejectDeletingTask(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	svc.store = &streamArtifactStorage{}
+	executionID := attachStreamArtifactExecution(t, svc, task)
+	if acquired, err := repo.Tasks().BeginDelete(t.Context(), task.ID); err != nil || !acquired {
+		t.Fatalf("BeginDelete = %v, %v", acquired, err)
+	}
+
+	if _, err := svc.StreamTaskArtifact(t.Context(), task.ID, task.UserID, executionID, streamArtifactRequest("artifact-body")); !errors.Is(err, ErrTaskDeleting) {
+		t.Fatalf("StreamTaskArtifact error = %v, want ErrTaskDeleting", err)
+	}
+	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}); !errors.Is(err, ErrTaskDeleting) {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want ErrTaskDeleting", err)
 	}
 }
 
@@ -403,7 +446,7 @@ func TestStreamTaskArtifactSurfacesUploadAndCleanupFailures(t *testing.T) {
 		t.Fatalf("failed upload cleanup state deleted=%#v objects=%#v", store.deleted, store.objects)
 	}
 	for key := range store.objects {
-		session, findErr := svc.repo.UploadSessions().FindByID(t.Context(), path.Base(key))
+		session, findErr := svc.repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, key))
 		if findErr != nil || session.Status != model.UploadSessionPending || session.ExpiresAt.After(time.Now().Add(time.Minute)) {
 			t.Fatalf("failed upload durable cleanup session = %#v, %v", session, findErr)
 		}
@@ -507,7 +550,7 @@ func TestStreamTaskArtifactResponseLossIsReclaimedAfterExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessionID := path.Base(result.ObjectKey)
+	sessionID := streamArtifactSessionID(t, result.ObjectKey)
 	session, err := repo.UploadSessions().FindByID(t.Context(), sessionID)
 	if err != nil {
 		t.Fatalf("find durable stream attempt: %v", err)
@@ -526,7 +569,7 @@ func TestStreamTaskArtifactResponseLossIsReclaimedAfterExpiry(t *testing.T) {
 	}
 }
 
-func TestFinalizeTaskArtifactManifestReclaimsDisplacedStreamAttempt(t *testing.T) {
+func TestFinalizeTaskArtifactManifestReusesImmutableObjectAcrossStreamAttempts(t *testing.T) {
 	svc, repo, _, task := newTaskArtifactTestService(t)
 	local, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
@@ -560,30 +603,29 @@ func TestFinalizeTaskArtifactManifestReclaimsDisplacedStreamAttempt(t *testing.T
 		t.Fatal(err)
 	}
 
-	firstSession, err := repo.UploadSessions().FindByID(t.Context(), path.Base(first.ObjectKey))
+	firstSession, err := repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, first.ObjectKey))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondSession, err := repo.UploadSessions().FindByID(t.Context(), path.Base(second.ObjectKey))
+	secondSession, err := repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, second.ObjectKey))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstSession.Status != model.UploadSessionPending || !firstSession.ExpiresAt.Before(time.Now().Add(time.Minute)) || secondSession.Status != model.UploadSessionFinalized {
+	if firstSession.Status != model.UploadSessionPending || secondSession.Status != model.UploadSessionPending {
 		t.Fatalf("replacement sessions = first %#v second %#v", firstSession, secondSession)
 	}
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), local, repo, time.Now().Add(time.Minute), 10)
-	if err != nil || cleaned != 1 {
-		t.Fatalf("cleanup displaced attempt = %d, %v", cleaned, err)
+	for _, key := range []string{first.ObjectKey, second.ObjectKey} {
+		if _, err := local.Read(t.Context(), key); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("finalized staging object %q read error = %v", key, err)
+		}
 	}
-	if _, err := local.Read(t.Context(), first.ObjectKey); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("displaced object read error = %v", err)
-	}
-	if body, err := local.Read(t.Context(), second.ObjectKey); err != nil || string(body) != "artifact-body" {
-		t.Fatalf("adopted object = %q, %v", body, err)
+	finalKey := buildTaskArtifactFinalStorageKey(task, executionID, firstReq.SHA256, firstReq.RelativePath)
+	if body, err := local.Read(t.Context(), finalKey); err != nil || string(body) != "artifact-body" {
+		t.Fatalf("immutable object = %q, %v", body, err)
 	}
 }
 
-func TestTaskArtifactManifestAdoptionFencesLaterExpiryCleanup(t *testing.T) {
+func TestTaskArtifactManifestPromotionKeepsImmutableObjectAfterStagingCleanup(t *testing.T) {
 	svc, repo, _, task := newTaskArtifactTestService(t)
 	local, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
@@ -605,20 +647,21 @@ func TestTaskArtifactManifestAdoptionFencesLaterExpiryCleanup(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(t.Context(), path.Base(result.ObjectKey))
-	if err != nil || session.Status != model.UploadSessionFinalized {
-		t.Fatalf("adopted session = %#v, %v", session, err)
+	session, err := repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, result.ObjectKey))
+	if err != nil || session.Status != model.UploadSessionPending {
+		t.Fatalf("released staging session = %#v, %v", session, err)
 	}
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), local, repo, session.ExpiresAt.Add(time.Hour), 10)
-	if err != nil || cleaned != 0 {
-		t.Fatalf("cleanup after adoption = %d, %v", cleaned, err)
+	cleaned, err := CleanupExpiredUploadSessions(t.Context(), local, repo, session.ExpiresAt.Add(taskArtifactCleanupGrace+time.Second), 10)
+	if err != nil || cleaned != 1 {
+		t.Fatalf("staging session cleanup = %d, %v", cleaned, err)
 	}
+	finalKey := buildTaskArtifactFinalStorageKey(task, executionID, req.SHA256, req.RelativePath)
 	files, err := repo.TaskFiles().FindByExecutionID(t.Context(), executionID)
-	if err != nil || len(files) != 1 || files[0].OSSKey != result.ObjectKey {
-		t.Fatalf("adopted task files = %#v, %v", files, err)
+	if err != nil || len(files) != 1 || files[0].OSSKey != finalKey {
+		t.Fatalf("immutable task files = %#v, %v", files, err)
 	}
-	if body, err := local.Read(t.Context(), result.ObjectKey); err != nil || string(body) != "artifact-body" {
-		t.Fatalf("adopted object = %q, %v", body, err)
+	if body, err := local.Read(t.Context(), finalKey); err != nil || string(body) != "artifact-body" {
+		t.Fatalf("immutable object = %q, %v", body, err)
 	}
 }
 
@@ -655,7 +698,7 @@ func TestDeleteTaskSchedulesAdoptedStreamAttemptsForCleanup(t *testing.T) {
 	if err := svc.Delete(t.Context(), task.ID); err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(t.Context(), path.Base(result.ObjectKey))
+	session, err := repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, result.ObjectKey))
 	if err != nil || session.Status != model.UploadSessionPending || session.ExpiresAt.After(time.Now().Add(time.Minute)) {
 		t.Fatalf("deleted task stream session = %#v, %v", session, err)
 	}
@@ -702,7 +745,7 @@ func TestTaskArtifactManifestCannotAdoptCleanupClaimedAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(t.Context(), path.Base(result.ObjectKey))
+	session, err := repo.UploadSessions().FindByID(t.Context(), streamArtifactSessionID(t, result.ObjectKey))
 	if err != nil {
 		t.Fatalf("find durable stream attempt: %v", err)
 	}
@@ -738,4 +781,21 @@ func TestTaskArtifactManifestCannotAdoptCleanupClaimedAttempt(t *testing.T) {
 	if err := <-cleanupDone; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func streamArtifactSessionID(t *testing.T, key string) string {
+	t.Helper()
+	_, remainder, ok := strings.Cut(key, "/staging/sha256/")
+	if !ok {
+		t.Fatalf("stream artifact key %q has no staging hash prefix", key)
+	}
+	_, remainder, ok = strings.Cut(remainder, "/")
+	if !ok {
+		t.Fatalf("stream artifact key %q has no upload id", key)
+	}
+	uploadID, _, ok := strings.Cut(remainder, "/")
+	if !ok {
+		t.Fatalf("stream artifact key %q has no relative path", key)
+	}
+	return uploadID
 }

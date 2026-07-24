@@ -5,8 +5,8 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 ## Product Surfaces
 
 - **Web Studio** — manage channels, plans, tasks, generated files, credits, model settings, and publishing state.
-- **MCP Server** — exposes writing, image, publishing, billing, workspace, and Seednote formatting tools to connected agents.
-- **Agent Runtime** — executes `article`, `seednote`, and related content agents locally or in Docker.
+- **MCP Server** — exposes atomic writing, image, publishing, billing, and Seednote capabilities to connected agents.
+- **Agent Runtime** — executes Desktop-claimed tasks or dispatches `article`, `seednote`, and related managed work to one-shot containers.
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `plugins/`, with native manifests and host adapters for each harness.
 
@@ -139,9 +139,11 @@ startup with any required value missing. Populate all required entries from
 `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`,
 `CLAUDE_CODE_AUTH_TOKEN`, `ANBAN_OSS_ENDPOINT`, `ANBAN_OSS_ACCESS_KEY_ID`, and
 `ANBAN_OSS_ACCESS_KEY_SECRET`, plus `MOONSHOT_API_KEY` for the configured writing
-and understanding routes. Additional provider and integration variables used by
-`server/config.yaml` can also be added to `.env`; the relevant optional feature
-will remain unavailable until its credentials are configured.
+and understanding routes. The checked-in image routes also require
+`VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Add any other provider and
+integration variables referenced by `server/config.yaml` directly to `.env`;
+the relevant optional feature remains unavailable until its credentials are
+configured.
 
 Kubernetes reads the billing and execution-token values from Secret
 `anban-billing-admin-api-key`, key `api-key`, and Secret

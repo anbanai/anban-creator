@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,7 +28,6 @@ type fakeDirectUploadStore struct {
 	deleteErrs  map[string]error
 	objects     map[string]*storage.ObjectInfo
 	statErr     error
-	statErrs    map[string]error
 	statHook    func(context.Context, string)
 	promoteHook func(sourceKey, finalKey string)
 	promoteErr  error
@@ -95,9 +93,6 @@ func (s *fakeDirectUploadStore) StatObject(ctx context.Context, key string) (*st
 	if s.statErr != nil {
 		return nil, s.statErr
 	}
-	if err := s.statErrs[key]; err != nil {
-		return nil, err
-	}
 	info := s.objects[key]
 	if info == nil {
 		return nil, storage.ErrObjectNotFound
@@ -156,16 +151,12 @@ func (r *fakeUploadSessionRepo) CompleteExpiration(context.Context, string, stri
 	return false, nil
 }
 
-func (r *fakeUploadSessionRepo) DeferExpiration(context.Context, string, string, time.Time) (bool, error) {
-	return false, nil
-}
-
 func (r *fakeUploadSessionRepo) ReopenExpiration(context.Context, string, string) (bool, error) {
 	return false, nil
 }
 
-func (r *fakeUploadSessionRepo) AdoptTaskArtifactManifest(context.Context, string, string, []repository.TaskArtifactSessionClaim, time.Time) error {
-	return nil
+func (r *fakeUploadSessionRepo) RescheduleExpiration(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
 }
 
 func (r *fakeUploadSessionRepo) ScheduleTaskArtifactExpiration(context.Context, string, time.Time) error {
@@ -201,422 +192,6 @@ func seedUploadSession(t *testing.T, repo repository.Repository, session *model.
 	t.Helper()
 	if err := repo.UploadSessions().Create(t.Context(), session); err != nil {
 		t.Fatalf("seed upload session: %v", err)
-	}
-}
-
-type countingExpiredUploadStore struct {
-	deleted     atomic.Int32
-	firstDelete chan struct{}
-}
-
-type mixedExpiredUploadStore struct {
-	*fakeDirectUploadStore
-	deleted     atomic.Int32
-	firstDelete chan struct{}
-}
-
-type poisonExpiredUploadStore struct {
-	poisonKey       string
-	poisonErr       error
-	poisonAttempts  atomic.Int32
-	ordinaryDeletes atomic.Int32
-	firstAttempt    chan struct{}
-}
-
-func (s *poisonExpiredUploadStore) StatObject(context.Context, string) (*storage.ObjectInfo, error) {
-	return nil, storage.ErrObjectNotFound
-}
-
-func (s *poisonExpiredUploadStore) PromoteObject(context.Context, string, string, string) (*storage.ObjectInfo, error) {
-	return nil, errors.New("unexpected promotion")
-}
-
-func (s *poisonExpiredUploadStore) Delete(_ context.Context, key string) error {
-	if key == s.poisonKey {
-		if s.poisonAttempts.Add(1) == 1 {
-			close(s.firstAttempt)
-		}
-		return s.poisonErr
-	}
-	s.ordinaryDeletes.Add(1)
-	return nil
-}
-
-func (s *poisonExpiredUploadStore) GetURL(key string) string { return key }
-
-func (s *mixedExpiredUploadStore) Delete(_ context.Context, key string) error {
-	if strings.HasSuffix(key, "/artifact.bin") {
-		if s.deleted.Add(1) == 1 {
-			close(s.firstDelete)
-		}
-	}
-	return nil
-}
-
-func (s *countingExpiredUploadStore) StatObject(context.Context, string) (*storage.ObjectInfo, error) {
-	return nil, storage.ErrObjectNotFound
-}
-
-func (s *countingExpiredUploadStore) PromoteObject(context.Context, string, string, string) (*storage.ObjectInfo, error) {
-	return nil, errors.New("unexpected promotion")
-}
-
-func (s *countingExpiredUploadStore) Delete(context.Context, string) error {
-	if s.deleted.Add(1) == 1 {
-		close(s.firstDelete)
-	}
-	return nil
-}
-
-func (s *countingExpiredUploadStore) GetURL(key string) string { return key }
-
-func TestStartUploadSessionCleanupDrainsEveryExpiredBatchPerTick(t *testing.T) {
-	repo := newDirectUploadTestRepository(t)
-	now := time.Now()
-	ids := make([]string, 0, 201)
-	for i := 0; i < 201; i++ {
-		id := uuid.NewString()
-		ids = append(ids, id)
-		seedUploadSession(t, repo, &model.UploadSession{
-			ID: id, UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-			StagingKey: "uploads/pending/user-1/" + id + "/artifact.bin", FileName: "artifact.bin",
-			ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending,
-			ExpiresAt: now.Add(-time.Minute),
-		})
-	}
-	store := &countingExpiredUploadStore{firstDelete: make(chan struct{})}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	StartUploadSessionCleanup(ctx, store, repo, 3*time.Second, nil)
-
-	select {
-	case <-store.firstDelete:
-	case <-time.After(4 * time.Second):
-		t.Fatal("cleanup tick did not start")
-	}
-	deadline := time.After(2 * time.Second)
-	for store.deleted.Load() != 201 {
-		select {
-		case <-deadline:
-			t.Fatalf("objects deleted in one tick = %d, want 201", store.deleted.Load())
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	statusDeadline := time.Now().Add(2 * time.Second)
-	for {
-		allExpired := true
-		for _, id := range ids {
-			session, err := repo.UploadSessions().FindByID(t.Context(), id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if session.Status != model.UploadSessionExpired {
-				allExpired = false
-				break
-			}
-		}
-		if allExpired {
-			break
-		}
-		if time.Now().After(statusDeadline) {
-			t.Fatal("cleanup worker did not finish expiring the drained batch")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-func TestStartUploadSessionCleanupDrainsPastMixedRecoveryBatch(t *testing.T) {
-	now := time.Now().Add(-2 * time.Hour)
-	baseRepo := newDirectUploadTestRepository(t)
-	interruptedSessions := &failFirstTargetFingerprintRepository{UploadSessionRepository: baseRepo.UploadSessions(), fail: true}
-	interruptedRepo := &uploadSessionRepositoryOverride{Repository: baseRepo, uploadSessions: interruptedSessions}
-	recovery := &model.UploadSession{
-		ID: "mixed-cleanup-recovery", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
-		StagingKey: "uploads/pending/user-1/mixed-cleanup-recovery/ref.png", FileName: "ref.png",
-		ContentType: "image/png", Size: 1024, Status: model.UploadSessionPending,
-		ExpiresAt: now.Add(time.Hour),
-	}
-	seedUploadSession(t, interruptedRepo, recovery)
-	baseStore := matchingUploadSessionStore(recovery)
-	baseStore.promoteETag = "etag-mixed-cleanup-recovery"
-	if _, err := FinalizeUploadSession(t.Context(), baseStore, interruptedRepo, FinalizeUploadRequest{
-		SessionID: recovery.ID, UserID: recovery.UserID, AllowedPurposes: []string{recovery.Purpose}, Now: now,
-	}); err == nil {
-		t.Fatal("recovery fixture finalization unexpectedly succeeded")
-	}
-
-	ordinaryIDs := make([]string, 0, 200)
-	for i := 0; i < 200; i++ {
-		id := uuid.NewString()
-		ordinaryIDs = append(ordinaryIDs, id)
-		seedUploadSession(t, baseRepo, &model.UploadSession{
-			ID: id, UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-			StagingKey: "uploads/pending/user-1/" + id + "/artifact.bin", FileName: "artifact.bin",
-			ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending,
-			ExpiresAt: now.Add(90 * time.Minute),
-		})
-	}
-	interrupted, err := baseRepo.UploadSessions().FindByID(t.Context(), recovery.ID)
-	if err != nil || interrupted.Status != model.UploadSessionPending || (interrupted.PromotionSourceETag == "" && interrupted.FinalizationETag == "") {
-		t.Fatalf("mixed recovery session = %#v, %v", interrupted, err)
-	}
-	candidates, err := baseRepo.UploadSessions().FindForCleanup(t.Context(), time.Now(), time.Now().Add(-uploadSessionCleanupLease), 100)
-	if err != nil || len(candidates) != 100 {
-		t.Fatalf("mixed first cleanup batch = %d, %v", len(candidates), err)
-	}
-	containsRecovery := false
-	for _, candidate := range candidates {
-		containsRecovery = containsRecovery || candidate.ID == recovery.ID
-	}
-	if !containsRecovery {
-		t.Fatal("mixed first cleanup batch does not contain the recovery session")
-	}
-	store := &mixedExpiredUploadStore{fakeDirectUploadStore: baseStore, firstDelete: make(chan struct{})}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	StartUploadSessionCleanup(ctx, store, baseRepo, 3*time.Second, nil)
-
-	select {
-	case <-store.firstDelete:
-	case <-time.After(4 * time.Second):
-		t.Fatal("mixed cleanup tick did not start")
-	}
-	deadline := time.After(2 * time.Second)
-	for store.deleted.Load() != 200 {
-		select {
-		case <-deadline:
-			t.Fatalf("ordinary objects deleted after mixed batch = %d, want 200", store.deleted.Load())
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	statusDeadline := time.Now().Add(2 * time.Second)
-	for {
-		allDone := true
-		for _, id := range ordinaryIDs {
-			session, err := baseRepo.UploadSessions().FindByID(t.Context(), id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if session.Status != model.UploadSessionExpired {
-				allDone = false
-				break
-			}
-		}
-		finalized, err := baseRepo.UploadSessions().FindByID(t.Context(), recovery.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		allDone = allDone && finalized.Status == model.UploadSessionFinalized
-		if allDone {
-			break
-		}
-		if time.Now().After(statusDeadline) {
-			t.Fatal("mixed cleanup worker did not finish the drained batches")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-func TestStartUploadSessionCleanupDefersPoisonAndDrainsLaterSessionsInSameTick(t *testing.T) {
-	repo := newDirectUploadTestRepository(t)
-	now := time.Now()
-	poison := &model.UploadSession{
-		ID: "cleanup-poison", UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-		StagingKey: "uploads/pending/user-1/cleanup-poison/artifact.bin", FileName: "artifact.bin",
-		ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending,
-		ExpiresAt: now.Add(-2 * time.Hour),
-	}
-	seedUploadSession(t, repo, poison)
-	for i := 0; i < 200; i++ {
-		id := uuid.NewString()
-		seedUploadSession(t, repo, &model.UploadSession{
-			ID: id, UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-			StagingKey: "uploads/pending/user-1/" + id + "/artifact.bin", FileName: "artifact.bin",
-			ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending,
-			ExpiresAt: now.Add(-time.Hour).Add(time.Duration(i) * time.Millisecond),
-		})
-	}
-	deleteErr := errors.New("poison delete failure")
-	store := &poisonExpiredUploadStore{poisonKey: poison.StagingKey, poisonErr: deleteErr, firstAttempt: make(chan struct{})}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	StartUploadSessionCleanup(ctx, store, repo, 20*time.Millisecond, nil)
-
-	select {
-	case <-store.firstAttempt:
-	case <-time.After(time.Second):
-		t.Fatal("cleanup tick did not attempt poison session")
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for store.ordinaryDeletes.Load() != 200 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := store.ordinaryDeletes.Load(); got != 200 {
-		t.Fatalf("ordinary objects deleted after poison = %d, want 200", got)
-	}
-	time.Sleep(80 * time.Millisecond)
-	if got := store.poisonAttempts.Load(); got != 1 {
-		t.Fatalf("poison delete attempts across cleanup ticks = %d, want 1", got)
-	}
-	deferred, err := repo.UploadSessions().FindByID(t.Context(), poison.ID)
-	if err != nil {
-		t.Fatalf("find deferred poison session: %v", err)
-	}
-	if deferred.Status != model.UploadSessionPending || !deferred.ExpiresAt.After(now) || deferred.CleanupClaimID != "" || deferred.CleanupClaimedAt != nil {
-		t.Fatalf("deferred poison session = %#v", deferred)
-	}
-}
-
-func TestCleanupExpiredUploadSessionsAggregatesPerSessionErrors(t *testing.T) {
-	now := time.Date(2026, 7, 23, 11, 0, 0, 0, time.UTC)
-	repo := newDirectUploadTestRepository(t)
-	errOne := errors.New("delete failure one")
-	errTwo := errors.New("delete failure two")
-	store := &fakeDirectUploadStore{deleteErrs: map[string]error{}}
-	for i, tc := range []struct {
-		id  string
-		err error
-	}{{id: "poison-one", err: errOne}, {id: "poison-two", err: errTwo}, {id: "healthy"}} {
-		key := "uploads/pending/user-1/" + tc.id + "/artifact.bin"
-		seedUploadSession(t, repo, &model.UploadSession{
-			ID: tc.id, UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-			StagingKey: key, FileName: "artifact.bin", ContentType: "application/octet-stream", Size: 1,
-			Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Hour).Add(time.Duration(i) * time.Minute),
-		})
-		if tc.err != nil {
-			store.deleteErrs[key] = tc.err
-		}
-	}
-
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 10)
-	if cleaned != 1 {
-		t.Fatalf("cleaned sessions = %d, want 1", cleaned)
-	}
-	if !errors.Is(err, errOne) || !errors.Is(err, errTwo) {
-		t.Fatalf("cleanup error = %v, want both per-session causes", err)
-	}
-	for _, id := range []string{"poison-one", "poison-two"} {
-		found, findErr := repo.UploadSessions().FindByID(t.Context(), id)
-		if findErr != nil || found.Status != model.UploadSessionPending || !found.ExpiresAt.After(now) {
-			t.Fatalf("deferred session %q = %#v, %v", id, found, findErr)
-		}
-	}
-}
-
-func TestCleanupExpiredUploadSessionsDefersRecoveryFailuresAndContinues(t *testing.T) {
-	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name      string
-		configure func(*model.UploadSession, *fakeDirectUploadStore, repository.Repository) repository.Repository
-	}{
-		{name: "stat final object", configure: func(session *model.UploadSession, store *fakeDirectUploadStore, repo repository.Repository) repository.Repository {
-			session.FinalizationETag = "etag-final"
-			store.statErrs["assets/users/user-1/recovery/ref.png"] = errors.New("temporary stat failure")
-			return repo
-		}},
-		{name: "finalization", configure: func(session *model.UploadSession, store *fakeDirectUploadStore, repo repository.Repository) repository.Repository {
-			session.PromotionSourceETag = "etag-source"
-			store.objects[session.StagingKey] = &storage.ObjectInfo{Key: session.StagingKey, Size: session.Size, ContentType: session.ContentType, ETag: "etag-source"}
-			store.objects["assets/users/user-1/recovery/ref.png"] = &storage.ObjectInfo{Key: "assets/users/user-1/recovery/ref.png", Size: session.Size, ContentType: session.ContentType, ETag: "etag-final"}
-			return &uploadSessionRepositoryOverride{Repository: repo, uploadSessions: &failFirstTargetFingerprintRepository{UploadSessionRepository: repo.UploadSessions(), fail: true}}
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			baseRepo := newDirectUploadTestRepository(t)
-			store := &fakeDirectUploadStore{objects: map[string]*storage.ObjectInfo{}, statErrs: map[string]error{}}
-			recovery := &model.UploadSession{
-				ID: "recovery", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
-				StagingKey: "uploads/pending/user-1/recovery/ref.png", FileName: "ref.png",
-				ContentType: "image/png", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-2 * time.Hour),
-			}
-			repo := tt.configure(recovery, store, baseRepo)
-			seedUploadSession(t, repo, recovery)
-			healthy := &model.UploadSession{
-				ID: "healthy", UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-				StagingKey: "uploads/pending/user-1/healthy/artifact.bin", FileName: "artifact.bin",
-				ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Hour),
-			}
-			seedUploadSession(t, repo, healthy)
-
-			cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 10)
-			if cleaned != 1 || !errors.Is(err, ErrUploadSessionUnavailable) {
-				t.Fatalf("cleanup result = %d, %v; want 1 and unavailable error", cleaned, err)
-			}
-			found, findErr := baseRepo.UploadSessions().FindByID(t.Context(), recovery.ID)
-			if findErr != nil || found.Status != model.UploadSessionPending || !found.ExpiresAt.After(now) || found.FinalizationToken != "" || found.FinalizationClaimedAt != nil {
-				t.Fatalf("deferred recovery session = %#v, %v", found, findErr)
-			}
-		})
-	}
-}
-
-func TestCleanupExpiredUploadSessionsExpiresMalformedRecoveryAfterDeletingStaging(t *testing.T) {
-	now := time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC)
-	repo := newDirectUploadTestRepository(t)
-	malformed := &model.UploadSession{
-		ID: "malformed", UserID: "user-1", Purpose: DirectUploadPurposeProjectReference,
-		StagingKey: "uploads/pending/user-1/malformed/ref.png", FileName: "../ref.png",
-		ContentType: "image/png", Size: 1, Status: model.UploadSessionPending,
-		ExpiresAt: now.Add(-2 * time.Hour), FinalizationETag: "etag-final",
-	}
-	seedUploadSession(t, repo, malformed)
-	healthy := &model.UploadSession{
-		ID: "healthy-after-malformed", UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-		StagingKey: "uploads/pending/user-1/healthy-after-malformed/artifact.bin", FileName: "artifact.bin",
-		ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Hour),
-	}
-	seedUploadSession(t, repo, healthy)
-	store := &fakeDirectUploadStore{}
-
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 10)
-	if cleaned != 2 || !errors.Is(err, ErrUploadSessionObjectInvalid) {
-		t.Fatalf("cleanup result = %d, %v; want 2 and invalid-object error", cleaned, err)
-	}
-	found, findErr := repo.UploadSessions().FindByID(t.Context(), malformed.ID)
-	if findErr != nil || found.Status != model.UploadSessionExpired {
-		t.Fatalf("malformed session = %#v, %v", found, findErr)
-	}
-	if len(store.deleted) != 2 || store.deleted[0] != malformed.StagingKey {
-		t.Fatalf("deleted staging objects = %#v", store.deleted)
-	}
-}
-
-type failDeferUploadSessionRepository struct {
-	repository.UploadSessionRepository
-	err error
-}
-
-func (r *failDeferUploadSessionRepository) DeferExpiration(context.Context, string, string, time.Time) (bool, error) {
-	return false, r.err
-}
-
-func TestCleanupExpiredUploadSessionsStopsWhenDurableDeferralFails(t *testing.T) {
-	now := time.Date(2026, 7, 23, 14, 0, 0, 0, time.UTC)
-	baseRepo := newDirectUploadTestRepository(t)
-	deferErr := errors.New("database defer failure")
-	repo := &uploadSessionRepositoryOverride{Repository: baseRepo, uploadSessions: &failDeferUploadSessionRepository{UploadSessionRepository: baseRepo.UploadSessions(), err: deferErr}}
-	poison := &model.UploadSession{
-		ID: "fatal-defer", UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-		StagingKey: "uploads/pending/user-1/fatal-defer/artifact.bin", FileName: "artifact.bin",
-		ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-2 * time.Hour),
-	}
-	healthy := &model.UploadSession{
-		ID: "must-not-run", UserID: "user-1", Purpose: DirectUploadPurposeTaskArtifact,
-		StagingKey: "uploads/pending/user-1/must-not-run/artifact.bin", FileName: "artifact.bin",
-		ContentType: "application/octet-stream", Size: 1, Status: model.UploadSessionPending, ExpiresAt: now.Add(-time.Hour),
-	}
-	seedUploadSession(t, repo, poison)
-	seedUploadSession(t, repo, healthy)
-	deleteErr := errors.New("temporary delete failure")
-	store := &fakeDirectUploadStore{deleteErrs: map[string]error{poison.StagingKey: deleteErr}}
-
-	cleaned, err := CleanupExpiredUploadSessions(t.Context(), store, repo, now, 10)
-	if cleaned != 0 || !errors.Is(err, deleteErr) || !errors.Is(err, deferErr) {
-		t.Fatalf("cleanup result = %d, %v; want both delete and fatal defer errors", cleaned, err)
-	}
-	if len(store.deleted) != 1 || store.deleted[0] != poison.StagingKey {
-		t.Fatalf("deletes after fatal deferral = %#v, want only poison", store.deleted)
 	}
 }
 
@@ -1072,7 +647,7 @@ func TestPrepareDirectUploadCreatesPendingScopedSTSSession(t *testing.T) {
 	if result.MaxSize != 50*1024*1024 {
 		t.Fatalf("max_size = %d, want 50MB", result.MaxSize)
 	}
-	if repo.createdSession == nil || repo.createdSession.Status != model.UploadSessionPending {
+	if repo.createdSession == nil || repo.createdSession.Status != model.UploadSessionPending || repo.createdSession.NextCleanupAt != nil {
 		t.Fatalf("upload session not recorded: %#v", repo.createdSession)
 	}
 	if store.uploadKey != result.Key || store.contentType != "video/mp4" {

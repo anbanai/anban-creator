@@ -31,6 +31,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/anbanai/anban-creator/server/router"
 	"github.com/anbanai/anban-creator/server/scheduler"
 	"github.com/anbanai/anban-creator/server/seednote"
@@ -641,25 +642,33 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ProjectSvc:           projectSvc,
-			Store:                store,
-			TaskSvc:              taskSvc,
-			PlanSvc:              planSvc,
-			ImageSvc:             imageSvc,
-			ImageModelResolver:   modelConfigSvc,
-			ImageGenerator:       imageSvc,
-			ProviderCostSvc:      fixedBilling.Cost,
-			BillingCatalogSvc:    fixedBilling.Catalog,
-			GenerateImageTimeout: cfg.MCP.ToolTimeouts.GenerateImage,
-			WritingSvc:           writingSvc,
-			PublishingSvc:        publishingSvc,
-			TemplateSvc:          templateSvc,
-			LiveSliceSvc:         liveSliceSvc,
-			SeednoteClient:       seednoteClient,
-			SeednoteReadiness:    seednoteMonitor,
-			TopicPoolSvc:         topicPoolSvc,
-			AgentFeedbackSvc:     agentFeedbackSvc,
-			TingWuConfigured:     cfg.TingWu.Complete(),
+			ProjectSvc:             projectSvc,
+			TaskSvc:                taskSvc,
+			PlanSvc:                planSvc,
+			ImageSvc:               imageSvc,
+			ImageModelResolver:     modelConfigSvc,
+			ImageGenerator:         imageSvc,
+			ProviderCostSvc:        fixedBilling.Cost,
+			BillingCatalogSvc:      fixedBilling.Catalog,
+			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
+			WritingSvc:             writingSvc,
+			PublishingSvc:          publishingSvc,
+			TemplateSvc:            templateSvc,
+			LiveSliceSvc:           liveSliceSvc,
+			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
+			FileUploadSvc:          service.NewFileUploadService(store),
+			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
+			TopicPoolSvc:           topicPoolSvc,
+			AgentFeedbackSvc:       agentFeedbackSvc,
+			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage),
+			ArticleScoreSvc:        service.NewArticleScoreService(),
+			SeednoteExportSvc:      service.NewSeednoteExportService(),
+			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
+			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
+			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, writingSvc, fixedBilling.Cost, service.TaskImageOperationsConfig{
+				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
+				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+			}, log),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -703,7 +712,7 @@ func main() {
 	if repo != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicArtifactCleanup(cleanupCtx, viralAnalysisSvc, posterSvc, log)
+		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
 	}
 
 	// 15.3 Start the local-claim fallback worker (every 10s). Flips
@@ -1099,11 +1108,16 @@ func parseLogLevel(level string) zerolog.Level {
 }
 
 // startPeriodicArtifactCleanup removes expirable derived records without touching NAS task workspaces.
-func startPeriodicArtifactCleanup(ctx context.Context, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
+func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	cleanup := func() {
+		if taskSvc != nil {
+			if _, err := taskSvc.CleanupSupersededTaskFileObjects(ctx, 100); err != nil {
+				log.Error().Err(err).Msg("superseded task file object cleanup failed")
+			}
+		}
 		if viralSvc != nil {
 			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
 				log.Error().Err(err).Msg("viral analysis cleanup failed")

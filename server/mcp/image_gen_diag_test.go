@@ -52,7 +52,7 @@ func TestClassifyImageToolFailureProviderTimeout(t *testing.T) {
 	parentCtx := context.Background()
 	operationCtx, cancel := context.WithTimeout(parentCtx, time.Minute)
 	defer cancel()
-	failure := classifyImageToolFailure(parentCtx, operationCtx, context.DeadlineExceeded, "generate", "volcengine", "seedream", time.Minute, false)
+	failure := classifyImageToolFailure(parentCtx, operationCtx, context.DeadlineExceeded, "generate", time.Minute, false)
 	if failure.Code != "provider_timeout" {
 		t.Fatalf("failure code = %q, want provider_timeout", failure.Code)
 	}

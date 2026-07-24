@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
 import { http as clientHttp } from '@/lib/http-client'
 import { tasksApi } from './tasks'
+import type { CreateTaskRequest } from '@/types'
 
 describe('tasksApi', () => {
   beforeEach(() => {
@@ -90,17 +91,41 @@ describe('tasksApi', () => {
     })
   })
 
-  it('always posts the complete clone input snapshot including empty fields', async () => {
+  it('posts the complete clone request unchanged', async () => {
     const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-clone', status: 'pending' } } } as any)
-
-    await tasksApi.clone('task-1', {
+    const request: CreateTaskRequest = {
+      type: 'montage',
+      project_id: 'project-1',
       prompt: '',
+      quantity: 1,
+      image_ratio: '9:16',
+      image_model_key: 'video-model',
+      skip_reference_image: false,
+      reference_image: { asset_id: 'asset-1' },
       input_attachments: [],
-    })
+      watermark: false,
+      goal: '',
+      goal_mode: false,
+      has_content_image: false,
+      has_tail_image: false,
+      article_with_cover: false,
+      article_with_content_images: false,
+      product_photos: ['oss://product.png'],
+      selected_modules: { hero: 1 },
+      target_platform: 'douyin',
+      selling_points: '',
+      language: 'zh-CN',
+      montage_input: {
+        brief: '',
+        source_assets: [],
+        delivery_targets: [],
+        advanced: { render: { fps: 30 } },
+      },
+      execution_target: 'local',
+    }
 
-    expect(post).toHaveBeenCalledWith('/tasks/task-1/clone', {
-      prompt: '',
-      input_attachments: [],
-    })
+    await tasksApi.clone('task-1', request)
+
+    expect(post).toHaveBeenCalledWith('/tasks/task-1/clone', request)
   })
 })

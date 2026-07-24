@@ -10,7 +10,6 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -52,30 +51,7 @@ type ImageResult struct {
 	ResponsePreview      string                      `json:"response_preview,omitempty"`
 	OutputMIME           string                      `json:"output_mime,omitempty"`
 	Usage                *image.ImageGenerationUsage `json:"usage,omitempty"`
-	// WeChatURL/MediaID are populated when generate_image is called with
-	// upload_to_cdn=true and the image is uploaded to the project's CDN
-	// (WeChat material library for article projects) in the same call.
-	// This collapses the old fragile two-step generate→upload into one
-	// atomic round-trip, so each image is durable the moment it is generated.
-	WeChatURL string `json:"wechat_url,omitempty"`
-	MediaID   string `json:"media_id,omitempty"`
-	// UploadError is set (instead of WeChatURL) when upload_to_cdn=true but
-	// the upload failed AFTER a successful generation. The generation is not
-	// wasted: the caller retries only the upload via upload_image(file_path).
-	UploadError  string              `json:"upload_error,omitempty"`
-	Verification *VisionVerification `json:"verification,omitempty"`
-	localCleanup func()
-}
-
-// VisionVerification is the post-generation vision check result attached to
-// ImageResult when the caller passes verify_with_vision=true. The fields mirror
-// the JSON shape the agent is instructed to request in verification_prompt.
-type VisionVerification struct {
-	Passed          bool     `json:"passed"`
-	Score           string   `json:"score"` // "high" | "medium" | "low" | "unknown"
-	MissingEntities []string `json:"missing_entities,omitempty"`
-	Notes           string   `json:"notes,omitempty"`
-	Raw             string   `json:"raw,omitempty"` // raw vision model output for debugging
+	localCleanup         func()
 }
 
 // UploadImageResult is the response for image upload.
@@ -85,12 +61,10 @@ type UploadImageResult struct {
 	WechatURL string `json:"wechat_url,omitempty"`
 }
 
-// DownloadImageResult is the response for image download (optionally with upload).
+// DownloadImageResult is the response for a server-local image download.
 type DownloadImageResult struct {
-	FilePath  string `json:"file_path,omitempty"`
-	URL       string `json:"url,omitempty"`
-	MediaID   string `json:"media_id,omitempty"`
-	WechatURL string `json:"wechat_url,omitempty"`
+	FilePath string `json:"file_path,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
 // ImageService handles image generation, upload, and compression
@@ -102,29 +76,7 @@ type ImageService struct {
 	modelConfigSvc  *ModelConfigService
 	logger          *zerolog.Logger
 	providerCostSvc *ProviderCostService
-	// imageRetry optionally overrides the same-provider backoff-retry policy used
-	// by generateWithRetry. nil ⇒ package defaults (3 attempts, 0/5s/15s backoff).
-	// The SAME provider is always retried — never switched — so a successful
-	// retry is visually identical to a first-try success.
-	imageRetry *imageRetryConfig
 }
-
-// imageRetryConfig tunes the same-provider backoff retry around GenerateRaw.
-// Leaving it zero/nil keeps the package defaults; tests inject short backoffs.
-type imageRetryConfig struct {
-	MaxAttempts int             // total attempts including the first; must be ≥ 1
-	Backoffs    []time.Duration // wait before attempt N (index 0 unused); clamped
-}
-
-// Default same-provider retry policy. Three attempts (one initial + two retries)
-// with backoffs of 5s then 15s cover the vast majority of transient blips seen
-// in production (intermittent relay 503 "no available channel", 429 rate limits,
-// brief network/timeout hiccups) without dragging a task out — worst case ~20s,
-// far under the configurable 60min task deadline.
-var (
-	defaultImageRetryMaxAttempts = 3
-	defaultImageRetryBackoffs    = []time.Duration{0, 5 * time.Second, 15 * time.Second}
-)
 
 // NewImageService creates a new ImageService.
 func NewImageService(
@@ -422,112 +374,34 @@ func (s *ImageService) buildProcessorForResolved(
 	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
 }
 
-// isTransientImageError reports whether err is worth a same-provider retry:
-// the SAME model/config is reused, so retrying never alters the visual result.
-// It returns true for context deadline/cancellation, net timeouts, and any
-// image.GenerateError whose Code is server_error / rate_limit / network_error
-// (provider.go Retryable). Content-policy and auth errors return false → the
-// caller fails fast instead of hammering a deterministic refusal.
-//
-// Do NOT reuse categorizeImageGenFailure (server/mcp/image_tools.go): it maps
-// errors to log labels, not retry decisions.
-func isTransientImageError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	var ge *image.GenerateError
-	if errors.As(err, &ge) {
-		return ge.Retryable()
-	}
-	return false
-}
-
-// generateWithRetry calls gen with exponential backoff, retrying ONLY transient
-// errors against the SAME provider (the caller's gen closure always invokes the
-// one processor built for this request, with its ref/watermark state intact).
-// Non-retryable errors fail fast; ctx cancellation aborts the backoff wait so a
-// cancelled task returns promptly. On success the result is returned as-is.
-func (s *ImageService) generateWithRetry(
+// generateProviderImage bounds one provider call. Agent and Skill workflows own
+// every retry and stop/continue decision above this application capability.
+func (s *ImageService) generateProviderImage(
 	ctx context.Context,
 	attemptTimeout time.Duration,
 	gen func(context.Context) (*image.GenerateRawResult, error),
-	imageType string,
+	_ string,
 ) (*image.GenerateRawResult, error) {
 	if attemptTimeout <= 0 {
 		attemptTimeout = 5 * time.Minute
 	}
-	maxAttempts := defaultImageRetryMaxAttempts
-	backoffs := defaultImageRetryBackoffs
-	if cfg := s.imageRetry; cfg != nil {
-		if cfg.MaxAttempts > 0 {
-			maxAttempts = cfg.MaxAttempts
-		}
-		if len(cfg.Backoffs) > 0 {
-			backoffs = cfg.Backoffs
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	var (
-		result *image.GenerateRawResult
-		err    error
-	)
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Honor a cancelled/expired task context up front: never burn a generation
-		// attempt on a task nobody wants anymore. (Processor.GenerateRaw currently
-		// runs against context.Background, so a ctx error won't come from gen()
-		// itself — but guarding here makes the retry correct independent of the
-		// backoff config, including the zero-backoff case.)
-		if cerr := ctx.Err(); cerr != nil {
-			return nil, cerr
-		}
-		if attempt > 0 {
-			// Wait grows with each retry; clamp to the last configured value so
-			// an under-sized backoffs slice doesn't index out of range. A
-			// client/task cancellation short-circuits the wait immediately.
-			wait := backoffs[min(attempt, len(backoffs)-1)]
-			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= wait+attemptTimeout {
-				return nil, fmt.Errorf("generate image: insufficient operation budget for retry: %w", err)
-			}
-			if wait > 0 {
-				select {
-				case <-time.After(wait):
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			}
-		}
-
-		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
-		result, err = gen(attemptCtx)
-		attemptErr := attemptCtx.Err()
-		cancel()
-		if err == nil {
-			return result, nil
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		if attemptErr != nil {
-			err = fmt.Errorf("provider attempt %d timed out after %s: %w", attempt+1, attemptTimeout, attemptErr)
-		}
-		if !isTransientImageError(err) {
-			return nil, fmt.Errorf("generate image: %w", err)
-		}
-		s.logger.Warn().
-			Int("attempt", attempt+1).
-			Int("max_attempts", maxAttempts).
-			Str("image_type", imageType).
-			Err(err).
-			Msg("image gen transient error, retrying same provider")
+	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+	result, err := gen(attemptCtx)
+	attemptErr := attemptCtx.Err()
+	cancel()
+	if err == nil {
+		return result, nil
 	}
-	return nil, fmt.Errorf("generate image (failed after %d attempts): %w", maxAttempts, err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if attemptErr != nil {
+		err = fmt.Errorf("provider attempt timed out after %s: %w", attemptTimeout, attemptErr)
+	}
+	return nil, fmt.Errorf("generate image: %w", err)
 }
 
 func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time.Duration {
@@ -572,11 +446,10 @@ func (s *ImageService) GenerateImage(
 	}
 	processor.SetWatermark(watermark)
 
-	// Generate with same-provider backoff retry: the closure always calls the ONE
-	// processor built above (same provider/model/ref/watermark), so a retry never
-	// changes the visual result — it only rides out transient 5xx/429/network blips.
+	// Invoke the selected provider exactly once. A stochastic retry is a new
+	// workflow decision and therefore belongs to the calling Agent or Skill.
 	providerRequestID := "internal:image:" + uuid.NewString()
-	rawResult, err := s.generateWithRetry(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
+	rawResult, err := s.generateProviderImage(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
 		if size != "" {
 			return processor.GenerateRawWithSize(attemptCtx, prompt, size)
 		}
@@ -820,43 +693,12 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 	return compressor.CompressImage(filePath)
 }
 
-// DownloadImage downloads an image from a URL and optionally uploads it to WeChat CDN.
-// If upload is "true" or "wechat", the image is uploaded after download.
-// Otherwise the image is saved to a temp directory.
-func (s *ImageService) DownloadImage(
-	ctx context.Context,
-	userID, projectID, url, upload string,
-) (*DownloadImageResult, error) {
+// DownloadImage downloads an image from a URL to a server-local temporary file.
+func (s *ImageService) DownloadImage(ctx context.Context, projectID, url string) (*DownloadImageResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
 	}
-
-	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
-		// WeChat platforms: download and upload to WeChat CDN.
-		if ch.Platform == model.PlatformArticle {
-			processor, err := s.buildProcessor(ctx, ch, "content", "")
-			if err != nil {
-				return nil, err
-			}
-
-			result, err := processor.DownloadAndUpload(url)
-			if err != nil {
-				return nil, fmt.Errorf("download and upload: %w", err)
-			}
-
-			return &DownloadImageResult{
-				URL:       url,
-				MediaID:   result.MediaID,
-				WechatURL: result.WechatURL,
-			}, nil
-		}
-
-		// Non-WeChat platforms: download and upload to storage provider.
-		return s.downloadAndUploadToStorage(ctx, url)
-	}
-
-	// Download only (all platforms).
 	processor, err := s.buildProcessor(ctx, ch, "content", "")
 	if err != nil {
 		return nil, err
@@ -876,51 +718,6 @@ func (s *ImageService) DownloadImage(
 	return &DownloadImageResult{
 		FilePath: result.FilePath,
 		URL:      url,
-	}, nil
-}
-
-// downloadAndUploadToStorage downloads an image from URL and uploads it to the storage provider.
-func (s *ImageService) downloadAndUploadToStorage(ctx context.Context, imageURL string) (*DownloadImageResult, error) {
-	if s.storage == nil {
-		return nil, fmt.Errorf("storage provider not available")
-	}
-
-	tmpDir, err := os.MkdirTemp("", "abw-dl-")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	outputPath := filepath.Join(tmpDir, "downloaded.png")
-
-	// Download using http.Get directly (no WeChat dependency needed).
-	resp, err := http.Get(imageURL)
-	if err != nil {
-		return nil, fmt.Errorf("download image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download image: HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return nil, fmt.Errorf("create temp file: %w", err)
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("write temp file: %w", err)
-	}
-	f.Close()
-
-	uploadResult, err := s.uploadToStorage(ctx, outputPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &DownloadImageResult{
-		URL: uploadResult.URL,
 	}, nil
 }
 

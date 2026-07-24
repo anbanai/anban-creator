@@ -82,7 +82,7 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	}
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relativePath)
 	attemptID := uuid.NewString()
-	objectKey := buildTaskArtifactStreamStorageKey(task, executionID, relativePath, attemptID)
+	objectKey := buildTaskArtifactStagingStorageKey(task, executionID, wantSHA256, attemptID, relativePath)
 	now := time.Now()
 	if err := s.repo.UploadSessions().Create(ctx, &model.UploadSession{
 		ID: attemptID, UserID: authenticatedUserID, Purpose: DirectUploadPurposeTaskArtifact,
@@ -129,6 +129,9 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	}
 	if validationErr != nil {
 		return nil, s.failTaskArtifactAttempt(ctx, attemptID, objectKey, validationErr)
+	}
+	if _, err := s.ValidateAgentTaskAccess(ctx, taskID, authenticatedUserID); err != nil {
+		return nil, s.failTaskArtifactAttempt(ctx, attemptID, objectKey, err)
 	}
 
 	return &TaskArtifactStreamResult{

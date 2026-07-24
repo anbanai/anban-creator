@@ -89,6 +89,7 @@ type BillingRepository interface {
 
 	EnqueueSettlement(ctx context.Context, settlement *model.BillingSettlementOutbox) error
 	FindSettlementByKey(ctx context.Context, scope, key string) (*model.BillingSettlementOutbox, error)
+	ListSettlementsByTask(ctx context.Context, taskID string) ([]model.BillingSettlementOutbox, error)
 	// ClaimSettlements must be called on txRepo.Billing() for MySQL. SQLite uses
 	// an atomic UPDATE ... RETURNING statement and can also run on the root repo.
 	ClaimSettlements(ctx context.Context, now time.Time, limit int) ([]model.BillingSettlementOutbox, error)
@@ -656,6 +657,15 @@ func (r *billingRepository) FindSettlementByKey(ctx context.Context, scope, key 
 		return nil, err
 	}
 	return &settlement, nil
+}
+
+func (r *billingRepository) ListSettlementsByTask(ctx context.Context, taskID string) ([]model.BillingSettlementOutbox, error) {
+	var settlements []model.BillingSettlementOutbox
+	err := r.db.WithContext(ctx).
+		Where("task_id = ?", taskID).
+		Order("created_at ASC").Order("id ASC").
+		Find(&settlements).Error
+	return settlements, err
 }
 
 func (r *billingRepository) ClaimSettlements(ctx context.Context, now time.Time, limit int) ([]model.BillingSettlementOutbox, error) {

@@ -174,7 +174,8 @@ func (p *LocalProvider) StatObject(_ context.Context, key string) (*ObjectInfo, 
 		return nil, fmt.Errorf("hash file %s: %w", destPath, err)
 	}
 	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(destPath)))
-	return &ObjectInfo{Key: key, Size: info.Size(), MimeType: contentType, ContentType: contentType, ETag: fmt.Sprintf("\"%x\"", hash.Sum(nil))}, nil
+	digest := fmt.Sprintf("%x", hash.Sum(nil))
+	return &ObjectInfo{Key: key, Size: info.Size(), MimeType: contentType, ContentType: contentType, ETag: `"` + digest + `"`, SHA256: digest}, nil
 }
 
 // PromoteObject conditionally copies a local object to an immutable final path.

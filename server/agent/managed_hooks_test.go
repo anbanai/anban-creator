@@ -412,6 +412,42 @@ func TestSeednoteQualityGateRejectsInvalidContentImageNames(t *testing.T) {
 	}
 }
 
+func TestSeednoteQualityGateRequiresExactUniqueSummaryOutputSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		outputs []map[string]any
+	}{
+		{name: "duplicate", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "image_01.png", "quality_status": "accepted"}}},
+		{name: "missing", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}}},
+		{name: "extra", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "image_01.png", "quality_status": "accepted"}, {"file_name": "ghost.png", "quality_status": "accepted"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			dir := writeSeednoteGateImageSet(t, workspace, []string{"cover.png", "image_01.png"})
+			summary, err := json.Marshal(map[string]any{"version": "1.0", "outputs": tt.outputs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), summary, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			output := runSeednoteQualityGate(t, workspace)
+			if strings.TrimSpace(output) == "" {
+				t.Fatalf("quality gate accepted non-exact summary outputs: %#v", tt.outputs)
+			}
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatal(err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, "必须与实际图片唯一且完全一致") {
+				t.Fatalf("quality gate output = %#v, want exact unique set block", result)
+			}
+		})
+	}
+}
+
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {

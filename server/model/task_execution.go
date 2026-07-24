@@ -31,6 +31,7 @@ type TaskExecution struct {
 	RuntimeInstanceID  string         `gorm:"column:runtime_instance_id;type:varchar(64)" json:"runtime_instance_id,omitempty"`
 	Started            bool           `gorm:"default:false;not null" json:"started"`
 	ManifestStatus     string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','collected','discarded','rejected')" json:"manifest_status,omitempty"`
+	ManifestSealed     bool           `gorm:"default:false;not null" json:"-"`
 	FinalizationStatus string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
 	FinalizationToken  string         `gorm:"type:char(36);default:'';index" json:"-"`
 	FinalizationAt     *time.Time     `json:"-"`

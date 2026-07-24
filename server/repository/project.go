@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var ErrProjectDeleteDependencies = errors.New("project has task or plan dependencies")
 
 // ProjectStats holds computed statistics for a project.
 type ProjectStats struct {
@@ -29,12 +33,16 @@ type ProjectListOptions struct {
 type ProjectRepository interface {
 	Create(ctx context.Context, project *model.Project) error
 	FindByID(ctx context.Context, id string) (*model.Project, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.Project, error)
 	ListByUserID(ctx context.Context, userID string, opts ProjectListOptions) ([]*model.Project, error)
 	ListActiveProjects(ctx context.Context) ([]*model.Project, error)
 	FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Project, error)
 	Update(ctx context.Context, project *model.Project) error
 	UpdateIfReferenceImageAssetID(ctx context.Context, project *model.Project, expectedID string) (bool, error)
 	UpdateStatus(ctx context.Context, id, status string) error
+	BeginDelete(ctx context.Context, id string) (bool, error)
+	CancelDelete(ctx context.Context, id string) (bool, error)
+	DeleteIfDeletingAndEmpty(ctx context.Context, id string) (bool, error)
 	Delete(ctx context.Context, id string) error
 	GetStats(ctx context.Context, projectID string) (*ProjectStats, error)
 	GetStatsByProjectIDs(ctx context.Context, projectIDs []string) (map[string]*ProjectStats, error)
@@ -59,6 +67,14 @@ func (r *gormProjectRepository) Create(ctx context.Context, project *model.Proje
 func (r *gormProjectRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
 	var project model.Project
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&project).Error; err != nil {
+		return nil, err
+	}
+	return &project, nil
+}
+
+func (r *gormProjectRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.Project, error) {
+	var project model.Project
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&project).Error; err != nil {
 		return nil, err
 	}
 	return &project, nil
@@ -125,6 +141,58 @@ func (r *gormProjectRepository) UpdateStatus(ctx context.Context, id, status str
 			"status":     status,
 			"updated_at": time.Now(),
 		}).Error
+}
+
+func (r *gormProjectRepository) BeginDelete(ctx context.Context, id string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Project{}).
+		Where("id = ? AND deleting_at IS NULL", id).
+		Update("deleting_at", time.Now())
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *gormProjectRepository) CancelDelete(ctx context.Context, id string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Project{}).
+		Where("id = ? AND deleting_at IS NOT NULL", id).
+		Update("deleting_at", nil)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *gormProjectRepository) DeleteIfDeletingAndEmpty(ctx context.Context, id string) (bool, error) {
+	var deleted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var project model.Project
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&project).Error; err != nil {
+			return err
+		}
+		if project.DeletingAt == nil {
+			return nil
+		}
+		var taskCount, planCount int64
+		if err := tx.Model(&model.Task{}).Where("project_id = ?", id).Count(&taskCount).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Plan{}).Where("project_id = ?", id).Count(&planCount).Error; err != nil {
+			return err
+		}
+		if taskCount > 0 || planCount > 0 {
+			return ErrProjectDeleteDependencies
+		}
+		result := tx.Where("id = ? AND deleting_at IS NOT NULL", id).Delete(&model.Project{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected == 1
+		return nil
+	})
+	return deleted, err
 }
 
 func (r *gormProjectRepository) Delete(ctx context.Context, id string) error {

@@ -18,9 +18,31 @@ import (
 type CloneTaskParams struct {
 	Prompt           *string
 	InputAttachments *[]model.EntryAttachment
+	Overrides        *CloneTaskOverrides
 }
 
-func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) (*model.Task, error) {
+type CloneTaskOverrides struct {
+	ProjectID                string
+	Quantity                 int
+	Prompt                   string
+	ImageRatio               string
+	ImageModelKey            string
+	SkipRefImage             *bool
+	ReferenceImageAssetID    string
+	InputAttachments         []model.EntryAttachment
+	Watermark                *bool
+	Goal                     string
+	GoalMode                 bool
+	HasContentImage          *bool
+	HasTailImage             *bool
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
+	Ecommerce                *model.EcommerceConfig
+	MontageInput             *model.MontageInput
+	ExecutionTarget          string
+}
+
+func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -31,6 +53,49 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	// be cloned because that would duplicate in-flight work and billing.
 	if src.Status != model.TaskStatusCompleted && src.Status != model.TaskStatusFailed && src.Status != model.TaskStatusCancelled {
 		return nil, fmt.Errorf("only completed, failed, or cancelled tasks can be cloned (current status: %s)", src.Status)
+	}
+
+	inputSourceTaskID, inputSourceProjectID := ResolveCloneInputSource(src)
+
+	if cloneParams.Overrides != nil {
+		override := cloneParams.Overrides
+		params := CreateManualParams{
+			UserID:                     src.UserID,
+			ProjectID:                  override.ProjectID,
+			Prompt:                     override.Prompt,
+			Quantity:                   override.Quantity,
+			ImageRatio:                 override.ImageRatio,
+			ImageModelKey:              override.ImageModelKey,
+			SkipRefImage:               override.SkipRefImage,
+			ReferenceImageAssetID:      override.ReferenceImageAssetID,
+			allowProjectReferenceAsset: trustedCloneProjectReferenceAsset(src, override.ReferenceImageAssetID),
+			InputSourceTaskID:          inputSourceTaskID,
+			InputSourceProjectID:       inputSourceProjectID,
+			InputAttachments:           cloneEntryAttachments(override.InputAttachments),
+			Watermark:                  override.Watermark,
+			Goal:                       override.Goal,
+			GoalMode:                   override.GoalMode,
+			HasContentImage:            override.HasContentImage,
+			HasTailImage:               override.HasTailImage,
+			ArticleWithCover:           override.ArticleWithCover,
+			ArticleWithContentImages:   override.ArticleWithContentImages,
+			Ecommerce:                  override.Ecommerce,
+			MontageInput:               override.MontageInput,
+			ExecutionTarget:            override.ExecutionTarget,
+		}
+		tasks, err := s.CreateManual(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		if len(tasks) == 0 {
+			return nil, fmt.Errorf("clone did not create a task")
+		}
+		s.logger.Info().
+			Str("src_task_id", taskID).
+			Str("new_task_id", tasks[0].ID).
+			Int("quantity", len(tasks)).
+			Msg("task cloned as editable tasks")
+		return tasks, nil
 	}
 
 	// Copy scalar fields to locals before taking their addresses so each *bool
@@ -44,10 +109,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 
 	overrides := src.Overrides.Data()
 	snapshot := src.ProjectSnapshot.Data()
-	inputSourceTaskID := src.InputSourceTaskID
-	if inputSourceTaskID == "" {
-		inputSourceTaskID = src.ID
-	}
 	prompt := src.Prompt
 	if cloneParams.Prompt != nil {
 		prompt = strings.TrimSpace(*cloneParams.Prompt)
@@ -68,6 +129,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		SkipRefImage:             &skipRef,
 		ReferenceImageAssetID:    src.ReferenceImageAssetID,
 		InputSourceTaskID:        inputSourceTaskID,
+		InputSourceProjectID:     inputSourceProjectID,
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,
@@ -79,6 +141,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ArticleWithContentImages: articleContent,
 		ExecutionTarget:          executionTarget,
 	}
+	params.allowProjectReferenceAsset = trustedCloneProjectReferenceAsset(src, src.ReferenceImageAssetID)
 
 	// Preserve the e-commerce package config (module selection, product photos,
 	// selling points) so the clone bills the same package and reuses the inputs.
@@ -111,7 +174,34 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("src_task_id", taskID).
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
-	return tasks[0], nil
+	return tasks, nil
+}
+
+func trustedCloneProjectReferenceAsset(source *model.Task, assetID string) bool {
+	assetID = strings.TrimSpace(assetID)
+	if source == nil || assetID == "" {
+		return false
+	}
+	return assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
+		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID)
+}
+
+// ResolveCloneInputSource returns the trusted root task/project pair whose
+// immutable task-scoped inputs a clone may reuse. Legacy rows that predate the
+// project field keep their source task under the source task's own project.
+func ResolveCloneInputSource(src *model.Task) (taskID, projectID string) {
+	if src == nil {
+		return "", ""
+	}
+	taskID = strings.TrimSpace(src.InputSourceTaskID)
+	projectID = strings.TrimSpace(src.InputSourceProjectID)
+	if taskID == "" {
+		return src.ID, src.ProjectID
+	}
+	if projectID == "" {
+		projectID = src.ProjectID
+	}
+	return taskID, projectID
 }
 
 func cloneExecutionTarget(source string) (string, error) {

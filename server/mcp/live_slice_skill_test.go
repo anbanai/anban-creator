@@ -163,6 +163,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		t.Fatal("live-slicer agent must preload its specialized Skills")
 	}
 	for _, banned := range []string{
+		"mkdir -p " + `"$(dirname "$OUT")"`,
 		"Python",
 		"python" + "3",
 		"live_slice_media" + ".py",

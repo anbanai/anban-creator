@@ -37,7 +37,7 @@ extract_project_id() {
 
 create_project() {
   local profile="$1" marker="$2" response project_id
-  response="$(api_post /api/v1/projects "$(jq -cn --arg profile "$profile" --arg marker "$marker" '{platform:$profile,name:("Runtime smoke " + $profile),instructions:("Managed runtime smoke only. Do not perform the normal content workflow. Use the Bash tool to create output/ and write the exact marker " + $marker + " to output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully. On a resume request append its exact RESUMED marker to the same file and stop successfully."),enable_publishing:false}')")" || return
+  response="$(api_post /api/v1/projects "$(jq -cn --arg profile "$profile" --arg marker "$marker" '{platform:$profile,name:("Runtime smoke " + $profile),instructions:("Managed runtime smoke only. Do not perform the normal content workflow. Use the Bash tool to write the exact marker " + $marker + " to /workspace/output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully. On a resume request append its exact RESUMED marker to the same file and stop successfully."),enable_publishing:false}')")" || return
   project_id="$(extract_project_id <<<"$response")" || {
     fail "project create response did not match the public API schema"
     return 1
@@ -150,7 +150,7 @@ task_volume() {
 verify_output() {
   local volume="$1" image="$2" marker="$3"
   docker run --rm --entrypoint /bin/sh -v "$volume:/workspace:ro" "$image" -c \
-    'find /workspace -path "*/output/runtime-smoke.txt" -type f -exec grep -F -- "$1" {} \; | grep -F -- "$1" >/dev/null' smoke "$marker"
+    'test -f /workspace/output/runtime-smoke.txt && grep -F -- "$1" /workspace/output/runtime-smoke.txt >/dev/null' smoke "$marker"
 }
 
 poll_container_removed() {
@@ -557,7 +557,7 @@ runtime_smoke_main() {
   poll_container_removed "$(cut -d'|' -f7 <<<"$MONTAGE_EXECUTION")"
 
   RESUME_MARKER="ARTICLE_RESUMED_RUNTIME_SMOKE_$$"
-  api_post "/api/v1/tasks/$ARTICLE_TASK/resume" "$(jq -cn --arg marker "$RESUME_MARKER" '{prompt:("Append the exact RESUMED marker " + $marker + " to output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully."),input_attachments:[]}')" >/dev/null
+  api_post "/api/v1/tasks/$ARTICLE_TASK/resume" "$(jq -cn --arg marker "$RESUME_MARKER" '{prompt:("Append the exact RESUMED marker " + $marker + " to /workspace/output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully."),input_attachments:[]}')" >/dev/null
   RESUME_EXECUTION="$(poll_execution_identity "$ARTICLE_TASK" 2 "$ARTICLE_TASK" "$ARTICLE_PROJECT")"
   verify_persisted_runtime "$RESUME_EXECUTION" article creator-agent-article:latest
   [[ "$(cut -d'|' -f3 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f1 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume parent execution identity mismatch"

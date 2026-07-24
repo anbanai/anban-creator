@@ -40,6 +40,7 @@ export type {
   TaskFile,
   ReferenceUsageSummaryData,
   CreateTaskRequest,
+  CloneTaskRequest,
   BulkTaskResult,
   BulkTasksResponse,
   WorkflowStatus,

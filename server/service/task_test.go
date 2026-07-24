@@ -64,6 +64,8 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
+		&model.TaskFileObjectCleanup{},
+		&model.BillingSettlementOutbox{},
 		&model.TopicPool{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
 	); err != nil {
@@ -268,6 +270,33 @@ func (s *concurrentResumeStorage) DownloadURL(context.Context, string, int) (str
 
 func (s *concurrentResumeStorage) HasCustomDomain() bool  { return true }
 func (s *concurrentResumeStorage) IsOwnedURL(string) bool { return true }
+
+type blockingTaskDeleteStorage struct {
+	*resumeTestStorage
+	deleteEntered chan struct{}
+	allowDelete   chan struct{}
+	deleteOnce    sync.Once
+}
+
+func newBlockingTaskDeleteStorage(key string) *blockingTaskDeleteStorage {
+	return &blockingTaskDeleteStorage{
+		resumeTestStorage: &resumeTestStorage{files: map[string][]byte{key: []byte("artifact")}},
+		deleteEntered:     make(chan struct{}),
+		allowDelete:       make(chan struct{}),
+	}
+}
+
+func (s *blockingTaskDeleteStorage) Name() string { return "blocking-task-delete" }
+
+func (s *blockingTaskDeleteStorage) Delete(ctx context.Context, key string) error {
+	s.deleteOnce.Do(func() { close(s.deleteEntered) })
+	select {
+	case <-s.allowDelete:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.resumeTestStorage.Delete(ctx, key)
+}
 
 type fakePublishedTrackingService struct {
 	calls []struct {
@@ -835,10 +864,14 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone completed task: %v", err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	if clone.ID == src.ID {
 		t.Fatal("clone reused the original task id")
 	}
@@ -850,6 +883,9 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if clone.InputSourceTaskID != src.ID {
 		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
+	if clone.InputSourceProjectID != src.ProjectID {
+		t.Fatalf("clone input source project = %q, want %q", clone.InputSourceProjectID, src.ProjectID)
 	}
 	cloneAttachments := clone.InputAttachments.Data()
 	if len(cloneAttachments) != 1 || cloneAttachments[0].Role != "brief" || cloneAttachments[0].Text != "original input" {
@@ -867,30 +903,391 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	destinationProject := &model.Project{
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Platform:     model.PlatformSeednote,
+		Name:         "Editable clone destination",
+		Status:       model.ProjectStatusActive,
+		Instructions: "current destination instructions",
+		VisualStyle:  "current destination style",
+	}
+	if err := repo.Projects().Create(ctx, destinationProject); err != nil {
+		t.Fatalf("create destination project: %v", err)
+	}
+	referenceAsset := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeTaskReference,
+		StorageKey:  "assets/users/" + userID + "/reference/editable-clone.png",
+		FileName:    "editable-clone.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "editable-clone-etag",
+	}
+	if err := repo.Assets().Create(ctx, referenceAsset); err != nil {
+		t.Fatalf("create reference asset: %v", err)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            sourceProjectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "source prompt",
+		InputSourceTaskID:    "root-source-task",
+		InputSourceProjectID: "root-source-project",
+	}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	skipReference := true
+	watermark := true
+	hasContent := false
+	hasTail := true
+	articleCover := false
+	articleContent := false
+	attachments := []model.EntryAttachment{{Role: "brief", Text: "edited attachment", FileName: "brief.txt"}}
+	tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+		ProjectID:                destinationProject.ID,
+		Quantity:                 2,
+		Prompt:                   "edited prompt",
+		ImageRatio:               "1:1",
+		ImageModelKey:            "gemini-pro",
+		SkipRefImage:             &skipReference,
+		ReferenceImageAssetID:    referenceAsset.ID,
+		InputAttachments:         attachments,
+		Watermark:                &watermark,
+		Goal:                     "edited goal",
+		GoalMode:                 true,
+		HasContentImage:          &hasContent,
+		HasTailImage:             &hasTail,
+		ArticleWithCover:         &articleCover,
+		ArticleWithContentImages: &articleContent,
+		ExecutionTarget:          model.ExecutionTargetLocal,
+	}})
+	if err != nil {
+		t.Fatalf("Clone with editable overrides: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("cloned tasks = %d, want 2", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.ProjectID != destinationProject.ID || task.Type != model.PlatformSeednote {
+			t.Fatalf("destination = project %q type %q, want %q/%q", task.ProjectID, task.Type, destinationProject.ID, model.PlatformSeednote)
+		}
+		snapshot := task.ProjectSnapshot.Data()
+		if snapshot.ProjectName != destinationProject.Name || snapshot.Platform != destinationProject.Platform || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
+			t.Fatalf("destination snapshot = %#v", snapshot)
+		}
+		if task.Prompt != "edited prompt" || task.ImageRatio != "1:1" || task.ImageModelKey != "gemini-pro" {
+			t.Fatalf("editable fields = prompt %q ratio %q model %q", task.Prompt, task.ImageRatio, task.ImageModelKey)
+		}
+		if !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+			t.Fatalf("reference/watermark fields = skip %v asset %q watermark %v", task.SkipReferenceImage, task.ReferenceImageAssetID, task.Watermark)
+		}
+		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage {
+			t.Fatalf("goal/seednote fields = goal %q mode %v content %v tail %v", task.Goal, task.GoalMode, task.HasContentImage, task.HasTailImage)
+		}
+		if task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
+			t.Fatalf("article fields = cover %v content %v", task.ArticleWithCover, task.ArticleWithContentImages)
+		}
+		if task.ExecutionTarget != model.ExecutionTargetLocal || task.LocalClaimDeadline == nil {
+			t.Fatalf("execution target = %q deadline %v", task.ExecutionTarget, task.LocalClaimDeadline)
+		}
+		if got := task.InputAttachments.Data(); len(got) != 1 || got[0] != attachments[0] {
+			t.Fatalf("attachments = %#v, want %#v", got, attachments)
+		}
+		if task.InputSourceTaskID != "root-source-task" || task.InputSourceProjectID != "root-source-project" {
+			t.Fatalf("root provenance = %q/%q", task.InputSourceTaskID, task.InputSourceProjectID)
+		}
+		persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("reload editable clone: %v", err)
+		}
+		if persisted.HasContentImage {
+			t.Fatal("persisted has_content_image = true, want explicit false")
+		}
+	}
+}
+
+func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	destinationProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	inherited := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/" + userID + "/reference/inherited.png",
+		FileName:    "inherited.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "inherited-etag",
+	}
+	unrelated := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/" + userID + "/reference/unrelated.png",
+		FileName:    "unrelated.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "unrelated-etag",
+	}
+	foreign := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      uuid.NewString(),
+		Purpose:     DirectUploadPurposeProjectReference,
+		StorageKey:  "assets/users/foreign/reference/foreign.png",
+		FileName:    "foreign.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "foreign-etag",
+	}
+	taskReference := &model.Asset{
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Purpose:     DirectUploadPurposeTaskReference,
+		StorageKey:  "assets/users/" + userID + "/reference/task.png",
+		FileName:    "task.png",
+		ContentType: "image/png",
+		Size:        128,
+		ETag:        "task-etag",
+	}
+	for _, asset := range []*model.Asset{inherited, unrelated, foreign, taskReference} {
+		seedReferenceAsset(t, repo, asset)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: inherited.ID})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	taskCount := func() int64 {
+		count, err := repo.Tasks().CountByUserID(ctx, userID, "", "")
+		if err != nil {
+			t.Fatalf("count tasks: %v", err)
+		}
+		return count
+	}
+
+	before := taskCount()
+	if _, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID: userID, ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: inherited.ID,
+	}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
+		t.Fatalf("direct CreateManual error = %v, want ErrReferenceAssetPurposeMismatch", err)
+	}
+	if got := taskCount(); got != before {
+		t.Fatalf("task count after rejected CreateManual = %d, want %d", got, before)
+	}
+
+	clone := func(assetID string) ([]*model.Task, error) {
+		return svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+			ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: assetID,
+		}})
+	}
+	clones, err := clone(inherited.ID)
+	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("trusted inherited clone = %#v, %v", clones, err)
+	}
+	firstClone := clones[0]
+	firstClone.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
+		t.Fatalf("complete first clone: %v", err)
+	}
+	exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{})
+	if err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != inherited.ID {
+		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
+	}
+
+	for _, test := range []struct {
+		name    string
+		assetID string
+		wantErr error
+	}{
+		{name: "unrelated same-user project reference", assetID: unrelated.ID, wantErr: ErrReferenceAssetPurposeMismatch},
+		{name: "foreign project reference", assetID: foreign.ID, wantErr: ErrReferenceAssetForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := taskCount()
+			if _, err := clone(test.assetID); !errors.Is(err, test.wantErr) {
+				t.Fatalf("clone error = %v, want %v", err, test.wantErr)
+			}
+			if got := taskCount(); got != before {
+				t.Fatalf("task count after rejected clone = %d, want %d", got, before)
+			}
+		})
+	}
+
+	normalClones, err := clone(taskReference.ID)
+	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != taskReference.ID {
+		t.Fatalf("normal task-reference clone = %#v, %v", normalClones, err)
+	}
+}
+
+func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		override func(projectID string) *CloneTaskOverrides
+		assert   func(t *testing.T, task *model.Task)
+	}{
+		{
+			name:     "ecommerce",
+			platform: model.PlatformEcommerce,
+			override: func(projectID string) *CloneTaskOverrides {
+				return &CloneTaskOverrides{
+					ProjectID: projectID,
+					Quantity:  2,
+					Ecommerce: &model.EcommerceConfig{
+						SelectedModules:          map[string]int{"main_images": 2},
+						ProductPhotos:            []string{"https://example.com/product.png"},
+						TargetPlatform:           "amazon",
+						SellingPoints:            "durable",
+						Language:                 "en",
+						ProviderStrategyOverride: "balanced",
+					},
+				}
+			},
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.Ecommerce.Data()
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || got.ProviderStrategyOverride != "balanced" || len(got.ProductPhotos) != 1 {
+					t.Fatalf("ecommerce = %#v", got)
+				}
+			},
+		},
+		{
+			name:     "montage",
+			platform: model.PlatformMontage,
+			override: func(projectID string) *CloneTaskOverrides {
+				return &CloneTaskOverrides{
+					ProjectID: projectID,
+					Quantity:  2,
+					MontageInput: &model.MontageInput{
+						Brief:       "edited montage brief",
+						PipelineKey: "default",
+						Preferences: model.MontagePreferences{AspectRatio: "16:9", DurationSeconds: 30},
+					},
+				}
+			},
+			assert: func(t *testing.T, task *model.Task) {
+				got := task.MontageInput.Data()
+				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+					t.Fatalf("montage input = %#v", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
+			ctx := context.Background()
+			userID := uuid.NewString()
+			sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			destinationProjectID := createTestProject(t, repo, userID, tt.platform)
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+			if err := repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatalf("create source task: %v", err)
+			}
+
+			tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: tt.override(destinationProjectID)})
+			if err != nil {
+				t.Fatalf("Clone: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("type-specific cloned tasks = %d, want platform-clamped 1", len(tasks))
+			}
+			if tasks[0].ProjectID != destinationProjectID || tasks[0].Type != tt.platform || tasks[0].ProjectSnapshot.Data().Platform != tt.platform {
+				t.Fatalf("destination task = %#v", tasks[0])
+			}
+			if tasks[0].InputSourceTaskID != source.ID || tasks[0].InputSourceProjectID != sourceProjectID {
+				t.Fatalf("source provenance = %q/%q", tasks[0].InputSourceTaskID, tasks[0].InputSourceProjectID)
+			}
+			tt.assert(t, tasks[0])
+		})
+	}
+}
+
 func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	src := &model.Task{
-		ID:                uuid.NewString(),
-		UserID:            userID,
-		ProjectID:         projectID,
-		Type:              model.PlatformArticle,
-		Status:            model.TaskStatusCompleted,
-		Prompt:            "clone lineage",
-		InputSourceTaskID: "root-task-id",
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            projectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "clone lineage",
+		InputSourceTaskID:    "root-task-id",
+		InputSourceProjectID: "root-project-id",
 	}
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatal(err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	if clone.InputSourceTaskID != "root-task-id" {
 		t.Fatalf("clone input source = %q, want root-task-id", clone.InputSourceTaskID)
+	}
+	if clone.InputSourceProjectID != "root-project-id" {
+		t.Fatalf("clone input source project = %q, want root-project-id", clone.InputSourceProjectID)
+	}
+}
+
+func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID:                   uuid.NewString(),
+		UserID:               userID,
+		ProjectID:            projectID,
+		Type:                 model.PlatformArticle,
+		Status:               model.TaskStatusCompleted,
+		Prompt:               "partial clone lineage",
+		InputSourceProjectID: "stale-project-id",
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
+	if clone.InputSourceTaskID != src.ID {
+		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
+	}
+	if clone.InputSourceProjectID != src.ProjectID {
+		t.Fatalf("clone input source project = %q, want %q", clone.InputSourceProjectID, src.ProjectID)
 	}
 }
 
@@ -919,10 +1316,14 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
 	if err != nil {
 		t.Fatalf("Clone montage task: %v", err)
 	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	clone := clones[0]
 	got := clone.MontageInput.Data()
 	if got.Brief != "保留克隆输入" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
@@ -1307,6 +1708,49 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	}
 }
 
+func TestTaskService_DeletePreventsConcurrentResumeFromRestoringAuthority(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	const objectKey = "tasks/delete-race/final.md"
+	store := newBlockingTaskDeleteStorage(objectKey)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, FileName: "final.md", FilePath: "output/final.md",
+		OSSKey: objectKey, CleanupOSSKey: objectKey, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatalf("create task file: %v", err)
+	}
+
+	deleteErr := make(chan error, 1)
+	go func() { deleteErr <- svc.Delete(ctx, task.ID) }()
+	select {
+	case <-store.deleteEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Delete did not reach object cleanup")
+	}
+
+	_, resumeErr := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	close(store.allowDelete)
+	if err := <-deleteErr; err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if !errors.Is(resumeErr, ErrTaskResumeNotTerminal) {
+		t.Fatalf("concurrent Resume error = %v, want deleting task rejection", resumeErr)
+	}
+	if _, err := repo.Tasks().FindByID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("task lookup after delete = %v, want record not found", err)
+	}
+}
+
 func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
@@ -1495,16 +1939,6 @@ func TestTaskServiceProjectConcurrencyModes(t *testing.T) {
 	uncapped.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	if got := uncapped.effectiveProjectMaxConcurrent(project); got != 8 {
 		t.Fatalf("uncapped dispatcher limit = %d, want project limit 8", got)
-	}
-}
-
-func TestTaskServiceResolveWorkspacePathDoesNotInspectServerFilesystem(t *testing.T) {
-	svc, _ := setupTaskServiceWithEnqueuer(t)
-	for _, path := range []string{"output/cover.png", "/workspace/task-1/output/cover.png"} {
-		got, ok := svc.ResolveWorkspacePath("task-1", path)
-		if ok || got != path {
-			t.Fatalf("ResolveWorkspacePath(%q) = %q, %v; want unchanged path and false", path, got, ok)
-		}
 	}
 }
 

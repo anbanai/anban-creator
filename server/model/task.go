@@ -105,6 +105,9 @@ type Task struct {
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
 	// may reuse. It is internal ownership provenance, not a client-controlled field.
 	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
+	// InputSourceProjectID records the project that owns InputSourceTaskID's
+	// immutable OSS inputs. It is internal ownership provenance.
+	InputSourceProjectID string `gorm:"type:char(36);index" json:"-"`
 	// Overrides is legacy storage for old task-level style/author/theme overrides.
 	// New tasks use ProjectSnapshot as the runtime fact source.
 	Overrides          datatypes.JSONType[StyleOverrides]  `gorm:"type:json" json:"overrides"`
@@ -193,6 +196,7 @@ type Task struct {
 	CurrentExecutionID *string                          `gorm:"type:char(36);index" json:"current_execution_id,omitempty"`
 	LocalClaimDeadline *time.Time                       `gorm:"index" json:"local_claim_deadline,omitempty"`
 	ExecutorInfo       datatypes.JSONType[ExecutorMeta] `gorm:"type:json" json:"executor_info"`
+	DeletingAt         *time.Time                       `gorm:"index" json:"-"`
 
 	CreatedAt time.Time `gorm:"index:idx_user_created,priority:2" json:"created_at"`
 	UpdatedAt time.Time `gorm:"index" json:"updated_at"`

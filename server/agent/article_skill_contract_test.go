@@ -74,7 +74,6 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -102,9 +101,9 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 				"任一硬性项失败时停止发布：内容不贴题、缺少封面 `media_id`、章节缺图",
 				"图文并茂**：每个 `##` 章节至少一张配图",
 				"图片生成要求",
-				"所有配图使用 `ref_image_path=\"$DIR/cover.png\"` 保持风格一致",
+				"所有配图使用 `ref_image_path=\"output/cover.png\"` 保持风格一致",
 				"将文件内容作为 `markdown` 参数传给 `convert_markdown",
-				"`$DIR/images.json` 仅作为审计记录，`convert_markdown` 不会读取该文件",
+				"`output/images.json` 仅作为审计记录，`convert_markdown` 不会读取该文件",
 				"| 6 | `article-visual-design` | `cover.png`, `image-plan.md` |",
 				"| 7 | `article-visual-design` | `images.json`, 更新 `04-article-final.md` |",
 				"| 8 | `content-writing` | `05-article.html` |",
@@ -136,8 +135,6 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -164,7 +161,6 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -186,7 +182,7 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 			for _, stale := range []string{
 				"Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具",
 				"排版模块使用标准 Markdown 语法，由 `convert_markdown` 工具中的 LLM 自动渲染",
-				"保存为 `$DIR/05-article.html`。",
+				"保存为 `output/05-article.html`。",
 				"inspect_article",
 			} {
 				if strings.Contains(text, stale) {
@@ -200,7 +196,6 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	contentWritingPaths := []string{
-		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "content-writing", "SKILL.md"),
 	}
 	for _, path := range contentWritingPaths {
@@ -225,7 +220,6 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 	}
 
 	articlePaths := []string{
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "agents", "article.toml"),
@@ -253,8 +247,6 @@ func TestArticleSkillContracts_WechatVisualsForbidDiversionCues(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 	}
 	for _, path := range paths {
@@ -316,7 +308,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -364,7 +355,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -378,7 +368,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "content.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -397,7 +386,6 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
 		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -461,7 +449,6 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 		filepath.Join(root, "plugins", "agents", "article.md"),
 		filepath.Join(root, "plugins", "agents", "article.toml"),
 		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -490,6 +477,219 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 	} {
 		if !strings.Contains(viral, term) {
 			t.Fatalf("article-viral-strategy viral-audit reference missing %q", term)
+		}
+	}
+}
+
+func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	capabilityPaths := []string{
+		filepath.Join(root, "plugins", "skills", "article-visual-design", "references", "cover.md"),
+		filepath.Join(root, "plugins", "skills", "article-cover-design", "references", "examples.md"),
+	}
+	for _, path := range capabilityPaths {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"generate_image",
+			"analyze_image",
+			"upload_image",
+			"可见内容质量结论",
+			"上传失败只重试上传，不重新生成",
+			"failure-state.json",
+			"不得请求用户中途协助",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing independent article image reference term %q", path, required)
+			}
+		}
+	}
+
+	reviewPaths := append(capabilityPaths,
+		filepath.Join(root, "plugins", "skills", "article-viral-strategy", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "article-viral-strategy", "references", "viral-audit.md"),
+	)
+	for _, path := range reviewPaths {
+		lower := strings.ToLower(readArticleContractFile(t, path))
+		for _, forbidden := range []string{"vision", "verification", "vision-score.md", "请求用户协助"} {
+			if strings.Contains(lower, forbidden) {
+				t.Fatalf("%s still contains stale article image review term %q", path, forbidden)
+			}
+		}
+	}
+
+	for _, path := range reviewPaths[len(capabilityPaths):] {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{"Agent 自主完成可见内容审查", "可见内容质量评分表"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing Agent-owned visible-content review term %q", path, required)
+			}
+		}
+	}
+}
+
+func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	cases := []struct {
+		path       string
+		errorCodes []string
+	}{
+		{filepath.Join(root, "plugins", "agents", "article.md"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "agents", "article.toml"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article", "SKILL.md"), []string{"article_cover_generation_failed", "article_cover_quality_failed", "article_content_images_failed", "article_draft_creation_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article-cover-design", "SKILL.md"), []string{"article_cover_quality_failed"}},
+		{filepath.Join(root, "plugins", "skills", "article-visual-design", "SKILL.md"), []string{"article_cover_quality_failed", "article_content_images_failed"}},
+	}
+	for _, tc := range cases {
+		body := readArticleContractFile(t, tc.path)
+		for _, required := range []string{
+			"failure-state.json",
+			`"status":"recoverable_failure"`,
+			`"resume_from"`,
+			"不得请求用户协助",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing managed zero-interaction failure term %q", tc.path, required)
+			}
+		}
+		for _, errorCode := range tc.errorCodes {
+			if !strings.Contains(body, errorCode) {
+				t.Fatalf("%s missing managed zero-interaction error code %q", tc.path, errorCode)
+			}
+		}
+		for _, forbidden := range []string{
+			"暂停流程请求用户协助",
+			"暂停流程，请求用户协助",
+			"仍失败则请求用户协助",
+			"暂停流程，分析原因",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s still contains mid-run user assistance path %q", tc.path, forbidden)
+			}
+		}
+	}
+}
+
+func articleConvertMarkdownFallbackScopes(body string) []string {
+	var scopes []string
+	for _, paragraph := range strings.Split(body, "\n\n") {
+		lower := strings.ToLower(paragraph)
+		if !strings.Contains(lower, "render_template") || !strings.Contains(lower, "convert_markdown") {
+			continue
+		}
+
+		deniesFallback := false
+		for _, denial := range []string{
+			"不得改用 `convert_markdown`", "不得改用 convert_markdown",
+			"禁止改用 `convert_markdown`", "禁止改用 convert_markdown",
+			"不得用 `convert_markdown`", "不得用 convert_markdown",
+			"禁止使用 `convert_markdown`", "禁止使用 convert_markdown",
+		} {
+			if strings.Contains(lower, strings.ToLower(denial)) {
+				deniesFallback = true
+				break
+			}
+		}
+		if deniesFallback {
+			continue
+		}
+
+		failureContext := false
+		for _, marker := range []string{"不可用", "调用失败", "旧版 server", "旧服务器"} {
+			if strings.Contains(lower, marker) {
+				failureContext = true
+				break
+			}
+		}
+		fallbackAlternative := false
+		for _, marker := range []string{"兼容降级", "降级路径", "备用路径", "替代路径", "fallback"} {
+			if strings.Contains(lower, marker) {
+				fallbackAlternative = true
+				break
+			}
+		}
+		if failureContext && fallbackAlternative {
+			scopes = append(scopes, paragraph)
+		}
+	}
+	return scopes
+}
+
+func TestArticleRenderTemplateFailureHasNoConvertMarkdownFallback(t *testing.T) {
+	stale := "`render_template` 是主路径；`convert_markdown` 仅作旧版 server 兼容降级，不得作主渲染路径。"
+	if scopes := articleConvertMarkdownFallbackScopes(stale); len(scopes) != 1 {
+		t.Fatalf("stale render fallback must be detected, got %d scopes", len(scopes))
+	}
+
+	legitimateDistinction := "`render_template` 负责结构化渲染；`convert_markdown` 处理普通 Markdown 转换，二者职责不同。"
+	if scopes := articleConvertMarkdownFallbackScopes(legitimateDistinction); len(scopes) != 0 {
+		t.Fatalf("tool responsibility distinction must remain allowed, got %d scopes", len(scopes))
+	}
+
+	failClosed := "`render_template` 不可用或调用失败时写 failure-state；不得改用 `convert_markdown`。"
+	if scopes := articleConvertMarkdownFallbackScopes(failClosed); len(scopes) != 0 {
+		t.Fatalf("fail-closed render policy must remain allowed, got %d scopes", len(scopes))
+	}
+
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
+		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
+	} {
+		if scopes := articleConvertMarkdownFallbackScopes(readArticleContractFile(t, path)); len(scopes) != 0 {
+			t.Fatalf("%s still permits convert_markdown fallback when render_template is unavailable", path)
+		}
+	}
+}
+
+func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "plugins", "agents", "article.md"),
+		filepath.Join(root, "plugins", "agents", "article.toml"),
+		filepath.Join(root, "plugins", "skills", "article", "SKILL.md"),
+	}
+
+	for _, path := range paths {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"托管上下文提供的项目 ID",
+			"恰好一个归属当前用户的 Article 项目",
+			"零个或多个归属当前用户的 Article 项目",
+			"不得让用户选择",
+			"article_project_resolution_failed",
+			`"stage":"project_resolution"`,
+			`"resume_from":"project_resolution"`,
+			"必需 MCP 能力调用不可用或失败",
+			"article_mcp_call_failed",
+			"调用成功但缺少可选语义配置",
+			"Agent 默认值",
+			"只有这种成功响应中的可选字段缺失",
+			"`upload_image` 调用失败时只重试上传",
+			"article_image_upload_failed",
+			"`analyze_image` 的传输或运行时失败",
+			"记录为警告",
+			"不得阻塞后续已规划的图片生成",
+			"最终质量判断由 Agent 负责",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing managed Article resolution term %q", path, required)
+			}
+		}
+
+		for _, forbidden := range []string{
+			"向用户展示所有可选项目",
+			"项目选择是唯一例外",
+			"如返回错误可忽略，用空列表继续",
+			"如果 MCP 工具因配置问题失败，直接报告错误信息并继续流程",
+			"自动重试 + 降级，非关键步骤跳过继续",
+			"如果 MCP 工具不可用或调用失败，立即停止并报告错误",
+			"`render_template` 不可用的旧版 server 上作为兼容降级路径",
+			"render_template 不可用的旧版 server 上作为兼容降级路径",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s still contains contradictory managed Article clause %q", path, forbidden)
+			}
 		}
 	}
 }

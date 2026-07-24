@@ -1060,15 +1060,36 @@ func TestDockerRuntimeContract(t *testing.T) {
 		for _, name := range []string{
 			"ANBAN_BILLING_ADMIN_API_KEY",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE",
+			"ANBAN_AGENT_IMAGE_MONTAGE",
 			"ANBAN_JWT_SECRET_KEY",
 			"ANBAN_OSS_ENDPOINT",
 			"ANBAN_OSS_ACCESS_KEY_ID",
 			"ANBAN_OSS_ACCESS_KEY_SECRET",
 			"CLAUDE_CODE_AUTH_TOKEN",
 			"MOONSHOT_API_KEY",
+			"VOLCENGINE_ARK_API_KEY",
+			"WANGCAI_OPENAI_API_KEY",
 		} {
 			if _, ok := dotenv[name]; !ok {
 				t.Errorf(".env.example missing required Server variable %s", name)
+			}
+		}
+
+		makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+		for _, target := range []string{"server-run:", "server-dev:"} {
+			start := strings.Index(makefile, target)
+			if start < 0 {
+				t.Fatalf("Makefile missing %s", target)
+			}
+			body := makefile[start:]
+			if next := strings.Index(body[len(target):], "\n\n"); next >= 0 {
+				body = body[:len(target)+next]
+			}
+			if !strings.Contains(body, ". ./.env") {
+				t.Errorf("Makefile %s does not load the documented root .env", target)
 			}
 		}
 	})
@@ -1144,6 +1165,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"runtime owns the task workspace and output",
 			"/var/run/docker.sock",
 			"immutable image digests",
+			"VOLCENGINE_ARK_API_KEY",
+			"WANGCAI_OPENAI_API_KEY",
 		} {
 			if !strings.Contains(normalizedDocs["README.md"], want) {
 				t.Errorf("README.md missing managed dispatch contract %q", want)

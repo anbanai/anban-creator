@@ -17,6 +17,7 @@ type TaskFile struct {
 	MediaID         string    `gorm:"type:varchar(200)" json:"media_id,omitempty"`
 	WechatURL       string    `gorm:"type:varchar(500)" json:"wechat_url,omitempty"`
 	OSSKey          string    `gorm:"type:varchar(500)" json:"-"`
+	CleanupOSSKey   string    `gorm:"type:varchar(500);index" json:"-"`
 	OSSURL          string    `gorm:"type:varchar(500)" json:"-"`
 	StorageProvider string    `gorm:"type:varchar(20);default:local" json:"-"`
 	URL             string    `gorm:"-" json:"url"`

@@ -1,13 +1,8 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
-  input_attachments: InputAttachment[]
-}
-
-export interface CloneTaskRequest {
-  prompt: string
   input_attachments: InputAttachment[]
 }
 

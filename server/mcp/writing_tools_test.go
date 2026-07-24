@@ -235,6 +235,7 @@ func TestBillingError_GenericError(t *testing.T) {
 }
 
 func TestScoreArticleHandler_ValidMetrics(t *testing.T) {
+	useArticleScoreService(t)
 	args := json.RawMessage(`{
 		"read_count": 10000,
 		"like_count": 500,
@@ -278,6 +279,7 @@ func TestScoreArticleHandler_ValidMetrics(t *testing.T) {
 }
 
 func TestScoreArticleHandler_ZeroReads(t *testing.T) {
+	useArticleScoreService(t)
 	args := json.RawMessage(`{"read_count": 0, "like_count": 5}`)
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
@@ -296,6 +298,7 @@ func TestScoreArticleHandler_ZeroReads(t *testing.T) {
 }
 
 func TestScoreArticleHandler_MinimalArgs(t *testing.T) {
+	useArticleScoreService(t)
 	args := json.RawMessage(`{"read_count": 1000, "like_count": 50}`)
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
@@ -319,6 +322,7 @@ func TestScoreArticleHandler_MinimalArgs(t *testing.T) {
 }
 
 func TestScoreArticleHandler_ViralScore(t *testing.T) {
+	useArticleScoreService(t)
 	args := json.RawMessage(`{
 		"read_count": 100000,
 		"like_count": 10000,
@@ -343,120 +347,11 @@ func TestScoreArticleHandler_ViralScore(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// calculateViralScore pure function tests
-// ---------------------------------------------------------------------------
-
-func TestCalculateViralScore_HighEngagement(t *testing.T) {
-	score := calculateViralScore(10000, 0.15, 0.05, 0.03, 0.03)
-	t.Logf("  [HIGH ENGAGEMENT] score=%.1f", score)
-	if score < 30 {
-		t.Errorf("high engagement score too low: %.1f", score)
-	}
-}
-
-func TestCalculateViralScore_LowEngagement(t *testing.T) {
-	score := calculateViralScore(100, 0.001, 0.0001, 0.0005, 0.0001)
-	t.Logf("  [LOW ENGAGEMENT] score=%.1f", score)
-	if score > 50 {
-		t.Errorf("low engagement score too high: %.1f", score)
-	}
-}
-
-func TestCalculateViralScore_CappedAt100(t *testing.T) {
-	score := calculateViralScore(10000000, 1.0, 1.0, 1.0, 1.0)
-	t.Logf("  [CAPPED] score=%.1f", score)
-	if score > 100 {
-		t.Errorf("score should be capped at 100, got %.1f", score)
-	}
-}
-
-func TestCalculateViralScore_ZeroReads(t *testing.T) {
-	score := calculateViralScore(0, 0, 0, 0, 0)
-	t.Logf("  [ZERO READS] score=%.1f", score)
-	// Log10(0) = -Inf, so read score goes negative; but score is capped at 100
-	// not floored at 0. This is a known edge case — score_articleHandler
-	// rejects read_count <= 0 before reaching this function.
-	if score > 0 {
-		t.Errorf("zero reads should not give positive score, got %.1f", score)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// getViralLevel tests
-// ---------------------------------------------------------------------------
-
-func TestGetViralLevel_AllLevels(t *testing.T) {
-	cases := []struct {
-		score    float64
-		expected string
-	}{
-		{95, "超级爆款"},
-		{85, "热门爆款"},
-		{75, "优质内容"},
-		{65, "潜力内容"},
-		{55, "普通内容"},
-		{30, "待优化"},
-		{0, "待优化"},
-	}
-	for _, tc := range cases {
-		level := getViralLevel(tc.score)
-		if level != tc.expected {
-			t.Errorf("getViralLevel(%.0f) = %q, want %q", tc.score, level, tc.expected)
-		}
-		t.Logf("  [LEVEL] score=%.0f → %q", tc.score, level)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// generateScoreRecommendations tests
-// ---------------------------------------------------------------------------
-
-func TestGenerateScoreRecommendations_LowEngagement(t *testing.T) {
-	recs := generateScoreRecommendations(0.005, 0.001, 0.003, 0.0001)
-	t.Logf("  [LOW ENGAGEMENT RECS] %v", recs)
-	if len(recs) == 0 {
-		t.Error("expected recommendations for low engagement")
-	}
-}
-
-func TestGenerateScoreRecommendations_GoodMetrics(t *testing.T) {
-	recs := generateScoreRecommendations(0.1, 0.05, 0.03, 0.02)
-	t.Logf("  [GOOD METRICS RECS] %v", recs)
-	if len(recs) != 1 {
-		t.Errorf("expected 1 recommendation for good metrics, got %d", len(recs))
-	}
-	if recs[0] != "各项指标表现良好，继续保持！" {
-		t.Errorf("expected good-metrics message, got: %q", recs[0])
-	}
-}
-
-func TestGenerateScoreRecommendations_LowShareRate(t *testing.T) {
-	recs := generateScoreRecommendations(0.05, 0.005, 0.03, 0.02)
-	found := false
-	for _, r := range recs {
-		if strings.Contains(r, "分享率偏低") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected share rate recommendation, got: %v", recs)
-	}
-}
-
-func TestGenerateScoreRecommendations_LowCommentRate(t *testing.T) {
-	recs := generateScoreRecommendations(0.1, 0.05, 0.1, 0.001)
-	found := false
-	for _, r := range recs {
-		if strings.Contains(r, "评论率偏低") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected comment rate recommendation, got: %v", recs)
-	}
+func useArticleScoreService(t *testing.T) {
+	t.Helper()
+	old := svcs
+	svcs = &Services{ArticleScoreSvc: service.NewArticleScoreService()}
+	t.Cleanup(func() { svcs = old })
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +530,7 @@ func TestConvertMarkdownHandler_EmptyStrings(t *testing.T) {
 func TestScoreArticleHandler_ViaMCP(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
+	SetServices(&Services{ArticleScoreSvc: service.NewArticleScoreService()})
 
 	text := callMCPTool(t, handler, "score_article",
 		`{"read_count":5000,"like_count":200,"share_count":30,"comment_count":15}`,

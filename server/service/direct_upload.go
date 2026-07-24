@@ -31,12 +31,15 @@ const (
 	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
 	DirectUploadPurposeTaskArtifact      = "task_artifact"
 
-	defaultDirectUploadTTLSeconds  = 15 * 60
-	uploadSessionCleanupLease      = 5 * time.Minute
-	uploadSessionCleanupRetryDelay = 30 * time.Minute
-	uploadFinalizationLease        = time.Minute
-	uploadFinalizationTimeout      = 45 * time.Second
-	uploadFinalizationCleanupTTL   = 5 * time.Second
+	defaultDirectUploadTTLSeconds = 15 * 60
+	uploadSessionCleanupLease     = 5 * time.Minute
+	uploadFinalizationLease       = time.Minute
+	uploadFinalizationTimeout     = 45 * time.Second
+	uploadFinalizationCleanupTTL  = 5 * time.Second
+	// Task-artifact staging remains cleanup-eligible for one hour after expiry
+	// so scheduler sweeps can remove objects recreated by delayed signed PUTs.
+	taskArtifactCleanupGrace      = time.Hour
+	taskArtifactCleanupRetryDelay = 30 * time.Minute
 )
 
 var (
@@ -66,6 +69,8 @@ type DirectUploadPrepareRequest struct {
 }
 
 type DirectUploadPrepareResult struct {
+	UploadRequired     bool              `json:"upload_required"`
+	ETag               string            `json:"etag,omitempty"`
 	UploadSessionID    string            `json:"upload_session_id"`
 	UploadID           string            `json:"upload_id"`
 	StagingKey         string            `json:"key"`
@@ -270,6 +275,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 		return nil, fmt.Errorf("record upload session: %w", err)
 	}
 	return &DirectUploadPrepareResult{
+		UploadRequired:     true,
 		UploadSessionID:    uploadID,
 		UploadID:           uploadID,
 		StagingKey:         key,
@@ -773,22 +779,8 @@ func directUploadPurposeAllowed(purpose string, allowed []string) bool {
 }
 
 func CleanupExpiredUploadSessions(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, before time.Time, limit int) (int, error) {
-	result := cleanupExpiredUploadSessionBatch(ctx, store, repo, before, limit)
-	return result.cleaned, errors.Join(result.err, result.fatal)
-}
-
-type uploadSessionCleanupBatchResult struct {
-	cleaned    int
-	candidates int
-	advanced   int
-	err        error
-	fatal      error
-}
-
-func cleanupExpiredUploadSessionBatch(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, before time.Time, limit int) uploadSessionCleanupBatchResult {
-	var result uploadSessionCleanupBatchResult
 	if store == nil || repo == nil {
-		return result
+		return 0, nil
 	}
 	if limit <= 0 {
 		limit = 100
@@ -796,113 +788,74 @@ func cleanupExpiredUploadSessionBatch(ctx context.Context, store DirectUploadFin
 	claimStaleBefore := before.Add(-uploadSessionCleanupLease)
 	sessions, err := repo.UploadSessions().FindForCleanup(ctx, before, claimStaleBefore, limit)
 	if err != nil {
-		result.fatal = err
-		return result
+		return 0, err
 	}
-	result.candidates = len(sessions)
+	cleaned := 0
 	for _, session := range sessions {
 		if session == nil {
 			continue
 		}
-		cleaned, advanced, sessionErr, fatalErr := cleanupExpiredUploadSession(ctx, store, repo, session, before, claimStaleBefore)
-		if cleaned {
-			result.cleaned++
-		}
-		if advanced {
-			result.advanced++
-		}
-		if sessionErr != nil {
-			result.err = errors.Join(result.err, fmt.Errorf("cleanup upload session %q: %w", session.ID, sessionErr))
-		}
-		if fatalErr != nil {
-			result.fatal = fmt.Errorf("cleanup upload session %q: %w", session.ID, fatalErr)
-			return result
-		}
-	}
-	return result
-}
-
-func cleanupExpiredUploadSession(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, session *model.UploadSession, before, claimStaleBefore time.Time) (bool, bool, error, error) {
-	if strings.TrimSpace(session.FinalizationETag) != "" || strings.TrimSpace(session.PromotionSourceETag) != "" {
-		finalKey, keyErr := finalizedUploadSessionKey(session)
-		if keyErr != nil {
-			invalidErr := fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, keyErr)
-			cleaned, advanced, cleanupErr, fatalErr := expireUploadSession(ctx, store, repo, session, before, claimStaleBefore)
-			return cleaned, advanced, errors.Join(invalidErr, cleanupErr), fatalErr
-		}
-		statCtx, statCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
-		_, finalErr := store.StatObject(statCtx, finalKey)
-		statCancel()
-		switch {
-		case finalErr == nil:
-			_, finalizeErr := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
-				SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: before,
-			})
-			if finalizeErr == nil {
-				return false, true, nil, nil
+		if session.Purpose != DirectUploadPurposeTaskArtifact && (strings.TrimSpace(session.FinalizationETag) != "" || strings.TrimSpace(session.PromotionSourceETag) != "") {
+			finalKey, keyErr := finalizedUploadSessionKey(session)
+			if keyErr != nil {
+				return cleaned, fmt.Errorf("%w: %v", ErrUploadSessionObjectInvalid, keyErr)
 			}
-			if errors.Is(finalizeErr, ErrUploadSessionObjectInvalid) {
-				cleaned, advanced, cleanupErr, fatalErr := expireUploadSession(ctx, store, repo, session, before, claimStaleBefore)
-				return cleaned, advanced, errors.Join(finalizeErr, cleanupErr), fatalErr
+			statCtx, statCancel := context.WithTimeout(ctx, uploadFinalizationTimeout)
+			_, finalErr := store.StatObject(statCtx, finalKey)
+			statCancel()
+			switch {
+			case finalErr == nil:
+				if _, finalizeErr := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
+					SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: before,
+				}); finalizeErr != nil {
+					return cleaned, finalizeErr
+				}
+				continue
+			case errors.Is(finalErr, storage.ErrObjectNotFound):
+			default:
+				return cleaned, fmt.Errorf("%w: stat final upload object during cleanup: %v", ErrUploadSessionUnavailable, finalErr)
 			}
-			advanced, fatalErr := deferUploadSessionCleanup(ctx, repo, session.ID, before, claimStaleBefore)
-			return false, advanced, finalizeErr, fatalErr
-		case errors.Is(finalErr, storage.ErrObjectNotFound):
-		default:
-			statErr := fmt.Errorf("%w: stat final upload object during cleanup: %v", ErrUploadSessionUnavailable, finalErr)
-			advanced, fatalErr := deferUploadSessionCleanup(ctx, repo, session.ID, before, claimStaleBefore)
-			return false, advanced, statErr, fatalErr
 		}
-	}
-	return expireUploadSession(ctx, store, repo, session, before, claimStaleBefore)
-}
-
-func expireUploadSession(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, session *model.UploadSession, before, claimStaleBefore time.Time) (bool, bool, error, error) {
-	claimID := uuid.NewString()
-	claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, claimID, before, claimStaleBefore)
-	if err != nil {
-		return false, false, nil, err
-	}
-	if !claimed {
-		return false, false, nil, nil
-	}
-	if deleteErr := store.Delete(ctx, session.StagingKey); deleteErr != nil {
-		deferred, deferErr := repo.UploadSessions().DeferExpiration(ctx, session.ID, claimID, before.Add(uploadSessionCleanupRetryDelay))
-		if deferErr != nil {
-			return false, false, deleteErr, fmt.Errorf("defer cleanup retry: %w", deferErr)
+		claimID := uuid.NewString()
+		claimed, err := repo.UploadSessions().ClaimExpiration(ctx, session.ID, claimID, before, claimStaleBefore)
+		if err != nil {
+			return cleaned, err
 		}
-		if !deferred {
-			return false, false, deleteErr, fmt.Errorf("defer cleanup retry: %w", ErrUploadSessionStateConflict)
+		if !claimed {
+			continue
 		}
-		return false, true, deleteErr, nil
+		if err := store.Delete(ctx, session.StagingKey); err != nil {
+			reopened, reopenErr := repo.UploadSessions().ReopenExpiration(ctx, session.ID, claimID)
+			if reopenErr != nil {
+				return cleaned, fmt.Errorf("delete expired upload session staging object: %w; reopen cleanup claim: %v", err, reopenErr)
+			}
+			if !reopened {
+				return cleaned, fmt.Errorf("delete expired upload session staging object: %w; cleanup claim was not reopened", err)
+			}
+			return cleaned, err
+		}
+		if session.Purpose == DirectUploadPurposeTaskArtifact && before.Before(session.ExpiresAt.Add(taskArtifactCleanupGrace)) {
+			nextCleanupAt := minTime(before.Add(taskArtifactCleanupRetryDelay), session.ExpiresAt.Add(taskArtifactCleanupGrace))
+			reopened, err := repo.UploadSessions().RescheduleExpiration(ctx, session.ID, claimID, nextCleanupAt)
+			if err != nil {
+				return cleaned, err
+			}
+			if !reopened {
+				return cleaned, ErrUploadSessionStateConflict
+			}
+			cleaned++
+			continue
+		}
+		completed, err := repo.UploadSessions().CompleteExpiration(ctx, session.ID, claimID, before)
+		if err != nil {
+			return cleaned, err
+		}
+		if !completed {
+			return cleaned, ErrUploadSessionStateConflict
+		}
+		cleaned++
 	}
-	completed, err := repo.UploadSessions().CompleteExpiration(ctx, session.ID, claimID, before)
-	if err != nil {
-		return false, false, nil, err
-	}
-	if !completed {
-		return false, false, nil, ErrUploadSessionStateConflict
-	}
-	return true, true, nil, nil
-}
-
-func deferUploadSessionCleanup(ctx context.Context, repo repository.Repository, sessionID string, before, claimStaleBefore time.Time) (bool, error) {
-	claimID := uuid.NewString()
-	claimed, err := repo.UploadSessions().ClaimExpiration(ctx, sessionID, claimID, before, claimStaleBefore)
-	if err != nil {
-		return false, fmt.Errorf("claim cleanup retry: %w", err)
-	}
-	if !claimed {
-		return false, fmt.Errorf("claim cleanup retry: %w", ErrUploadSessionStateConflict)
-	}
-	deferred, err := repo.UploadSessions().DeferExpiration(ctx, sessionID, claimID, before.Add(uploadSessionCleanupRetryDelay))
-	if err != nil {
-		return false, fmt.Errorf("defer cleanup retry: %w", err)
-	}
-	if !deferred {
-		return false, fmt.Errorf("defer cleanup retry: %w", ErrUploadSessionStateConflict)
-	}
-	return true, nil
+	return cleaned, nil
 }
 
 func directUploadFinalURLMatches(raw, finalURL, finalKey string) bool {

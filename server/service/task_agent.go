@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 )
 
 const missingExecutionResultDiagnostic = "agent returned no execution result"
+
+var ErrTaskDeleting = errors.New("task is being deleted")
 
 func normalizeTerminalExecutionResult(result *serveragent.ExecutionResult) *serveragent.ExecutionResult {
 	if result != nil {
@@ -39,6 +42,9 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 	if authenticatedUserID != "" && authenticatedUserID != "system" && task.UserID != authenticatedUserID {
 		return nil, fmt.Errorf("task does not belong to authenticated user")
 	}
+	if task.DeletingAt != nil {
+		return nil, ErrTaskDeleting
+	}
 	return task, nil
 }
 
@@ -49,7 +55,7 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
 	}
-	if task.UserID != userID || task.ProjectID != projectID || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+	if task.DeletingAt != nil || task.UserID != userID || task.ProjectID != projectID || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
 		return fmt.Errorf("execution token does not match current task execution")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)

@@ -1,60 +1,27 @@
-import { useState, useEffect, useMemo, type BaseSyntheticEvent } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Ban, RotateCcw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import { getApiErrorMessage } from '@/lib/http-client'
-import type { TaskStatus, CreateTaskRequest, Project } from '@/types'
-import type { Resolver } from 'react-hook-form'
+import type { TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, ecommerceLanguageOptions } from '@/lib/labels'
-import {
-  getLocalExecutorStatus,
-  setExecutorEnabled,
-  startLocalExecutor,
-  type LocalExecutorStatus,
-} from '@/lib/tauri'
-import {
-  canSubmitLocalTask,
-  localExecutorCreateHint,
-  shouldDefaultRunLocally,
-} from '@/lib/local-executor-ux'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
-import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
-import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
-import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
-import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
-import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
-import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
-import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
-import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { useImageModels } from '@/hooks/useImageModels'
-import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
-import { getProjectCreationDefaults, taskActionSignal, taskCreationCostPreview } from '@/lib/studio-ux'
-import type { PromptAttachment } from '@/types/input-attachment'
-import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
-import { referenceSelectionFromValue } from '@/lib/reference-image'
+import { taskActionSignal } from '@/lib/studio-ux'
+import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -83,42 +50,9 @@ export default function TasksPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
-  const [quantity, setQuantity] = useState(1)
-  const [watermark, setWatermark] = useState(false)
-  const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
-  const [goalMode, setGoalMode] = useState(false)
-  const [hasContentImage, setHasContentImage] = useState(true)
-  const [hasTailImage, setHasTailImage] = useState(false)
-  // Article image toggles (公众号文章): cover + content images each independently
-  // toggleable. Both default true → legacy "always generate both" (zero regression).
-  const [articleWithCover, setArticleWithCover] = useState(true)
-  const [articleWithContentImages, setArticleWithContentImages] = useState(true)
-  const [goalText, setGoalText] = useState('')
-  const [projectImageRatio, setProjectImageRatio] = useState('')
-  const [referenceUploading, setReferenceUploading] = useState(false)
-  const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
-  const [montageUploading, setMontageUploading] = useState(false)
-  // Desktop local-executor integration: when the Tauri shell reports a
-  // provisioned local executor, default new tasks to run on the user's machine
-  // (enables ffmpeg / local-shell). The user can flip this off to force cloud.
-  // In the browser isLocalExecutorAvailable() is always false → no-op.
-  const [localExecutorStatus, setLocalExecutorStatus] = useState<LocalExecutorStatus | null>(null)
-  const [runLocally, setRunLocally] = useState(true)
-  const localExecutorAvailable = localExecutorStatus?.available ?? false
-  const localExecutorHint = localExecutorCreateHint(localExecutorStatus)
-  useEffect(() => {
-    let cancelled = false
-    getLocalExecutorStatus().then((status) => {
-      if (!cancelled) {
-        setLocalExecutorStatus(status)
-        setRunLocally(shouldDefaultRunLocally(status))
-      }
-    })
-    return () => { cancelled = true }
-  }, [])
   const { submit } = useSubmitLock()
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
   useEffect(() => {
     const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
@@ -140,78 +74,6 @@ export default function TasksPage() {
     return map
   }, [projects])
 
-  const { data: billingWallet } = useQuery({
-    queryKey: ['billing', 'wallet'],
-    queryFn: () => api.billing.wallet(),
-  })
-
-  const { data: billingCatalog } = useQuery({
-    queryKey: ['billing', 'catalog'],
-    queryFn: () => api.billing.catalog(),
-  })
-
-  const form = useForm<CreateTaskFormValues>({
-    resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
-  })
-  const attachmentController = usePromptAttachments({
-    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
-    attachments: promptAttachments,
-    onAttachmentsChange: (next) => {
-      setPromptAttachments(next)
-      form.setValue('input_attachments', next.map((attachment) => (
-        attachment.status === 'uploaded' && attachment.uploadId && attachment.key
-          ? {
-              type: attachment.type,
-              upload_id: attachment.uploadId,
-              key: attachment.key,
-              file_name: attachment.fileName,
-              content_type: attachment.contentType,
-              size: attachment.size,
-              instruction: attachment.instruction,
-              role: attachment.role,
-            }
-          : {
-              type: attachment.type,
-              file_name: attachment.fileName,
-              content_type: attachment.contentType,
-              size: attachment.size,
-              instruction: attachment.instruction,
-              role: attachment.role,
-            }
-      )), { shouldDirty: true, shouldValidate: true })
-    },
-  })
-
-  const watchedType = useWatch({ control: form.control, name: 'type' })
-  const isMontageTask = watchedType === 'montage'
-  const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
-  const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
-  const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
-  const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
-
-  // Toggle a module on/off or adjust its quantity. Removing the key (vs storing 0)
-  // keeps selected_modules clean and matches the server's "active module" semantics.
-  const setModuleQty = (key: string, qty: number) => {
-    const cur = form.getValues('selected_modules') ?? {}
-    const next = { ...cur }
-    if (qty >= 1) next[key] = qty
-    else delete next[key]
-    form.setValue('selected_modules', next, { shouldDirty: true })
-  }
-
-  // Auto-focus prompt field when dialog opens
-  useEffect(() => {
-    if (modalOpen) {
-      setTimeout(() => form.setFocus('prompt'), 100)
-    }
-  }, [modalOpen, form])
-
-  // Warn before closing with unsaved changes
-  useFormDirtyCheck(form, modalOpen)
-
   // Resolve create intent after project prerequisites are known.
   useEffect(() => {
     if (!shouldCreate || projectsLoading) return
@@ -221,12 +83,13 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (!modalOpen) return
+    if (projectsLoading) return
     if (projects.length > 0) return
 
     setModalOpen(false)
     toast.error('请先创建一个项目，再开始新建任务。')
     navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
-  }, [projects.length, modalOpen, navigate, createIntent.type, createIntent.intent])
+  }, [projects.length, projectsLoading, modalOpen, navigate, createIntent.type, createIntent.intent])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['tasks', statusFilter, projectFilter, page],
@@ -267,19 +130,6 @@ export default function TasksPage() {
       return next.length === prev.length ? prev : next
     })
   }, [tasks])
-
-  const createMutation = useMutation({
-    mutationFn: (data: CreateTaskRequest) => api.tasks.create(data),
-    onSuccess: (task) => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      toast.success('任务创建成功')
-      resetModal()
-      navigate(`/tasks/${task.id}`)
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '创建任务失败，请重试'))
-    },
-  })
 
   const togglePublished = useMutation({
     mutationFn: ({ id, published }: { id: string; published: boolean }) =>
@@ -349,128 +199,18 @@ export default function TasksPage() {
     bulkDeleteMutation.isPending
 
   function openCreate() {
+    if (projectsLoading) {
+      setCreateDialogIntent({ projectId: createIntent.projectId, type: createIntent.type })
+      setModalOpen(true)
+      return
+    }
     if (projects.length === 0) {
       toast.error('请先创建一个项目，再开始新建任务。')
       navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
-    const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
-    const defaults = getProjectCreationDefaults(selectedIntentProject)
-    const defaultType = createIntent.type ?? defaults.type
-    form.reset({
-      type: defaultType,
-      prompt: '',
-      project_id: selectedIntentProject?.id ?? '',
-      image_ratio: defaults.imageRatio as CreateTaskFormValues['image_ratio'],
-      image_model_key: defaults.imageModelKey,
-      reference_image: null,
-      input_attachments: [],
-      product_photos: [],
-      selected_modules: defaults.selectedModules,
-      target_platform: defaults.targetPlatform,
-      selling_points: '',
-      language: '',
-      montage_input: defaultType === 'montage'
-        ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
-        : undefined,
-    })
-    setQuantity(1)
-    setWatermark(false)
-    setReferenceUploading(false)
-    setMontageUploading(false)
-    attachmentController.clear()
-    setProjectImageRatio(defaults.imageRatio)
-    setHasContentImage(true)
-    setHasTailImage(false)
-    setArticleWithCover(true)
-    setArticleWithContentImages(true)
-    void getLocalExecutorStatus().then((status) => {
-      setLocalExecutorStatus(status)
-      setRunLocally(shouldDefaultRunLocally(status))
-    })
+    setCreateDialogIntent({ projectId: createIntent.projectId, type: createIntent.type })
     setModalOpen(true)
-  }
-
-  function closeModal() {
-    if (form.formState.isDirty) {
-      setShowDirtyDialog(true)
-      return
-    }
-    resetModal()
-  }
-
-  function resetModal() {
-    setModalOpen(false)
-    setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', reference_image: null, input_attachments: [], product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', montage_input: undefined })
-    setQuantity(1)
-    setWatermark(false)
-    setReferenceUploading(false)
-    setMontageUploading(false)
-    attachmentController.clear()
-    setGoalMode(false)
-    setGoalText('')
-    setProjectImageRatio('')
-    setHasContentImage(true)
-    setHasTailImage(false)
-    setArticleWithCover(true)
-    setArticleWithContentImages(true)
-  }
-
-  async function onSubmit(values: CreateTaskFormValues) {
-    let statusForSubmit = localExecutorStatus
-    const wantsLocalExecution = values.type !== 'montage' && runLocally
-    if (wantsLocalExecution && statusForSubmit?.state === 'ready_stopped') {
-      const ok = await startLocalExecutor()
-      if (ok) {
-        await setExecutorEnabled(true)
-        statusForSubmit = { ...statusForSubmit, running: true, state: 'running_idle' }
-        setLocalExecutorStatus(statusForSubmit)
-        toast.success('本地执行器已启动')
-      } else {
-        toast.error('本地执行器启动失败，本次将改为云端执行')
-      }
-    }
-    const runThisTaskLocally = canSubmitLocalTask(statusForSubmit, wantsLocalExecution)
-    if (wantsLocalExecution && !runThisTaskLocally) {
-      toast.message('本地执行器未运行，本次将改为云端执行')
-    }
-    await submit(async () => createMutation.mutateAsync({
-      type: values.type as import('@/types').TaskType,
-      prompt: values.prompt?.trim() || undefined,
-      project_id: values.project_id,
-      quantity: quantity > 1 ? quantity : undefined,
-      image_ratio: values.image_ratio || undefined,
-      image_model_key: values.image_model_key || undefined,
-      reference_image: referenceSelectionFromValue(values.reference_image) || undefined,
-      watermark: watermark || undefined,
-      goal_mode: values.type !== 'ecommerce' && goalMode ? true : undefined,
-      goal: values.type !== 'ecommerce' && goalMode ? (goalText.trim() || undefined) : undefined,
-      has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
-      has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
-      input_attachments: values.input_attachments,
-      // Article image toggles (公众号文章): both default true; non-article omits.
-      article_with_cover: values.type === 'article' ? articleWithCover : undefined,
-      article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
-      // E-commerce package (server forces quantity=1 and charges only the base task fee).
-      // The schema guarantees ≥1 module + ≥1 photo for ecommerce; strip empties.
-      product_photos: values.type === 'ecommerce' && values.product_photos?.length ? values.product_photos : undefined,
-      selected_modules: values.type === 'ecommerce' && values.selected_modules && Object.values(values.selected_modules).some((q) => q >= 1) ? values.selected_modules : undefined,
-      target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
-      selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
-      language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
-      // Route to the desktop local executor only when it is running and able to claim now.
-      execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
-    })).catch(() => {})
-  }
-
-  function handleCreateSubmit(event?: BaseSyntheticEvent) {
-    if (referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
-      event?.preventDefault()
-      return
-    }
-    return form.handleSubmit(onSubmit)(event)
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -525,72 +265,6 @@ export default function TasksPage() {
     failed: tasks.filter((t) => t.status === 'failed').length,
     approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
   }), [tasks])
-
-  const costPreview = taskCreationCostPreview({
-    catalog: billingCatalog,
-    type: watchedType,
-    quantity,
-    balance: billingWallet?.balance ?? 0,
-  })
-
-  const creationBlocker = !costPreview.priceAvailable
-    ? { message: '固定价格目录暂不可用，请稍后重试。', href: '', actionLabel: '' }
-    : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
-      ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing', actionLabel: '查看钱包' }
-    : watchedType !== 'ecommerce' && goalMode && !goalText.trim()
-      ? { message: '强目标模式需要填写目标条件。', href: '', actionLabel: '' }
-      : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-        ? { message: '电商出图需要先上传产品图。', href: '', actionLabel: '' }
-        : null
-
-  const promptComposer = (
-    <AgentPromptInput
-      value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
-      onChange={(value) => {
-        form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (watchedType === 'montage') {
-          form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        }
-        setPromptAttachments(value.attachments)
-      }}
-      onSubmit={() => handleCreateSubmit()}
-      attachmentController={attachmentController}
-      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
-      submitMode="external"
-      placeholder="描述创作目标、内容要求和素材使用方式..."
-      submitLabel="创建任务"
-      submitting={createMutation.isPending}
-      submitDisabled={Boolean(creationBlocker)}
-      contextBar={(
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <ProjectContextControl
-            mode="select"
-            projects={projects}
-            value={watchedProjectId || null}
-            allowNoProject={false}
-            loading={projectsLoading}
-            placeholder="选择项目"
-            createProjectHref={projectsReturnHref({ type: watchedType, intent: 'new' })}
-            onValueChange={(id) => {
-              setMontageUploading(false)
-              form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-              const project = id ? projects.find((item) => item.id === id) : undefined
-              if (!project) return
-              const defaults = getProjectCreationDefaults(project)
-              setProjectImageRatio(defaults.imageRatio)
-              form.setValue('type', defaults.type)
-              form.setValue('image_ratio', defaults.imageRatio as CreateTaskFormValues['image_ratio'], { shouldDirty: false })
-              form.setValue('selected_modules', defaults.selectedModules, { shouldDirty: false })
-              form.setValue('target_platform', defaults.targetPlatform, { shouldDirty: false })
-              form.setValue('image_model_key', defaults.imageModelKey, { shouldDirty: false })
-              form.setValue('montage_input', defaults.type === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, project.montage_defaults) : undefined, { shouldDirty: false })
-            }}
-          />
-          <Badge variant="secondary">{contentTypeLabel[watchedType] || watchedType}</Badge>
-        </div>
-      )}
-    />
-  )
 
   return (
     <div className="space-y-6">
@@ -884,500 +558,14 @@ export default function TasksPage() {
         </>
       )}
 
-      {/* Create Task Dialog */}
-      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
-          <DialogHeader className="border-b border-border px-4 py-3">
-            <DialogTitle>新建任务</DialogTitle>
-            <DialogDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础任务费预估</DialogDescription>
-            <p className="pt-2 text-[11px] text-muted-foreground">
-              类型 / 项目 / 目标/提示词 / 图片/高级 / 基础任务费预估
-            </p>
-          </DialogHeader>
-          <Form {...form}>
-            <form id="task-create-form" onSubmit={handleCreateSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase text-muted-foreground">01 类型</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">选择项目后自动匹配任务类型</p>
-                  </div>
-                  <Badge variant="secondary" className="shrink-0">
-                    {contentTypeLabel[watchedType] || watchedType}
-                  </Badge>
-                </div>
-              </div>
-
-              {selectedProject && watchedType !== 'viral_analysis' && (
-                <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
-                  <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
-                  <p className="text-xs text-muted-foreground">
-                    {isMontageTask ? (
-                      <>项目定位 {selectedProject.instructions || selectedProject.positioning || '—'}</>
-                    ) : (
-                      <>视觉风格 {selectedProject.visual_style || '—'}</>
-                    )}
-                    {watchedType === 'article' && (
-                      <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
-                    )}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground/80">创建后项目再修改，不会影响这个任务。</p>
-                </div>
-              )}
-
-              <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">03 目标/提示词</p>
-              {!isMontageTask ? promptComposer : null}
-              </div>
-
-              <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">04 图片/高级</p>
-
-              {/* Quantity selector (ecommerce creates one guided package task at qty=1) */}
-              {watchedType !== 'ecommerce' && !isMontageTask && (
-              <div className="space-y-2">
-                <FormLabel>数量</FormLabel>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <Button
-                      key={n}
-                      type="button"
-                      variant={quantity === n ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setQuantity(n)}
-                    >
-                      {n}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              )}
-
-              {/* Image ratio selector (ecommerce uses per-module ratios from platform specs) */}
-              {watchedType !== 'ecommerce' && !isMontageTask && (
-              <FormField control={form.control} name="image_ratio" render={({ field }) => {
-                const defaultRatio = projectImageRatio || platformDefaultRatio[watchedType] || '3:4'
-                const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
-                const ratioOptions = [
-                  { value: '3:4', label: '3:4 竖版' },
-                  { value: '1:1', label: '1:1 方形' },
-                  { value: '4:3', label: '4:3 横版' },
-                  { value: '16:9', label: '16:9 宽屏' },
-                ].map((opt) => opt.value === defaultRatio
-                  ? { ...opt, label: `${opt.label}（默认）` }
-                  : opt,
-                )
-                return (
-                <FormItem>
-                  <FormLabel>封面比例</FormLabel>
-                  <Select value={field.value || undefined} onValueChange={field.onChange}>
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={defaultLabel} />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {ratioOptions.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-                )
-              }} />
-              )}
-
-              {/* Image model selector */}
-              {!isMontageTask && <FormField control={form.control} name="image_model_key" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>图像模型</FormLabel>
-                  <FormControl>
-                    {imageModelsLoading ? (
-                      <Skeleton className="h-10 w-full rounded-xl" />
-                    ) : (
-                      <ImageModelSelector
-                        options={imageModelOptions}
-                        value={field.value || ''}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />}
-
-              {!isMontageTask && (
-                <FormField control={form.control} name="reference_image" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>任务参考图</FormLabel>
-                    <FormControl>
-                      <ReferenceAssetUpload
-                        value={field.value ?? null}
-                        onChange={field.onChange}
-                        purpose="task_reference"
-                        onUploadingChange={setReferenceUploading}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
-
-              {isMontageTask && (
-                <MontageCreationPanel
-                  form={form}
-                  fieldRoot="montage_input"
-                  onUploadingChange={setMontageUploading}
-                  briefField={promptComposer}
-                />
-              )}
-
-              {/* Watermark toggle */}
-              {!isMontageTask && <button
-                type="button"
-                onClick={() => setWatermark(!watermark)}
-                className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                  watermark
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-foreground/20'
-                }`}
-              >
-                <Stamp className={`mt-0.5 h-5 w-5 shrink-0 ${watermark ? 'text-primary' : 'text-muted-foreground'}`} />
-                <div className="min-w-0">
-                  <p className={`text-sm font-medium ${watermark ? 'text-foreground' : 'text-muted-foreground'}`}>
-                    水印
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
-                </div>
-              </button>}
-
-              {/* Image composition (seednote only) */}
-              {watchedType === 'seednote' && (
-                <div className="rounded-lg border border-border p-3">
-                  <div className="flex items-start gap-3">
-                    <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground">图片构成</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        封面始终生成；勾选要额外生成的图。
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 divide-y divide-border">
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-foreground">封面图</span>
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">必选</span>
-                      </div>
-                      <Switch checked disabled />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">内容图</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">承载 2-4 个信息点（image_01.png）</p>
-                      </div>
-                      <Switch checked={hasContentImage} onCheckedChange={setHasContentImage} />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">尾图</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">行动召唤 / 关注引导（tail.png）</p>
-                      </div>
-                      <Switch checked={hasTailImage} onCheckedChange={setHasTailImage} />
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    当前将生成 {1 + (hasContentImage ? 1 : 0) + (hasTailImage ? 1 : 0)} 张图片
-                  </p>
-                </div>
-              )}
-
-              {/* Image composition (公众号 article): cover + content images each
-                  independently toggleable — unlike seednote, the article cover is
-                  NOT mandatory (both default on → legacy behavior). */}
-              {watchedType === 'article' && (
-                <div className="rounded-lg border border-border p-3">
-                  <div className="flex items-start gap-3">
-                    <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground">图片构成</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        独立选择是否生成封面与正文配图。两者都关 = 纯文字文章。
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 divide-y divide-border">
-                    <div className="flex items-center justify-between py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">封面图</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">公众号头图（900×383，作为发布草稿封面）</p>
-                      </div>
-                      <Switch checked={articleWithCover} onCheckedChange={setArticleWithCover} />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">正文配图</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
-                      </div>
-                      <Switch checked={articleWithContentImages} onCheckedChange={setArticleWithContentImages} />
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {articleWithCover && articleWithContentImages
-                      ? '将生成封面 + 正文配图（默认）'
-                      : articleWithCover
-                        ? '仅生成封面图，不生成正文配图'
-                        : articleWithContentImages
-                          ? '仅生成正文配图；发布草稿不设封面'
-                          : '纯文字文章，不生成任何图片；发布草稿不设封面'}
-                  </p>
-                </div>
-              )}
-
-              {/* E-commerce package: product photos + selectable modules + platform/compliance.
-                  Creation billing is the ecommerce base task fee; module qty only guides later MCP usage. */}
-              {watchedType === 'ecommerce' && (
-                <div className="space-y-4 rounded-lg border border-border p-3">
-                  <div className="flex items-start gap-3">
-                    <Package className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground">电商素材包</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        上传产品图，选择交付模块。创建只扣基础任务费，后续图片生成和理解按实际用量结算。
-                      </p>
-                    </div>
-                  </div>
-
-                  <FormField control={form.control} name="product_photos" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>产品图（必填）</FormLabel>
-                      <FormControl>
-                        <MultiImageUpload
-                          value={field.value ?? []}
-                          onChange={(urls) => field.onChange(urls)}
-                          purpose="reference"
-                          max={16}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <div className="space-y-2">
-                    <FormLabel>交付模块（至少选一项）</FormLabel>
-                    <div className="divide-y divide-border">
-                      {ecommerceModuleCatalog.map((mod) => {
-                        const qty = watchedSelectedModules?.[mod.key] ?? 0
-                        const enabled = qty >= 1
-                        return (
-                          <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-medium text-foreground">{mod.label}</p>
-                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{mod.ratio}</span>
-                              </div>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {enabled && (
-                                <div className="flex items-center gap-1">
-                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setModuleQty(mod.key, Math.max(mod.minQty, qty - mod.qtyStep))} aria-label="减少">
-                                    <Minus className="h-3 w-3" />
-                                  </Button>
-                                  <span className="w-8 text-center text-sm tabular-nums">{qty}{mod.qtyLabel}</span>
-                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setModuleQty(mod.key, Math.min(mod.maxQty, qty + mod.qtyStep))} aria-label="增加">
-                                    <Plus className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              )}
-                              <Switch checked={enabled} onCheckedChange={(on) => setModuleQty(mod.key, on ? mod.defaultQty : 0)} aria-label={`启用 ${mod.label}`} />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {(!watchedSelectedModules || Object.values(watchedSelectedModules).every((q) => !q || q < 1)) && (
-                      <p className="text-xs text-destructive">请至少选择一个交付模块</p>
-                    )}
-                  </div>
-
-                  <FormField control={form.control} name="target_platform" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>目标平台</FormLabel>
-                      <Select value={field.value || undefined} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger className="w-full"><SelectValue placeholder="选择投放平台（影响尺寸与合规规范）" /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {ecommerceTargetPlatformOptions.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name="selling_points" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>核心卖点（可选）</FormLabel>
-                      <FormControl>
-                        <Textarea placeholder="列出产品核心卖点（材质 / 功能 / 使用场景 / 价格优势等）。留空则由 AI 从产品图分析提炼" className="min-h-[72px] resize-y" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name="language" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>语言</FormLabel>
-                      <Select value={field.value || undefined} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger className="w-full"><SelectValue placeholder="中文" /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {ecommerceLanguageOptions.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                </div>
-              )}
-
-
-              {/* Goal mode toggle (ecommerce keeps a guided package flow without goal retries) */}
-              {watchedType !== 'ecommerce' && !isMontageTask && (
-              <div className={`rounded-lg border p-3 transition-colors ${
-                goalMode ? 'border-primary bg-primary/5' : 'border-border'
-              }`}>
-                <button
-                  type="button"
-                  onClick={() => setGoalMode(!goalMode)}
-                  className="flex w-full items-start gap-3 text-left"
-                >
-                  <Target className={`mt-0.5 h-5 w-5 shrink-0 ${goalMode ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-medium ${goalMode ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      强目标模式
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      开启后扣费 ×3，最多尝试 3 次。任务执行后由 AI 评估产出是否满足「目标条件」，未达成自动重试。
-                    </p>
-                  </div>
-                  <Switch checked={goalMode} onCheckedChange={setGoalMode} />
-                </button>
-                {goalMode && (
-                  <div className="mt-3 space-y-2">
-                    <Textarea
-                      value={goalText}
-                      onChange={(e) => setGoalText(e.target.value)}
-                      placeholder="例：文章字数 ≥ 1500 字；必须包含 3 个真实案例；开头必须设置钩子；种草笔记必须包含具体使用感受…"
-                      className="min-h-[80px] resize-y text-sm"
-                      maxLength={4000}
-                    />
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        '文章字数 ≥ 1500 字',
-                        '必须包含 3 个真实案例',
-                        '开头必须设置钩子，吸引读者继续阅读',
-                        '必须包含数据或引用来源',
-                      ].map((example) => (
-                        <button
-                          key={example}
-                          type="button"
-                          onClick={() => setGoalText(example)}
-                          className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                        >
-                          {example}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              )}
-              </div>
-
-              {/* Cost display */}
-              <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 固定价格</p>
-                <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
-                  {costPreview.priceAvailable ? (
-                    <p className="text-muted-foreground">
-                      固定任务价：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分
-                    </p>
-                  ) : (
-                    <p className="font-medium text-red-500">固定任务价暂不可用</p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {runLocally && !isMontageTask ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>
-                  {costPreview.priceAvailable && (
-                    <p className="text-muted-foreground">
-                      余额：{(billingWallet?.balance ?? 0).toLocaleString()} →{' '}
-                      <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
-                        {costPreview.remaining.toLocaleString()}
-                      </span>
-                    </p>
-                  )}
-                  {creationBlocker && (
-                    <p className="text-sm font-medium text-red-500">
-                      {creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </form>
-          </Form>
-          <DialogFooter className="mx-0 mb-0 border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
-            {localExecutorAvailable && !isMontageTask && (
-              <div className="mr-auto flex min-w-0 items-center gap-2 text-xs">
-                <label className="flex cursor-pointer items-center gap-2 text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
-                  <Switch checked={runLocally} onCheckedChange={setRunLocally} />
-                  <span className="whitespace-nowrap">在本机运行</span>
-                </label>
-                <span className="max-w-[260px] truncate text-muted-foreground/75" title={localExecutorHint}>
-                  {localExecutorHint}
-                </span>
-              </div>
-            )}
-            <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button
-              type="submit"
-              form="task-create-form"
-              loading={createMutation.isPending}
-              disabled={Boolean(creationBlocker)
-                || referenceUploading
-                || attachmentController.uploading
-                || attachmentController.hasFailures
-                || (isMontageTask && montageUploading)}
-            >
-              {runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
-                ? '启动并创建'
-                : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dirty form confirmation */}
-      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
-            <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
-            <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TaskFormDialog
+        open={modalOpen}
+        mode="create"
+        initialProjectId={createDialogIntent.projectId}
+        initialType={createDialogIntent.type}
+        onOpenChange={setModalOpen}
+        onCreated={(task) => navigate(`/tasks/${task.id}`)}
+      />
 
       {/* 批量操作二次确认：文案/按钮随 bulkAction 变化。取消与删除不可逆 → destructive。 */}
       <AlertDialog
