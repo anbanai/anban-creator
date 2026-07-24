@@ -278,6 +278,21 @@ func TestPushManagedSubmodulesPushesDetachedHeadToSuperprojectBranch(t *testing.
 	}
 }
 
+func TestPushManagedSubmodulesIgnoresSuperprojectGitEnvironmentForNestedGit(t *testing.T) {
+	fixture := newGitSyncFixture(t, true, true)
+
+	script := repositoryPath(t, "scripts", "push-managed-submodules.sh")
+	runCommand(t, fixture.superproject, []string{
+		"GIT_DIR=" + filepath.Join(fixture.superproject, ".git"),
+		"GIT_WORK_TREE=" + fixture.superproject,
+	}, script, "main")
+
+	remoteHead := strings.TrimSpace(runCommand(t, fixture.remote, nil, "git", "rev-parse", "refs/heads/main"))
+	if remoteHead != fixture.detachedHead {
+		t.Fatalf("remote main = %s, want detached submodule HEAD %s", remoteHead, fixture.detachedHead)
+	}
+}
+
 func TestPushManagedSubmodulesSkipsUnmarkedSubmodule(t *testing.T) {
 	fixture := newGitSyncFixture(t, false, true)
 
