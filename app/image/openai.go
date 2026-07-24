@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,12 +25,51 @@ import (
 
 // OpenAIProvider OpenAI 图片生成服务提供者
 type OpenAIProvider struct {
-	client         openai.Client
-	model          string
-	size           string // Image size for API calls
-	sizeRatio      string // ratio string for GenerateResult.Size
-	responseFormat string // "b64_json" | "url" | "" (auto → b64_json)
-	log            *zerolog.Logger
+	client                   openai.Client
+	model                    string
+	size                     string // Image size for API calls
+	sizeRatio                string // ratio string for GenerateResult.Size
+	responseFormat           string // "b64_json" | "url" | "" (auto → b64_json)
+	log                      *zerolog.Logger
+	imageDownloadRetryPolicy *openAIImageDownloadRetryPolicy
+}
+
+type openAIImageDownloadRetryPolicy struct {
+	maxAttempts  int
+	totalTimeout time.Duration
+	backoffs     []time.Duration
+}
+
+var defaultOpenAIImageDownloadRetryPolicy = openAIImageDownloadRetryPolicy{
+	maxAttempts:  3,
+	totalTimeout: 120 * time.Second,
+	backoffs:     []time.Duration{time.Second, 2 * time.Second},
+}
+
+func effectiveImageDownloadRetryPolicy(configured *openAIImageDownloadRetryPolicy) openAIImageDownloadRetryPolicy {
+	if configured == nil {
+		effective := defaultOpenAIImageDownloadRetryPolicy
+		effective.backoffs = append([]time.Duration(nil), effective.backoffs...)
+		return effective
+	}
+
+	effective := *configured
+	effective.backoffs = append([]time.Duration(nil), configured.backoffs...)
+	if effective.maxAttempts < 1 {
+		effective.maxAttempts = 1
+	}
+	if effective.totalTimeout <= 0 {
+		effective.totalTimeout = defaultOpenAIImageDownloadRetryPolicy.totalTimeout
+	}
+	return effective
+}
+
+func (p openAIImageDownloadRetryPolicy) backoffAfterAttempt(attempt int) time.Duration {
+	index := attempt - 1
+	if index < 0 || index >= len(p.backoffs) {
+		return 0
+	}
+	return p.backoffs[index]
 }
 
 // NewOpenAIProvider 创建 OpenAI Provider
@@ -193,13 +234,8 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 			Msg("openai: image generation failed")
 		return nil, err
 	}
-	if requiresImageUsageForBilling(p.model) && (result.Usage == nil || result.Usage.TotalTokens <= 0 || result.Usage.ImageOutputTokens <= 0) {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "missing_usage",
-			Message:  fmt.Sprintf("%s usage is required for billing", p.model),
-			HintMsg:  "请确认 OpenAI-compatible 网关会透传 image usage；否则不能启用 GPT Image 2 生产通道。",
-		}
+	if err := p.validateGeneratedResult(result); err != nil {
+		return nil, err
 	}
 
 	imgCount := 1
@@ -291,7 +327,7 @@ func (p *OpenAIProvider) generateStandard(ctx context.Context, prompt string, op
 		}
 	}
 
-	return p.imageResponseToResult(resp)
+	return p.imageResponseToResult(ctx, resp)
 }
 
 // generateStreaming generates images with progressive partial delivery
@@ -410,7 +446,7 @@ func (p *OpenAIProvider) generateEdit(ctx context.Context, prompt string, opts *
 		}
 	}
 
-	return p.imageResponseToResult(resp)
+	return p.imageResponseToResult(ctx, resp)
 }
 
 // generateEditStreaming generates edited images with streaming
@@ -588,7 +624,7 @@ func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, s
 }
 
 // imageResponseToResult converts an ImagesResponse to a GenerateResult
-func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*GenerateResult, error) {
+func (p *OpenAIProvider) imageResponseToResult(ctx context.Context, resp *openai.ImagesResponse) (*GenerateResult, error) {
 	size := p.sizeRatio
 	if resp.Size != "" {
 		size = string(resp.Size)
@@ -601,7 +637,7 @@ func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*Ge
 	}
 
 	if len(resp.Data) == 1 {
-		single, err := p.imageDataToResult(resp.Data[0])
+		single, err := p.imageDataToResult(ctx, resp.Data[0])
 		if err != nil {
 			return nil, err
 		}
@@ -613,8 +649,9 @@ func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*Ge
 	// Multiple images (batch)
 	images := make([]GeneratedImage, 0, len(resp.Data))
 	for i, img := range resp.Data {
-		filePath, err := p.saveImageData(img)
+		filePath, err := p.saveImageData(ctx, img)
 		if err != nil {
+			cleanupGeneratedResultFiles(&GenerateResult{Images: images})
 			return nil, err
 		}
 		images = append(images, GeneratedImage{
@@ -631,19 +668,19 @@ func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*Ge
 }
 
 // saveImageData saves a single Image from API response to a temp file
-func (p *OpenAIProvider) saveImageData(img openai.Image) (string, error) {
+func (p *OpenAIProvider) saveImageData(ctx context.Context, img openai.Image) (string, error) {
 	if img.B64JSON != "" {
 		return p.saveBase64Image(img.B64JSON)
 	}
 	if img.URL != "" {
-		filePath, err := wechat.DownloadFile(img.URL)
+		filePath, attempts, err := p.downloadGeneratedImage(ctx, img.URL)
 		if err != nil {
-			p.logImageDownloadFailure(img.URL, err)
+			p.logImageDownloadFailure(img.URL, err, attempts)
 			return "", &GenerateError{
 				Provider: p.Name(),
 				Code:     "url_download_error",
-				Message:  fmt.Sprintf("下载图片失败: %s", img.URL),
-				Original: err,
+				Message:  "下载生成图片失败",
+				Original: sanitizeImageDownloadError(err),
 			}
 		}
 		return filePath, nil
@@ -655,7 +692,7 @@ func (p *OpenAIProvider) saveImageData(img openai.Image) (string, error) {
 	}
 }
 
-func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, error) {
+func (p *OpenAIProvider) imageDataToResult(ctx context.Context, img openai.Image) (*GenerateResult, error) {
 	result := &GenerateResult{
 		Model:         p.model,
 		Size:          p.sizeRatio,
@@ -676,15 +713,14 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 	if img.URL != "" {
 		result.ResponseType = "url"
 		result.ResponsePreview = img.URL
-		filePath, err := wechat.DownloadFile(img.URL)
+		filePath, attempts, err := p.downloadGeneratedImage(ctx, img.URL)
 		if err != nil {
-			p.logImageDownloadFailure(img.URL, err)
+			p.logImageDownloadFailure(img.URL, err, attempts)
 			return nil, &GenerateError{
 				Provider: p.Name(),
 				Code:     "url_download_error",
-				Message:  fmt.Sprintf("OpenAI 图片接口返回了 URL，但下载失败: %s", img.URL),
-				HintMsg:  fmt.Sprintf("RevisedPrompt=%q", img.RevisedPrompt),
-				Original: err,
+				Message:  "OpenAI 图片接口返回了 URL，但下载失败",
+				Original: sanitizeImageDownloadError(err),
 			}
 		}
 		result.URL = filePath
@@ -700,11 +736,131 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 	}
 }
 
-func (p *OpenAIProvider) logImageDownloadFailure(rawURL string, err error) {
+func (p *OpenAIProvider) downloadGeneratedImage(ctx context.Context, rawURL string) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var configuredPolicy *openAIImageDownloadRetryPolicy
+	if p != nil {
+		configuredPolicy = p.imageDownloadRetryPolicy
+	}
+	policy := effectiveImageDownloadRetryPolicy(configuredPolicy)
+	downloadCtx, cancel := context.WithTimeout(ctx, policy.totalTimeout)
+	defer cancel()
+
+	for attempt := 1; attempt <= policy.maxAttempts; attempt++ {
+		if err := downloadCtx.Err(); err != nil {
+			return "", attempt - 1, err
+		}
+		filePath, err := wechat.DownloadFileContext(downloadCtx, rawURL)
+		if err == nil {
+			return filePath, attempt, nil
+		}
+		if downloadCtx.Err() != nil {
+			return "", attempt, downloadCtx.Err()
+		}
+		if !isRetryableGeneratedImageDownload(err) || attempt == policy.maxAttempts {
+			return "", attempt, err
+		}
+
+		delay := policy.backoffAfterAttempt(attempt)
+		p.logGeneratedImageDownloadRetry(rawURL, err, attempt, policy.maxAttempts, delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-downloadCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return "", attempt, downloadCtx.Err()
+		}
+	}
+
+	return "", 0, errors.New("openai: generated image download retry policy has no attempts")
+}
+
+func isRetryableGeneratedImageDownload(err error) bool {
+	var dlErr *wechat.DownloadError
+	if !errors.As(err, &dlErr) || dlErr == nil {
+		return false
+	}
+	if dlErr.StatusCode == 0 {
+		return dlErr.Original != nil
+	}
+	return dlErr.StatusCode == http.StatusRequestTimeout ||
+		dlErr.StatusCode == http.StatusTooManyRequests ||
+		(dlErr.StatusCode >= http.StatusInternalServerError && dlErr.StatusCode <= 599)
+}
+
+func (p *OpenAIProvider) logGeneratedImageDownloadRetry(rawURL string, err error, attempt, maxAttempts int, delay time.Duration) {
+	if p == nil || p.log == nil {
+		return
+	}
+	event := p.log.Warn().
+		Err(sanitizeImageDownloadError(err)).
+		Str("url_host", downloadURLHost(rawURL)).
+		Int("attempt", attempt).
+		Int("max_attempts", maxAttempts).
+		Dur("retry_delay", delay)
+	var dlErr *wechat.DownloadError
+	if errors.As(err, &dlErr) {
+		event = event.
+			Int("status_code", dlErr.StatusCode).
+			Dur("download_elapsed", dlErr.Elapsed)
+	}
+	event.Msg("openai: retrying generated image URL download")
+}
+
+func sanitizeImageDownloadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	var dlErr *wechat.DownloadError
+	if errors.As(err, &dlErr) && dlErr != nil {
+		if dlErr.Original != nil {
+			return errors.New("download file: " + sanitizedImageDownloadErrorMessage(dlErr.Original, dlErr.URL))
+		}
+		if dlErr.URL == "" {
+			return errors.New(dlErr.Error())
+		}
+		return errors.New(strings.ReplaceAll(dlErr.Error(), dlErr.URL, "<redacted-url>"))
+	}
+	return errors.New(sanitizedImageDownloadErrorMessage(err, ""))
+}
+
+func sanitizedImageDownloadErrorMessage(err error, rawURL string) string {
+	if err == nil {
+		return "unknown error"
+	}
+	var urlErr *neturl.Error
+	if errors.As(err, &urlErr) && urlErr != nil {
+		return fmt.Sprintf("%s %s: %s", urlErr.Op, downloadURLHost(urlErr.URL), sanitizedImageDownloadErrorMessage(urlErr.Err, ""))
+	}
+	message := err.Error()
+	if rawURL != "" {
+		message = strings.ReplaceAll(message, rawURL, "<redacted-url>")
+	}
+	return message
+}
+
+func (p *OpenAIProvider) logImageDownloadFailure(rawURL string, err error, attempts int) {
 	if p == nil || p.log == nil || err == nil {
 		return
 	}
-	event := p.log.Error().Err(err).Str("url_host", downloadURLHost(rawURL))
+	event := p.log.Error().
+		Err(sanitizeImageDownloadError(err)).
+		Str("url_host", downloadURLHost(rawURL)).
+		Int("attempts", attempts)
 	var dlErr *wechat.DownloadError
 	if errors.As(err, &dlErr) {
 		event = event.
@@ -713,11 +869,144 @@ func (p *OpenAIProvider) logImageDownloadFailure(rawURL string, err error) {
 			Str("content_length", dlErr.ContentLength).
 			Str("server", dlErr.Server).
 			Str("cf_ray", dlErr.CFRay).
-			Str("location", dlErr.Location).
-			Str("body_preview", dlErr.BodyPreview).
+			Str("location", sanitizeImageDownloadLocation(dlErr.Location)).
+			Str("body_preview", sanitizeImageDownloadBodyPreview(dlErr.BodyPreview)).
 			Dur("download_elapsed", dlErr.Elapsed)
 	}
 	event.Msg("openai: failed to download generated image URL")
+}
+
+func sanitizeImageDownloadLocation(location string) string {
+	if location == "" {
+		return ""
+	}
+	if host := downloadURLHost(location); host != "" {
+		return host
+	}
+	return "<redacted>"
+}
+
+var (
+	imageDownloadURLPattern            = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
+	imageDownloadAuthorizationPattern  = regexp.MustCompile(`(?i)["']?authorization["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^;,\r\n}]*)`)
+	imageDownloadCookiePattern         = regexp.MustCompile(`(?i)["']?(?:set-cookie|cookie)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,\r\n}]*)`)
+	imageDownloadSensitiveValuePattern = regexp.MustCompile(
+		`(?i)["']?(?:x-amz-(?:credential|signature)|client[_-]?secret|password|passwd|credentials?|secret|access[_-]?token|refresh[_-]?token|token|signature|sig|api[_-]?key|apikey|key)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,;\s}\]]+)`,
+	)
+)
+
+func sanitizeImageDownloadBodyPreview(bodyPreview string) string {
+	if bodyPreview == "" {
+		return ""
+	}
+
+	var jsonBody any
+	if err := json.Unmarshal([]byte(bodyPreview), &jsonBody); err == nil {
+		redactImageDownloadJSONCredentials(jsonBody)
+		if encoded, marshalErr := json.Marshal(jsonBody); marshalErr == nil {
+			sanitized := strings.ReplaceAll(string(encoded), `\u003c`, "<")
+			sanitized = strings.ReplaceAll(sanitized, `\u003e`, ">")
+			return boundedImageDownloadBodyPreview(sanitizeImageDownloadText(sanitized))
+		}
+	}
+
+	return boundedImageDownloadBodyPreview(sanitizeImageDownloadText(bodyPreview))
+}
+
+func sanitizeImageDownloadText(value string) string {
+	sanitized := strings.ReplaceAll(value, `\/`, "/")
+	sanitized = imageDownloadURLPattern.ReplaceAllStringFunc(sanitized, func(rawURL string) string {
+		if host := downloadURLHost(rawURL); host != "" {
+			return "<url:" + host + ">"
+		}
+		return "<redacted-url>"
+	})
+	sanitized = imageDownloadAuthorizationPattern.ReplaceAllStringFunc(sanitized, func(match string) string {
+		return redactPlainImageDownloadCredential(match, "<redacted-header>")
+	})
+	sanitized = imageDownloadCookiePattern.ReplaceAllStringFunc(sanitized, func(match string) string {
+		return redactPlainImageDownloadCredential(match, "<redacted-header>")
+	})
+	sanitized = imageDownloadSensitiveValuePattern.ReplaceAllStringFunc(sanitized, func(match string) string {
+		return redactPlainImageDownloadCredential(match, "<redacted-value>")
+	})
+	return sanitized
+}
+
+func redactPlainImageDownloadCredential(match, replacement string) string {
+	if strings.Contains(match, "<redacted>") {
+		return match
+	}
+	return replacement
+}
+
+func redactImageDownloadJSONCredentials(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if isSensitiveImageDownloadCredentialKey(key) {
+				typed[key] = "<redacted>"
+				continue
+			}
+			redactImageDownloadJSONCredentials(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactImageDownloadJSONCredentials(child)
+		}
+	}
+}
+
+func isSensitiveImageDownloadCredentialKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.NewReplacer("_", "", "-", "").Replace(normalized)
+	switch normalized {
+	case "token", "signature", "sig", "apikey", "key", "authorization", "cookie", "setcookie",
+		"clientsecret", "password", "passwd", "credential", "credentials", "secret",
+		"accesstoken", "refreshtoken", "xamzcredential", "xamzsignature":
+		return true
+	default:
+		return false
+	}
+}
+
+func boundedImageDownloadBodyPreview(sanitized string) string {
+	if len(sanitized) > 80 {
+		sanitized = strings.ToValidUTF8(sanitized[:80], "")
+	}
+	return sanitized
+}
+
+func (p *OpenAIProvider) validateGeneratedResult(result *GenerateResult) error {
+	if !requiresImageUsageForBilling(p.model) || (result != nil && result.Usage != nil && result.Usage.TotalTokens > 0 && result.Usage.ImageOutputTokens > 0) {
+		return nil
+	}
+
+	cleanupGeneratedResultFiles(result)
+	return &GenerateError{
+		Provider: p.Name(),
+		Code:     "missing_usage",
+		Message:  fmt.Sprintf("%s usage is required for billing", p.model),
+		HintMsg:  "请确认 OpenAI-compatible 网关会透传 image usage；否则不能启用 GPT Image 2 生产通道。",
+	}
+}
+
+func cleanupGeneratedResultFiles(result *GenerateResult) {
+	if result == nil {
+		return
+	}
+	paths := make(map[string]struct{}, len(result.Images)+1)
+	if result.URL != "" {
+		paths[result.URL] = struct{}{}
+	}
+	for _, image := range result.Images {
+		if image.URL != "" {
+			paths[image.URL] = struct{}{}
+		}
+	}
+	for path := range paths {
+		_ = os.Remove(path)
+	}
 }
 
 func downloadURLHost(rawURL string) string {
