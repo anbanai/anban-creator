@@ -280,7 +280,7 @@ func (s *BillingReferralService) issueOrReplay(ctx context.Context, repo reposit
 
 	accounts := make(map[string]*model.BillingWalletAccount, 2)
 	for _, userID := range orderedDistinctUserIDs(req.UserID, inviterID) {
-		account, err := repo.LockAccount(ctx, userID)
+		account, err := lockRequiredBillingAccount(ctx, repo, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -340,14 +340,8 @@ func (s *BillingReferralService) appendReward(ctx context.Context, repo reposito
 }
 
 func lockReferralAccounts(ctx context.Context, repo repository.BillingRepository, userIDs ...string) error {
-	ordered := orderedDistinctUserIDs(userIDs...)
-	for _, userID := range ordered {
-		if err := repo.EnsureAccount(ctx, userID); err != nil {
-			return err
-		}
-	}
-	for _, userID := range ordered {
-		if _, err := repo.LockAccount(ctx, userID); err != nil {
+	for _, userID := range orderedDistinctUserIDs(userIDs...) {
+		if _, err := lockRequiredBillingAccount(ctx, repo, userID); err != nil {
 			return err
 		}
 	}

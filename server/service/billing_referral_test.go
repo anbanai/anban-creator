@@ -35,7 +35,7 @@ func TestBillingReferral(t *testing.T) {
 		if got, err := f.referrals.TopUp(context.Background(), below); err != nil || got.Referral != nil {
 			t.Fatalf("below-threshold TopUp = %+v, %v; want no referral", got, err)
 		}
-		f.assertAccountAbsent(t, billingReferralInviterID)
+		f.assertAccount(t, billingReferralInviterID, 0, 0, 0)
 		f.assertAccount(t, billingReferralInviteeID, 9_999, 0, 0)
 
 		qualifying := f.topUpRequest(billingReferralInviteeID, 10_000, "qualifying")
@@ -191,8 +191,8 @@ func TestBillingReferral(t *testing.T) {
 		if _, err := f.repo.Billing().FindEntryBySource(context.Background(), "api", "rollback"); !errors.Is(err, gorm.ErrRecordNotFound) {
 			t.Fatalf("rolled-back topup lookup = %v", err)
 		}
-		f.assertAccountAbsent(t, billingReferralInviterID)
-		f.assertAccountAbsent(t, billingReferralInviteeID)
+		f.assertAccount(t, billingReferralInviterID, 0, 0, 0)
+		f.assertAccount(t, billingReferralInviteeID, 0, 0, 0)
 	})
 
 	t.Run("identity drift is a typed conflict", func(t *testing.T) {
@@ -385,11 +385,6 @@ func (r *recordingReferralBillingRepository) FindReferralIssue(ctx context.Conte
 	return r.BillingRepository.FindReferralIssue(ctx, inviteeUserID, programID)
 }
 
-func (r *recordingReferralBillingRepository) EnsureAccount(ctx context.Context, userID string) error {
-	r.recorder.events = append(r.recorder.events, "wallet-ensure:"+userID)
-	return r.BillingRepository.EnsureAccount(ctx, userID)
-}
-
 func (r *recordingReferralBillingRepository) LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error) {
 	r.recorder.events = append(r.recorder.events, "wallet-lock:"+userID)
 	return r.BillingRepository.LockAccount(ctx, userID)
@@ -439,7 +434,7 @@ func assertAllReferralUserLocksPrecedeWallet(t *testing.T, events []string) {
 func assertNoReferralWalletCallForUser(t *testing.T, events []string, userID string) {
 	t.Helper()
 	for _, event := range events {
-		if event == "wallet-ensure:"+userID || event == "wallet-lock:"+userID {
+		if event == "wallet-lock:"+userID {
 			t.Fatalf("unexpected wallet call for %s: %v", userID, events)
 		}
 	}
@@ -496,14 +491,20 @@ func (f *billingReferralFixture) createUser(t *testing.T, userID, invitedBy stri
 		if err := f.repo.Users().Update(context.Background(), user); err != nil {
 			t.Fatal(err)
 		}
-		return
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal(err)
+	} else {
+		if err := f.repo.Users().Create(context.Background(), &model.User{
+			ID: userID, Email: userID + "@example.test", Password: "fixture", InviteCode: "code-" + userID, InvitedBy: invitedBy,
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := f.repo.Users().Create(context.Background(), &model.User{
-		ID: userID, Email: userID + "@example.test", Password: "fixture", InviteCode: "code-" + userID, InvitedBy: invitedBy,
-	}); err != nil {
+	if _, err := f.repo.Billing().FindAccount(context.Background(), userID); errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: userID}); err != nil {
+			t.Fatal(err)
+		}
+	} else if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -524,13 +525,6 @@ func (f *billingReferralFixture) assertAccount(t *testing.T, userID string, paid
 	}
 	if account.PaidCredits != paid || account.PromotionalCredits != promotional || account.DebtCredits != debt {
 		t.Fatalf("account %s = %+v, want paid=%d promotional=%d debt=%d", userID, account, paid, promotional, debt)
-	}
-}
-
-func (f *billingReferralFixture) assertAccountAbsent(t *testing.T, userID string) {
-	t.Helper()
-	if _, err := f.repo.Billing().FindAccount(context.Background(), userID); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("account %s lookup = %v, want not found", userID, err)
 	}
 }
 

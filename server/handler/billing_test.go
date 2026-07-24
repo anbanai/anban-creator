@@ -156,6 +156,11 @@ func TestBillingHandler(t *testing.T) {
 
 	t.Run("admin authentication topup replay transactions and referral summary", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
+		for _, userID := range []string{billingHandlerInviterID, billingHandlerInviteeID} {
+			if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: userID}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		body := f.topUpBody("payment-1", 10_000)
 		resp := f.adminRequest(t, "", body)
 		assertBillingHTTP(t, resp, http.StatusUnauthorized, BillingCodeUnauthorized)
