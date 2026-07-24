@@ -92,12 +92,10 @@ func TestBillingHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("wallet absent is zero and read only", func(t *testing.T) {
+	t.Run("wallet absent is a ledger invariant error and read only", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		resp := f.publicRequest(t, http.MethodGet, "/api/billing/wallet", nil)
-		assertBillingHTTP(t, resp, http.StatusOK, 0)
-		data := billingResponseData(t, resp)
-		assertJSONNumbers(t, data, map[string]float64{"paid": 0, "promotional": 0, "debt": 0, "balance": 0})
+		assertBillingHTTP(t, resp, http.StatusInternalServerError, BillingCodeLedgerInvalid)
 		if _, err := f.repo.Billing().FindAccount(context.Background(), f.inviteeID); !errorsIsRecordNotFound(err) {
 			t.Fatalf("wallet read created account or returned unexpected error: %v", err)
 		}
@@ -156,6 +154,11 @@ func TestBillingHandler(t *testing.T) {
 
 	t.Run("admin authentication topup replay transactions and referral summary", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
+		for _, userID := range []string{billingHandlerInviterID, billingHandlerInviteeID} {
+			if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: userID}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		body := f.topUpBody("payment-1", 10_000)
 		resp := f.adminRequest(t, "", body)
 		assertBillingHTTP(t, resp, http.StatusUnauthorized, BillingCodeUnauthorized)
@@ -309,6 +312,9 @@ func TestBillingHandler(t *testing.T) {
 
 	t.Run("public DTOs contain no internal cost vocabulary", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
+		if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: f.inviteeID}); err != nil {
+			t.Fatalf("create empty wallet: %v", err)
+		}
 		for _, endpoint := range []struct {
 			method string
 			path   string

@@ -36,7 +36,6 @@ var (
 type BillingRepository interface {
 	FindAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
 	LockAccount(ctx context.Context, userID string) (*model.BillingWalletAccount, error)
-	EnsureAccount(ctx context.Context, userID string) error
 	CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error
 	UpdateAccount(ctx context.Context, account *model.BillingWalletAccount, expectedVersion int64) error
 
@@ -142,15 +141,6 @@ func (r *billingRepository) LockAccount(ctx context.Context, userID string) (*mo
 		return nil, err
 	}
 	return &account, nil
-}
-
-func (r *billingRepository) EnsureAccount(ctx context.Context, userID string) error {
-	if !r.transactionBound {
-		return ErrBillingRequiresTransaction
-	}
-	return r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&model.BillingWalletAccount{UserID: userID}).Error
 }
 
 func (r *billingRepository) CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error {

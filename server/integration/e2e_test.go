@@ -70,6 +70,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 		&model.Plan{},
 		&model.Task{},
 		&model.TaskFile{},
+		&model.BillingWalletAccount{},
 	); err != nil {
 		t.Fatalf("failed to auto-migrate: %v", err)
 	}

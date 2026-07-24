@@ -181,7 +181,7 @@ func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx r
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return nil, findErr
 	}
-	account, lockErr := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
+	account, lockErr := lockRequiredBillingAccount(ctx, billingRepo, req.UserID)
 	if lockErr != nil {
 		return nil, lockErr
 	}
@@ -312,7 +312,7 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 			return nil, findErr
 		}
 	}
-	account, lockErr := billingRepo.LockAccount(ctx, req.UserID)
+	account, lockErr := lockRequiredBillingAccount(ctx, billingRepo, req.UserID)
 	if lockErr != nil {
 		return nil, lockErr
 	}
@@ -544,7 +544,7 @@ func (s *BillingWalletService) topUpInTxAfterUserLock(ctx context.Context, tx re
 	if err := requirePublishedBillingCatalog(ctx, billingRepo, req.CatalogID); err != nil {
 		return nil, err
 	}
-	account, err := lockOrCreateBillingAccount(ctx, billingRepo, req.UserID)
+	account, err := lockRequiredBillingAccount(ctx, billingRepo, req.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +692,7 @@ func (s *BillingWalletService) reverseCharge(ctx context.Context, chargeID, reas
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		account, err := billingRepo.LockAccount(ctx, original.UserID)
+		account, err := lockRequiredBillingAccount(ctx, billingRepo, original.UserID)
 		if err != nil {
 			return err
 		}
@@ -791,7 +791,7 @@ func (s *BillingWalletService) RebuildProjection(ctx context.Context, userID str
 	var result *model.BillingWalletAccount
 	err := s.withTx(ctx, func(tx repository.Repository) error {
 		billingRepo := tx.Billing()
-		account, err := billingRepo.LockAccount(ctx, userID)
+		account, err := lockRequiredBillingAccount(ctx, billingRepo, userID)
 		if err != nil {
 			return err
 		}
@@ -856,7 +856,7 @@ func (s *BillingWalletService) ExpirePromotionalCredits(ctx context.Context, now
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			account, err := billingRepo.LockAccount(ctx, candidate.UserID)
+			account, err := lockRequiredBillingAccount(ctx, billingRepo, candidate.UserID)
 			if err != nil {
 				return err
 			}
@@ -1401,11 +1401,12 @@ func topUpEntryMatchesRequest(entry *model.BillingWalletEntry, req TopUpRequest)
 		entry.SourceType != nil && *entry.SourceType == req.ExternalSourceType && entry.SourceID != nil && *entry.SourceID == req.ExternalSourceID
 }
 
-func lockOrCreateBillingAccount(ctx context.Context, repo repository.BillingRepository, userID string) (*model.BillingWalletAccount, error) {
-	if err := repo.EnsureAccount(ctx, userID); err != nil {
-		return nil, err
+func lockRequiredBillingAccount(ctx context.Context, repo repository.BillingRepository, userID string) (*model.BillingWalletAccount, error) {
+	account, err := repo.LockAccount(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: wallet account is missing", ErrBillingLedgerInvalid)
 	}
-	return repo.LockAccount(ctx, userID)
+	return account, err
 }
 
 func appendWalletEntries(ctx context.Context, repo repository.BillingRepository, entries []*model.BillingWalletEntry) error {

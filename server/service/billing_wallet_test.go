@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,6 +25,44 @@ const (
 	billingWalletUserID    = "10000000-0000-4000-8000-000000000001"
 	billingWalletNewUserID = "10000000-0000-4000-8000-000000000002"
 )
+
+func TestStandaloneChargeClassifiesMissingWalletAsLedgerInvalid(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	f := newBillingWalletFixtureWithRepository(t, repository.New(db), 500, 0, 0)
+	quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "missing-wallet")
+	if err := db.Where("user_id = ?", billingWalletUserID).Delete(&model.BillingWalletAccount{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.wallet.ChargeStandaloneOperation(context.Background(), OperationChargeRequest{
+		UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+		ResourceType: "image_generation", ResourceID: uuid.NewString(), RequestFingerprint: quote.RequestFingerprint,
+		IdempotencyScope: "standalone-charge", IdempotencyKey: "missing-wallet",
+	})
+	if !errors.Is(err, ErrBillingLedgerInvalid) {
+		t.Fatalf("error = %v, want ledger invalid", err)
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("persistence error leaked: %v", err)
+	}
+}
+
+func TestBillingServicesDoNotCreateMissingWalletsLazily(t *testing.T) {
+	for _, name := range []string{"billing_wallet.go", "billing_referral.go"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(source), ".EnsureAccount(") || strings.Contains(string(source), "lockOrCreateBillingAccount") {
+			t.Fatalf("%s still creates missing wallets lazily", name)
+		}
+	}
+}
 
 func TestBillingTopUpRequiresCanonicalIdentity(t *testing.T) {
 	if _, exists := reflect.TypeOf(TopUpRequest{}).FieldByName("ExternalRef"); exists {
@@ -487,18 +526,22 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 }
 
 func TestBillingWalletStandaloneOperationNeverOverdraws(t *testing.T) {
-	f := newBillingWalletFixture(t, 499, 0, 0)
-	quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "standalone-1")
-	req := OperationChargeRequest{
-		UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
-		ResourceType: "image", ResourceID: "image-1", RequestFingerprint: quote.RequestFingerprint,
-		IdempotencyScope: "standalone-charge", IdempotencyKey: "standalone-1",
-	}
-	if _, err := f.wallet.ChargeStandaloneOperation(context.Background(), req); !errors.Is(err, ErrBillingInsufficientForStandaloneOperation) {
-		t.Fatalf("standalone error = %v, want insufficient", err)
-	}
-	if got := f.account(t, billingWalletUserID); got.PaidCredits != 499 || got.DebtCredits != 0 {
-		t.Fatalf("standalone changed wallet: %+v", got)
+	for _, paid := range []int64{0, 499} {
+		t.Run(fmt.Sprintf("paid_%d", paid), func(t *testing.T) {
+			f := newBillingWalletFixture(t, paid, 0, 0)
+			quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "standalone-1")
+			req := OperationChargeRequest{
+				UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
+				ResourceType: "image", ResourceID: "image-1", RequestFingerprint: quote.RequestFingerprint,
+				IdempotencyScope: "standalone-charge", IdempotencyKey: "standalone-1",
+			}
+			if _, err := f.wallet.ChargeStandaloneOperation(context.Background(), req); !errors.Is(err, ErrBillingInsufficientForStandaloneOperation) {
+				t.Fatalf("standalone error = %v, want insufficient", err)
+			}
+			if got := f.account(t, billingWalletUserID); got.PaidCredits != paid || got.DebtCredits != 0 {
+				t.Fatalf("standalone changed wallet: %+v", got)
+			}
+		})
 	}
 }
 
@@ -758,44 +801,25 @@ func TestBillingWalletConcurrentTopUpIdempotency(t *testing.T) {
 	}
 }
 
-func TestBillingWalletConcurrentFirstAccountTopUpsBothSucceed(t *testing.T) {
+func TestBillingWalletTopUpClassifiesMissingWalletAsLedgerInvalid(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	if err := f.repo.Users().Create(context.Background(), &model.User{
 		ID: billingWalletNewUserID, Email: "new-wallet-user@example.test", Password: "fixture", InviteCode: "NEW-WALLET-USER",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.wallet.repo = &ensureAccountRepository{Repository: f.repo, userID: billingWalletNewUserID}
-	requests := []TopUpRequest{
-		{
-			UserID: billingWalletNewUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "first-account-a",
-			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-a"), IdempotencyScope: "topup", IdempotencyKey: "first-account-a",
-		},
-		{
-			UserID: billingWalletNewUserID, Credits: 200, ExternalSourceType: "payment", ExternalSourceID: "first-account-b",
-			CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("first-account-b"), IdempotencyScope: "topup", IdempotencyKey: "first-account-b",
-		},
+	_, err := f.wallet.TopUp(context.Background(), TopUpRequest{
+		UserID: billingWalletNewUserID, Credits: 100, ExternalSourceType: "payment", ExternalSourceID: "missing-wallet",
+		CatalogID: "retail-test-v1", RequestFingerprint: billingFingerprint("missing-wallet"), IdempotencyScope: "topup", IdempotencyKey: "missing-wallet",
+	})
+	if !errors.Is(err, ErrBillingLedgerInvalid) {
+		t.Fatalf("TopUp error = %v, want ErrBillingLedgerInvalid", err)
 	}
-	var wg sync.WaitGroup
-	errs := make(chan error, len(requests))
-	for _, req := range requests {
-		req := req
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := f.wallet.TopUp(context.Background(), req)
-			errs <- err
-		}()
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("persistence error leaked: %v", err)
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent first-account top-up: %v", err)
-		}
-	}
-	if got := f.account(t, billingWalletNewUserID); got.PaidCredits != 300 || got.PromotionalCredits != 0 || got.DebtCredits != 0 {
-		t.Fatalf("first-account top-up projection = %+v", got)
+	if _, findErr := f.repo.Billing().FindAccount(context.Background(), billingWalletNewUserID); !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing wallet was created: %v", findErr)
 	}
 }
 
@@ -1580,31 +1604,6 @@ type noLedgerScanRepository struct {
 	listEntriesCalls int
 }
 
-type ensureAccountRepository struct {
-	repository.Repository
-	userID string
-}
-
-func (r *ensureAccountRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
-	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
-		return fn(&ensureAccountTxRepository{Repository: tx, userID: r.userID})
-	})
-}
-
-type ensureAccountTxRepository struct {
-	repository.Repository
-	userID string
-}
-
-func (r *ensureAccountTxRepository) Billing() repository.BillingRepository {
-	return &ensureAccountBillingRepository{BillingRepository: r.Repository.Billing(), userID: r.userID}
-}
-
-type ensureAccountBillingRepository struct {
-	repository.BillingRepository
-	userID string
-}
-
 type postLockCurrentReadState struct {
 	accountLocked   bool
 	lockCalls       int
@@ -1706,13 +1705,6 @@ func (r *postLockCurrentReadBillingRepository) LockDebtAllocationsBySourceEntryI
 	}
 	r.state.lockCalls++
 	return append([]model.BillingDebtAllocation(nil), r.state.debtAllocations...), nil
-}
-
-func (r *ensureAccountBillingRepository) CreateAccount(ctx context.Context, account *model.BillingWalletAccount) error {
-	if account.UserID == r.userID {
-		return errors.New("direct account creation is not race safe")
-	}
-	return r.BillingRepository.CreateAccount(ctx, account)
 }
 
 func (r *noLedgerScanRepository) Billing() repository.BillingRepository {

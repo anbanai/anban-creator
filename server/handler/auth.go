@@ -29,6 +29,7 @@ type AuthHandler struct {
 	wechatSvc        *auth.WeChatService
 	wechatCfg        *config.WeChatConfig
 	repo             repository.Repository
+	userProvisioning *service.UserProvisioningService
 	emailSvc         *service.EmailService
 	logger           *zerolog.Logger
 	hub              *WebSocketHub
@@ -57,6 +58,7 @@ func NewAuthHandler(
 		wechatSvc:        wechatSvc,
 		wechatCfg:        wechatCfg,
 		repo:             repo,
+		userProvisioning: service.NewUserProvisioningService(repo),
 		emailSvc:         emailSvc,
 		logger:           logger,
 		hub:              hub,
@@ -166,6 +168,14 @@ func (h *AuthHandler) requireDB(c fiber.Ctx) error {
 		return Error(c, fiber.StatusServiceUnavailable, "database is not available")
 	}
 	return nil
+}
+
+func (h *AuthHandler) createUser(ctx context.Context, user *model.User, inviter *model.User) error {
+	inviterID := ""
+	if inviter != nil {
+		inviterID = inviter.ID
+	}
+	return h.userProvisioning.Create(ctx, user, inviterID, h.maxInvitePerUser)
 }
 
 // generateInviteCode generates a random 8-character invite code using crypto/rand.
@@ -400,36 +410,12 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		Password:   string(hashed),
 		InviteCode: inviteCode,
 	}
-	if inviter != nil {
-		user.InvitedBy = inviter.ID
-	}
-
-	// Use transaction for user creation + invite count increment.
-	if inviter != nil {
-		if err := h.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-			if err := txRepo.Users().Create(ctx, user); err != nil {
-				return err
-			}
-			ok, err := txRepo.Users().IncrementInviteCount(ctx, inviter.ID, h.maxInvitePerUser)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return errors.New("invite limit reached")
-			}
-			return nil
-		}); err != nil {
-			if err.Error() == "invite limit reached" {
-				return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
-			}
-			h.logger.Error().Err(err).Msg("failed to create user in transaction")
-			return Error(c, fiber.StatusInternalServerError, "failed to create user")
+	if err := h.createUser(ctx, user, inviter); err != nil {
+		if errors.Is(err, service.ErrInviteLimitReached) {
+			return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
 		}
-	} else {
-		if err := h.repo.Users().Create(ctx, user); err != nil {
-			h.logger.Error().Err(err).Msg("failed to create user")
-			return Error(c, fiber.StatusInternalServerError, "failed to create user")
-		}
+		h.logger.Error().Err(err).Msg("failed to create user")
+		return Error(c, fiber.StatusInternalServerError, "failed to create user")
 	}
 
 	resp, err := h.generateTokenPair(c, user.ID)
@@ -562,43 +548,19 @@ func (h *AuthHandler) CodeLogin(c fiber.Ctx) error {
 			Password:   "",
 			InviteCode: inviteCode,
 		}
-		if inviter != nil {
-			user.InvitedBy = inviter.ID
-		}
-
-		// Use transaction for user creation + invite count increment.
-		if inviter != nil {
-			if err := h.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-				if err := txRepo.Users().Create(ctx, user); err != nil {
-					return err
-				}
-				ok, err := txRepo.Users().IncrementInviteCount(ctx, inviter.ID, h.maxInvitePerUser)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return errors.New("invite limit reached")
-				}
-				return nil
-			}); err != nil {
-				if err.Error() == "invite limit reached" {
-					return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
-				}
-				h.logger.Error().Err(err).Msg("failed to create user in transaction")
-				return Error(c, fiber.StatusInternalServerError, "failed to create user")
+		if err := h.createUser(ctx, user, inviter); err != nil {
+			if errors.Is(err, service.ErrInviteLimitReached) {
+				return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
 			}
-		} else {
-			if err := h.repo.Users().Create(ctx, user); err != nil {
-				if errors.Is(err, gorm.ErrDuplicatedKey) {
-					user, err = h.repo.Users().FindByEmail(ctx, req.Email)
-					if err != nil {
-						h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to find user after duplicate key")
-						return Error(c, fiber.StatusInternalServerError, "internal error")
-					}
-				} else {
-					h.logger.Error().Err(err).Msg("failed to create user from code login")
-					return Error(c, fiber.StatusInternalServerError, "failed to create user")
+			if repository.IsDuplicateKeyError(err) {
+				user, err = h.repo.Users().FindByEmail(ctx, req.Email)
+				if err != nil {
+					h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to find user after duplicate key")
+					return Error(c, fiber.StatusInternalServerError, "internal error")
 				}
+			} else {
+				h.logger.Error().Err(err).Msg("failed to create user from code login")
+				return Error(c, fiber.StatusInternalServerError, "failed to create user")
 			}
 		}
 
@@ -838,7 +800,7 @@ func (h *AuthHandler) WXLogin(c fiber.Ctx) error {
 		if req.Avatar != "" {
 			user.Avatar = req.Avatar
 		}
-		if err := h.repo.Users().Create(ctx, user); err != nil {
+		if err := h.createUser(ctx, user, nil); err != nil {
 			h.logger.Error().Err(err).Msg("failed to create user from WeChat login")
 			return Error(c, fiber.StatusInternalServerError, "failed to create user")
 		}
@@ -1110,7 +1072,7 @@ func (h *AuthHandler) QRLoginCallback(c fiber.Ctx) error {
 		if req.Avatar != "" {
 			user.Avatar = req.Avatar
 		}
-		if err := h.repo.Users().Create(ctx, user); err != nil {
+		if err := h.createUser(ctx, user, nil); err != nil {
 			h.logger.Error().Err(err).Msg("failed to create user from QR login")
 			return Error(c, fiber.StatusInternalServerError, "failed to create user")
 		}
