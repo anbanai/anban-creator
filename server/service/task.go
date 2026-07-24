@@ -1560,6 +1560,9 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		if err != nil {
 			return fmt.Errorf("find current execution before task authority removal: %w", err)
 		}
+		if execution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+			return fmt.Errorf("cancel task before delete: runtime finalization is not complete")
+		}
 		if execution.CleanupStatus != model.TaskExecutionCleanupDone {
 			return fmt.Errorf("cancel task before delete: runtime cleanup is not complete")
 		}

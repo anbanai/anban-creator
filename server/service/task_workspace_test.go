@@ -141,7 +141,10 @@ func TestTaskDeleteWaitsForFailedRuntimeCleanupBeforeRemovingAuthority(t *testin
 	ctx := context.Background()
 	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
 		[]string{model.TaskExecutionRunning}, model.TaskExecutionFailed,
-		model.ExecutionTransition{CleanupStatus: model.TaskExecutionCleanupPending}); err != nil || !won {
+		model.ExecutionTransition{
+			FinalizationStatus: model.TaskExecutionFinalizationDone,
+			CleanupStatus:      model.TaskExecutionCleanupPending,
+		}); err != nil || !won {
 		t.Fatalf("fail execution: won=%v err=%v", won, err)
 	}
 	if err := repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusFailed); err != nil {
@@ -183,6 +186,14 @@ func TestTaskDeleteWaitsForFailedRuntimeCleanupBeforeRemovingAuthority(t *testin
 func TestTaskDeleteDoesNotBypassManagedCleanupWithoutDispatcher(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)
 	ctx := context.Background()
+	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionRunning}, model.TaskExecutionCancelled,
+		model.ExecutionTransition{
+			FinalizationStatus: model.TaskExecutionFinalizationDone,
+			CleanupStatus:      model.TaskExecutionCleanupPending,
+		}); err != nil || !won {
+		t.Fatalf("terminalize execution: won=%v err=%v", won, err)
+	}
 	workspace := &taskWorkspaceLifecycleFake{}
 	svc.SetTaskWorkspaceLifecycle(workspace)
 
@@ -203,5 +214,79 @@ func TestTaskDeleteDoesNotBypassManagedCleanupWithoutDispatcher(t *testing.T) {
 	svc.SetRuntimeDispatcher(&cancelOrderingDispatcher{repo: repo})
 	if err := svc.Delete(ctx, task.ID); err != nil {
 		t.Fatalf("Delete after dispatcher recovery: %v", err)
+	}
+}
+
+func TestTaskDeletePreservesManagedFinalizationAuthority(t *testing.T) {
+	tests := []struct {
+		name               string
+		finalizationStatus string
+		claimFinalization  bool
+	}{
+		{
+			name:               "active finalization lease",
+			finalizationStatus: model.TaskExecutionFinalizationSettlement,
+			claimFinalization:  true,
+		},
+		{
+			name:               "interrupted finalization without lease",
+			finalizationStatus: model.TaskExecutionFinalizationNotification,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			ctx := context.Background()
+			if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
+				[]string{model.TaskExecutionRunning}, model.TaskExecutionFailed,
+				model.ExecutionTransition{
+					FinalizationStatus: tt.finalizationStatus,
+					CleanupStatus:      model.TaskExecutionCleanupDone,
+				}); err != nil || !won {
+				t.Fatalf("terminalize execution: won=%v err=%v", won, err)
+			}
+			if err := repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusFailed); err != nil {
+				t.Fatalf("fail task: %v", err)
+			}
+			finalizationToken := ""
+			if tt.claimFinalization {
+				finalizationToken = uuid.NewString()
+				if won, err := repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, finalizationToken, time.Minute); err != nil || !won {
+					t.Fatalf("claim finalization: won=%v err=%v", won, err)
+				}
+			}
+
+			err := svc.Delete(ctx, task.ID)
+			if err == nil || !strings.Contains(err.Error(), "runtime finalization is not complete") {
+				t.Fatalf("Delete error = %v, want incomplete runtime finalization", err)
+			}
+			retainedTask, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("task authority removed before finalization completed: %v", err)
+			}
+			if retainedTask.DeletingAt == nil {
+				t.Fatal("deletion barrier was not retained for finalization retry")
+			}
+			if _, err := repo.TaskExecutions().FindByID(ctx, execution.ID); err != nil {
+				t.Fatalf("execution authority removed before finalization completed: %v", err)
+			}
+
+			if finalizationToken == "" {
+				finalizationToken = uuid.NewString()
+				if won, err := repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, finalizationToken, time.Minute); err != nil || !won {
+					t.Fatalf("claim interrupted finalization: won=%v err=%v", won, err)
+				}
+			}
+			if won, err := repo.TaskExecutions().AdvanceFinalization(ctx, execution.ID, finalizationToken, tt.finalizationStatus, model.TaskExecutionFinalizationDone); err != nil || !won {
+				t.Fatalf("complete finalization: won=%v err=%v", won, err)
+			}
+			if err := svc.Delete(ctx, task.ID); err != nil {
+				t.Fatalf("Delete after finalization completed: %v", err)
+			}
+			if _, err := repo.Tasks().FindByID(ctx, task.ID); err == nil {
+				t.Fatal("task authority remains after completed finalization retry")
+			}
+		})
 	}
 }

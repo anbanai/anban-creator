@@ -303,7 +303,10 @@ func TestTaskDeleteRemovesEveryImmutableImageOperationObject(t *testing.T) {
 	}
 	if won, err := f.repo.TaskExecutions().Transition(ctx, f.executionID,
 		[]string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded,
-		model.ExecutionTransition{CleanupStatus: model.TaskExecutionCleanupDone}); err != nil || !won {
+		model.ExecutionTransition{
+			FinalizationStatus: model.TaskExecutionFinalizationDone,
+			CleanupStatus:      model.TaskExecutionCleanupDone,
+		}); err != nil || !won {
 		t.Fatalf("complete execution cleanup: won=%v err=%v", won, err)
 	}
 	if err := f.service.tasks.Delete(ctx, f.taskID); err != nil {

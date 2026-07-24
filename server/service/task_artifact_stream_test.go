@@ -689,7 +689,10 @@ func TestDeleteTaskSchedulesAdoptedStreamAttemptsForCleanup(t *testing.T) {
 	}
 	if won, err := repo.TaskExecutions().Transition(t.Context(), executionID,
 		[]string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded,
-		model.ExecutionTransition{CleanupStatus: model.TaskExecutionCleanupDone}); err != nil || !won {
+		model.ExecutionTransition{
+			FinalizationStatus: model.TaskExecutionFinalizationDone,
+			CleanupStatus:      model.TaskExecutionCleanupDone,
+		}); err != nil || !won {
 		t.Fatalf("complete execution cleanup: won=%v err=%v", won, err)
 	}
 	if err := repo.Tasks().UpdateStatus(t.Context(), task.ID, model.TaskStatusCompleted); err != nil {
