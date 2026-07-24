@@ -355,7 +355,10 @@ func main() {
 		taskSvc.SetNASResumeEnabled(true)
 		if cap := managedRuntimeProjectConcurrencyCap(cfg.Claude.Executor); cap > 0 {
 			taskSvc.SetProjectConcurrencyCap(cap)
-			log.Info().Msg("Kubernetes Job runtime enabled: project task concurrency capped at 1 per memory PVC")
+			log.Info().
+				Str("executor", cfg.Claude.Executor).
+				Int("cap", cap).
+				Msg("managed runtime project concurrency capped for shared project memory")
 		}
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
@@ -896,10 +899,12 @@ func main() {
 }
 
 func managedRuntimeProjectConcurrencyCap(executor string) int {
-	if strings.TrimSpace(executor) == "kubernetes" {
+	switch strings.TrimSpace(executor) {
+	case "docker", "kubernetes":
 		return 1
+	default:
+		return 0
 	}
-	return 0
 }
 
 func migrateModels(db *gorm.DB, migrate func(*gorm.DB) error) error {
