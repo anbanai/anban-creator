@@ -155,6 +155,8 @@ export function sanitizeUserFacingErrorMessage(message: unknown, fallback: strin
   if (!raw) return fallback
   const lower = raw.toLowerCase()
 
+  if (isBillingMachineMessage(raw)) return fallback
+
   if (isGeneratedImageDownloadError(raw, lower)) {
     return '图片已生成，但保存到作品库失败，请稍后重试'
   }
@@ -208,13 +210,54 @@ function isGeneratedImageDownloadError(raw: string, lower: string): boolean {
   )
 }
 
+function isBillingMachineMessage(message: string): boolean {
+  return /\bbilling_[a-z0-9_]+\b/i.test(message)
+}
+
+interface ApiErrorBody {
+  code?: number
+  msg?: string
+  error?: string
+}
+
+const billingErrorMessages: Partial<Record<number, string>> = {
+  40201: '账户存在欠费，请先充值结清',
+  40202: '积分余额不足，请先充值后继续',
+  40203: '积分余额不足，请先充值后继续',
+  40401: '服务计费配置异常，请联系管理员',
+  40402: '服务计费配置异常，请联系管理员',
+}
+
+function getApiErrorBody(err: unknown): ApiErrorBody | undefined {
+  if (!err || typeof err !== 'object' || !('response' in err)) return undefined
+  const data = (err as { response?: { data?: unknown } }).response?.data
+  return data && typeof data === 'object' ? data as ApiErrorBody : undefined
+}
+
+export function getApiErrorCode(err: unknown): number | undefined {
+  const code = getApiErrorBody(err)?.code
+  return typeof code === 'number' ? code : undefined
+}
+
+function isNetworkError(err: unknown): boolean {
+  if (!axios.isAxiosError(err) || err.response) return false
+  return err.code === 'ERR_NETWORK' || err.message === 'Network Error'
+}
+
 /** Extract user-friendly error message from an unknown error */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
-  if (err && typeof err === 'object' && 'response' in err) {
-    const resp = (err as { response?: { data?: { msg?: string; error?: string } } }).response
-    if (resp?.data?.msg) return sanitizeUserFacingErrorMessage(resp.data.msg, fallback)
-    if (resp?.data?.error) return sanitizeUserFacingErrorMessage(resp.data.error, fallback)
+  const body = getApiErrorBody(err)
+  const code = getApiErrorCode(err)
+  if (code !== undefined) {
+    const localized = billingErrorMessages[code]
+    if (localized) return localized
+    if (code === 50000 || code === 50001) return fallback
   }
+
+  const responseMessage = body?.msg ?? body?.error
+  if (responseMessage) return sanitizeUserFacingErrorMessage(responseMessage, fallback)
+
+  if (isNetworkError(err)) return '网络连接失败，请检查网络后重试'
   if (err instanceof Error) return sanitizeUserFacingErrorMessage(err.message, fallback)
   return fallback
 }
