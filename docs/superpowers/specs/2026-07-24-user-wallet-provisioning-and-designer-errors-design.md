@@ -1,126 +1,105 @@
-# User Wallet Provisioning And Designer Billing Errors
+# 用户钱包开户与 Designer 计费错误设计
 
-**Date:** 2026-07-24
+**日期：** 2026-07-24
 
-## Goal
+## 目标
 
-Make a billing wallet a required part of every newly created user and prevent
-Studio from exposing backend billing identifiers such as
-`billing_resource_not_found` to users.
+将计费钱包设为每个新用户的必备从属资源，同时阻止 Studio 向用户展示
+`billing_resource_not_found` 之类的后端计费标识。
 
-This is a forward-only change. It does not backfill or otherwise support users
-created before the new provisioning contract.
+本次为向前演进，不回填、不兼容新开户契约生效前创建的用户。
 
-## Current Failure
+## 当前故障
 
-Designer obtains a fixed-SKU quote and then charges the standalone image
-operation while creating an image generation record. The charge transaction
-locks `billing_wallet_accounts` directly. Authentication flows create `users`
-without creating the corresponding wallet row, so the lock can return
-`gorm.ErrRecordNotFound`. The shared billing handler currently maps that
-persistence error to `billing_resource_not_found`, and Studio displays the
-machine identifier in a toast.
+Designer 先获取固定 SKU 报价，然后在创建图片生成记录时扣除独立图片操作费用。
+扣费事务直接锁定 `billing_wallet_accounts`。当前认证流程只创建 `users`，不会创建
+对应的钱包记录，因此加锁查询可能返回 `gorm.ErrRecordNotFound`。共享计费 Handler
+随后将该持久化错误映射为 `billing_resource_not_found`，Studio 又把这个机器标识直接
+显示在 Toast 中。
 
-## User Provisioning Contract
+## 用户开户契约
 
-Introduce one application-service operation for new-user provisioning. Every
-authentication flow that creates a user must call this operation instead of
-writing through `UserRepository` directly.
+新增一个统一的新用户开户应用服务。所有会创建用户的认证流程都必须调用这个服务，
+不再直接通过 `UserRepository` 写入用户。
 
-The operation runs one repository transaction that:
+开户操作在同一个仓储事务中完成：
 
-1. creates the user;
-2. creates an empty `BillingWalletAccount` for the same user ID;
-3. applies the inviter count update when registration uses an invitation.
+1. 创建用户；
+2. 使用相同用户 ID 创建余额为零的 `BillingWalletAccount`；
+3. 使用邀请码注册时，更新邀请人的邀请计数。
 
-Any failure rolls back all three effects. Duplicate-user recovery remains in
-the authentication flow, but only a successfully committed provisioning
-transaction may be treated as a newly created user.
+任一步失败都回滚全部操作。认证流程仍可处理用户重复创建竞争，但只有成功提交开户
+事务后，才能把用户视为新建成功。
 
-The provisioning service owns this orchestration because it crosses user,
-billing, and invitation repositories. HTTP handlers remain responsible only
-for request validation, authentication-provider exchange, and mapping service
-results to responses.
+该编排横跨用户、计费和邀请仓储，因此由应用服务负责。HTTP Handler 只负责请求校验、
+认证供应商交互，以及将服务结果映射为响应。
 
-## Billing Error Contract
+## 计费错误契约
 
-Billing services must translate repository lookup failures at their boundary.
-A missing wallet after successful user authentication violates the provisioning
-invariant and is an internal ledger failure, not a public resource-not-found
-condition.
+计费服务必须在领域边界转换仓储查询错误。用户已经通过认证但钱包不存在，说明开户
+不变量遭到破坏，应归类为内部账本错误，而不是对外的资源不存在错误。
 
-The existing public billing codes remain authoritative for expected outcomes:
+现有公开计费错误码继续作为预期业务结果的唯一依据：
 
-- `40203`: insufficient credits for a standalone operation;
-- `40401`: the configured SKU cannot be resolved;
-- `50001`: the persisted billing ledger violates its invariant;
-- `50000`: an otherwise unclassified internal billing failure.
+- `40203`：独立操作积分不足；
+- `40401`：无法解析已配置的 SKU；
+- `50001`：持久化计费账本违反不变量；
+- `50000`：其他未分类的内部计费错误。
 
-Detailed repository and billing errors stay in server logs. API responses keep
-stable numeric codes and machine-readable message identifiers; clients must not
-render those identifiers directly.
+详细的仓储与计费错误只写入服务端日志。API 响应继续返回稳定的数值错误码和机器可读
+消息标识，但客户端不得直接展示这些标识。
 
-## Studio Error Presentation
+## Studio 错误展示
 
-The shared HTTP error utility must classify API errors by numeric response code
-before considering `msg` or `error` text. It returns localized, user-facing
-messages for known billing outcomes and a neutral fallback for internal billing
-failures.
+共享 HTTP 错误工具必须先按响应中的数值业务码分类，再考虑 `msg` 或 `error` 文本。
+对于已知计费结果，返回本地化的用户文案；对于内部计费异常，返回中性的兜底提示。
 
-For Designer specifically:
+Designer 的具体行为：
 
-- insufficient standalone balance is shown as
-  `积分余额不足，充值后即可继续生成`;
-- the error toast provides an action that navigates to `/billing`;
-- internal billing failures are shown as
-  `图片服务暂时不可用，请稍后重试`;
-- machine identifiers such as `billing_resource_not_found` are never visible.
+- 独立操作积分不足时显示“积分余额不足，充值后即可继续生成”；
+- 错误 Toast 提供跳转 `/billing` 的“去充值”操作；
+- 内部计费异常显示“图片服务暂时不可用，请稍后重试”；
+- 任何情况下都不显示 `billing_resource_not_found` 等机器标识。
 
-Other Studio surfaces using the shared error utility receive appropriate common
-billing messages without Designer-specific navigation behavior.
+其他使用共享错误工具的 Studio 页面获得通用计费提示，但不会获得 Designer 专属的跳转
+行为。
 
-## Designer Affordability Preview
+## Designer 支付能力预检
 
-Designer loads the current wallet alongside its provider list. The selected
-provider already supplies the fixed credit price. The prompt area displays the
-price and current available balance in its existing operational control area.
+Designer 在加载供应商列表的同时加载当前钱包。所选供应商已经提供固定积分价格。
+提示词操作区显示本次价格和当前可用余额。
 
-When the available balance is lower than the selected provider price, the
-generate command is disabled and its visible state explains that credits are
-insufficient. The user can navigate to `/billing` from that state. This check is
-only an interaction aid: `/designer/generate` remains the authoritative atomic
-admission and charge boundary because the balance can change concurrently.
+当前可用余额低于所选供应商价格时，禁用生成命令，并在可见状态中说明积分不足；用户
+可以从该状态跳转到 `/billing`。该检查只用于改善交互，`/designer/generate` 仍是最终的
+原子准入和扣费边界，因为余额可能被其他并发操作改变。
 
-Wallet-query failure must not be treated as a zero balance. Designer remains
-submittable in that case and relies on the server response, while avoiding a
-misleading insufficient-balance state.
+钱包查询失败不能被当作余额为零。此时 Designer 仍允许提交，由服务端返回最终结果，
+避免展示错误的余额不足状态。
 
-## Testing
+## 测试
 
-Backend tests must prove:
+后端测试必须证明：
 
-- every supported new-user creation path commits a user and an empty wallet;
-- a wallet-creation or invitation-update failure rolls back the user;
-- a missing wallet during standalone charging becomes a ledger/internal billing
-  error rather than `billing_resource_not_found`;
-- an existing zero-balance wallet returns the standalone insufficient-credit
-  error.
+- 每一种受支持的新用户创建路径都会同时提交用户和空钱包；
+- 钱包创建失败或邀请计数更新失败时会回滚用户；
+- 独立操作扣费时钱包缺失会变成账本/内部计费错误，而不是
+  `billing_resource_not_found`；
+- 已存在的零余额钱包会返回独立操作积分不足错误。
 
-Studio tests must prove:
+Studio 测试必须证明：
 
-- numeric billing codes map to localized text without exposing machine IDs;
-- Designer disables generation only when a successfully loaded balance is below
-  the selected fixed price;
-- a wallet query failure does not disable generation;
-- the insufficient-credit response offers navigation to `/billing`.
+- 数值计费错误码会映射为本地化文案，不会暴露机器标识；
+- 仅当钱包成功加载且余额低于所选固定价格时，Designer 才禁用生成；
+- 钱包查询失败不会禁用生成；
+- 收到积分不足响应时会提供跳转 `/billing` 的操作。
 
-Run the relevant focused Go and Studio tests first, followed by `go test ./...`,
-the server build, `bun run test`, and `bun run build`.
+先运行相关 Go 与 Studio 定向测试，再运行 `go test ./...`、服务端构建、
+`bun run test` 和 `bun run build`。
 
-## Out Of Scope
+## 不在范围内
 
-- Backfilling wallets for existing users.
-- Importing historical balances.
-- Changing SKU prices, catalog publication, or provider routing.
-- Retrying failed image-provider requests.
-- Replacing the existing API response envelope.
+- 为现有用户回填钱包。
+- 导入历史余额。
+- 修改 SKU 价格、目录发布或供应商路由。
+- 重试失败的图片供应商请求。
+- 替换现有 API 响应结构。
