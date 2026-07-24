@@ -110,7 +110,7 @@ func (h *BillingHandler) Wallet(c fiber.Ctx) error {
 	}
 	account, err := h.repo.Billing().FindAccount(c.Context(), userID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Success(c, BillingWalletResponse{})
+		return writeBillingServiceError(c, service.ErrBillingLedgerInvalid)
 	}
 	if err != nil {
 		h.logError(err, userID, "read billing wallet")
