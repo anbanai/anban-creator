@@ -248,35 +248,28 @@ claude:
     doubao-seed-evolving-latest-version: "doubao-seed-evolving"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
-  # Agent 执行器类型：local 用于开发；docker 用于单机容器；kubernetes 用于生产队列。
-  executor: "${ANBAN_CLAUDE_EXECUTOR:-local}"
+  # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
+  executor: "${ANBAN_AGENT_EXECUTOR}"
+  # 所有托管执行器共享同一组 canonical runtime 镜像。
+  runtime_images:
+    article: "${ANBAN_AGENT_IMAGE_ARTICLE}"
+    seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
+    montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+  # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
+  execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
   # 是否启用 agent 沙箱隔离。生产建议 true。
   sandbox: true
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   docker:
-    # 持久容器使用最小 Article 镜像；依赖更重的任务由一次性专用容器执行。
-    article_image: "${ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE:-creator-agent-article:latest}"
-    image_profiles:
-      seednote: "${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}"
-      montage: "${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}"
+    network: "${ANBAN_AGENT_DOCKER_NETWORK:-anban-creator-network}"
     cpu_cores: 2
     memory_mb: 4096
+    pids_limit: 512
     timeout_sec: 3600
-    container_name: "${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}"
-    workspace_dir: "${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR}"
   kubernetes:
     # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
-    # Article Agent 镜像。支持版本标签或 sha256 digest；生产推荐 digest，
-    # 但发布流水线也可以注入唯一版本标签。镜像只包含通用内容创作运行时；
-    # Seednote 外部研究与 Montage 视频合成依赖由专用镜像承载。
-    article_image: "${ANBAN_ARTICLE_AGENT_IMAGE}"
-    # 必需的任务类型专用镜像。Seednote 镜像包含 Agent-Reach/Python；
-    # Montage 镜像包含 OpenMontage/Remotion/ffmpeg workspace runtime。
-    image_profiles:
-      seednote: "${ANBAN_SEEDNOTE_AGENT_IMAGE}"
-      montage: "${ANBAN_MONTAGE_AGENT_IMAGE}"
     # Agent Job 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
@@ -284,8 +277,6 @@ claude:
     # Agent Job 中的 Go 与 Node/Claude Code TLS 客户端校验 Server 使用的签发 CA Secret，仅挂载 ca.crt。
     # 不要指向保存叶子证书 tls.crt/tls.key 的 anban-server-tls。
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"
-    # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
-    execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
     # 项目记忆与任务工作区 PVC 使用的 RWX NAS 存储类及各自容量。
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
     project_memory_size: "${ANBAN_AGENT_PROJECT_MEMORY_SIZE:-1Gi}"

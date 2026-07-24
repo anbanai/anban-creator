@@ -106,7 +106,7 @@ func TestTaskServiceRegisterRenderedImageOwnsValidationAndRegistration(t *testin
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -146,7 +146,7 @@ func TestRegisterRenderedImagePersistsRequestedRoleInInitialWrite(t *testing.T) 
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -184,7 +184,7 @@ func TestRegisterRenderedImageUpdatesRoleWithoutReuploadingIdenticalContent(t *t
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &renderedImageLifecycleStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -224,7 +224,7 @@ func TestRegisterRenderedImageDeletesUploadedObjectWhenPersistenceFails(t *testi
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -257,7 +257,7 @@ func TestRegisterRenderedImageFailedReplacementPreservesExistingObject(t *testin
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -308,7 +308,7 @@ func TestRegisterRenderedImageSuccessfulReplacementDeletesSupersededObject(t *te
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &fakeTaskStorage{name: "oss"}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -354,7 +354,7 @@ func TestRegisterRenderedImageDeleteFailureLeavesRecoverableCleanupIntent(t *tes
 		fakeTaskStorage: &fakeTaskStorage{name: "oss"},
 		deleteFailures:  1,
 	}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -426,7 +426,7 @@ func TestRegisterRenderedImageConcurrentReplacementsDoNotLeakCASLoser(t *testing
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -483,7 +483,7 @@ func TestUnpublishedRenderedImageCleanupCannotDeleteRepublishedContent(t *testin
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -538,7 +538,7 @@ func TestQueuedRenderedImageCleanupCannotDeleteRepublishedContent(t *testing.T) 
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -603,7 +603,7 @@ func TestTaskFileCleanupAttemptsQueuedObjectsWhenLegacyBatchIsFull(t *testing.T)
 		fakeTaskStorage: &fakeTaskStorage{name: "oss", files: map[string][]byte{}},
 		deleteFailures:  2,
 	}
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	ctx := context.Background()
 	var owner *model.TaskFile
 	for index := range 2 {
@@ -648,7 +648,7 @@ func TestRegisterRenderedImageRoleUpdateRacingReplacementPreservesCurrentIdentit
 			repo := repository.New(db)
 			logger := zerolog.New(io.Discard)
 			store := &concurrentRenderedImageStorage{fakeTaskStorage: &fakeTaskStorage{name: "oss"}, deleteFailures: 1}
-			svc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 			ctx := context.Background()
 			userID := uuid.NewString()
 			projectID := createTestProject(t, repo, userID, model.PlatformArticle)

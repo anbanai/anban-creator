@@ -131,18 +131,13 @@ func TestMontageRuntimeManifestFilesUseEmptyObjectsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
+func TestMontageTaskFilesRequireFinalVideoAndManifest(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 
 	t.Run("missing manifest", func(t *testing.T) {
-		workDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(workDir, "final.mp4"), []byte("video"), 0o644); err != nil {
-			t.Fatalf("write final video: %v", err)
-		}
-
-		got := ValidateTaskArtifactsFromWorkDir(task, workDir)
+		got := ValidateTaskArtifactsFromTaskFiles(task, []*model.TaskFile{{FileName: "final.mp4"}})
 		if got.Valid {
-			t.Fatal("ValidateTaskArtifactsFromWorkDir valid = true, want false")
+			t.Fatal("ValidateTaskArtifactsFromTaskFiles valid = true, want false")
 		}
 		if got.Reason != "montage missing required deliverables: delivery-manifest.json" {
 			t.Fatalf("Reason = %q, want missing delivery manifest", got.Reason)
@@ -152,17 +147,12 @@ func TestMontageWorkDirArtifactsRequireFinalVideoAndManifest(t *testing.T) {
 	t.Run("accepts final video aliases with manifest", func(t *testing.T) {
 		for _, name := range []string{"final.mp4", "final_video.mp4", "final-video.mp4"} {
 			t.Run(name, func(t *testing.T) {
-				workDir := t.TempDir()
-				if err := os.WriteFile(filepath.Join(workDir, name), []byte("video"), 0o644); err != nil {
-					t.Fatalf("write final video: %v", err)
-				}
-				if err := os.WriteFile(filepath.Join(workDir, "delivery-manifest.json"), []byte("{}"), 0o644); err != nil {
-					t.Fatalf("write delivery manifest: %v", err)
-				}
-
-				got := ValidateTaskArtifactsFromWorkDir(task, workDir)
+				got := ValidateTaskArtifactsFromTaskFiles(task, []*model.TaskFile{
+					{FileName: name},
+					{FileName: "delivery-manifest.json"},
+				})
 				if !got.Valid {
-					t.Fatalf("ValidateTaskArtifactsFromWorkDir valid = false, reason=%q missing=%v", got.Reason, got.Missing)
+					t.Fatalf("ValidateTaskArtifactsFromTaskFiles valid = false, reason=%q missing=%v", got.Reason, got.Missing)
 				}
 			})
 		}
@@ -180,6 +170,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
 		"provider_menu_summary",
 		"env_keys",
 		"delivery-manifest.json",
@@ -198,6 +189,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
 		"provider_menu_summary",
 		"delivery-manifest.json",
 		"final_video",
@@ -240,6 +232,9 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
+		"/workspace/openmontage",
+		"output/montage-project.json",
+		`"output_dir": "output"`,
 		"provider_menu_summary",
 		"Secrets only arrive through environment variables",
 		"env_keys",
@@ -253,6 +248,35 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	}
 	if strings.Contains(canonical, "provider_env") {
 		t.Fatal("montage skill must use env_keys without the legacy provider_env name")
+	}
+	for _, forbidden := range []string{
+		"/workspace/montage",
+		"fall back to the configured/default `third_party/OpenMontage` path",
+		"workspace preparation",
+	} {
+		if strings.Contains(canonical, forbidden) {
+			t.Fatalf("managed montage skill contains obsolete runtime contract %q", forbidden)
+		}
+	}
+
+	examples := readRepoFile(t, filepath.Join(root, "plugins", "skills", "montage", "references", "examples.md"))
+	for _, want := range []string{
+		"output/montage-project.json",
+		"output/delivery-manifest.json",
+		"output/failure-diagnosis.md",
+	} {
+		if !strings.Contains(examples, want) {
+			t.Fatalf("montage examples missing managed artifact path %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"/workspace/montage",
+		"configured submodule or runner",
+		"workspace and task-file tools",
+	} {
+		if strings.Contains(examples, forbidden) {
+			t.Fatalf("montage examples contain obsolete runtime contract %q", forbidden)
+		}
 	}
 }
 

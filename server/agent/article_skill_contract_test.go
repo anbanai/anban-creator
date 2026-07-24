@@ -116,6 +116,19 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	}
 }
 
+func TestArticleSkillUsesRuntimeOwnedOutputDirectory(t *testing.T) {
+	path := filepath.Join(articleContractRepoRoot(t), "plugins", "skills", "article", "SKILL.md")
+	text := readArticleContractFile(t, path)
+	for _, term := range []string{"runtime", "`output/`", "提供"} {
+		if !strings.Contains(text, term) {
+			t.Fatalf("%s missing runtime-owned output contract %q", path, term)
+		}
+	}
+	if strings.Contains(text, "步骤 1 创建") {
+		t.Fatalf("%s still assigns output directory creation to the workflow", path)
+	}
+}
+
 func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{

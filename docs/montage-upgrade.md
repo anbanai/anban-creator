@@ -31,9 +31,9 @@ cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.co
 
 Production uses three immutable Agent images:
 
-- `ANBAN_ARTICLE_AGENT_IMAGE` (deployed from `article_agent_image_repo`): the minimal Article runtime.
-- `ANBAN_SEEDNOTE_AGENT_IMAGE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
-- `ANBAN_MONTAGE_AGENT_IMAGE`: the Montage runtime with an embedded OpenMontage template.
+- `ANBAN_AGENT_IMAGE_ARTICLE` (deployed from `article_agent_image_repo`): the minimal Article runtime.
+- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
+- `ANBAN_AGENT_IMAGE_MONTAGE`: the Montage runtime with an embedded OpenMontage template.
 
 Build all three images with:
 
@@ -49,14 +49,16 @@ mutable tags as the persisted `task_executions.runtime_image` value.
 
 ## Workspace And Resume
 
-The task PVC is mounted at `/workspace`. At Kubernetes task startup, the init
-container atomically copies the complete image template into a writable
-`/workspace/montage` directory when it does not already exist. The Agent uses
-the same materialization contract as a Docker/local fallback. It runs with:
+Every managed execution receives a fresh container or Kubernetes Job. The task
+workspace volume is mounted at `/workspace`, and the runtime owns its workspace
+and output. At Kubernetes task startup, the init container atomically copies the
+complete image template into a writable `/workspace/openmontage` directory when
+it does not already exist. The Agent uses the same materialization contract in
+Docker and runs with:
 
 ```text
-cwd=/workspace/montage
-ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/montage
+cwd=/workspace/openmontage
+ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/openmontage
 ```
 
 OpenMontage project files, checkpoints, and Claude session state therefore stay
@@ -68,7 +70,7 @@ server configuration has changed.
 
 `/tmp` is an `emptyDir` and is intentionally not recoverable. Do not place
 resume-critical state there. Direct artifact upload uses
-`/workspace/montage/output`; source trees, checkpoints, `.anban-runtime-home`,
+`/workspace/openmontage/output`; source trees, checkpoints, `.anban-runtime-home`,
 `.claude`, secrets, and dependency caches remain on NAS and are not published as
 task artifacts unless the workflow explicitly registers a stable file through
 MCP.
@@ -85,7 +87,7 @@ Verify a live deployment with:
 ```bash
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}'
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .spec.volumes[*]}{.name}{"="}{.persistentVolumeClaim.claimName}{"\n"}{end}'
-kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -d /workspace/montage; test -w /workspace/montage; test -d /workspace/montage/remotion-composer'
+kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -d /workspace/openmontage; test -w /workspace/openmontage; test -d /workspace/openmontage/remotion-composer'
 ```
 
 ## Adapter Rule

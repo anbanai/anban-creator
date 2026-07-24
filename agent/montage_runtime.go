@@ -14,7 +14,6 @@ import (
 
 var montageTaskInputNames = []string{
 	".anban-creator",
-	".task-context",
 	"CLAUDE.md",
 	"montage-input.json",
 	"montage-tool-policy.json",

@@ -46,7 +46,7 @@ const LocalClaimWindow = 30 * time.Second
 
 // LocalExecutionConfig is the full task config returned to a desktop local
 // executor on a successful claim. The desktop builds the anban run argv
-// from this (mirroring agent.DockerExecutor.buildAgentCommand) and supplies
+// from this (matching the managed bootstrap defaults) and supplies
 // server_url + the user's own API key from its local settings — those are NOT
 // echoed here (the desktop already holds them and echoing keys is unsafe).
 type LocalExecutionConfig struct {
@@ -127,7 +127,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 }
 
 // buildLocalExecutionConfig resolves the agent argv inputs for a task the same
-// way the cloud DockerExecutor does (default model from config, per-type
+// way managed runtime bootstrap does (default model from config, per-type
 // max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
 func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutionConfig {
 	return &LocalExecutionConfig{
@@ -316,6 +316,64 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	// separately as internal cost evidence and never becomes a retail deduction.
 	s.releaseSlotAndDispatch(ctx, task)
 	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
+	return nil
+}
+
+func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, userID string) error {
+	if task == nil || execution == nil || task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
+		return ErrStaleTaskExecution
+	}
+	resultJSON, err := marshalExecutionEvidence(&agent.ExecutionResult{
+		Success:         false,
+		Error:           "用户取消",
+		TerminalReason:  model.TaskBillingTerminalUserCancelled,
+		RemoteArtifacts: true,
+	})
+	if err != nil {
+		return err
+	}
+	var swapped bool
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		locked, err := tx.Tasks().FindByID(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		if userID != "" && locked.UserID != userID {
+			return fmt.Errorf("task not found")
+		}
+		if locked.CurrentExecutionID == nil || *locked.CurrentExecutionID != execution.ID {
+			return ErrStaleTaskExecution
+		}
+		current, err := tx.TaskExecutions().FindByID(ctx, execution.ID)
+		if err != nil {
+			return err
+		}
+		if current.Target != model.ExecutionTargetLocalClaimed {
+			return fmt.Errorf("local cancellation requires local_claimed execution")
+		}
+		swapped, err = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消", resultJSON, nil, "")
+		if err != nil || !swapped {
+			return err
+		}
+		return tx.Tasks().UpdateBillingTerminalReason(ctx, task.ID, model.TaskBillingTerminalUserCancelled)
+	})
+	if err != nil {
+		return fmt.Errorf("cancel local task: %w", err)
+	}
+	if !swapped {
+		return fmt.Errorf("task is not in a cancellable state")
+	}
+	task.Status = model.TaskStatusCancelled
+	s.notifyTerminal(ctx, task, model.TaskStatusCancelled, "用户取消")
+	if s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
+		s.pubsub.PublishCancel(ctx, task.ID)
+	}
+	if v, ok := s.cancelFuncs.Load(task.ID); ok {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			cancel()
+		}
+	}
 	return nil
 }
 

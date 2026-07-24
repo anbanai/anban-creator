@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -10,6 +12,20 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var (
+	// ErrRuntimeIdentityConflict reports attempted drift from a persisted non-empty identity member.
+	ErrRuntimeIdentityConflict = errors.New("runtime identity conflict")
+	// ErrRuntimeIdentityInactive reports identity writes rejected after an execution leaves its active states.
+	ErrRuntimeIdentityInactive = errors.New("runtime identity cannot be updated for inactive execution")
+)
+
+var activeTaskExecutionStatuses = []string{
+	model.TaskExecutionCreated,
+	model.TaskExecutionDispatching,
+	model.TaskExecutionStarting,
+	model.TaskExecutionRunning,
+}
 
 type taskExecutionRepository struct {
 	db *gorm.DB
@@ -38,6 +54,9 @@ func (r *taskExecutionRepository) ClaimDispatch(
 	id, token string,
 	leaseDuration time.Duration,
 ) (bool, error) {
+	if err := validateLeaseToken("dispatch", token); err != nil {
+		return false, err
+	}
 	result, err := buildDispatchClaimUpdate(r.db.WithContext(ctx), id, token, leaseDuration)
 	if err != nil {
 		return false, err
@@ -82,7 +101,52 @@ func buildDispatchClaimUpdate(db *gorm.DB, id, token string, leaseDuration time.
 		}), nil
 }
 
+func (r *taskExecutionRepository) RefreshDispatchClaim(ctx context.Context, id, token string) (bool, error) {
+	if err := validateLeaseToken("dispatch", token); err != nil {
+		return false, err
+	}
+	now, err := databaseNow(r.db)
+	if err != nil {
+		return false, fmt.Errorf("refresh dispatch claim: %w", err)
+	}
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND dispatch_claim_token = ?", id, token).
+		Update("dispatch_claimed_at", now)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+	current, err := r.findRuntimeIdentityState(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return current.DispatchClaimToken == token, nil
+}
+
+func (r *taskExecutionRepository) DispatchClaimActive(ctx context.Context, id string, leaseDuration time.Duration) (bool, error) {
+	_, stalePredicate, staleArg, _, err := databaseLeaseClock(r.db, "dispatch_claimed_at", leaseDuration)
+	if err != nil {
+		return false, fmt.Errorf("dispatch barrier: %w", err)
+	}
+	var count int64
+	err = r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND dispatch_claim_token <> ''", id).
+		Where("dispatch_claimed_at IS NULL OR NOT ("+stalePredicate+")", staleArg).
+		Count(&count).Error
+	return count == 1, err
+}
+
 func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token string) (bool, error) {
+	if err := validateLeaseToken("dispatch", token); err != nil {
+		return false, err
+	}
 	result := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
@@ -97,21 +161,41 @@ func (r *taskExecutionRepository) AbandonDispatch(ctx context.Context, id, token
 	return result.RowsAffected > 0, nil
 }
 
-func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error) {
-	result := r.db.WithContext(ctx).
+func (r *taskExecutionRepository) CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error) {
+	if err := validateLeaseToken("dispatch", token); err != nil {
+		return false, err
+	}
+	updates := map[string]any{
+		"status":               model.TaskExecutionStarting,
+		"dispatch_claim_token": "",
+		"dispatch_claimed_at":  nil,
+	}
+	query := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
-		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
-		Updates(map[string]any{
-			"status":               model.TaskExecutionStarting,
-			"dispatch_claim_token": "",
-			"dispatch_claimed_at":  nil,
-			"namespace":            namespace,
-			"job_name":             jobName,
-		})
+		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token)
+	query = addRuntimeIdentityUpdate(query, updates, identity)
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
 	}
-	return result.RowsAffected > 0, nil
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+
+	current, err := r.findRuntimeIdentityState(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if current.Status != model.TaskExecutionDispatching || current.DispatchClaimToken != token {
+		return false, nil
+	}
+	if err := runtimeIdentityConflict(current, identity); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (r *taskExecutionRepository) FailDispatch(
@@ -119,19 +203,20 @@ func (r *taskExecutionRepository) FailDispatch(
 	id, token, reason string,
 	diagnostics, executionResult []byte,
 ) (bool, error) {
+	if err := validateLeaseToken("dispatch", token); err != nil {
+		return false, err
+	}
 	result := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
 		Where("id = ? AND status = ? AND dispatch_claim_token = ?", id, model.TaskExecutionDispatching, token).
 		Updates(map[string]any{
-			"status":               model.TaskExecutionFailed,
-			"dispatch_claim_token": "",
-			"dispatch_claimed_at":  nil,
-			"terminal_reason":      reason,
-			"diagnostics":          diagnostics,
-			"result":               executionResult,
-			"finalization_status":  model.TaskExecutionFinalizationTerminal,
-			"cleanup_status":       model.TaskExecutionCleanupPending,
-			"completed_at":         time.Now(),
+			"status":              model.TaskExecutionFailed,
+			"terminal_reason":     reason,
+			"diagnostics":         diagnostics,
+			"result":              executionResult,
+			"finalization_status": model.TaskExecutionFinalizationTerminal,
+			"cleanup_status":      model.TaskExecutionCleanupPending,
+			"completed_at":        time.Now(),
 		})
 	if result.Error != nil {
 		return false, result.Error
@@ -175,25 +260,134 @@ func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before t
 	return executions, err
 }
 
-func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error {
-	updates := make(map[string]any, 3)
-	if namespace != "" {
-		updates["namespace"] = namespace
-	}
-	if jobName != "" {
-		updates["job_name"] = jobName
-	}
-	if podUID != "" {
-		updates["pod_uid"] = podUID
-	}
-	if len(updates) == 0 {
+func (r *taskExecutionRepository) SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error {
+	if identity.Scope == "" && identity.Workload == "" && identity.InstanceID == "" {
 		return nil
 	}
 
-	return r.db.WithContext(ctx).
+	updates := make(map[string]any, 3)
+	query := r.db.WithContext(ctx).
 		Model(&model.TaskExecution{}).
-		Where("id = ? AND status IN ?", id, []string{model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting, model.TaskExecutionRunning}).
-		Updates(updates).Error
+		Where("id = ? AND status IN ?", id, activeTaskExecutionStatuses)
+	query = addRuntimeIdentityUpdate(query, updates, identity)
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	current, err := r.findRuntimeIdentityState(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !isActiveTaskExecutionStatus(current.Status) {
+		return fmt.Errorf("%w: execution %s has status %s", ErrRuntimeIdentityInactive, id, current.Status)
+	}
+	return runtimeIdentityConflict(current, identity)
+}
+
+func (r *taskExecutionRepository) SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error) {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return false, err
+	}
+	if identity.Scope == "" || identity.Workload == "" || identity.InstanceID == "" {
+		return false, fmt.Errorf("complete recovered runtime identity is required")
+	}
+
+	updates := make(map[string]any, 3)
+	query := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND cleanup_status = ? AND cleanup_token = ?", id, model.TaskExecutionCleanupPending, token)
+	query = addRuntimeIdentityUpdate(query, updates, identity)
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+
+	current, err := r.findCleanupRuntimeIdentityState(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if current.CleanupStatus != model.TaskExecutionCleanupPending || current.CleanupToken != token {
+		return false, nil
+	}
+	if err := runtimeIdentityConflict(current, identity); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func addRuntimeIdentityUpdate(query *gorm.DB, updates map[string]any, identity model.RuntimeIdentity) *gorm.DB {
+	for _, member := range []struct {
+		column string
+		value  string
+	}{
+		{column: "runtime_scope", value: identity.Scope},
+		{column: "runtime_workload", value: identity.Workload},
+		{column: "runtime_instance_id", value: identity.InstanceID},
+	} {
+		if member.value == "" {
+			continue
+		}
+		updates[member.column] = member.value
+		query = query.Where("("+member.column+" IS NULL OR "+member.column+" = '' OR "+member.column+" = ?)", member.value)
+	}
+	return query
+}
+
+func (r *taskExecutionRepository) findRuntimeIdentityState(ctx context.Context, id string) (*model.TaskExecution, error) {
+	var execution model.TaskExecution
+	err := r.db.WithContext(ctx).
+		Select("id", "status", "dispatch_claim_token", "runtime_scope", "runtime_workload", "runtime_instance_id").
+		Where("id = ?", id).
+		First(&execution).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+func (r *taskExecutionRepository) findCleanupRuntimeIdentityState(ctx context.Context, id string) (*model.TaskExecution, error) {
+	var execution model.TaskExecution
+	err := r.db.WithContext(ctx).
+		Select("id", "cleanup_status", "cleanup_token", "runtime_scope", "runtime_workload", "runtime_instance_id").
+		Where("id = ?", id).
+		First(&execution).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+func runtimeIdentityConflict(current *model.TaskExecution, identity model.RuntimeIdentity) error {
+	for _, member := range []struct {
+		name      string
+		persisted string
+		supplied  string
+	}{
+		{name: "scope", persisted: current.RuntimeScope, supplied: identity.Scope},
+		{name: "workload", persisted: current.RuntimeWorkload, supplied: identity.Workload},
+		{name: "instance", persisted: current.RuntimeInstanceID, supplied: identity.InstanceID},
+	} {
+		if member.supplied != "" && member.persisted != "" && member.persisted != member.supplied {
+			return fmt.Errorf("%w: %s is %q, received %q", ErrRuntimeIdentityConflict, member.name, member.persisted, member.supplied)
+		}
+	}
+	return nil
+}
+
+func isActiveTaskExecutionStatus(status string) bool {
+	for _, active := range activeTaskExecutionStatuses {
+		if status == active {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string, now time.Time) error {
@@ -216,8 +410,8 @@ func (r *taskExecutionRepository) Transition(
 		updates["started"] = true
 		updates["started_at"] = now
 	}
-	if change.PodUID != "" {
-		updates["pod_uid"] = change.PodUID
+	if change.RuntimeInstanceID != "" {
+		updates["runtime_instance_id"] = change.RuntimeInstanceID
 	}
 	if change.ManifestStatus != "" {
 		updates["manifest_status"] = change.ManifestStatus
@@ -306,6 +500,9 @@ func (r *taskExecutionRepository) TransitionPublishing(ctx context.Context, id, 
 }
 
 func (r *taskExecutionRepository) ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error) {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return false, err
+	}
 	now, stalePredicate, staleArg, duePredicate, err := databaseLeaseClock(r.db, "cleanup_at", lease)
 	if err != nil {
 		return false, fmt.Errorf("cleanup lease: %w", err)
@@ -319,13 +516,22 @@ func (r *taskExecutionRepository) ClaimCleanup(ctx context.Context, id, token st
 }
 
 func (r *taskExecutionRepository) CompleteCleanup(ctx context.Context, id, token string) (bool, error) {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return false, err
+	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND cleanup_status = ? AND cleanup_token = ?", id, model.TaskExecutionCleanupPending, token).
-		Updates(map[string]any{"cleanup_status": model.TaskExecutionCleanupDone, "cleanup_token": "", "cleanup_at": nil, "cleanup_next_at": nil})
+		Updates(map[string]any{
+			"cleanup_status": model.TaskExecutionCleanupDone, "cleanup_token": "", "cleanup_at": nil, "cleanup_next_at": nil,
+			"dispatch_claim_token": "", "dispatch_claimed_at": nil,
+		})
 	return result.RowsAffected == 1, result.Error
 }
 
 func (r *taskExecutionRepository) FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error) {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return false, err
+	}
 	next, err := databaseFuture(r.db, backoff)
 	if err != nil {
 		return false, fmt.Errorf("cleanup retry backoff: %w", err)
@@ -389,9 +595,19 @@ func databaseFuture(db *gorm.DB, delay time.Duration) (clause.Expr, error) {
 }
 
 func (r *taskExecutionRepository) ReleaseCleanup(ctx context.Context, id, token string) error {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND cleanup_status = ? AND cleanup_token = ?", id, model.TaskExecutionCleanupPending, token).
 		Updates(map[string]any{"cleanup_token": "", "cleanup_at": nil}).Error
+}
+
+func validateLeaseToken(kind, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return fmt.Errorf("%s lease token is required", kind)
+	}
+	return nil
 }
 
 func isTerminalTaskExecutionStatus(status string) bool {

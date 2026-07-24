@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func testModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
@@ -50,9 +52,10 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
 			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
-			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".task-context", "text": "TASK_ID=task-1\n", "mode": 420}},
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".anban-creator/runtime-note.txt", "text": "managed\n", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(),
 			"runtime_env":         testClaudeRuntimeEnv(),
+			"artifact_transport":  map[string]any{"mode": "direct"},
 		}})
 	}))
 	defer server.Close()
@@ -64,8 +67,8 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	if response.ExecutionToken != executionToken {
 		t.Fatal("execution token was not returned")
 	}
-	got, err := os.ReadFile(filepath.Join(workspace, ".task-context"))
-	if err != nil || string(got) != "TASK_ID=task-1\n" {
+	got, err := os.ReadFile(filepath.Join(workspace, ".anban-creator", "runtime-note.txt"))
+	if err != nil || string(got) != "managed\n" {
 		t.Fatalf("materialized=%q err=%v", got, err)
 	}
 	projected, _ := os.ReadFile(tokenFile)
@@ -75,6 +78,66 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 	info, err := os.Lstat(filepath.Join(workspace, "output"))
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
 		t.Fatalf("runtime output = %#v, err=%v", info, err)
+	}
+}
+
+func TestBootstrapCreatesRuntimeOwnedOutput(t *testing.T) {
+	workspace := t.TempDir()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload-token\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
+			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
+			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
+		}})
+	}))
+	defer server.Close()
+
+	if _, err := testBootstrapJob(context.Background(), JobConfig{
+		ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile,
+	}); err != nil {
+		t.Fatalf("BootstrapJob: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(workspace, "output"))
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o750 {
+		t.Fatalf("runtime output = %#v, err=%v", info, err)
+	}
+}
+
+func TestBootstrapCreatesLiveSlicerOutputTree(t *testing.T) {
+	workspace := t.TempDir()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload-token\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+			"execution_token": executionToken, "task_id": "task-1", "task_type": model.TaskTypeLiveSlicer, "project_id": "project-1",
+			"prompt": "slice", "model": "sonnet", "max_turns": 160, "agent_flag": "anban:live-slicer",
+			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
+			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
+		}})
+	}))
+	defer server.Close()
+
+	if _, err := testBootstrapJob(context.Background(), JobConfig{
+		ServerURL: server.URL, ExecutionID: "execution-1", Workspace: workspace, WorkloadTokenFile: tokenFile,
+	}); err != nil {
+		t.Fatalf("BootstrapJob: %v", err)
+	}
+	for _, relative := range []string{"output", "output/exports", "output/exports/.parts"} {
+		assertRuntimeDirectory(t, filepath.Join(workspace, filepath.FromSlash(relative)))
+	}
+	if _, err := os.Lstat(filepath.Join(workspace, serveragent.MontageRuntimeDirName)); !os.IsNotExist(err) {
+		t.Fatalf("live-slicer Montage runtime path error = %v, want not exist", err)
 	}
 }
 
@@ -100,6 +163,7 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 			"prompt": "render", "model": "sonnet", "max_turns": 40, "agent_flag": "anban:montage",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": "montage-input.json", "text": "{}", "mode": 420}},
 			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
+			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
 	defer server.Close()
@@ -108,14 +172,14 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 		t.Fatalf("BootstrapJob: %v", err)
 	}
 	for _, name := range []string{"README.md", "montage-input.json"} {
-		if _, err := os.Stat(filepath.Join(workspace, "montage", name)); err != nil {
+		if _, err := os.Stat(filepath.Join(workspace, "openmontage", name)); err != nil {
 			t.Fatalf("Montage runtime missing %s: %v", name, err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "montage-input.json")); !os.IsNotExist(err) {
 		t.Fatalf("Montage input must not be materialized outside runtime: %v", err)
 	}
-	link, err := os.Readlink(filepath.Join(workspace, "montage", "output"))
+	link, err := os.Readlink(filepath.Join(workspace, "openmontage", "output"))
 	if err != nil || link != filepath.Join(workspace, "output") {
 		t.Fatalf("Montage output link = %q, err=%v", link, err)
 	}
@@ -184,6 +248,25 @@ func TestBootstrapProductionServerURLRequiresHTTPS(t *testing.T) {
 	}
 	if _, err := validateBootstrapServerURL("http://127.0.0.1:8080", true); err != nil {
 		t.Fatalf("test loopback rejected: %v", err)
+	}
+}
+
+func TestBootstrapJobRejectsHTTPByDefault(t *testing.T) {
+	_, err := BootstrapJob(context.Background(), JobConfig{
+		ServerURL: "http://creator-server:8080", ExecutionID: "execution-1", Workspace: t.TempDir(), WorkloadTokenFile: filepath.Join(t.TempDir(), "token"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("BootstrapJob HTTP error = %v, want default HTTPS rejection", err)
+	}
+}
+
+func TestValidateBootstrapServerURLAllowsExplicitManagedHTTPServer(t *testing.T) {
+	parsed, err := validateBootstrapServerURL("http://creator-server:8080", true)
+	if err != nil {
+		t.Fatalf("explicit managed HTTP server rejected: %v", err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "creator-server:8080" {
+		t.Fatalf("parsed URL = %s", parsed)
 	}
 }
 
@@ -270,6 +353,7 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
 			ModelUsageAliases: testModelUsageAliases(),
 			RuntimeEnv:        testClaudeRuntimeEnv(),
+			ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
 		}
 	}
 	tests := []struct {
@@ -304,6 +388,8 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			r.Env = map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
 		}},
 		{"too many files", func(r *BootstrapResponse) { r.Files = make([]BootstrapFile, maxBootstrapFiles+1) }},
+		{"missing artifact transport", func(r *BootstrapResponse) { r.ArtifactTransport.Mode = "" }},
+		{"unknown artifact transport", func(r *BootstrapResponse) { r.ArtifactTransport.Mode = "proxy" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -330,6 +416,7 @@ func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
 		ModelUsageAliases:   testModelUsageAliases(),
 		RuntimeEnv:          testClaudeRuntimeEnv(),
 		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
+		ArtifactTransport:   service.ArtifactTransport{Mode: ArtifactUploadStream},
 	}
 	if err := validateBootstrapResponse("execution-1", &response); err != nil {
 		t.Fatalf("validate bootstrap response: %v", err)
@@ -624,5 +711,5 @@ func testExecutionToken(t *testing.T, executionID, taskID, projectID string) str
 }
 
 func testBootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
-	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPLoopback: true})
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPServer: true})
 }

@@ -13,6 +13,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 const (
@@ -21,19 +23,23 @@ const (
 	KubernetesPodUIDExtra      = "authentication.kubernetes.io/pod-uid"
 )
 
-// KubernetesWorkloadIdentity is the verified Kubernetes object ownership chain.
-type KubernetesWorkloadIdentity struct {
-	Namespace      string
-	ServiceAccount string
-	PodName        string
-	PodUID         string
-	JobName        string
-	JobUID         string
-	ExecutionID    string
-	TaskID         string
-	ProjectID      string
-	UserID         string
-	JobDeadline    time.Time
+// WorkloadIdentity is the provider-neutral, verified identity of one runtime
+// instance and the execution ownership it is allowed to bootstrap. Target is
+// the provider kind; RuntimeIdentity fields remain provider-owned coordinates.
+type WorkloadIdentity struct {
+	model.RuntimeIdentity
+	Target      string
+	ExecutionID string
+	TaskID      string
+	ProjectID   string
+	UserID      string
+	Deadline    time.Time
+}
+
+// WorkloadVerifier authenticates a provider credential and resolves it to the
+// common runtime and execution ownership identity.
+type WorkloadVerifier interface {
+	Verify(context.Context, string, string) (*WorkloadIdentity, error)
 }
 
 type KubernetesWorkloadVerifier struct {
@@ -49,7 +55,7 @@ func NewKubernetesWorkloadVerifier(kube kubernetes.Interface, namespace, service
 	return &KubernetesWorkloadVerifier{kube: kube, namespace: namespace, serviceAccount: serviceAccount}, nil
 }
 
-func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requestedExecutionID string) (*KubernetesWorkloadIdentity, error) {
+func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requestedExecutionID string) (*WorkloadIdentity, error) {
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(requestedExecutionID) == "" {
 		return nil, errors.New("workload token and execution ID are required")
 	}
@@ -127,7 +133,15 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 			return nil, errors.New("bound Pod and owning Job runtime identity labels conflict")
 		}
 	}
-	return &KubernetesWorkloadIdentity{Namespace: v.namespace, ServiceAccount: v.serviceAccount, PodName: podName, PodUID: podUID, JobName: job.Name, JobUID: string(job.UID), ExecutionID: requestedExecutionID, TaskID: labels[kubernetesTaskIDLabel], ProjectID: labels[kubernetesProjectIDLabel], UserID: labels[kubernetesUserIDLabel], JobDeadline: jobDeadline}, nil
+	return &WorkloadIdentity{
+		RuntimeIdentity: model.RuntimeIdentity{Scope: v.namespace, Workload: job.Name, InstanceID: string(job.UID)},
+		Target:          "kubernetes",
+		ExecutionID:     requestedExecutionID,
+		TaskID:          labels[kubernetesTaskIDLabel],
+		ProjectID:       labels[kubernetesProjectIDLabel],
+		UserID:          labels[kubernetesUserIDLabel],
+		Deadline:        jobDeadline,
+	}, nil
 }
 
 func terminalJobCondition(conditions []batchv1.JobCondition) bool {

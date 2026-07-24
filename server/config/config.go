@@ -588,20 +588,22 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns the direct provider contract for every Claude runtime.
 type ClaudeConfig struct {
-	Provider       string             `yaml:"provider" json:"provider"`
-	BaseURL        string             `yaml:"base_url" json:"base_url"`
-	AuthToken      string             `yaml:"auth_token" json:"-"`
-	Models         ClaudeModelsConfig `yaml:"models" json:"models"`
-	UsageAliases   map[string]string  `yaml:"model_usage_aliases" json:"model_usage_aliases"`
-	Executor       string             `yaml:"executor"` // "local" (default), "docker", or "kubernetes"
-	Env            map[string]string  `yaml:"env"`
-	PluginDir      string             `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox        bool               `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker         DockerConfig       `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes     KubernetesConfig   `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns       map[string]int     `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir     string             `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL string             `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	Provider             string             `yaml:"provider" json:"provider"`
+	BaseURL              string             `yaml:"base_url" json:"base_url"`
+	AuthToken            string             `yaml:"auth_token" json:"-"`
+	Models               ClaudeModelsConfig `yaml:"models" json:"models"`
+	UsageAliases         map[string]string  `yaml:"model_usage_aliases" json:"model_usage_aliases"`
+	Executor             string             `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages        RuntimeImages      `yaml:"runtime_images"`
+	ExecutionTokenSecret string             `yaml:"execution_token_secret" json:"-"`
+	Env                  map[string]string  `yaml:"env"`
+	PluginDir            string             `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox              bool               `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker               DockerConfig       `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes           KubernetesConfig   `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns             map[string]int     `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir           string             `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL       string             `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 type ClaudeModelsConfig struct {
@@ -626,7 +628,8 @@ const (
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"provider": true, "base_url": true, "auth_token": true, "models": true,
-		"model_usage_aliases": true, "executor": true, "env": true, "plugin_dir": true,
+		"model_usage_aliases": true, "executor": true, "runtime_images": true,
+		"execution_token_secret": true, "env": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
 	}
@@ -770,6 +773,22 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, "claude.model_usage_aliases."+raw+" must not remap a canonical Claude model")
 		}
 	}
+	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage}
+	for _, profile := range requiredRuntimeProfiles {
+		image, ok := c.RuntimeImages[profile]
+		if !ok {
+			errs = append(errs, "claude.runtime_images."+profile+" is required")
+			continue
+		}
+		if strings.TrimSpace(image) == "" {
+			errs = append(errs, "claude.runtime_images."+profile+" must not be empty")
+		}
+	}
+	for profile := range c.RuntimeImages {
+		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage {
+			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
+		}
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
@@ -778,24 +797,23 @@ func (c ClaudeConfig) Validate() error {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	ArticleImage  string            `yaml:"article_image"`  // Article image (default: "creator-agent-article:latest")
-	ImageProfiles map[string]string `yaml:"image_profiles"` // Images for task types with additional runtime dependencies
-	CPUCores      int64             `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
-	MemoryMB      int64             `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
-	TimeoutSec    int               `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
-	ContainerName string            `yaml:"container_name"` // Persistent Article container; profile tasks use one-shot containers and inherit its volumes
-	WorkspaceDir  string            `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
+	Network       string `yaml:"network"`
+	CPUCores      int64  `yaml:"cpu_cores"`
+	cpuCoresSet   bool   `yaml:"-"`
+	MemoryMB      int64  `yaml:"memory_mb"`
+	memoryMBSet   bool   `yaml:"-"`
+	PidsLimit     int64  `yaml:"pids_limit"`
+	pidsLimitSet  bool   `yaml:"-"`
+	TimeoutSec    int    `yaml:"timeout_sec"`
+	timeoutSecSet bool   `yaml:"-"`
 }
 
 // KubernetesConfig holds ACK/Kubernetes Job runtime settings.
 type KubernetesConfig struct {
-	Namespace            string            `yaml:"namespace"`
-	ArticleImage         string            `yaml:"article_image"`
-	ImageProfiles        map[string]string `yaml:"image_profiles"`
-	ServiceAccount       string            `yaml:"service_account"`
-	ImagePullSecret      string            `yaml:"image_pull_secret"`
-	ServerCASecret       string            `yaml:"server_ca_secret"`
-	ExecutionTokenSecret string            `yaml:"execution_token_secret"`
+	Namespace       string `yaml:"namespace"`
+	ServiceAccount  string `yaml:"service_account"`
+	ImagePullSecret string `yaml:"image_pull_secret"`
+	ServerCASecret  string `yaml:"server_ca_secret"`
 
 	NASStorageClass         string                              `yaml:"nas_storage_class"`
 	ProjectMemorySize       string                              `yaml:"project_memory_size"`
@@ -816,36 +834,75 @@ type RuntimeImageSelection struct {
 	Image   string
 }
 
-func imageForTask(articleImage string, profiles map[string]string, taskType string) RuntimeImageSelection {
-	taskType = strings.TrimSpace(taskType)
-	if image := strings.TrimSpace(profiles[taskType]); image != "" {
-		return RuntimeImageSelection{Profile: taskType, Image: image}
-	}
-	return RuntimeImageSelection{Profile: model.PlatformArticle, Image: strings.TrimSpace(articleImage)}
-}
+type RuntimeImages map[string]string
 
-func (c DockerConfig) ImageForTask(taskType string) RuntimeImageSelection {
-	return imageForTask(c.ArticleImage, c.ImageProfiles, taskType)
-}
-
-func (c KubernetesConfig) ImageForTask(taskType string) RuntimeImageSelection {
-	return imageForTask(c.ArticleImage, c.ImageProfiles, taskType)
-}
-
-func isAgentImageProfileTaskType(taskType string) bool {
-	switch taskType {
-	case model.PlatformArticle,
-		model.PlatformSeednote,
-		model.PlatformMoments,
-		model.PlatformEcommerce,
-		model.PlatformMontage:
-		return true
+func canonicalRuntimeProfile(taskType string) string {
+	switch strings.TrimSpace(taskType) {
+	case model.PlatformSeednote:
+		return model.PlatformSeednote
+	case model.PlatformMontage:
+		return model.PlatformMontage
+	case model.TaskTypeLiveSlicer:
+		return model.PlatformMontage
 	default:
-		return false
+		return model.PlatformArticle
 	}
+}
+
+func (c RuntimeImages) ForTask(taskType string) RuntimeImageSelection {
+	profile := canonicalRuntimeProfile(taskType)
+	return RuntimeImageSelection{Profile: profile, Image: strings.TrimSpace(c[profile])}
+}
+
+func (c *DockerConfig) UnmarshalYAML(value *yaml.Node) error {
+	known := map[string]bool{
+		"network": true, "cpu_cores": true, "memory_mb": true,
+		"pids_limit": true, "timeout_sec": true,
+	}
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("claude.docker config must be a mapping")
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		if key := value.Content[i].Value; !known[key] {
+			return fmt.Errorf("unknown claude.docker config field %q", key)
+		}
+	}
+	type plain DockerConfig
+	if err := value.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		switch value.Content[i].Value {
+		case "cpu_cores":
+			c.cpuCoresSet = true
+		case "memory_mb":
+			c.memoryMBSet = true
+		case "pids_limit":
+			c.pidsLimitSet = true
+		case "timeout_sec":
+			c.timeoutSecSet = true
+		}
+	}
+	return nil
 }
 
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
+	known := map[string]bool{
+		"namespace": true, "service_account": true, "image_pull_secret": true,
+		"server_ca_secret": true, "nas_storage_class": true,
+		"project_memory_size": true, "task_workspace_size": true,
+		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
+		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
+		"pre_start_retry_limit": true, "resources": true, "resource_profiles": true,
+	}
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("claude.kubernetes config must be a mapping")
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		if key := value.Content[i].Value; !known[key] {
+			return fmt.Errorf("unknown claude.kubernetes config field %q", key)
+		}
+	}
 	type rawKubernetesConfig KubernetesConfig
 	var raw rawKubernetesConfig
 	if err := value.Decode(&raw); err != nil {
@@ -1026,18 +1083,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 			return fmt.Errorf("unknown top-level config key %s", key)
 		}
 	}
-	if claude, ok := top["claude"].(map[string]any); ok {
-		if docker, ok := claude["docker"].(map[string]any); ok {
-			if _, ok := docker["image"]; ok {
-				return fmt.Errorf("deprecated config key claude.docker.image; use claude.docker.article_image")
-			}
-		}
-		if kubernetes, ok := claude["kubernetes"].(map[string]any); ok {
-			if _, ok := kubernetes["agent_image"]; ok {
-				return fmt.Errorf("deprecated config key claude.kubernetes.agent_image; use claude.kubernetes.article_image")
-			}
-		}
-	}
 	if modelRoutes, ok := top["model_routes"].(map[string]any); ok {
 		if imageGeneration, ok := modelRoutes["image_generation"].(map[string]any); ok {
 			if _, ok := imageGeneration["sizes"]; ok {
@@ -1201,9 +1246,6 @@ func (c *Config) applyDefaults() {
 	}
 
 	// Claude executor defaults.
-	if c.Claude.Executor == "" {
-		c.Claude.Executor = "local"
-	}
 	defaultMaxTurns := map[string]int{
 		"moments":        25,
 		"viral_analysis": 30,
@@ -1220,25 +1262,19 @@ func (c *Config) applyDefaults() {
 			}
 		}
 	}
-	if c.Claude.Docker.ArticleImage == "" {
-		c.Claude.Docker.ArticleImage = "creator-agent-article:latest"
+	if c.Claude.Docker.Network == "" {
+		c.Claude.Docker.Network = "anban-creator-network"
 	}
-	if c.Claude.Docker.ImageProfiles == nil {
-		c.Claude.Docker.ImageProfiles = map[string]string{}
-	}
-	if _, ok := c.Claude.Docker.ImageProfiles[model.PlatformSeednote]; !ok {
-		c.Claude.Docker.ImageProfiles[model.PlatformSeednote] = "creator-agent-seednote:latest"
-	}
-	if _, ok := c.Claude.Docker.ImageProfiles[model.PlatformMontage]; !ok {
-		c.Claude.Docker.ImageProfiles[model.PlatformMontage] = "creator-agent-montage:latest"
-	}
-	if c.Claude.Docker.CPUCores == 0 {
+	if c.Claude.Docker.CPUCores == 0 && !c.Claude.Docker.cpuCoresSet {
 		c.Claude.Docker.CPUCores = 2
 	}
-	if c.Claude.Docker.MemoryMB == 0 {
+	if c.Claude.Docker.MemoryMB == 0 && !c.Claude.Docker.memoryMBSet {
 		c.Claude.Docker.MemoryMB = 4096
 	}
-	if c.Claude.Docker.TimeoutSec == 0 {
+	if c.Claude.Docker.PidsLimit == 0 && !c.Claude.Docker.pidsLimitSet {
+		c.Claude.Docker.PidsLimit = 512
+	}
+	if c.Claude.Docker.TimeoutSec == 0 && !c.Claude.Docker.timeoutSecSet {
 		// Default 3600s (60m) to stay >= asynq.content_generate_timeout (60m).
 		// The container must outlive the task deadline, otherwise it is killed
 		// before the agent finishes (silent partial failure).
@@ -1524,12 +1560,6 @@ func (c *Config) resolvePaths(rootConfigDir string) {
 			c.Claude.PluginDir = abs
 		}
 	}
-	// Resolve docker workspace_dir to absolute path if relative.
-	if c.Claude.Docker.WorkspaceDir != "" && !filepath.IsAbs(c.Claude.Docker.WorkspaceDir) {
-		if abs, err := filepath.Abs(c.Claude.Docker.WorkspaceDir); err == nil {
-			c.Claude.Docker.WorkspaceDir = abs
-		}
-	}
 	// Resolve task_log_dir to absolute path if relative.
 	if c.Claude.TaskLogDir != "" && !filepath.IsAbs(c.Claude.TaskLogDir) {
 		if abs, err := filepath.Abs(c.Claude.TaskLogDir); err == nil {
@@ -1698,35 +1728,33 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.Claude.Executor {
-	case "local", "docker", "kubernetes":
+	case "docker", "kubernetes":
 	default:
-		errs = append(errs, fmt.Sprintf("claude.executor must be 'local', 'docker', or 'kubernetes', got %q", c.Claude.Executor))
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'docker' or 'kubernetes', got %q", c.Claude.Executor))
+	}
+	if len(c.Claude.ExecutionTokenSecret) < 32 {
+		errs = append(errs, "claude.execution_token_secret must be at least 32 bytes")
 	}
 
 	// When using the Docker executor, the container timeout must be at least as
 	// long as content_generate_timeout, otherwise the container is killed before
 	// the asynq task deadline (the agent's work is lost mid-pipeline).
 	if c.Claude.Executor == "docker" {
-		if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
+		if c.Claude.Docker.CPUCores <= 0 {
+			errs = append(errs, "claude.docker.cpu_cores must be positive")
+		}
+		if c.Claude.Docker.MemoryMB <= 0 {
+			errs = append(errs, "claude.docker.memory_mb must be positive")
+		}
+		if c.Claude.Docker.PidsLimit <= 0 {
+			errs = append(errs, "claude.docker.pids_limit must be positive")
+		}
+		if c.Claude.Docker.TimeoutSec <= 0 {
+			errs = append(errs, "claude.docker.timeout_sec must be positive")
+		} else if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
 			errs = append(errs, fmt.Sprintf(
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
 				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))
-		}
-		if strings.TrimSpace(c.Claude.Docker.ArticleImage) == "" {
-			errs = append(errs, "claude.docker.article_image is required")
-		}
-		for _, taskType := range []string{model.PlatformSeednote, model.PlatformMontage} {
-			if strings.TrimSpace(c.Claude.Docker.ImageProfiles[taskType]) == "" {
-				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles.%s is required", taskType))
-			}
-		}
-		for taskType, image := range c.Claude.Docker.ImageProfiles {
-			if !isAgentImageProfileTaskType(taskType) {
-				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles contains unsupported task type %q", taskType))
-			}
-			if strings.TrimSpace(image) == "" {
-				errs = append(errs, fmt.Sprintf("claude.docker.image_profiles.%s must not be empty", taskType))
-			}
 		}
 	}
 
@@ -1748,30 +1776,11 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
 		}
-		if strings.TrimSpace(c.Claude.Kubernetes.ArticleImage) == "" {
-			errs = append(errs, "claude.kubernetes.article_image is required")
-		}
-		for _, taskType := range []string{model.PlatformSeednote, model.PlatformMontage} {
-			if strings.TrimSpace(c.Claude.Kubernetes.ImageProfiles[taskType]) == "" {
-				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s is required", taskType))
-			}
-		}
-		for taskType, image := range c.Claude.Kubernetes.ImageProfiles {
-			if !isAgentImageProfileTaskType(taskType) {
-				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles contains unsupported task type %q", taskType))
-			}
-			if strings.TrimSpace(image) == "" {
-				errs = append(errs, fmt.Sprintf("claude.kubernetes.image_profiles.%s must not be empty", taskType))
-			}
-		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 			errs = append(errs, "claude.kubernetes.service_account is required")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
 			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
-		}
-		if len(c.Claude.Kubernetes.ExecutionTokenSecret) < 32 {
-			errs = append(errs, "claude.kubernetes.execution_token_secret must be at least 32 bytes")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.nas_storage_class is required")

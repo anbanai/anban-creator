@@ -196,6 +196,7 @@ type Task struct {
 	CurrentExecutionID *string                          `gorm:"type:char(36);index" json:"current_execution_id,omitempty"`
 	LocalClaimDeadline *time.Time                       `gorm:"index" json:"local_claim_deadline,omitempty"`
 	ExecutorInfo       datatypes.JSONType[ExecutorMeta] `gorm:"type:json" json:"executor_info"`
+	DeletingAt         *time.Time                       `gorm:"index" json:"-"`
 
 	CreatedAt time.Time `gorm:"index:idx_user_created,priority:2" json:"created_at"`
 	UpdatedAt time.Time `gorm:"index" json:"updated_at"`

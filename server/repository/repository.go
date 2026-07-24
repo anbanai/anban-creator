@@ -82,6 +82,7 @@ type PlanRepository interface {
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
@@ -139,6 +140,8 @@ type TaskRepository interface {
 	// claimed it). Used by the fallback worker before re-enqueueing an
 	// unclaimed local task.
 	ResetLocalTarget(ctx context.Context, taskID string) (bool, error)
+	BeginDelete(ctx context.Context, taskID string) (bool, error)
+	DeleteIfDeleting(ctx context.Context, taskID string) (bool, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusForUser(ctx context.Context, taskID, userID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
@@ -208,13 +211,16 @@ type TaskExecutionRepository interface {
 	Create(ctx context.Context, execution *model.TaskExecution) error
 	NextAttempt(ctx context.Context, taskID string) (int, error)
 	ClaimDispatch(ctx context.Context, id, token string, leaseDuration time.Duration) (bool, error)
+	RefreshDispatchClaim(ctx context.Context, id, token string) (bool, error)
+	DispatchClaimActive(ctx context.Context, id string, leaseDuration time.Duration) (bool, error)
 	AbandonDispatch(ctx context.Context, id, token string) (bool, error)
-	CompleteDispatch(ctx context.Context, id, token, namespace, jobName string) (bool, error)
+	CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
-	SetRuntimeIdentity(ctx context.Context, id, namespace, jobName, podUID string) error
+	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
+	SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
@@ -243,6 +249,8 @@ type UploadSessionRepository interface {
 	CompleteExpiration(ctx context.Context, id, claimID string, expiredAt time.Time) (bool, error)
 	ReopenExpiration(ctx context.Context, id, claimID string) (bool, error)
 	RescheduleExpiration(ctx context.Context, id, claimID string, nextCleanupAt time.Time) (bool, error)
+	ScheduleTaskArtifactExpiration(ctx context.Context, id string, expiresAt time.Time) error
+	ScheduleTaskArtifactPrefixExpiration(ctx context.Context, userID, stagingPrefix string, expiresAt time.Time) error
 }
 
 // AssetRepository provides access to immutable finalized upload assets.

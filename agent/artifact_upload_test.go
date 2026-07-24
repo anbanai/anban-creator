@@ -29,10 +29,27 @@ type fakeArtifactReporter struct {
 	prepared       []ArtifactPrepareRequest
 	prepareResult  *ArtifactPrepareResponse
 	prepareErrors  []error
+	streamed       []ArtifactStreamRequest
+	bodies         []string
 	manifest       ArtifactManifestRequest
 	manifestCalls  int
 	manifestErrors []error
 	progress       []string
+}
+
+func (f *fakeArtifactReporter) StreamArtifactContent(_ context.Context, req ArtifactStreamRequest, body io.Reader) (*ArtifactStreamResponse, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	f.streamed = append(f.streamed, req)
+	f.bodies = append(f.bodies, string(data))
+	return &ArtifactStreamResponse{
+		ObjectKey:   "uploads/users/u/projects/p/tasks/" + req.TaskID + "/executions/" + req.ExecutionID + "/artifacts/staging/" + req.RelativePath,
+		ContentType: req.ContentType,
+		Size:        req.Size,
+		SHA256:      req.SHA256,
+	}, nil
 }
 
 func (f *fakeArtifactReporter) PrepareArtifactUpload(_ context.Context, req ArtifactPrepareRequest) (*ArtifactPrepareResponse, error) {
@@ -483,6 +500,40 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 	}
 	if got := reporter.progress; len(got) != 1 || got[0] != "collected 1 workspace artifact(s)" {
 		t.Fatalf("progress = %#v, want collected artifact progress", got)
+	}
+}
+
+func TestArtifactUploaderUsesConfiguredTransport(t *testing.T) {
+	for _, mode := range []string{ArtifactUploadDirect, ArtifactUploadStream} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			writeAgentArtifactTestFile(t, root, "output/article.md", "artifact-body")
+			reporter := &fakeArtifactReporter{}
+			uploader := NewArtifactUploader(&Config{
+				TaskID: "task-1", ExecutionID: "execution-1", TaskType: "article",
+				Workspace: root, ArtifactUploadMode: mode,
+			}, reporter)
+			directCalls := 0
+			uploader.putObject = func(_ context.Context, _ *ArtifactPrepareResponse, source io.Reader, _ string) (string, error) {
+				directCalls++
+				_, err := io.Copy(io.Discard, source)
+				return "etag", err
+			}
+
+			if err := uploader.UploadWorkspaceArtifacts(t.Context(), &serveragent.ExecutionResult{WorkDir: root}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == ArtifactUploadDirect {
+				if directCalls != 1 || len(reporter.prepared) != 1 || len(reporter.streamed) != 0 {
+					t.Fatalf("direct calls=%d prepared=%d streamed=%d", directCalls, len(reporter.prepared), len(reporter.streamed))
+				}
+			} else if directCalls != 0 || len(reporter.prepared) != 0 || len(reporter.streamed) != 1 || reporter.bodies[0] != "artifact-body" {
+				t.Fatalf("stream calls=%d prepared=%d streamed=%d bodies=%#v", directCalls, len(reporter.prepared), len(reporter.streamed), reporter.bodies)
+			}
+			if len(reporter.manifest.Files) != 1 || reporter.manifest.Files[0].ObjectKey == "" {
+				t.Fatalf("manifest = %#v", reporter.manifest)
+			}
+		})
 	}
 }
 

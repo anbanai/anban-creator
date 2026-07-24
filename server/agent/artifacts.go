@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,11 +30,6 @@ func (v ArtifactValidation) Error() string {
 		return "missing required deliverables: " + strings.Join(v.Missing, ", ")
 	}
 	return "no required deliverables found"
-}
-
-func ValidateTaskArtifactsFromWorkDir(task *model.Task, workDir string) ArtifactValidation {
-	files, count := collectWorkDirArtifacts(workDir)
-	return validateTaskArtifacts(task, files, count)
 }
 
 func ValidateTaskArtifactsFromTaskFiles(task *model.Task, taskFiles []*model.TaskFile) ArtifactValidation {
@@ -164,41 +157,6 @@ func hasSeednoteContentImage(files map[string]bool) bool {
 	return false
 }
 
-func collectWorkDirArtifacts(workDir string) (map[string]bool, int) {
-	files := make(map[string]bool)
-	if workDir == "" {
-		return files, 0
-	}
-	scanDir := workDir
-	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
-		scanDir = filepath.Join(workDir, "output")
-	}
-
-	meaningful := 0
-	_ = filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".anban-creator", ".claude", DockerRuntimeHomeDirName:
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, relErr := filepath.Rel(scanDir, path)
-		if relErr != nil {
-			rel = path
-		}
-		addArtifactPath(files, rel)
-		if isDeliverableArtifact(rel) {
-			meaningful++
-		}
-		return nil
-	})
-	return files, meaningful
-}
-
 func addArtifactPath(files map[string]bool, path string) {
 	path = strings.TrimSpace(filepath.ToSlash(path))
 	if path == "" {
@@ -217,7 +175,7 @@ func isDeliverableArtifact(path string) bool {
 		return false
 	}
 	switch base {
-	case "claude.md", ".task-context", "settings.json", ".mcp.json":
+	case "claude.md", "settings.json", ".mcp.json":
 		return false
 	default:
 		return true

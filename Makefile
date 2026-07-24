@@ -21,6 +21,8 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
+.PHONY: docker-runtime-smoke
+
 # Default target
 all: server-build
 
@@ -93,11 +95,13 @@ server-build:
 
 # Build and run the server
 server-run: server-build
-	./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+		./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
 
 # Run the server via go run (development)
 server-dev:
-	@cd server && go run . -config config.yaml
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+		cd server && go run . -config config.yaml
 
 # Run server tests
 server-test:
@@ -123,9 +127,9 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Build task-specific runtimes, then start all Compose services. The content
-# image is built by Compose itself; profile images are launched on demand.
-docker-up: docker-seednote-agent-image docker-montage-agent-image
+# Build all one-shot task runtimes, then start the Compose services. Runtime
+# containers are launched on demand by the server and are not Compose services.
+docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -156,6 +160,10 @@ docker-montage-agent-image:
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
+
+# The script owns its Docker availability check and all isolated smoke builds.
+docker-runtime-smoke:
+	@deploy/docker/runtime-smoke.sh
 
 # Build the anban-creator-server Docker image
 docker-server-image:
@@ -243,6 +251,7 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build Seednote agent image with Agent-Reach"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"

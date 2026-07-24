@@ -66,7 +66,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 				}
 			}
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			h := NewTaskHandler(taskSvc, &logger)
@@ -151,7 +151,7 @@ func TestPlanAndTaskReadResponsesPresentRepositoryAssets(t *testing.T) {
 	planSvc.SetReferenceAssetService(referenceSvc)
 	planHandler := NewPlanHandler(planSvc, &logger)
 	planHandler.SetReferenceAssetService(referenceSvc)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	taskHandler := NewTaskHandler(taskSvc, &logger)
 	taskHandler.SetRepository(repo)
@@ -211,7 +211,7 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -383,7 +383,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -461,7 +461,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			}
 			repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 			taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
 			h := NewTaskHandler(taskSvc, &logger)
 			h.SetRepository(repo)
@@ -508,7 +508,7 @@ func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesV
 	repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -553,7 +553,7 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -594,7 +594,7 @@ func TestResumeSigningFailureDoesNotMutateTask(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)

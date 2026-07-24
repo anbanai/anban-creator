@@ -85,7 +85,7 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 	now := time.Now()
 	reaped := 0
 	for _, t := range tasks {
-		// Durable cloud executions are owned by KubernetesReconciler. The legacy
+		// Durable managed executions are owned by RuntimeReconciler. The legacy
 		// task-only reaper must not race that authoritative state machine.
 		if t.CurrentExecutionID != nil {
 			continue

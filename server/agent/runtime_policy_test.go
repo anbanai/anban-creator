@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -134,12 +135,46 @@ func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
 		"generate_image",
 		"get_project_profile",
 		"list_project_titles",
-		"prepare_workspace",
 		"submit_agent_feedback",
 		"update_task_progress",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedRequiredMCPTools(\"seednote\") = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateManagedMCPStatusRequiresNamespacedLiveSlicerTools(t *testing.T) {
+	want := []string{
+		"build_live_clip_manifest",
+		"build_live_clip_plan",
+		"build_live_subject_clip_plan",
+		"complete_live_subject",
+		"create_live_analysis_task",
+		"get_media_pipeline_status",
+		"prepare_file_upload",
+		"query_live_analysis_task",
+		"recognize_live_invalid_sentences",
+		"recognize_live_segments",
+		"recognize_live_subjects",
+		"submit_agent_feedback",
+		"update_task_progress",
+	}
+	if got := managedRequiredMCPTools(model.TaskTypeLiveSlicer); !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedRequiredMCPTools(live-slicer) = %#v, want %#v", got, want)
+	}
+	tools := make([]claudecode.McpToolInfo, 0, len(want))
+	for _, name := range want {
+		tools = append(tools, claudecode.McpToolInfo{Name: "mcp__anban__" + name})
+	}
+	status := &claudecode.McpStatusResponse{McpServers: []claudecode.McpServerStatus{{
+		Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: tools,
+	}}}
+	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err != nil {
+		t.Fatalf("ValidateManagedMCPStatus namespaced tools: %v", err)
+	}
+	status.McpServers[0].Tools = status.McpServers[0].Tools[1:]
+	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err == nil || !strings.Contains(err.Error(), "build_live_clip_manifest") {
+		t.Fatalf("error = %v, want missing build_live_clip_manifest", err)
 	}
 }
 
@@ -235,6 +270,7 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 		},
 		{taskType: "article", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
 		{taskType: "ecommerce", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
+		{taskType: model.TaskTypeLiveSlicer, skills: []any{"anban:live-slice", "anban:capcut-draft"}, missing: "anban:live-slice"},
 	} {
 		t.Run(tc.taskType, func(t *testing.T) {
 			message := &claudecode.SystemMessage{
@@ -279,44 +315,23 @@ func TestValidateManagedPluginResultPreservesProtocolErrorsAndFailsClosed(t *tes
 	}
 }
 
-func TestManagedAgentExecutorsUseRuntimePolicy(t *testing.T) {
-	for _, path := range []string{
-		"executor.go",
-		"../../agent/runner.go",
-	} {
-		t.Run(path, func(t *testing.T) {
-			text := readRepoFile(t, path)
-			if !strings.Contains(text, "WithManagedAgentRuntimePolicy()") {
-				t.Fatalf("%s must apply WithManagedAgentRuntimePolicy()", path)
-			}
-		})
-	}
-
-	localExecutor := readRepoFile(t, "executor.go")
+func TestStandaloneAgentRunnerUsesRuntimePolicy(t *testing.T) {
+	body := readRepoFile(t, "../../agent/runner.go")
 	for _, want := range []string{
-		`agentFlag := "anban:" + agentName`,
-		`claudecode.WithExtraArgs(map[string]*string{"agent": &agentFlag})`,
+		"WithManagedAgentRuntimePolicy()",
+		"claudecode.WithPermissionMode(claudecode.PermissionModeDefault)",
+		"client.ReceiveResponse(ctx)",
 	} {
-		if !strings.Contains(localExecutor, want) {
-			t.Fatalf("local executor must start the plugin agent as the main session via %q", want)
+		if !strings.Contains(body, want) {
+			t.Fatalf("standalone Agent runner must retain managed runtime contract %q", want)
 		}
 	}
-	if strings.Contains(localExecutor, "claudecode.WithAgent(agentName") {
-		t.Fatal("local executor must not register the workflow agent as a delegatable subagent")
-	}
-	for _, path := range []string{"executor.go", "../../agent/runner.go"} {
-		body := readRepoFile(t, path)
-		if !strings.Contains(body, "claudecode.WithPermissionMode(claudecode.PermissionModeDefault)") {
-			t.Fatalf("%s must use default permission evaluation with the managed fail-closed callback", path)
-		}
-		if strings.Contains(body, "claudecode.PermissionModeBypassPermissions") {
-			t.Fatalf("%s must not bypass the managed allowlist", path)
-		}
-		if !strings.Contains(body, "client.ReceiveResponse(ctx)") {
-			t.Fatalf("%s must consume the SDK response iterator so asynchronous stream errors are preserved", path)
-		}
-		if strings.Contains(body, "client.ReceiveMessages(ctx)") {
-			t.Fatalf("%s must not discard SDK stream errors through the message-only channel", path)
+	for _, forbidden := range []string{
+		"claudecode.PermissionModeBypassPermissions",
+		"client.ReceiveMessages(ctx)",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("standalone Agent runner retains forbidden runtime behavior %q", forbidden)
 		}
 	}
 }

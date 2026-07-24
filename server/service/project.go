@@ -309,32 +309,63 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 	if ch.UserID != userID {
 		return ErrProjectOwnedByUser
 	}
+	acquired, err := s.repo.Projects().BeginDelete(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("begin project delete: %w", err)
+	}
+	ch, err = s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("reload project delete authority: %w", err)
+	}
+	if !acquired && ch.DeletingAt == nil {
+		return fmt.Errorf("begin project delete: deletion authority was not acquired")
+	}
+	releaseBarrier := func(original error) error {
+		if !acquired {
+			return original
+		}
+		released, releaseErr := s.repo.Projects().CancelDelete(context.WithoutCancel(ctx), projectID)
+		if releaseErr != nil {
+			return errors.Join(original, fmt.Errorf("release project delete barrier: %w", releaseErr))
+		}
+		if !released {
+			return errors.Join(original, errors.New("release project delete barrier: authority was lost"))
+		}
+		return original
+	}
 
 	// Check if the project has associated tasks.
 	stats, err := s.repo.Projects().GetStats(ctx, projectID)
 	if err != nil {
-		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to get project stats before delete")
+		return releaseBarrier(fmt.Errorf("get project stats before delete: %w", err))
 	}
 	if stats != nil && stats.TotalTasks > 0 {
-		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated tasks; archive it instead", stats.TotalTasks)}
+		return releaseBarrier(projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated tasks; archive it instead", stats.TotalTasks)})
 	}
 
 	// Check if the project has associated plans.
 	planCount, err := s.repo.Plans().CountByUserID(ctx, userID, projectID)
 	if err != nil {
-		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to count plans before delete")
+		return releaseBarrier(fmt.Errorf("count project plans before delete: %w", err))
 	}
 	if planCount > 0 {
-		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated plans; archive it instead", planCount)}
+		return releaseBarrier(projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated plans; archive it instead", planCount)})
 	}
 
-	if err := s.repo.Projects().Delete(ctx, projectID); err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
 	if s.memory != nil {
 		if err := s.memory.DeleteProjectMemory(ctx, projectID); err != nil {
 			return fmt.Errorf("delete project memory: %w", err)
 		}
+	}
+	deleted, err := s.repo.Projects().DeleteIfDeletingAndEmpty(ctx, projectID)
+	if errors.Is(err, repository.ErrProjectDeleteDependencies) {
+		return projectDeleteConflictError{msg: "cannot delete project with associated tasks or plans; archive it instead"}
+	}
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	if !deleted {
+		return fmt.Errorf("delete project: deletion authority was lost")
 	}
 	return nil
 }

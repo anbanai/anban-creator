@@ -39,6 +39,7 @@ type Config struct {
 const (
 	ArtifactUploadOff    = "off"
 	ArtifactUploadDirect = "direct"
+	ArtifactUploadStream = "stream"
 )
 
 func runFlags() []cli.Flag {
@@ -62,7 +63,7 @@ func runFlags() []cli.Flag {
 		&cli.BoolFlag{Name: "has-tail-image", Usage: "seednote: generate tail.png"},
 		&cli.BoolFlag{Name: "article-with-cover", Usage: "article: generate cover image", Value: true},
 		&cli.BoolFlag{Name: "article-with-content-images", Usage: "article: generate in-text images", Value: true},
-		&cli.StringFlag{Name: "artifact-upload-mode", Usage: "artifact upload mode: off or direct", Value: ArtifactUploadOff, Sources: cli.EnvVars("ANBAN_ARTIFACT_UPLOAD_MODE"), Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "artifact-upload-mode", Usage: "artifact upload mode: off, direct, or stream", Value: ArtifactUploadOff, Sources: cli.EnvVars("ANBAN_ARTIFACT_UPLOAD_MODE"), Config: cli.StringConfig{TrimSpace: true}},
 	}
 }
 
@@ -109,9 +110,9 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 	switch cfg.ArtifactUploadMode {
 	case "", ArtifactUploadOff:
 		cfg.ArtifactUploadMode = ArtifactUploadOff
-	case ArtifactUploadDirect:
+	case ArtifactUploadDirect, ArtifactUploadStream:
 	default:
-		return nil, fmt.Errorf("artifact-upload-mode must be one of: off, direct")
+		return nil, fmt.Errorf("artifact-upload-mode must be one of: off, direct, stream")
 	}
 	if cfg.AgentFlag == "" {
 		cfg.AgentFlag = "anban:" + serveragent.TaskTypeToAgent(cfg.TaskType)

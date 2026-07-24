@@ -39,6 +39,7 @@ const (
 
 type JobConfig struct {
 	ServerURL         string
+	AllowHTTPServer   bool
 	ExecutionID       string
 	Workspace         string
 	WorkloadTokenFile string
@@ -54,19 +55,19 @@ type bootstrapEnvelope struct {
 }
 
 func BootstrapJob(ctx context.Context, cfg JobConfig) (*BootstrapResponse, error) {
-	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{})
+	return bootstrapJobWithPolicy(ctx, cfg, bootstrapRequestPolicy{allowHTTPServer: cfg.AllowHTTPServer})
 }
 
 type bootstrapRequestPolicy struct {
-	allowHTTPLoopback bool
-	client            *http.Client
+	allowHTTPServer bool
+	client          *http.Client
 }
 
 func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrapRequestPolicy) (*BootstrapResponse, error) {
 	if strings.TrimSpace(cfg.ServerURL) == "" || strings.TrimSpace(cfg.ExecutionID) == "" || strings.TrimSpace(cfg.Workspace) == "" || strings.TrimSpace(cfg.WorkloadTokenFile) == "" {
 		return nil, fmt.Errorf("server-url, execution-id, workspace, and workload-token-file are required")
 	}
-	serverURL, err := validateBootstrapServerURL(cfg.ServerURL, policy.allowHTTPLoopback)
+	serverURL, err := validateBootstrapServerURL(cfg.ServerURL, policy.allowHTTPServer)
 	if err != nil {
 		return nil, err
 	}
@@ -126,22 +127,22 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 		return err
 	}
 	outputPath := filepath.Join(root, "output")
-	info, err := os.Lstat(outputPath)
-	switch {
-	case os.IsNotExist(err):
-		if err := os.Mkdir(outputPath, 0o750); err != nil {
-			return fmt.Errorf("create runtime output directory: %w", err)
-		}
-	case err != nil:
-		return fmt.Errorf("inspect runtime output directory: %w", err)
-	case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
-		return fmt.Errorf("runtime output must be a real directory")
-	}
-	if err := os.Chmod(outputPath, 0o750); err != nil {
-		return fmt.Errorf("set runtime output permissions: %w", err)
+	if err := ensureRuntimeDirectory(outputPath, "output"); err != nil {
+		return err
 	}
 
-	if !model.IsMontagePlatform(strings.TrimSpace(profile)) {
+	profile = strings.TrimSpace(profile)
+	if profile == model.TaskTypeLiveSlicer {
+		exportsPath := filepath.Join(outputPath, "exports")
+		if err := ensureRuntimeDirectory(exportsPath, "live-slicer exports"); err != nil {
+			return err
+		}
+		if err := ensureRuntimeDirectory(filepath.Join(exportsPath, ".parts"), "live-slicer parts"); err != nil {
+			return err
+		}
+	}
+
+	if !model.IsMontagePlatform(profile) {
 		return nil
 	}
 	runtimePath, err := materializeMontageRuntime(root)
@@ -154,7 +155,24 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 	return nil
 }
 
-func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, error) {
+func ensureRuntimeDirectory(path, label string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(path, 0o750); err != nil {
+			return fmt.Errorf("create runtime %s directory: %w", label, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("inspect runtime %s directory: %w", label, err)
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("runtime %s must be a real directory", label)
+	}
+	if err := os.Chmod(path, 0o750); err != nil {
+		return fmt.Errorf("set runtime %s permissions: %w", label, err)
+	}
+	return nil
+}
+
+func validateBootstrapServerURL(raw string, allowHTTPServer bool) (*url.URL, error) {
 	trimmed := strings.TrimSpace(raw)
 	parsed, err := url.Parse(trimmed)
 	if err != nil || trimmed == "" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Path != "" && parsed.Path != "/") {
@@ -163,11 +181,8 @@ func validateBootstrapServerURL(raw string, allowHTTPLoopback bool) (*url.URL, e
 	if _, err := net.LookupPort("tcp", parsed.Port()); parsed.Port() != "" && err != nil {
 		return nil, fmt.Errorf("bootstrap server URL is invalid")
 	}
-	if parsed.Scheme != "https" {
-		ip := net.ParseIP(parsed.Hostname())
-		if !allowHTTPLoopback || parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("bootstrap server URL must use HTTPS")
-		}
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !allowHTTPServer) {
+		return nil, fmt.Errorf("bootstrap server URL must use HTTPS")
 	}
 	parsed.Path = ""
 	return parsed, nil
@@ -366,6 +381,9 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if !validBootstrapTaskType(response.TaskType) {
 		return fmt.Errorf("bootstrap task type is invalid")
 	}
+	if response.ArtifactTransport.Mode != ArtifactUploadDirect && response.ArtifactTransport.Mode != ArtifactUploadStream {
+		return fmt.Errorf("bootstrap artifact transport is invalid")
+	}
 	if strings.TrimSpace(response.Prompt) == "" || len(response.Prompt) > maxBootstrapPromptBytes {
 		return fmt.Errorf("bootstrap prompt is invalid")
 	}
@@ -424,7 +442,7 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 
 func validBootstrapTaskType(taskType string) bool {
 	switch taskType {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage:
+	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.TaskTypeLiveSlicer:
 		return true
 	default:
 		return false

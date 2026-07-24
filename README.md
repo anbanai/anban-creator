@@ -5,8 +5,8 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 ## Product Surfaces
 
 - **Web Studio** — manage channels, plans, tasks, generated files, credits, model settings, and publishing state.
-- **MCP Server** — exposes writing, image, publishing, billing, workspace, and Seednote formatting tools to connected agents.
-- **Agent Runtime** — executes `article`, `seednote`, and related content agents locally or in Docker.
+- **MCP Server** — exposes atomic writing, image, publishing, billing, and Seednote capabilities to connected agents.
+- **Agent Runtime** — executes Desktop-claimed tasks or dispatches `article`, `seednote`, and related managed work to one-shot containers.
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `plugins/`, with native manifests and host adapters for each harness.
 
@@ -17,15 +17,45 @@ Their independent build definitions, together with the Server, Studio, and
 wcfLink definitions, live in `deploy/docker/` and use the repository root as the
 Docker build context.
 
+## Managed Agent Runtime
+
+The Server scheduler dispatches every managed execution to a fresh container:
+Docker locally or a Kubernetes Job in production. There is no persistent Agent
+service and no Server-owned execution directory. The runtime owns the task
+workspace and output, retains resume state in the task workspace volume, and
+uploads registered task artifacts back through the Server API.
+
+The shared scheduler configuration is:
+
+- `ANBAN_AGENT_EXECUTOR`: `docker` or `kubernetes`.
+- `ANBAN_AGENT_IMAGE_ARTICLE`: the minimal Article runtime image.
+- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the Python and Agent-Reach runtime image.
+- `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
+- `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
+  to mint short-lived workload tokens.
+
+The Server never builds missing runtime images. `make docker-up` builds the three
+local runtime images before starting Compose; direct `docker compose up` users
+must build or pull them first. Production deployments should publish and select
+immutable image digests so a persisted execution can always resume with the
+same runtime identity.
+
+The Docker executor requires access to a Docker daemon. Compose mounts
+`/var/run/docker.sock` into the Server and uses the host socket group through
+`DOCKER_GID`; anyone deploying the Server another way must provide equivalent
+daemon access. Kubernetes instead uses the namespace, task/project PVC storage
+classes, and ServiceAccount settings in `server/Deployment.yaml`, while reading
+the execution token secret from a Kubernetes Secret.
+
 ## Quick Start
 
 ```bash
-# Configure the required private billing top-up credential.
+# Create the local Server environment file.
 cp .env.example .env
-# Set ANBAN_BILLING_ADMIN_API_KEY in .env before starting Compose.
+# Fill every required value in .env before starting Compose.
 
 # Start infra and services with Docker Compose
-# (builds the Seednote and Montage profile images before startup)
+# (builds all three managed runtime images before startup)
 make docker-up
 
 # Or run server and web separately during development
@@ -103,7 +133,24 @@ Important sections:
 - WeChat auth and publishing settings
 - credits and invitation rules
 
-Docker Compose requires `ANBAN_BILLING_ADMIN_API_KEY` in the root `.env` file. Kubernetes deployments read the same variable from Secret `anban-billing-admin-api-key`, key `api-key`; do not put the credential directly in manifests or config files.
+Docker Compose loads the root `.env` into the Server container and rejects a
+startup with any required value missing. Populate all required entries from
+`.env.example`: `ANBAN_BILLING_ADMIN_API_KEY`, a 32-byte or longer
+`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`,
+`CLAUDE_CODE_AUTH_TOKEN`, `ANBAN_OSS_ENDPOINT`, `ANBAN_OSS_ACCESS_KEY_ID`, and
+`ANBAN_OSS_ACCESS_KEY_SECRET`, plus `MOONSHOT_API_KEY` for the configured writing
+and understanding routes. The checked-in image routes also require
+`VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Add any other provider and
+integration variables referenced by `server/config.yaml` directly to `.env`;
+the relevant optional feature remains unavailable until its credentials are
+configured.
+
+Kubernetes reads the billing and execution-token values from Secret
+`anban-billing-admin-api-key`, key `api-key`, and Secret
+`anban-agent-execution-token`, key `token-secret`, respectively. Configure the
+remaining `server/config.yaml` environment references through the deployment's
+Secret/config injection. Do not put credentials directly in manifests or config
+files.
 
 Users can configure per-account platform credentials and per-user model settings from Studio.
 

@@ -30,6 +30,30 @@ import (
 
 type noopTaskEnqueuer struct{}
 
+type availableRuntimeDispatcher struct{}
+
+func (availableRuntimeDispatcher) Scope() string { return "docker" }
+
+func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
+	return config.RuntimeImageSelection{Profile: taskType, Image: "creator-agent-" + taskType + ":test"}
+}
+
+func (availableRuntimeDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "test-runtime"}, nil
+}
+
+func (availableRuntimeDispatcher) ResolvePrepared(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
+	return &model.RuntimeIdentity{Scope: "docker", Workload: "test-runtime", InstanceID: "test-instance"}, nil
+}
+
+func (availableRuntimeDispatcher) Activate(context.Context, *model.TaskExecution) error { return nil }
+
+func (availableRuntimeDispatcher) Inspect(context.Context, *model.TaskExecution) (*serveragent.RuntimeExecutionState, error) {
+	return &serveragent.RuntimeExecutionState{Phase: serveragent.RuntimePhasePending}, nil
+}
+
+func (availableRuntimeDispatcher) Delete(context.Context, *model.TaskExecution) error { return nil }
+
 func (noopTaskEnqueuer) Enqueue(string, []byte) error {
 	return nil
 }
@@ -153,7 +177,7 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files/zip", func(c fiber.Ctx) error {
@@ -231,7 +255,7 @@ func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 		t.Fatalf("create task file: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
@@ -286,7 +310,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -323,7 +347,7 @@ func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -386,7 +410,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -457,7 +481,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetImagePresets(presets)
 	h.SetRepository(repo)
@@ -549,7 +573,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -615,7 +639,8 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -670,7 +695,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -737,7 +762,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -810,7 +835,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -923,7 +948,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1100,7 +1125,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1263,7 +1288,10 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 				t.Fatal(err)
 			}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			if tt.platform == model.PlatformMontage {
+				taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+			}
 			h := NewTaskHandler(taskSvc, &logger)
 			h.SetRepository(repo)
 			app := fiber.New()
@@ -1356,7 +1384,10 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 		}
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	if destinationPlatform == model.PlatformMontage {
+		taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+	}
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 	h.SetStore(store)
@@ -1389,7 +1420,7 @@ func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixt
 	}
 	if err := fixture.repo.TaskExecutions().Create(t.Context(), &model.TaskExecution{
 		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionStarting,
-		Namespace: "anban", JobName: "job-1",
+		RuntimeScope: "anban", RuntimeWorkload: "job-1", RuntimeInstanceID: "pod-uid-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1413,10 +1444,10 @@ func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixt
 			"claude-test": {Provider: "anthropic", Model: "claude-test"},
 		},
 	}, zerolog.Nop())
-	response, err := bootstrap.Bootstrap(t.Context(), &serveragent.KubernetesWorkloadIdentity{
-		Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1",
+	response, err := bootstrap.Bootstrap(t.Context(), &serveragent.WorkloadIdentity{
+		Target: "kubernetes", RuntimeIdentity: model.RuntimeIdentity{Scope: "anban", Workload: "job-1", InstanceID: "pod-uid-1"},
 		ExecutionID: executionID, TaskID: task.ID, ProjectID: task.ProjectID, UserID: task.UserID,
-		JobDeadline: time.Now().Add(30 * time.Minute),
+		Deadline: time.Now().Add(30 * time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("bootstrap cloned attachment: %v", err)
@@ -1829,7 +1860,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			h := NewTaskHandler(taskSvc, &logger)
@@ -1901,7 +1932,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 		t.Fatalf("create empty wallet: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetBillingCatalogService(catalog)
 	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, &bundle, service.BillingWalletOptions{Now: func() time.Time { return now }}))
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1972,7 +2003,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	store.data = map[string][]byte{pendingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2043,7 +2074,7 @@ func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2089,7 +2120,7 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2158,7 +2189,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2207,7 +2238,7 @@ func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewTaskHandler(service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil), &logger)
+	h := NewTaskHandler(service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -2265,7 +2296,7 @@ func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Reposi
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 	handler.SetRepository(repo)
 	app := fiber.New()

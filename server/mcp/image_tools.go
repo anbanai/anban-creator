@@ -19,19 +19,19 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate one durable task image from a creative prompt and optional ordered references. The server resolves the configured route, registers the generated task file to the current execution, and settles the operation atomically. Terminal file collection occurs after the final workspace manifest and terminal finalization; download_url is the immediate durable handle. Returns the durable asset name, role, download_url, and task-relative file_path.",
+		Description: "Generate one durable task image from a creative prompt and optional ordered references. This is not a guaranteed line-art-only colorize tool. The server resolves the configured route, registers the generated task file to the current execution, and settles the operation atomically. Terminal file collection occurs after the final workspace manifest and terminal finalization; download_url is the immediate durable handle. The returned task-relative file_path is a durable logical path, not a server-local path. Use the download_url across runtime boundaries.",
 		InputSchema: generateImageInputSchema(),
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload a server-local image to WeChat CDN or configured storage. When task_id is provided, relative file_path values are resolved against that task workspace. Returns upload metadata.",
+		Description: "Upload an absolute server-local file path to WeChat CDN or configured storage. The path is not the agent client's current working directory. task_id only associates and authorizes the operation. Returns upload metadata.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
 				"file_path":  map[string]any{"type": "string", "description": "Server-local file path of the image to upload"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task ID; when provided, relative file_path is resolved from the task workspace"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task ID used to associate and authorize the upload"},
 			},
 			"required": []any{"project_id", "file_path"},
 		},
@@ -45,13 +45,13 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "compress_image",
-		Description: "Compress a server-local image file (resize and re-encode). Returns the server-local path to the compressed file. No credit deduction. When task_id is provided, relative file_path values are resolved against that task workspace.",
+		Description: "Compress an absolute server-local image file (resize and re-encode). The path is not the agent client's current working directory. Returns the server-local path to the compressed file. No credit deduction; task_id only associates and authorizes the operation.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"file_path": map[string]any{"type": "string", "description": "Server-local file path of the image to compress"},
 				"max_width": map[string]any{"type": "integer", "description": "Maximum width in pixels (0 = use server default)", "default": 0},
-				"task_id":   map[string]any{"type": "string", "description": "Optional task ID; when provided, relative file_path is resolved from the task workspace"},
+				"task_id":   map[string]any{"type": "string", "description": "Optional task ID used to associate and authorize the operation"},
 			},
 			"required": []any{"file_path"},
 		},
@@ -71,7 +71,7 @@ func registerImageTools(server *mcp.Server) {
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines model route context)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
-				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image/download_image file_path result), max 10MB"},
+				"file_path":  map[string]any{"type": "string", "description": "Use file_path returned by download_image or another absolute server-local file path; file_path analysis is limited to 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task ID to associate the image-understanding credit charge with"},
 			},

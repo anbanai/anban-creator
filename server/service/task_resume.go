@@ -70,6 +70,9 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	if task.UserID != userID {
 		return nil, fmt.Errorf("task not found")
 	}
+	if task.DeletingAt != nil {
+		return nil, ErrTaskResumeNotTerminal
+	}
 	if !model.IsTerminalTaskStatus(task.Status) {
 		return nil, ErrTaskResumeNotTerminal
 	}

@@ -12,7 +12,6 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
@@ -64,8 +63,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		}
 
 		planSvc := service.NewPlanService(repo, &logger)
-		agentExecutor := agent.NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, nil, "", "", nil, nil)
-		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger, "", nil, "", nil, nil)
+		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
@@ -185,6 +183,13 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 		if route.Method == "POST" && route.Path == "/api/v1/files/"+"upload" {
 			t.Fatalf("legacy upload route is still registered: %+v", route)
 		}
+	}
+}
+
+func TestRouterEnablesRequestBodyStreaming(t *testing.T) {
+	app := NewRouter(&Services{Config: &config.Config{}})
+	if !app.Config().StreamRequestBody {
+		t.Fatal("StreamRequestBody must be enabled")
 	}
 }
 

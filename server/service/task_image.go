@@ -118,7 +118,6 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		return s.replayAsset(ctx, file, snapshot)
 	}
 
-	physicalOutputPath, outputPathResolved := s.tasks.ResolveWorkspacePath(req.TaskID, req.OutputPath)
 	referencePaths, cleanupReferences, err := s.resolveReadablePaths(ctx, req.TaskID, req.ReferencePaths)
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference images: %w", err)
@@ -127,7 +126,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		defer cleanupReferences()
 	}
 
-	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, physicalOutputPath, "", referencePaths, req.TaskID, req.Size, resolved, req.Watermark)
+	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, req.Size, resolved, req.Watermark)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -135,12 +134,6 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		return nil, errors.New("generate image: image generator returned no result")
 	}
 	defer result.CleanupLocalFile()
-	if outputPathResolved && result.FilePath == physicalOutputPath {
-		result.FilePath = req.OutputPath
-		if result.LocalFilePath == "" {
-			result.LocalFilePath = physicalOutputPath
-		}
-	}
 	if result.FilePath == "" {
 		result.FilePath = req.OutputPath
 	}
@@ -294,9 +287,6 @@ func (s *TaskImageService) resolveReadablePath(ctx context.Context, taskID, path
 	path = strings.TrimSpace(path)
 	if path == "" || filepath.IsAbs(path) {
 		return path, nil, nil
-	}
-	if resolved, ok := s.tasks.ResolveWorkspacePath(taskID, path); ok {
-		return resolved, nil, nil
 	}
 	if s.tasks.Repository() == nil || s.tasks.Storage() == nil {
 		return path, nil, nil

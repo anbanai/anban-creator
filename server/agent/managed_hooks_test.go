@@ -35,11 +35,12 @@ func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
 			script := filepath.Join(hooksDir, tt.script)
 			body := fmt.Sprintf(`#!/bin/sh
 input=$(cat)
+test "$CLAUDE_PROJECT_DIR" = %q || exit 3
 case "$input" in
   *'"agent_type":"%s"'*'"managed_main_session":true'*) printf '%%s' '{"decision":"block","reason":"gate-ran"}' ;;
   *) exit 2 ;;
 esac
-`, tt.agentType)
+`, workspace, tt.agentType)
 			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -75,16 +76,16 @@ func TestManagedTaskStopHookSkipsTaskTypesWithoutGate(t *testing.T) {
 	}
 }
 
-func TestSeednoteQualityGateAcceptsRecordedQualityStatus(t *testing.T) {
+func TestSeednoteQualityGateAcceptsAcceptedContentQuality(t *testing.T) {
 	workspace := t.TempDir()
 	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
 	output := runSeednoteQualityGate(t, workspace)
 	if strings.TrimSpace(output) != "" {
-		t.Fatalf("quality gate blocked an accepted quality status in %s: %s", seednoteDir, output)
+		t.Fatalf("quality gate blocked accepted content quality in %s: %s", seednoteDir, output)
 	}
 }
 
-func TestSeednoteQualityGateBlocksFailedQualityStatus(t *testing.T) {
+func TestSeednoteQualityGateBlocksRejectedContentQuality(t *testing.T) {
 	workspace := t.TempDir()
 	writeSeednoteGateFixture(t, workspace, false)
 	output := runSeednoteQualityGate(t, workspace)
@@ -92,16 +93,154 @@ func TestSeednoteQualityGateBlocksFailedQualityStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("parse quality gate output %q: %v", output, err)
 	}
-	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "quality_status=failed") {
-		t.Fatalf("quality gate output = %#v, want failed quality-status block", result)
+	if result["decision"] != "block" || !strings.Contains(result["reason"].(string), "quality_status=rejected") {
+		t.Fatalf("quality gate output = %#v, want rejected content quality block", result)
 	}
 }
 
-func TestSeednoteQualityGateContainsNoEmbeddedImageVerificationContract(t *testing.T) {
-	script := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
-	for _, forbidden := range []string{`output.get("verification")`, "generate_image 原子视觉核验"} {
-		if strings.Contains(script, forbidden) {
-			t.Fatalf("seednote quality gate still contains legacy embedded verification contract %q", forbidden)
+func TestSeednoteQualityGateBlocksMissingRuntimeWorkspaceInjection(t *testing.T) {
+	workspace := t.TempDir()
+	writeSeednoteGateFixture(t, workspace, true)
+
+	tests := []struct {
+		name         string
+		workspaceEnv []string
+	}{
+		{name: "missing"},
+		{name: "empty", workspaceEnv: []string{""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := runSeednoteQualityGateInvocation(
+				t,
+				workspace,
+				`{"agent_type":"anban:seednote","managed_main_session":true}`,
+				tt.workspaceEnv...,
+			)
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" ||
+				!strings.Contains(reason, "missing runtime workspace injection") ||
+				!strings.Contains(reason, "CLAUDE_PROJECT_DIR") {
+				t.Fatalf("quality gate output = %#v, want missing runtime workspace injection block", result)
+			}
+		})
+	}
+}
+
+func TestSeednoteQualityGateBlockOutputUsesCanonicalFailureStatePath(t *testing.T) {
+	tests := []struct {
+		name               string
+		failureBody        string
+		injectWorkspace    bool
+		wantReasonFragment string
+	}{
+		{
+			name:               "missing runtime workspace",
+			wantReasonFragment: "missing runtime workspace injection",
+		},
+		{
+			name:               "invalid failure state",
+			failureBody:        `{not-json`,
+			injectWorkspace:    true,
+			wantReasonFragment: "失败态文件无效",
+		},
+		{
+			name:               "incomplete failure state",
+			failureBody:        `{"status":"recoverable_failure","stage":"visual_generation"}`,
+			injectWorkspace:    true,
+			wantReasonFragment: "失败态文件不完整",
+		},
+		{
+			name:               "missing delivery artifacts",
+			injectWorkspace:    true,
+			wantReasonFragment: "content.md（缺少最终正文）",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if tt.failureBody != "" {
+				outputDir := filepath.Join(workspace, "output")
+				if err := os.MkdirAll(outputDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(outputDir, "failure-state.json"), []byte(tt.failureBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			workspaceEnv := []string(nil)
+			if tt.injectWorkspace {
+				workspaceEnv = []string{workspace}
+			}
+			output := runSeednoteQualityGateInvocation(
+				t,
+				workspace,
+				`{"agent_type":"anban:seednote","managed_main_session":true}`,
+				workspaceEnv...,
+			)
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, tt.wantReasonFragment) {
+				t.Fatalf("quality gate output = %#v, want block containing %q", result, tt.wantReasonFragment)
+			}
+			assertCanonicalFailureStateReferences(t, result)
+		})
+	}
+}
+
+func assertCanonicalFailureStateReferences(t *testing.T, value any) {
+	t.Helper()
+	switch value := value.(type) {
+	case map[string]any:
+		for _, field := range value {
+			assertCanonicalFailureStateReferences(t, field)
+		}
+	case []any:
+		for _, item := range value {
+			assertCanonicalFailureStateReferences(t, item)
+		}
+	case string:
+		const filename = "failure-state.json"
+		const canonicalPrefix = "output/"
+		remaining := value
+		for {
+			index := strings.Index(remaining, filename)
+			if index < 0 {
+				return
+			}
+			if index < len(canonicalPrefix) || remaining[index-len(canonicalPrefix):index] != canonicalPrefix {
+				t.Fatalf("hook output contains non-canonical failure-state reference %q", value)
+			}
+			remaining = remaining[index+len(filename):]
+		}
+	}
+}
+
+func TestSeednoteQualityGateSkipsNonSeednoteWithoutRuntimeWorkspaceInjection(t *testing.T) {
+	output := runSeednoteQualityGateInvocation(
+		t,
+		t.TempDir(),
+		`{"agent_type":"anban:article","managed_main_session":true}`,
+	)
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate returned output for non-Seednote invocation: %s", output)
+	}
+}
+
+func TestSeednoteQualityGateDoesNotFallBackToProcessWorkingDirectory(t *testing.T) {
+	hook := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	for _, forbidden := range []string{"$PWD", "os.getcwd()", "CLAUDE_PROJECT_DIR:-"} {
+		if strings.Contains(hook, forbidden) {
+			t.Errorf("seednote quality gate contains forbidden CWD fallback %q", forbidden)
 		}
 	}
 }
@@ -219,6 +358,96 @@ func TestSeednoteQualityGateAcceptsCanonicalManagedOutput(t *testing.T) {
 	}
 }
 
+func TestSeednoteQualityGateAcceptsCanonicalModeImageSets(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []string
+	}{
+		{name: "cover_only", images: []string{"cover.png"}},
+		{name: "cover_tail", images: []string{"cover.png", "tail.png"}},
+		{name: "cover_content_one", images: []string{"cover.png", "image_01.png"}},
+		{name: "cover_content_two", images: []string{"cover.png", "image_01.png", "image_02.png"}},
+		{name: "full_three", images: []string{"cover.png", "image_01.png", "image_02.png", "image_03.png", "tail.png"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			writeSeednoteGateImageSet(t, workspace, tt.images)
+			if output := runSeednoteQualityGate(t, workspace); strings.TrimSpace(output) != "" {
+				t.Fatalf("quality gate blocked canonical %s image set: %s", tt.name, output)
+			}
+		})
+	}
+}
+
+func TestSeednoteQualityGateRejectsInvalidContentImageNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		images     []string
+		wantReason string
+	}{
+		{name: "arbitrary suffix", images: []string{"cover.png", "image_bad.png"}, wantReason: "非规范内容图文件名"},
+		{name: "non-padded index", images: []string{"cover.png", "image_1.png"}, wantReason: "非规范内容图文件名"},
+		{name: "index above maximum", images: []string{"cover.png", "image_04.png"}, wantReason: "非规范内容图文件名"},
+		{name: "starts at second image", images: []string{"cover.png", "image_02.png"}, wantReason: "内容图编号必须从 image_01.png 开始连续"},
+		{name: "gap in sequence", images: []string{"cover.png", "image_01.png", "image_03.png"}, wantReason: "内容图编号必须从 image_01.png 开始连续"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			writeSeednoteGateImageSet(t, workspace, tt.images)
+			output := runSeednoteQualityGate(t, workspace)
+			if strings.TrimSpace(output) == "" {
+				t.Fatalf("quality gate accepted invalid image set: %v", tt.images)
+			}
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("parse quality gate output %q: %v", output, err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, tt.wantReason) {
+				t.Fatalf("quality gate output = %#v, want block containing %q", result, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestSeednoteQualityGateRequiresExactUniqueSummaryOutputSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		outputs []map[string]any
+	}{
+		{name: "duplicate", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "image_01.png", "quality_status": "accepted"}}},
+		{name: "missing", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}}},
+		{name: "extra", outputs: []map[string]any{{"file_name": "cover.png", "quality_status": "accepted"}, {"file_name": "image_01.png", "quality_status": "accepted"}, {"file_name": "ghost.png", "quality_status": "accepted"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			dir := writeSeednoteGateImageSet(t, workspace, []string{"cover.png", "image_01.png"})
+			summary, err := json.Marshal(map[string]any{"version": "1.0", "outputs": tt.outputs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), summary, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			output := runSeednoteQualityGate(t, workspace)
+			if strings.TrimSpace(output) == "" {
+				t.Fatalf("quality gate accepted non-exact summary outputs: %#v", tt.outputs)
+			}
+			var result map[string]any
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatal(err)
+			}
+			reason, _ := result["reason"].(string)
+			if result["decision"] != "block" || !strings.Contains(reason, "必须与实际图片唯一且完全一致") {
+				t.Fatalf("quality gate output = %#v, want exact unique set block", result)
+			}
+		})
+	}
+}
+
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
@@ -258,13 +487,54 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 	if err := os.WriteFile(filepath.Join(dir, "image-plan.md"), []byte("计划图片数量: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	qualityStatus := "rejected"
+	if passed {
+		qualityStatus = "accepted"
+	}
 	summary, err := json.Marshal(map[string]any{
 		"version": "1.0",
 		"outputs": []any{map[string]any{
 			"file_name":      "cover.png",
-			"quality_status": map[bool]string{true: "accepted", false: "failed"}[passed],
-			"quality_notes":  "visible content quality was reviewed by the agent workflow",
+			"quality_status": qualityStatus,
 		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), summary, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeSeednoteGateImageSet(t *testing.T, workspace string, images []string) string {
+	t.Helper()
+	dir := writeSeednoteGateFixture(t, workspace, true)
+	for _, name := range images {
+		if name == "cover.png" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "image-plan.md"),
+		[]byte(fmt.Sprintf("计划图片数量: %d\n", len(images))),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	outputs := make([]map[string]any, 0, len(images))
+	for _, name := range images {
+		outputs = append(outputs, map[string]any{
+			"file_name":      name,
+			"quality_status": "accepted",
+		})
+	}
+	summary, err := json.Marshal(map[string]any{
+		"version": "1.0",
+		"outputs": outputs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -277,11 +547,29 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 
 func runSeednoteQualityGate(t *testing.T, workspace string) string {
 	t.Helper()
+	return runSeednoteQualityGateInvocation(
+		t,
+		workspace,
+		`{"agent_type":"anban:seednote","managed_main_session":true}`,
+		workspace,
+	)
+}
+
+func runSeednoteQualityGateInvocation(t *testing.T, workspace, input string, workspaceEnv ...string) string {
+	t.Helper()
 	script := filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh")
 	cmd := exec.Command("bash", script)
 	cmd.Dir = workspace
-	cmd.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+workspace)
-	cmd.Stdin = strings.NewReader(`{"agent_type":"anban:seednote","managed_main_session":true}`)
+	cmd.Env = make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CLAUDE_PROJECT_DIR=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	if len(workspaceEnv) > 0 {
+		cmd.Env = append(cmd.Env, "CLAUDE_PROJECT_DIR="+workspaceEnv[0])
+	}
+	cmd.Stdin = strings.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()

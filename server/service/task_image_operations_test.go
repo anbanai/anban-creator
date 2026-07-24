@@ -65,7 +65,7 @@ func (f *fakeTaskImageOperationsCost) RecordMediaUnreconciled(_ context.Context,
 	return &model.BillingProviderCostEvent{}, f.recordErr
 }
 
-func TestTaskImageOperationsOwnPathResolutionAndAnalysisCost(t *testing.T) {
+func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -84,7 +84,7 @@ func TestTaskImageOperationsOwnPathResolutionAndAnalysisCost(t *testing.T) {
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tasks := NewTaskService(repo, nil, nil, nil, &logger, "", nil, workspace, nil, nil)
+	tasks := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	images := &fakeTaskImageOperationsImage{}
 	writing := &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}
 	cost := &fakeTaskImageOperationsCost{}
@@ -95,16 +95,16 @@ func TestTaskImageOperationsOwnPathResolutionAndAnalysisCost(t *testing.T) {
 	if _, err := svc.Upload(ctx, UploadTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: "output/image.png"}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
-	if images.uploadPath != imagePath {
-		t.Fatalf("upload path = %q, want %q", images.uploadPath, imagePath)
+	if images.uploadPath != "output/image.png" {
+		t.Fatalf("upload path = %q, want runtime-relative path", images.uploadPath)
 	}
 	if _, err := svc.Compress(ctx, CompressTaskImageRequest{UserID: userID, TaskID: taskID, FilePath: "output/image.png"}); err != nil {
 		t.Fatalf("Compress: %v", err)
 	}
-	if images.compressPath != imagePath {
-		t.Fatalf("compress path = %q, want %q", images.compressPath, imagePath)
+	if images.compressPath != "output/image.png" {
+		t.Fatalf("compress path = %q, want runtime-relative path", images.compressPath)
 	}
-	result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: "output/image.png", Prompt: "inspect"})
+	result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: imagePath, Prompt: "inspect"})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 		t.Fatal(err)
 	}
 	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: "foreign", ProjectID: projectID, TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if !errors.Is(err, ErrTaskImageOperationOwnership) {
 		t.Fatalf("Analyze error = %v, want ownership error", err)
@@ -150,7 +150,7 @@ func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T)
 		t.Fatal(err)
 	}
 	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: "wrong-project", TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if !errors.Is(err, ErrTaskImageOperationProjectMismatch) || writing.calls != 0 {
 		t.Fatalf("Analyze = %v, writing calls=%d; want project mismatch before delegation", err, writing.calls)

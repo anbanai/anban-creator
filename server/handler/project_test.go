@@ -28,6 +28,14 @@ type projectReadiness bool
 
 func (r projectReadiness) Ready() bool { return bool(r) }
 
+type projectMemoryDeleteFake struct {
+	err error
+}
+
+func (f projectMemoryDeleteFake) DeleteProjectMemory(context.Context, string) error {
+	return f.err
+}
+
 func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	req := projectRequest{
 		Platform:               "article",
@@ -914,5 +922,39 @@ func TestProjectHandler_DeleteWithAssociatedPlansReturnsConflict(t *testing.T) {
 	if !strings.Contains(msg, "cannot delete project with 1 associated plans") ||
 		!strings.Contains(msg, "archive it instead") {
 		t.Fatalf("msg = %q, want associated plan archive guidance", msg)
+	}
+}
+
+func TestProjectHandler_DeleteDoesNotExposeMemoryProviderFailure(t *testing.T) {
+	_, repo := setupProjectDeleteHandlerTest(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	svc := service.NewProjectService(repo, &logger)
+	svc.SetProjectMemoryLifecycle(projectMemoryDeleteFake{err: errors.New("provider internal identity detail")})
+	h := NewProjectHandler(svc, &logger)
+	app := fiber.New()
+	app.Delete("/api/v1/projects/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Delete(c)
+	})
+
+	resp := doRequest(t, app, http.MethodDelete, "/api/v1/projects/"+projectID, userID, nil)
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusInternalServerError)
+	}
+	body := decodeBody(t, resp)
+	if msg, _ := body["msg"].(string); msg != "failed to delete project" {
+		t.Fatalf("msg = %q, want generic project delete failure", msg)
+	}
+	if _, err := repo.Projects().FindByID(ctx, projectID); err != nil {
+		t.Fatalf("project authority removed after provider failure: %v", err)
 	}
 }

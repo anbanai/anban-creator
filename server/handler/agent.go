@@ -26,12 +26,8 @@ const (
 	agentWorkloadTokenContextKey = "agent_workload_token"
 )
 
-type workloadVerifier interface {
-	Verify(context.Context, string, string) (*serveragent.KubernetesWorkloadIdentity, error)
-}
-
 type agentBootstrapper interface {
-	Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error)
+	Bootstrap(context.Context, *serveragent.WorkloadIdentity) (*service.AgentBootstrapResponse, error)
 }
 
 // AgentHandler handles agent-to-server communication endpoints.
@@ -43,7 +39,7 @@ type AgentHandler struct {
 	adminAPIKey      string
 	directUploadCfg  service.DirectUploadConfig
 	executionTokens  *auth.ExecutionTokenService
-	workloadVerifier workloadVerifier
+	workloadVerifier serveragent.WorkloadVerifier
 	bootstrapper     agentBootstrapper
 	logger           *zerolog.Logger
 }
@@ -56,7 +52,7 @@ func (h *AgentHandler) SetAdminAPIKey(key string) {
 	h.adminAPIKey = key
 }
 
-func (h *AgentHandler) SetBootstrap(verifier workloadVerifier, bootstrapper agentBootstrapper) {
+func (h *AgentHandler) SetBootstrap(verifier serveragent.WorkloadVerifier, bootstrapper agentBootstrapper) {
 	h.workloadVerifier, h.bootstrapper = verifier, bootstrapper
 }
 
@@ -385,7 +381,7 @@ type agentClaimRequest struct {
 // A desktop local executor polls this endpoint to atomically claim its oldest
 // pending local-target task. On success it returns the full task config
 // (service.LocalExecutionConfig) which the desktop turns into an anban run
-// argv (mirroring the cloud DockerExecutor), supplying its own server_url +
+// argv (matching managed bootstrap defaults), supplying its own server_url +
 // API key. The claimed task is already status=running, so cloud Asynq never
 // picks it up. Returns 204 No Content when nothing is claimable.
 func (h *AgentHandler) Claim(c fiber.Ctx) error {

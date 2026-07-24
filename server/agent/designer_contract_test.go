@@ -34,13 +34,16 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 		"`analyze_image`",
 		"`download_image`",
 		"`update_task_progress`",
+		"output/input-manifest.md",
+		"output/color-bible.md",
+		"output/colored_00.png",
+		"output/consistency-report.md",
 		"ANBAN_API_URL",
 		"ANBAN_DEFAULT_PROJECT",
 		"ANBAN_API_KEY",
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
-		"runtime 已预创建的 `output/`",
 		"如果为空，调用 `list_projects`",
 	}
 	if !strings.Contains(frontmatter, "\nskills:") {
@@ -51,7 +54,7 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 			t.Fatalf("designer agent missing required term %q", term)
 		}
 	}
-	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载", "prepare_workspace", "$DIR"} {
+	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("designer agent contains obsolete Skill loading instruction %q", forbidden)
 		}
@@ -121,8 +124,12 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 		"file_path` 方式分析有 10MB 限制",
 		"compress_image",
 		"upload_image",
-		"runtime 已预创建的 `output/`",
-		"output_path` 使用任务相对路径 `output/",
+		"`output_path` 使用任务相对路径",
+		"output/server-paths.md",
+		"下载 `download_url` 到 `output/colored_NN.png`",
+		"output/color-bible.md",
+		"output/colored_00.png",
+		"output/consistency-report.md",
 		"size` 是宽高比提示",
 		"从原始线稿推断最接近的支持比例",
 		"Prompt 控制在 500 词以内",
@@ -204,7 +211,7 @@ func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) 
 
 	banned := []string{
 		"file_path=上色图服务器端路径, image_url=原始线稿CDN_URL",
-		"用 `download_image` 或返回的 `download_url` 下载到 `output/colored_NN.png`",
+		"用 `download_image` 或返回的 `download_url` 下载到 `$DIR/colored_NN.png`",
 	}
 	for _, term := range banned {
 		if strings.Contains(all, term) {
@@ -217,7 +224,6 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "server", "mcp", "image_tools.go"),
-		filepath.Join(root, "server", "mcp", "workspace_tools.go"),
 	}
 
 	var body strings.Builder
@@ -231,16 +237,14 @@ func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 	}
 
 	required := []string{
-		"Generate one durable task image",
-		"settles the operation atomically",
-		"Task-relative output path",
-		"Requested aspect ratio",
-		"Optional ordered reference image paths",
-		"relative file_path values are resolved against that task workspace",
-		"image_base64 for agent/client-local bytes",
-		"file_path for an absolute server-local file",
+		"not a guaranteed line-art-only colorize tool",
+		"task-relative file_path is a durable logical path",
+		"not a server-local path",
+		"Use the download_url across runtime boundaries",
+		"absolute server-local file path",
+		"not the agent client's current working directory",
+		"Use file_path returned by download_image",
 		"file_path analysis is limited to 10MB",
-		"relative path rooted at the agent task workspace/current working directory",
 	}
 	all := body.String()
 	for _, term := range required {

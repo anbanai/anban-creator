@@ -13,6 +13,8 @@ import (
 	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
@@ -57,7 +59,7 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 		if cfg.ExecutionID != "execution-1" || cfg.WorkloadTokenFile != "/token" {
 			t.Fatalf("job config=%+v", cfg)
 		}
-		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", RuntimeEnv: map[string]string{
+		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect}, RuntimeEnv: map[string]string{
 			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
 			"ANBAN_API_KEY":        "must-not-override",
 		}, ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
@@ -80,6 +82,26 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 	}
 }
 
+func TestJobCommandPassesExplicitManagedHTTPPolicy(t *testing.T) {
+	called := false
+	bootstrap := func(_ context.Context, cfg JobConfig) (*BootstrapResponse, error) {
+		called = true
+		field := reflect.ValueOf(cfg).FieldByName("AllowHTTPServer")
+		if !field.IsValid() || field.Kind() != reflect.Bool || !field.Bool() {
+			t.Fatalf("job config does not carry explicit HTTP trust: %+v", cfg)
+		}
+		return &BootstrapResponse{}, nil
+	}
+	cmd := newJobCommand(bootstrap, func(context.Context, *Config) error { return nil })
+	err := cmd.Run(context.Background(), []string{
+		"job", "--server-url", "http://creator-server:8080", "--allow-http-server",
+		"--execution-id", "execution-1", "--workspace", "/workspace", "--workload-token-file", "/token",
+	})
+	if err != nil || !called {
+		t.Fatalf("explicit HTTP job flag: called=%v err=%v", called, err)
+	}
+}
+
 func TestJobRuntimeConfigMapsMontageEnvOnlyForMontageTasks(t *testing.T) {
 	jobCfg := JobConfig{ServerURL: "http://server", ExecutionID: "execution-1", Workspace: "/workspace"}
 	env := map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
@@ -91,6 +113,20 @@ func TestJobRuntimeConfigMapsMontageEnvOnlyForMontageTasks(t *testing.T) {
 	article := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: "article", Env: env})
 	if len(article.Env) != 0 {
 		t.Fatalf("article env = %#v, want empty", article.Env)
+	}
+	liveSlicer := jobRuntimeConfig(jobCfg, &BootstrapResponse{TaskType: model.TaskTypeLiveSlicer, Env: env})
+	if len(liveSlicer.Env) != 0 {
+		t.Fatalf("live-slicer env = %#v, want empty", liveSlicer.Env)
+	}
+}
+
+func TestJobRuntimeConfigUsesBootstrapArtifactTransport(t *testing.T) {
+	jobCfg := JobConfig{ExecutionID: "execution-1"}
+	for _, mode := range []string{ArtifactUploadDirect, ArtifactUploadStream} {
+		got := jobRuntimeConfig(jobCfg, &BootstrapResponse{ArtifactTransport: service.ArtifactTransport{Mode: mode}})
+		if got.ArtifactUploadMode != mode {
+			t.Fatalf("artifact upload mode = %q, want %q", got.ArtifactUploadMode, mode)
+		}
 	}
 }
 

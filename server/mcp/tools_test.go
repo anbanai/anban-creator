@@ -34,7 +34,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	repo := repository.New(db)
 	logger := zerolog.Nop()
 	projectSvc := service.NewProjectService(repo, &logger)
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
 	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{})
@@ -67,6 +67,19 @@ func getAgentProjectProfileForTest(ctx context.Context, userID string, args map[
 		return nil, err.Error()
 	}
 	return map[string]any(*profile), ""
+}
+
+func TestMCPToolListDoesNotContainPrepareWorkspace(t *testing.T) {
+	tools := listMCPToolsForTest(t, NewMCPHandler(nil, "test-key", nil))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if tool["name"] == "prepare_workspace" {
+			t.Fatal("MCP tool list contains forbidden prepare_workspace tool")
+		}
+	}
 }
 
 func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {

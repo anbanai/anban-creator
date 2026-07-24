@@ -124,6 +124,9 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"metadata.json",
 		"audio.mp3",
 		"cover.jpg",
+		"output/metadata.json",
+		"output/audio.mp3",
+		"output/cover.jpg",
 		"analysis.json",
 		"invalid-sentences.json",
 		"segments.json",
@@ -140,9 +143,9 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"ffprobe",
 		"duration",
 		"需人工复核片段",
-		"exports/",
-		"clip-manifest.json",
-		"summary.md",
+		"output/exports/clip-NN.mp4",
+		"output/clip-manifest.json",
+		"output/summary.md",
 		"$TINGWU_TASK_ID",
 	} {
 		if !strings.Contains(body, want) {
@@ -160,7 +163,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		t.Fatal("live-slicer agent must preload its specialized Skills")
 	}
 	for _, banned := range []string{
-		`mkdir -p "$(dirname "$OUT")"`,
+		"mkdir -p " + `"$(dirname "$OUT")"`,
 		"Python",
 		"python" + "3",
 		"live_slice_media" + ".py",
@@ -192,7 +195,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"actual_duration_seconds",
 		"warnings",
 		"rejected",
-		"exports/*.md",
+		"output/exports/clip-NN.md",
 		"需人工复核片段",
 		"segments.json",
 	} {
@@ -217,6 +220,46 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		if !strings.Contains(claude, want) {
 			t.Fatalf("claudecode plugin development docs missing %q", want)
 		}
+	}
+}
+
+func TestLiveSlicerAgentsUseMCPPlannedExportPaths(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	for _, relativePath := range []string{
+		"plugins/agents/live-slicer.md",
+		"plugins/agents/live-slicer.toml",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relativePath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(raw)
+			for _, required := range []string{
+				"output/exports/clip-NN.mp4",
+				"output/exports/clip-NN.md",
+				"output/exports/*.mp4",
+				"output/exports/01-topic.md",
+				"output/exports/*.md",
+			} {
+				if !strings.Contains(body, required) {
+					t.Errorf("%s missing MCP-planned export path %q", relativePath, required)
+				}
+			}
+			for _, forbidden := range []string{
+				"output/clip-NN.mp4",
+				"output/clip-NN.md",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("%s contains export path outside MCP-planned directory %q", relativePath, forbidden)
+				}
+			}
+		})
 	}
 }
 

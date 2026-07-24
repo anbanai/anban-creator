@@ -175,7 +175,19 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		plan.SetMontageInput(*p.MontageInput)
 	}
 
-	if err := s.repo.Plans().Create(ctx, plan); err != nil {
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		authoritative, err := tx.Projects().FindByIDForUpdate(ctx, p.ProjectID)
+		if err != nil {
+			return err
+		}
+		if authoritative.UserID != p.UserID {
+			return fmt.Errorf("project not owned by user")
+		}
+		if authoritative.Status != model.ProjectStatusActive || authoritative.DeletingAt != nil {
+			return fmt.Errorf("project is not active")
+		}
+		return tx.Plans().Create(ctx, plan)
+	}); err != nil {
 		return nil, fmt.Errorf("create plan: %w", err)
 	}
 

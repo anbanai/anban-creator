@@ -19,6 +19,12 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "error: push-managed-submodules.sh must be run inside a Git working tree" >&2
   exit 1
 }
+
+# Hooks export the superproject's repository-local Git variables. Clear them
+# before invoking Git inside a submodule so each -C target discovers itself.
+for git_env_var in $(git rev-parse --local-env-vars); do
+  unset "$git_env_var"
+done
 cd "$repo_root"
 
 superproject_commit=$(git rev-parse --verify "${superproject_revision}^{commit}" 2>/dev/null) || {

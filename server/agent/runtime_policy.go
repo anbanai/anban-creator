@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -236,6 +237,8 @@ func managedRequiredPluginSkills(taskType string) []string {
 		}
 	case "article", "ecommerce":
 		return []string{"anban:humanizer"}
+	case model.TaskTypeLiveSlicer:
+		return []string{"anban:live-slice", "anban:capcut-draft"}
 	default:
 		return nil
 	}
@@ -281,18 +284,35 @@ func initStringValues(value any) map[string]bool {
 }
 
 func managedRequiredMCPTools(taskType string) []string {
-	if strings.TrimSpace(taskType) != "seednote" {
+	switch strings.TrimSpace(taskType) {
+	case "seednote":
+		return []string{
+			"analyze_image",
+			"finalize_task_title",
+			"generate_image",
+			"get_project_profile",
+			"list_project_titles",
+			"submit_agent_feedback",
+			"update_task_progress",
+		}
+	case model.TaskTypeLiveSlicer:
+		return []string{
+			"build_live_clip_manifest",
+			"build_live_clip_plan",
+			"build_live_subject_clip_plan",
+			"complete_live_subject",
+			"create_live_analysis_task",
+			"get_media_pipeline_status",
+			"prepare_file_upload",
+			"query_live_analysis_task",
+			"recognize_live_invalid_sentences",
+			"recognize_live_segments",
+			"recognize_live_subjects",
+			"submit_agent_feedback",
+			"update_task_progress",
+		}
+	default:
 		return nil
-	}
-	return []string{
-		"analyze_image",
-		"finalize_task_title",
-		"generate_image",
-		"get_project_profile",
-		"list_project_titles",
-		"prepare_workspace",
-		"submit_agent_feedback",
-		"update_task_progress",
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -219,6 +220,99 @@ func TestReportArtifactManifestPostsEndpoint(t *testing.T) {
 	}
 	if gotPath != "/api/v1/agent/artifacts/manifest" || gotBody.TaskID != "t1" || len(gotBody.Files) != 1 {
 		t.Fatalf("manifest request = path %q body %+v, want one file on manifest endpoint", gotPath, gotBody)
+	}
+}
+
+func TestReporterStreamsArtifactWithBoundedAuthenticatedRequest(t *testing.T) {
+	body := "artifact-body"
+	var gotPath, gotAuth, gotPathHeader, gotHashHeader, gotSizeHeader, gotBody string
+	var gotContentLength int64
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotPathHeader = r.Header.Get("X-Anban-Artifact-Path")
+		gotHashHeader = r.Header.Get("X-Anban-Artifact-SHA256")
+		gotSizeHeader = r.Header.Get("X-Anban-Artifact-Size")
+		gotContentLength = r.ContentLength
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotBody = string(data)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"object_key":   "uploads/task/output/article.md",
+				"content_type": "text/markdown",
+				"size":         len(body),
+				"sha256":       strings.Repeat("a", 64),
+			},
+		})
+	})
+	rep.cfg.ExecutionID = "execution-1"
+	req := ArtifactStreamRequest{
+		TaskID: "attacker-task", ExecutionID: "attacker-execution",
+		RelativePath: "output/文章.md", ContentType: "text/markdown",
+		Size: int64(len(body)), SHA256: strings.Repeat("a", 64),
+	}
+	got, err := rep.StreamArtifactContent(t.Context(), req, strings.NewReader(body+"ignored-tail"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ObjectKey == "" || gotPath != "/api/v1/agent/artifacts/content" || gotAuth != "Bearer k" {
+		t.Fatalf("response/path/auth = %#v/%q/%q", got, gotPath, gotAuth)
+	}
+	if gotPathHeader != req.RelativePath || gotHashHeader != req.SHA256 || gotSizeHeader != "13" || gotContentLength != int64(len(body)) {
+		t.Fatalf("stream headers path=%q hash=%q size=%q content-length=%d", gotPathHeader, gotHashHeader, gotSizeHeader, gotContentLength)
+	}
+	if gotBody != body {
+		t.Fatalf("streamed body = %q, want bounded %q", gotBody, body)
+	}
+}
+
+func TestReporterStreamsArtifactRejectsOversizedResponse(t *testing.T) {
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0,"msg":"`+strings.Repeat("x", 1<<20)+`","data":{"object_key":"uploads/task/output/article.md","content_type":"text/markdown","size":13,"sha256":"`+strings.Repeat("a", 64)+`"}}`)
+	})
+	rep.cfg.ExecutionID = "execution-1"
+	_, err := rep.StreamArtifactContent(t.Context(), ArtifactStreamRequest{
+		RelativePath: "output/article.md", ContentType: "text/markdown", Size: 13, SHA256: strings.Repeat("a", 64),
+	}, strings.NewReader("artifact-body"))
+	if err == nil || !strings.Contains(err.Error(), "decode artifact stream response") {
+		t.Fatalf("oversized response error = %v", err)
+	}
+}
+
+func TestReporterStreamsArtifactRejectsTrailingJSON(t *testing.T) {
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0,"data":{"object_key":"uploads/task/output/article.md","content_type":"text/markdown","size":13,"sha256":"`+strings.Repeat("a", 64)+`"}} {}`)
+	})
+	rep.cfg.ExecutionID = "execution-1"
+	_, err := rep.StreamArtifactContent(t.Context(), ArtifactStreamRequest{
+		RelativePath: "output/article.md", ContentType: "text/markdown", Size: 13, SHA256: strings.Repeat("a", 64),
+	}, strings.NewReader("artifact-body"))
+	if err == nil || !strings.Contains(err.Error(), "decode artifact stream response") {
+		t.Fatalf("trailing response error = %v", err)
+	}
+}
+
+func TestReporterStreamsArtifactRejectsNonzeroEnvelopeCode(t *testing.T) {
+	rep, _ := newTestReporter(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 40900,
+			"msg":  "execution is stale",
+			"data": map[string]any{
+				"object_key": "uploads/task/output/article.md", "content_type": "text/markdown",
+				"size": 13, "sha256": strings.Repeat("a", 64),
+			},
+		})
+	})
+	rep.cfg.ExecutionID = "execution-1"
+	_, err := rep.StreamArtifactContent(t.Context(), ArtifactStreamRequest{
+		RelativePath: "output/article.md", ContentType: "text/markdown", Size: 13, SHA256: strings.Repeat("a", 64),
+	}, strings.NewReader("artifact-body"))
+	if err == nil || !strings.Contains(err.Error(), "execution is stale") {
+		t.Fatalf("nonzero envelope error = %v", err)
 	}
 }
 

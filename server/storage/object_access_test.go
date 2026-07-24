@@ -56,7 +56,7 @@ func TestLocalProviderStatsAndBoundsObjectReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StatObject: %v", err)
 	}
-	if info.Size != 5 || info.ContentType != "image/png" || info.SHA256 != "" {
+	if info.Size != 5 || info.ContentType != "image/png" || info.SHA256 != "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5" {
 		t.Fatalf("ObjectInfo = %#v", info)
 	}
 	if _, err := provider.ReadObject(context.Background(), key, 4); !errors.Is(err, ErrObjectExceedsMaxSize) {

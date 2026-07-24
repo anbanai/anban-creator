@@ -159,6 +159,14 @@ func (r *fakeUploadSessionRepo) RescheduleExpiration(context.Context, string, st
 	return false, nil
 }
 
+func (r *fakeUploadSessionRepo) ScheduleTaskArtifactExpiration(context.Context, string, time.Time) error {
+	return nil
+}
+
+func (r *fakeUploadSessionRepo) ScheduleTaskArtifactPrefixExpiration(context.Context, string, string, time.Time) error {
+	return nil
+}
+
 func newDirectUploadTestRepository(t *testing.T) repository.Repository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:direct-upload-"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})

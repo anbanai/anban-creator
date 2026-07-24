@@ -62,7 +62,8 @@ RUN set -eux; \
       exit 1; \
     fi; \
     chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
-    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
+    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"; \
+    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban
 
 USER 1000:1000
 WORKDIR /workspace

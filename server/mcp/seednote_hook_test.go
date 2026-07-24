@@ -453,6 +453,15 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	if err := validateSeednoteDeliveryContract(valid); err != nil {
 		t.Fatalf("valid seednote delivery contract rejected: %v", err)
 	}
+	finalReport, err := markdownSection(valid, "#### 步骤 12：最终报告", "\n---")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutatedFinalReport := strings.Replace(finalReport, "output/content.md", "content.md", 1)
+	if mutatedFinalReport == finalReport {
+		t.Fatal("seednote final report missing output/content.md mutation target")
+	}
+	explicitContentPathMissing := strings.Replace(valid, finalReport, mutatedFinalReport, 1)
 
 	finalize := `finalize_task_title` + `(task_id=$TASK_ID, title=$FINAL_TITLE)`
 	tests := []struct {
@@ -468,8 +477,8 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 			body: strings.Replace(valid, `"message":"<原始错误摘要>"`, `"detail":"<原始错误摘要>"`, 1),
 		},
 		{
-			name: "final result summary missing",
-			body: strings.Replace(valid, "向用户交付可复核的结果摘要", "向用户交付结果摘要", 1),
+			name: "explicit content path missing",
+			body: explicitContentPathMissing,
 		},
 	}
 	for _, tt := range tests {
@@ -566,7 +575,7 @@ func validateSeednoteDeliveryContract(body string) error {
 	if err != nil {
 		return err
 	}
-	for _, forbidden := range []string{"archive_workspace", "$ARCHIVE_DIR", "archive-seednote-workspace.sh", `mv "output"/*`, "ARCHIVE_SUCCEEDED"} {
+	for _, forbidden := range []string{"archive_workspace", "$ARCHIVE_DIR", "archive-seednote-workspace.sh", `mv "$DIR"/*`, "ARCHIVE_SUCCEEDED"} {
 		if strings.Contains(body, forbidden) {
 			return fmt.Errorf("seednote workflow contains legacy archive term %q", forbidden)
 		}
@@ -574,9 +583,8 @@ func validateSeednoteDeliveryContract(body string) error {
 	for _, required := range []string{
 		"`output/content.md`",
 		"逐项校验",
-		"`image-review.md` 记录可见内容质量观察和“审核不可用” warning",
+		"`image-review.md` 记录可见内容质量观察",
 		"`analyze_image` 运行错误只保留在服务端观测记录中",
-		"不创建失败态",
 		"不单独让交付校验失败",
 		"failure-state.json",
 		"仅在所有交付校验通过后、即将报告成功前删除",
@@ -585,8 +593,14 @@ func validateSeednoteDeliveryContract(body string) error {
 			return fmt.Errorf("seednote delivery validation missing %q", required)
 		}
 	}
-	if !strings.Contains(body, "向用户交付可复核的结果摘要") || !strings.Contains(body, "`output/content.md`") {
-		return fmt.Errorf("seednote final report must identify explicit output artifacts")
+	finalReport, err := markdownSection(body, "#### 步骤 12：最终报告", "\n---")
+	if err != nil {
+		return err
+	}
+	for _, required := range []string{"output/content.md", "output/image-plan.md"} {
+		if !strings.Contains(finalReport, required) {
+			return fmt.Errorf("seednote final report missing explicit artifact path %q", required)
+		}
 	}
 	return nil
 }

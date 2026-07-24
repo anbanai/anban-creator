@@ -567,7 +567,7 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
 	reason := terminalBillingReason(execution, result)
-	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
+	durableDelivery, err := s.executionHasDurableDelivery(ctx, execution.ID)
 	if err != nil {
 		return fmt.Errorf("inspect durable task delivery: %w", err)
 	}
@@ -616,7 +616,7 @@ func isTerminalExecution(status string) bool {
 }
 
 // terminalizeCurrentExecution is the narrow service callback used by the
-// Kubernetes reconciler. Infrastructure failures have no successful result.
+// Runtime reconciler. Infrastructure failures have no successful result.
 func (s *TaskService) TerminalizeCurrentExecution(ctx context.Context, executionID, status, reason string, diagnostics []byte) error {
 	execution, task, err := s.currentExecution(ctx, executionID)
 	if err != nil {
@@ -713,7 +713,10 @@ func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *
 		}
 	}()
 	deleteCtx, cancel := context.WithTimeout(ctx, s.cloudFinalizationLease()/2)
-	deleteErr := s.kubernetesDispatcher.Delete(deleteCtx, execution)
+	authoritative, exists, deleteErr := s.ResolveExecutionCleanupRuntime(deleteCtx, execution.ID, token)
+	if deleteErr == nil && exists {
+		deleteErr = s.runtimeDispatcher.Delete(deleteCtx, authoritative)
+	}
 	cancel()
 	if deleteErr != nil {
 		backoff := s.cleanupRetryBackoff
@@ -722,12 +725,12 @@ func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *
 		}
 		failed, failErr := s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, backoff)
 		if failErr != nil {
-			return errors.Join(fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr), failErr)
+			return errors.Join(fmt.Errorf("delete cancelled runtime workload: %w", deleteErr), failErr)
 		}
 		if !failed {
-			return errors.Join(fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr), errors.New("cancelled execution cleanup lease lost while recording retry"))
+			return errors.Join(fmt.Errorf("delete cancelled runtime workload: %w", deleteErr), errors.New("cancelled execution cleanup lease lost while recording retry"))
 		}
-		return fmt.Errorf("delete cancelled Kubernetes Job: %w", deleteErr)
+		return fmt.Errorf("delete cancelled runtime workload: %w", deleteErr)
 	}
 	completed, err := s.repo.TaskExecutions().CompleteCleanup(ctx, execution.ID, token)
 	if err != nil {

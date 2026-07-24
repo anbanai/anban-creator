@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -37,13 +38,16 @@ func TestRunnerReconcilesOnlyTransportedExactModelAliases(t *testing.T) {
 
 func TestRuntimeCwd(t *testing.T) {
 	workspace := "/workspace"
-	if got := runtimeCwd(workspace, "montage"); got != "/workspace/montage" {
+	if got := runtimeCwd(workspace, "montage"); got != "/workspace/openmontage" {
 		t.Fatalf("Montage cwd = %q", got)
 	}
 	if got := runtimeCwd(workspace, "seednote"); got != workspace {
 		t.Fatalf("Seednote cwd = %q, want %q", got, workspace)
 	}
-	if got := montageRuntimePath(workspace); got != "/workspace/montage" {
+	if got := runtimeCwd(workspace, model.TaskTypeLiveSlicer); got != workspace {
+		t.Fatalf("Live Slicer cwd = %q, want %q", got, workspace)
+	}
+	if got := montageRuntimePath(workspace); got != "/workspace/openmontage" {
 		t.Fatalf("Montage runtime path = %q", got)
 	}
 }
@@ -60,7 +64,7 @@ func TestRunnerOptionsUseWritableMontageRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := claudecode.NewOptions(opts...)
-	wantRoot := filepath.Join(workspace, "montage")
+	wantRoot := filepath.Join(workspace, "openmontage")
 	if got.Cwd == nil || *got.Cwd != wantRoot {
 		t.Fatalf("Montage cwd = %#v, want %q", got.Cwd, wantRoot)
 	}

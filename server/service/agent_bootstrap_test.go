@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,6 +136,32 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "storage_key") {
 		t.Fatalf("bootstrap response exposed storage key: %s", raw)
+	}
+}
+
+func TestBootstrapDoesNotMaterializeLegacyTaskContext(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, SkipReferenceImage: true}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		Model:             "claude-test",
+		Store:             &signFakeStore{},
+		TokenTTL:          time.Hour,
+		RuntimeEnv:        bootstrapTestRuntimeEnv(),
+		ModelUsageAliases: bootstrapTestModelUsageAliases(),
+	}, zerolog.Nop())
+
+	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+	for _, file := range response.Files {
+		if file.Path == ".task-context" {
+			t.Fatalf("bootstrap files retain legacy task context: %#v", response.Files)
+		}
 	}
 }
 
@@ -288,7 +316,7 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 	}
 }
 
-func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *testing.T) {
+func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +352,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 		t.Fatal(err)
 	}
 	resumeSessionID := uuid.NewString()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "kubernetes", Status: model.TaskExecutionStarting, Namespace: "anban", JobName: "job-1"}); err != nil {
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "docker", Status: model.TaskExecutionStarting, RuntimeScope: "docker", RuntimeWorkload: "exec-1"}); err != nil {
 		t.Fatal(err)
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
@@ -333,7 +361,7 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	runtimeEnv["ANTHROPIC_AUTH_TOKEN"] = "bootstrap-secret"
 	runtimeEnv["PATH"] = "/untrusted/bin"
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: runtimeEnv, ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
-	identity := &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-1", PodUID: "pod-uid-1", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, JobDeadline: time.Now().Add(4 * time.Minute)}
+	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
 		t.Fatal(err)
@@ -379,8 +407,8 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(identity.JobDeadline) {
-		t.Fatalf("token expiry = %v, exceeds Job deadline", claims.ExpiresAt)
+	if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(identity.Deadline) {
+		t.Fatalf("token expiry = %v, exceeds workload deadline", claims.ExpiresAt)
 	}
 	second, err := svc.Bootstrap(ctx, identity)
 	if err != nil || second.TaskID != taskID {
@@ -393,17 +421,22 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retryClaims.ExecutionID != executionID || retryClaims.ExpiresAt == nil || retryClaims.ExpiresAt.Time.After(identity.JobDeadline) {
+	if retryClaims.ExecutionID != executionID || retryClaims.ExpiresAt == nil || retryClaims.ExpiresAt.Time.After(identity.Deadline) {
 		t.Fatalf("retry claims = %#v", retryClaims)
 	}
 	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
-	if found.Status != model.TaskExecutionRunning || !found.Started || found.PodUID != "pod-uid-1" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
+	if found.Status != model.TaskExecutionRunning || !found.Started || found.RuntimeInstanceID != "container-id" || found.StartedAt == nil || found.LastHeartbeatAt == nil {
 		t.Fatalf("execution = %#v", found)
 	}
-	if _, err := svc.Bootstrap(ctx, &serveragent.KubernetesWorkloadIdentity{Namespace: "anban", PodName: "pod-2", PodUID: "pod-uid-2", JobName: "job-1", ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID}); err == nil {
-		t.Fatal("different Pod stole running execution")
+	if _, err := svc.Bootstrap(ctx, &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "replacement-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(time.Minute)}); err == nil {
+		t.Fatal("different runtime instance stole running execution")
 	}
-	taskSvc := NewTaskService(repo, nil, nil, nil, nil, "", nil, "", nil, nil)
+	crossProvider := *identity
+	crossProvider.Target = "kubernetes"
+	if _, err := svc.Bootstrap(ctx, &crossProvider); err == nil {
+		t.Fatal("cross-provider workload with identical runtime identity accepted")
+	}
+	taskSvc := NewTaskService(repo, nil, nil, nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
 		t.Fatalf("current execution rejected: %v", err)
 	}
@@ -412,10 +445,335 @@ func TestBootstrapTransitionsCurrentExecutionAndIgnoresLegacyReferenceURL(t *tes
 	}
 }
 
-func TestBootstrapRejectsExpiredJobDeadlineBeforeBuildingResponse(t *testing.T) {
+func TestBootstrapRejectsExpiredWorkloadDeadlineBeforeBuildingResponse(t *testing.T) {
 	svc := &AgentBootstrapService{}
 	if _, err := svc.buildResponse(context.Background(), nil, nil, nil, time.Now().Add(-time.Second)); err == nil {
-		t.Fatal("expired Job deadline accepted")
+		t.Fatal("expired workload deadline accepted")
+	}
+}
+
+type bootstrapReadTrackingRepository struct {
+	repository.Repository
+	reads int
+}
+
+type bootstrapReadTrackingExecutions struct {
+	repository.TaskExecutionRepository
+	owner *bootstrapReadTrackingRepository
+}
+
+func (r *bootstrapReadTrackingRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &bootstrapReadTrackingExecutions{owner: r}
+}
+
+func (r *bootstrapReadTrackingExecutions) FindByID(context.Context, string) (*model.TaskExecution, error) {
+	r.owner.reads++
+	return nil, errors.New("unexpected execution read")
+}
+
+func TestBootstrapRejectsIncompleteNonCanonicalOrExpiredIdentityBeforeRepositoryAccess(t *testing.T) {
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	base := serveragent.WorkloadIdentity{
+		Target:          "docker",
+		RuntimeIdentity: model.RuntimeIdentity{Scope: "daemon-a", Workload: "exec-1", InstanceID: "container-id"},
+		ExecutionID:     "execution-1",
+		TaskID:          "task-1",
+		ProjectID:       "project-1",
+		UserID:          "user-1",
+		Deadline:        time.Now().Add(time.Minute),
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*serveragent.WorkloadIdentity)
+	}{
+		{name: "target", mutate: func(i *serveragent.WorkloadIdentity) { i.Target = "" }},
+		{name: "scope", mutate: func(i *serveragent.WorkloadIdentity) { i.Scope = "" }},
+		{name: "workload", mutate: func(i *serveragent.WorkloadIdentity) { i.Workload = "" }},
+		{name: "instance", mutate: func(i *serveragent.WorkloadIdentity) { i.InstanceID = "" }},
+		{name: "execution", mutate: func(i *serveragent.WorkloadIdentity) { i.ExecutionID = "" }},
+		{name: "task", mutate: func(i *serveragent.WorkloadIdentity) { i.TaskID = "" }},
+		{name: "project", mutate: func(i *serveragent.WorkloadIdentity) { i.ProjectID = "" }},
+		{name: "user", mutate: func(i *serveragent.WorkloadIdentity) { i.UserID = "" }},
+		{name: "expired deadline", mutate: func(i *serveragent.WorkloadIdentity) { i.Deadline = time.Now().Add(-time.Second) }},
+		{name: "non-canonical target", mutate: func(i *serveragent.WorkloadIdentity) { i.Target = " docker" }},
+		{name: "non-canonical instance", mutate: func(i *serveragent.WorkloadIdentity) { i.InstanceID = "container-id " }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			identity := base
+			tc.mutate(&identity)
+			repo := &bootstrapReadTrackingRepository{}
+			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Minute}, zerolog.Nop())
+			response, err := svc.Bootstrap(t.Context(), &identity)
+			if !errors.Is(err, ErrAgentBootstrapConflict) || response != nil {
+				t.Fatalf("Bootstrap response/error = %#v/%v, want nil conflict", response, err)
+			}
+			if repo.reads != 0 {
+				t.Fatalf("invalid identity caused %d repository reads", repo.reads)
+			}
+		})
+	}
+}
+
+type bootstrapRaceState struct {
+	mu                sync.Mutex
+	execution         model.TaskExecution
+	task              model.Task
+	project           model.Project
+	user              model.User
+	transitionEntered chan struct{}
+	transitionRelease <-chan struct{}
+	txFindOnce        sync.Once
+	txFindEntered     chan struct{}
+	txFindRelease     <-chan struct{}
+}
+
+type bootstrapRaceRepository struct {
+	repository.Repository
+	state *bootstrapRaceState
+	inTx  bool
+}
+
+type bootstrapRaceUsers struct {
+	repository.UserRepository
+	state *bootstrapRaceState
+}
+
+type bootstrapRaceProjects struct {
+	repository.ProjectRepository
+	state *bootstrapRaceState
+}
+
+type bootstrapRaceTasks struct {
+	repository.TaskRepository
+	state *bootstrapRaceState
+}
+
+type bootstrapRaceExecutions struct {
+	repository.TaskExecutionRepository
+	state *bootstrapRaceState
+	inTx  bool
+}
+
+func (r *bootstrapRaceRepository) Users() repository.UserRepository {
+	return &bootstrapRaceUsers{state: r.state}
+}
+
+func (r *bootstrapRaceRepository) Projects() repository.ProjectRepository {
+	return &bootstrapRaceProjects{state: r.state}
+}
+
+func (r *bootstrapRaceRepository) Tasks() repository.TaskRepository {
+	return &bootstrapRaceTasks{state: r.state}
+}
+
+func (r *bootstrapRaceRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &bootstrapRaceExecutions{state: r.state, inTx: r.inTx}
+}
+
+func (r *bootstrapRaceRepository) WithTx(_ context.Context, fn func(repository.Repository) error) error {
+	return fn(&bootstrapRaceRepository{state: r.state, inTx: true})
+}
+
+func (r *bootstrapRaceUsers) FindByID(_ context.Context, id string) (*model.User, error) {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.user.ID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := r.state.user
+	return &copy, nil
+}
+
+func (r *bootstrapRaceProjects) FindByID(_ context.Context, id string) (*model.Project, error) {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.project.ID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := r.state.project
+	return &copy, nil
+}
+
+func (r *bootstrapRaceTasks) FindByID(_ context.Context, id string) (*model.Task, error) {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.task.ID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := r.state.task
+	return &copy, nil
+}
+
+func (r *bootstrapRaceTasks) UpdateHeartbeat(context.Context, string) error { return nil }
+
+func (r *bootstrapRaceExecutions) FindByID(_ context.Context, id string) (*model.TaskExecution, error) {
+	if r.inTx && r.state.txFindEntered != nil {
+		r.state.txFindOnce.Do(func() {
+			close(r.state.txFindEntered)
+			<-r.state.txFindRelease
+		})
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.execution.ID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := r.state.execution
+	return &copy, nil
+}
+
+func (r *bootstrapRaceExecutions) SetRuntimeIdentity(_ context.Context, id string, identity model.RuntimeIdentity) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.execution.ID {
+		return gorm.ErrRecordNotFound
+	}
+	if r.state.execution.Status != model.TaskExecutionStarting && r.state.execution.Status != model.TaskExecutionRunning {
+		return repository.ErrRuntimeIdentityInactive
+	}
+	for _, pair := range [][2]string{{r.state.execution.RuntimeScope, identity.Scope}, {r.state.execution.RuntimeWorkload, identity.Workload}, {r.state.execution.RuntimeInstanceID, identity.InstanceID}} {
+		if pair[0] != "" && pair[1] != "" && pair[0] != pair[1] {
+			return repository.ErrRuntimeIdentityConflict
+		}
+	}
+	if identity.Scope != "" {
+		r.state.execution.RuntimeScope = identity.Scope
+	}
+	if identity.Workload != "" {
+		r.state.execution.RuntimeWorkload = identity.Workload
+	}
+	if identity.InstanceID != "" {
+		r.state.execution.RuntimeInstanceID = identity.InstanceID
+	}
+	return nil
+}
+
+func (r *bootstrapRaceExecutions) Transition(_ context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error) {
+	if r.state.transitionEntered != nil {
+		r.state.transitionEntered <- struct{}{}
+		<-r.state.transitionRelease
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if id != r.state.execution.ID || !slices.Contains(from, r.state.execution.Status) {
+		return false, nil
+	}
+	r.state.execution.Status = to
+	r.state.execution.Started = change.Started
+	if change.RuntimeInstanceID != "" {
+		r.state.execution.RuntimeInstanceID = change.RuntimeInstanceID
+	}
+	return true, nil
+}
+
+func (r *bootstrapRaceExecutions) UpdateHeartbeat(context.Context, string, time.Time) error {
+	return nil
+}
+
+func newBootstrapRaceFixture(t *testing.T) (*AgentBootstrapService, *bootstrapRaceState, *serveragent.WorkloadIdentity) {
+	t.Helper()
+	executionID := "execution-1"
+	state := &bootstrapRaceState{
+		execution: model.TaskExecution{ID: executionID, TaskID: "task-1", Target: "docker", Status: model.TaskExecutionStarting, RuntimeScope: "daemon-a", RuntimeWorkload: "exec-1"},
+		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
+		project:   model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "project", Status: model.ProjectStatusActive},
+		user:      model.User{ID: "user-1"},
+	}
+	repo := &bootstrapRaceRepository{state: state}
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", TokenTTL: time.Minute, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "daemon-a", Workload: "exec-1", InstanceID: "container-a"}, ExecutionID: executionID, TaskID: "task-1", ProjectID: "project-1", UserID: "user-1", Deadline: time.Now().Add(time.Minute)}
+	return svc, state, identity
+}
+
+func TestBootstrapConcurrentSameInstanceIsIdempotent(t *testing.T) {
+	svc, state, identity := newBootstrapRaceFixture(t)
+	state.transitionEntered = make(chan struct{}, 2)
+	release := make(chan struct{})
+	state.transitionRelease = release
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := svc.Bootstrap(t.Context(), identity)
+			errs <- err
+		}()
+	}
+	<-state.transitionEntered
+	<-state.transitionEntered
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("same-instance bootstrap failed: %v", err)
+		}
+	}
+}
+
+func TestBootstrapConcurrentDifferentInstancesHasOneWinnerWithoutOverwrite(t *testing.T) {
+	svc, state, first := newBootstrapRaceFixture(t)
+	second := *first
+	second.InstanceID = "container-b"
+	start := make(chan struct{})
+	type result struct {
+		instance string
+		err      error
+	}
+	results := make(chan result, 2)
+	for _, identity := range []*serveragent.WorkloadIdentity{first, &second} {
+		go func(identity *serveragent.WorkloadIdentity) {
+			<-start
+			_, err := svc.Bootstrap(t.Context(), identity)
+			results <- result{instance: identity.InstanceID, err: err}
+		}(identity)
+	}
+	close(start)
+	successes := 0
+	winner := ""
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			successes++
+			winner = result.instance
+		}
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if successes != 1 || state.execution.RuntimeInstanceID != winner {
+		t.Fatalf("successes/winner/persisted = %d/%q/%q", successes, winner, state.execution.RuntimeInstanceID)
+	}
+}
+
+func TestBootstrapAndReconcilerInstanceRaceNeverOverwrite(t *testing.T) {
+	svc, state, identity := newBootstrapRaceFixture(t)
+	state.txFindEntered = make(chan struct{})
+	release := make(chan struct{})
+	state.txFindRelease = release
+	bootstrapErr := make(chan error, 1)
+	go func() {
+		_, err := svc.Bootstrap(t.Context(), identity)
+		bootstrapErr <- err
+	}()
+	<-state.txFindEntered
+	reconcileErr := (&TaskService{repo: svc.repo}).RecordExecutionInstance(t.Context(), identity.ExecutionID, "reconciler-container")
+	close(release)
+	bootErr := <-bootstrapErr
+	state.mu.Lock()
+	persisted := state.execution.RuntimeInstanceID
+	state.mu.Unlock()
+	successes := 0
+	if bootErr == nil {
+		successes++
+		if persisted != identity.InstanceID {
+			t.Fatalf("bootstrap won but persisted instance = %q", persisted)
+		}
+	}
+	if reconcileErr == nil {
+		successes++
+		if persisted != "reconciler-container" {
+			t.Fatalf("reconciler won but persisted instance = %q", persisted)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("bootstrap/reconciler errors = %v/%v, want exactly one winner", bootErr, reconcileErr)
 	}
 }
 

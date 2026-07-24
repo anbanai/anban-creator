@@ -30,23 +30,31 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-type executionScopeTestStore struct{ *fakeAgentArtifactStorage }
+type executionScopeTestStore struct {
+	*fakeAgentArtifactStorage
+	uploadedKey  string
+	uploadedBody []byte
+}
 
 func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
+	s.uploadedKey = key
+	s.uploadedBody = append([]byte(nil), data...)
+	s.fakeAgentArtifactStorage.uploadedKey = key
+	s.fakeAgentArtifactStorage.uploadedBody = append([]byte(nil), data...)
 	return &storage.UploadResult{Key: key, URL: s.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
 }
 
 type testWorkloadVerifier struct {
 	gotToken, gotExecutionID string
-	identity                 *serveragent.KubernetesWorkloadIdentity
+	identity                 *serveragent.WorkloadIdentity
 	err                      error
 }
 
-func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.KubernetesWorkloadIdentity, error) {
+func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.WorkloadIdentity, error) {
 	v.gotToken, v.gotExecutionID = token, executionID
 	return v.identity, v.err
 }
@@ -56,11 +64,11 @@ type testBootstrapper struct {
 	err      error
 }
 
-func (b testBootstrapper) Bootstrap(context.Context, *serveragent.KubernetesWorkloadIdentity) (*service.AgentBootstrapResponse, error) {
+func (b testBootstrapper) Bootstrap(context.Context, *serveragent.WorkloadIdentity) (*service.AgentBootstrapResponse, error) {
 	return b.response, b.err
 }
 
-func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
+func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
@@ -72,7 +80,7 @@ func TestAgentExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	h := NewAgentHandler(nil, nil, nil, "", &logger)
 	h.SetExecutionTokenService(tokens)
-	verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
 	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{TaskID: "task-1", ExecutionToken: "execution-token"}})
 	app := fiber.New()
 	app.Post("/agent/scoped", h.AuthMiddleware, func(c fiber.Ctx) error {
@@ -200,7 +208,7 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := zerolog.New(io.Discard)
-			verifier := &testWorkloadVerifier{identity: &serveragent.KubernetesWorkloadIdentity{ExecutionID: "execution-1"}}
+			verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}
 			h := NewAgentHandler(nil, nil, nil, "", &logger)
 			h.SetBootstrap(verifier, testBootstrapper{err: tc.err})
 			app := fiber.New()
@@ -428,12 +436,12 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, PodUID: "pod-1"}); err != nil {
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
 	store := &executionScopeTestStore{fakeAgentArtifactStorage: &fakeAgentArtifactStorage{}}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	apiKeys := service.NewAPIKeyService(repo, &logger)
 	_, rawAPIKey, err := apiKeys.Create(ctx, userID, "local")
 	if err != nil {
@@ -449,10 +457,11 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	h.SetDirectUploadConfig(service.DirectUploadConfig{Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", STSRoleArn: "role"}, CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
 		return &service.UploadCredential{AccessKeyID: "ak", AccessKeySecret: "secret", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
 	})})
-	app := fiber.New()
+	app := fiber.New(fiber.Config{StreamRequestBody: true})
 	app.Post("/agent/progress", h.AuthMiddleware, h.Progress)
 	app.Post("/agent/upload", h.AuthMiddleware, h.Upload)
 	app.Post("/agent/artifacts/prepare", h.AuthMiddleware, h.PrepareArtifactUpload)
+	app.Post("/agent/artifacts/content", h.AuthMiddleware, h.StreamArtifactContent)
 	app.Post("/agent/artifacts/manifest", h.AuthMiddleware, h.ReportArtifactManifest)
 	app.Post("/agent/complete", h.AuthMiddleware, h.Complete)
 	return app, repo, task, executionID, token, rawAPIKey, store.fakeAgentArtifactStorage
@@ -505,7 +514,7 @@ func TestResolvePublishingRequiresAdminKeyAndResumesFinalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewAgentHandler(taskSvc, nil, nil, "", &logger)
 	h.SetAdminAPIKey("operator-secret")
 	app := fiber.New()
@@ -572,7 +581,7 @@ func setupAgentClaimApp(t *testing.T) (app *fiber.App, repo repository.Repositor
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetExecutorDefaults("claude-test", nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "test")
@@ -610,6 +619,8 @@ func ptrTime(t time.Time) *time.Time { return &t }
 type fakeAgentArtifactStorage struct {
 	uploadKey         string
 	uploadContentType string
+	uploadedKey       string
+	uploadedBody      []byte
 	stats             map[string]*storage.ObjectInfo
 	statErr           error
 }
@@ -728,7 +739,7 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeAgentArtifactStorage{}
-	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	apiKeySvc := service.NewAPIKeyService(repo, &logger)
 	_, rawKey, err := apiKeySvc.Create(ctx, userID, "artifact")
 	if err != nil {

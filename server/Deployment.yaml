@@ -36,7 +36,7 @@ spec:
               value: "true"
             - name: ANBAN_ILINK_BASE_URL
               value: http://wcflink:18070
-            - name: ANBAN_CLAUDE_EXECUTOR
+            - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
               value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443
@@ -48,11 +48,11 @@ spec:
               value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
-            - name: ANBAN_ARTICLE_AGENT_IMAGE
+            - name: ANBAN_AGENT_IMAGE_ARTICLE
               value: ${article_agent_image_repo}
-            - name: ANBAN_SEEDNOTE_AGENT_IMAGE
+            - name: ANBAN_AGENT_IMAGE_SEEDNOTE
               value: ${seednote_agent_image_repo}
-            - name: ANBAN_MONTAGE_AGENT_IMAGE
+            - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: ${montage_agent_image_repo}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: creator-agent-runner

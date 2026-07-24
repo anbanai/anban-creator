@@ -8,46 +8,46 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
-	"github.com/anbanai/anban-creator/server/model"
 )
 
-type KubernetesReconcileService interface {
+type RuntimeReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
-	RecordExecutionPod(context.Context, string, string) error
+	RecordExecutionInstance(context.Context, string, string) error
 	ResumeExecutionDispatch(context.Context, string) error
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
 	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
+	ResolveExecutionCleanupRuntime(context.Context, string, string) (*model.TaskExecution, bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
 	FailExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	ReleaseExecutionCleanup(context.Context, string, string) error
 }
 
-type KubernetesReconcilerConfig struct {
+type RuntimeReconcilerConfig struct {
 	Interval             time.Duration
 	BatchSize            int
 	Concurrency          int
 	CompletionGrace      time.Duration
 	MissingResourceGrace time.Duration
 	HeartbeatTimeout     time.Duration
+	ActiveDeadline       time.Duration
 	PreStartRetryLimit   int
 	CleanupLease         time.Duration
 	CleanupRetryBackoff  time.Duration
 }
 
-type KubernetesReconciler struct {
-	dispatcher KubernetesDispatcher
-	service    KubernetesReconcileService
-	config     KubernetesReconcilerConfig
-	logger     *zerolog.Logger
+type RuntimeReconciler struct {
+	dispatcher RuntimeDispatcher
+	service    RuntimeReconcileService
+	config     RuntimeReconcilerConfig
+	logger     zerolog.Logger
 	now        func() time.Time
 }
 
-func NewKubernetesReconciler(dispatcher KubernetesDispatcher, service KubernetesReconcileService, cfg KubernetesReconcilerConfig, logger *zerolog.Logger) *KubernetesReconciler {
+func NewRuntimeReconciler(dispatcher RuntimeDispatcher, service RuntimeReconcileService, cfg RuntimeReconcilerConfig, logger zerolog.Logger) *RuntimeReconciler {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 10 * time.Second
 	}
@@ -66,18 +66,18 @@ func NewKubernetesReconciler(dispatcher KubernetesDispatcher, service Kubernetes
 	if cfg.CleanupRetryBackoff <= 0 {
 		cfg.CleanupRetryBackoff = 10 * time.Second
 	}
-	return &KubernetesReconciler{dispatcher: dispatcher, service: service, config: cfg, logger: logger, now: time.Now}
+	return &RuntimeReconciler{dispatcher: dispatcher, service: service, config: cfg, logger: logger, now: time.Now}
 }
 
-func (r *KubernetesReconciler) Run(ctx context.Context) {
+func (r *RuntimeReconciler) Run(ctx context.Context) {
 	if r == nil || r.dispatcher == nil || r.service == nil {
 		return
 	}
 	ticker := time.NewTicker(r.config.Interval)
 	defer ticker.Stop()
 	for {
-		if err := r.ReconcileOnce(ctx); err != nil && r.logger != nil {
-			r.logger.Error().Err(err).Msg("Kubernetes execution reconciliation batch failed")
+		if err := r.ReconcileOnce(ctx); err != nil {
+			r.logger.Error().Err(err).Msg("runtime execution reconciliation batch failed")
 		}
 		select {
 		case <-ctx.Done():
@@ -87,9 +87,9 @@ func (r *KubernetesReconciler) Run(ctx context.Context) {
 	}
 }
 
-func (r *KubernetesReconciler) ReconcileOnce(ctx context.Context) error {
+func (r *RuntimeReconciler) ReconcileOnce(ctx context.Context) error {
 	if r == nil || r.dispatcher == nil || r.service == nil {
-		return errors.New("Kubernetes reconciler is not configured")
+		return errors.New("runtime reconciler is not configured")
 	}
 	now := r.now()
 	executions, err := r.service.FindReconcilableExecutions(ctx, now, r.config.BatchSize)
@@ -111,8 +111,8 @@ func (r *KubernetesReconciler) ReconcileOnce(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			}
-			if err := r.reconcileOne(ctx, execution, now); err != nil && r.logger != nil {
-				r.logger.Warn().Err(err).Str("execution_id", execution.ID).Str("task_id", execution.TaskID).Msg("Kubernetes execution reconciliation item failed")
+			if err := r.reconcileOne(ctx, execution, now); err != nil {
+				r.logger.Warn().Err(err).Str("execution_id", execution.ID).Str("task_id", execution.TaskID).Msg("runtime execution reconciliation item failed")
 			}
 		}(execution)
 	}
@@ -120,11 +120,14 @@ func (r *KubernetesReconciler) ReconcileOnce(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *model.TaskExecution, now time.Time) error {
-	if isTerminalKubernetesExecution(execution.Status) {
+func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.TaskExecution, now time.Time) error {
+	if isTerminalRuntimeExecution(execution.Status) {
 		finalizeErr := r.service.ResumeExecutionFinalization(ctx, execution.ID)
 		cleanupErr := r.cleanupExecution(ctx, execution)
 		return errors.Join(finalizeErr, cleanupErr)
+	}
+	if r.config.ActiveDeadline > 0 && !execution.CreatedAt.IsZero() && now.Sub(execution.CreatedAt) >= r.config.ActiveDeadline {
+		return r.failWithRetryLimit(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", "", "Runtime execution active deadline exceeded", nil, 0)
 	}
 	if execution.Status == model.TaskExecutionCreated || execution.Status == model.TaskExecutionDispatching {
 		return r.service.ResumeExecutionDispatch(ctx, execution.ID)
@@ -135,22 +138,34 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		if missingSince.IsZero() {
 			missingSince = execution.CreatedAt
 		}
-		if apierrors.IsNotFound(err) && now.Sub(missingSince) >= r.config.MissingResourceGrace {
-			return r.fail(ctx, execution, model.TaskExecutionFailed, "job_missing", "Kubernetes Job or Pod was not found", nil)
+		if errors.Is(err, ErrRuntimeWorkloadNotFound) && now.Sub(missingSince) >= r.config.MissingResourceGrace {
+			return r.fail(ctx, execution, model.TaskExecutionFailed, "runtime_missing", "", "Runtime workload was not found", nil)
 		}
 		return err
 	}
-	if state.PodUID != "" {
-		if err := r.service.RecordExecutionPod(ctx, execution.ID, state.PodUID); err != nil {
+	if state == nil {
+		return r.fail(ctx, execution, model.TaskExecutionFailed, "inspection_empty", "", "", nil)
+	}
+	if state.InstanceID != "" {
+		if err := r.service.RecordExecutionInstance(ctx, execution.ID, state.InstanceID); err != nil {
 			return err
 		}
 	}
-
-	reason, terminalStatus := kubernetesTerminalReason(state)
-	if reason != "" {
-		return r.fail(ctx, execution, terminalStatus, reason, state.Message, state.ExitCode)
+	if execution.Status == model.TaskExecutionStarting && state.Phase == RuntimePhasePending {
+		if err := r.dispatcher.Activate(ctx, execution); err != nil {
+			if IsPermanentDispatchError(err) {
+				return r.failWithRetryLimit(ctx, execution, model.TaskExecutionFailed, "activation_failed", state.Reason, err.Error(), state.ExitCode, 0)
+			}
+			return err
+		}
+		return nil
 	}
-	if state.Phase == kubernetesPhaseSucceeded {
+
+	reason, terminalStatus := runtimeTerminalReason(state)
+	if reason != "" {
+		return r.fail(ctx, execution, terminalStatus, reason, state.Reason, state.Message, state.ExitCode)
+	}
+	if state.Phase == RuntimePhaseSucceeded {
 		completedAt := execution.UpdatedAt
 		if state.CompletedAt != nil {
 			completedAt = *state.CompletedAt
@@ -158,7 +173,7 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 		if now.Sub(completedAt) < r.config.CompletionGrace {
 			return nil
 		}
-		return r.fail(ctx, execution, model.TaskExecutionFailed, "missing_completion", "Job succeeded without an Agent completion callback", state.ExitCode)
+		return r.fail(ctx, execution, model.TaskExecutionFailed, "missing_completion", state.Reason, "Runtime workload succeeded without an Agent completion callback", state.ExitCode)
 	}
 	if execution.Started && r.config.HeartbeatTimeout > 0 {
 		heartbeatBase := execution.LastHeartbeatAt
@@ -166,25 +181,30 @@ func (r *KubernetesReconciler) reconcileOne(ctx context.Context, execution *mode
 			heartbeatBase = execution.StartedAt
 		}
 		if heartbeatBase != nil && now.Sub(*heartbeatBase) >= r.config.HeartbeatTimeout {
-			return r.fail(ctx, execution, model.TaskExecutionTimedOut, "heartbeat_timeout", "Agent heartbeat expired", state.ExitCode)
+			return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", state.Reason, "Agent heartbeat deadline exceeded", state.ExitCode)
 		}
 	}
 	return nil
 }
 
-func (r *KubernetesReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, message string, exitCode *int32) error {
+func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32) error {
+	return r.failWithRetryLimit(ctx, execution, status, reason, runtimeReason, message, exitCode, r.config.PreStartRetryLimit)
+}
+
+func (r *RuntimeReconciler) failWithRetryLimit(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32, retryLimit int) error {
 	diagnostics, _ := json.Marshal(map[string]any{
-		"reason":    reason,
-		"message":   sanitizeKubernetesDiagnostic(message),
-		"exit_code": exitCodeValue(exitCode),
+		"reason":         reason,
+		"runtime_reason": sanitizeRuntimeDiagnostic(runtimeReason),
+		"message":        sanitizeRuntimeDiagnostic(message),
+		"exit_code":      exitCodeValue(exitCode),
 	})
-	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics, r.config.PreStartRetryLimit); err != nil {
+	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics, retryLimit); err != nil {
 		return err
 	}
 	return r.cleanupExecution(ctx, execution)
 }
 
-func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
+func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
 	if execution == nil || execution.CleanupStatus == model.TaskExecutionCleanupDone {
 		return nil
 	}
@@ -199,7 +219,10 @@ func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *
 		}
 	}()
 	deleteCtx, cancel := context.WithTimeout(ctx, r.config.CleanupLease/2)
-	deleteErr := r.dispatcher.Delete(deleteCtx, execution)
+	authoritative, exists, deleteErr := r.service.ResolveExecutionCleanupRuntime(deleteCtx, execution.ID, token)
+	if deleteErr == nil && exists {
+		deleteErr = r.dispatcher.Delete(deleteCtx, authoritative)
+	}
 	cancel()
 	if deleteErr != nil {
 		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, r.config.CleanupRetryBackoff)
@@ -207,7 +230,7 @@ func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *
 			return errors.Join(deleteErr, failErr)
 		}
 		if !failed {
-			return errors.Join(deleteErr, errors.New("Kubernetes execution cleanup lease lost while recording retry"))
+			return errors.Join(deleteErr, errors.New("runtime execution cleanup lease lost while recording retry"))
 		}
 		return deleteErr
 	}
@@ -216,7 +239,7 @@ func (r *KubernetesReconciler) cleanupExecution(ctx context.Context, execution *
 		return err
 	}
 	if !completed {
-		return errors.New("Kubernetes execution cleanup lease lost")
+		return errors.New("runtime execution cleanup lease lost")
 	}
 	return nil
 }
@@ -228,32 +251,25 @@ func exitCodeValue(exitCode *int32) any {
 	return *exitCode
 }
 
-func kubernetesTerminalReason(state *KubernetesExecutionState) (string, string) {
+func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 	if state == nil {
 		return "inspection_empty", model.TaskExecutionFailed
 	}
+	if state.Phase != RuntimePhaseFailed {
+		return "", ""
+	}
 	reason := strings.ToLower(strings.TrimSpace(state.Reason))
 	switch {
-	case reason == "deadlineexceeded" || strings.Contains(reason, "deadline"):
+	case reason == "timeout" || reason == "timedout" || reason == "deadlineexceeded" || strings.Contains(reason, "deadline"):
 		return "deadline_exceeded", model.TaskExecutionTimedOut
 	case reason == "oomkilled" || (state.ExitCode != nil && *state.ExitCode == 137):
 		return "oom_killed", model.TaskExecutionFailed
-	case reason == "failedscheduling" || strings.Contains(reason, "unschedul"):
-		return "scheduling_failed", model.TaskExecutionFailed
-	case reason == "failedmount" || reason == "failedattachvolume" || strings.Contains(reason, "mount") || strings.Contains(reason, "provision"):
-		return "volume_mount_failed", model.TaskExecutionFailed
-	case reason == "errimagepull" || reason == "imagepullbackoff" || strings.Contains(reason, "imagepull"):
-		return "image_pull_failed", model.TaskExecutionFailed
-	case strings.Contains(reason, "containerconfig") || strings.Contains(reason, "crashloop") || strings.Contains(reason, "runcontainer"):
-		return "container_start_failed", model.TaskExecutionFailed
-	case state.Phase == kubernetesPhaseFailed:
-		return "job_failed", model.TaskExecutionFailed
 	default:
-		return "", ""
+		return "runtime_failed", model.TaskExecutionFailed
 	}
 }
 
-func sanitizeKubernetesDiagnostic(value string) string {
+func sanitizeRuntimeDiagnostic(value string) string {
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	if len(value) > 1024 {
 		value = value[:1024]
@@ -266,7 +282,7 @@ func sanitizeKubernetesDiagnostic(value string) string {
 	return value
 }
 
-func isTerminalKubernetesExecution(status string) bool {
+func isTerminalRuntimeExecution(status string) bool {
 	switch status {
 	case model.TaskExecutionSucceeded, model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut:
 		return true

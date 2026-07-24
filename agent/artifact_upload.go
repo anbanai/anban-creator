@@ -62,6 +62,22 @@ type ArtifactManifestFile struct {
 	Role         string `json:"role,omitempty"`
 }
 
+type ArtifactStreamRequest struct {
+	TaskID       string
+	ExecutionID  string
+	RelativePath string
+	ContentType  string
+	Size         int64
+	SHA256       string
+}
+
+type ArtifactStreamResponse struct {
+	ObjectKey   string `json:"object_key"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+}
+
 type WorkspaceArtifact struct {
 	LocalPath    string
 	RelativePath string
@@ -70,6 +86,7 @@ type WorkspaceArtifact struct {
 
 type ArtifactReporter interface {
 	PrepareArtifactUpload(context.Context, ArtifactPrepareRequest) (*ArtifactPrepareResponse, error)
+	StreamArtifactContent(context.Context, ArtifactStreamRequest, io.Reader) (*ArtifactStreamResponse, error)
 	ReportArtifactManifest(context.Context, ArtifactManifestRequest) error
 	ReportProgress(context.Context, string) error
 }
@@ -94,14 +111,11 @@ func ScanWorkspaceArtifacts(ctx context.Context, root string) ([]WorkspaceArtifa
 	return scanWorkspaceArtifacts(ctx, root, "")
 }
 
-func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, result *serveragent.ExecutionResult) error {
+func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serveragent.ExecutionResult) error {
 	if u == nil || u.cfg == nil || u.reporter == nil {
 		return fmt.Errorf("artifact uploader is not configured")
 	}
 	workDir := u.cfg.Workspace
-	if result != nil && strings.TrimSpace(result.WorkDir) != "" {
-		workDir = result.WorkDir
-	}
 	if err := artifactContextCause(ctx); err != nil {
 		return err
 	}
@@ -175,7 +189,7 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 			return ArtifactManifestFile{}, fmt.Errorf("snapshot artifact %s: %w", file.RelativePath, err)
 		}
 
-		prepared, err := u.reporter.PrepareArtifactUpload(ctx, ArtifactPrepareRequest{
+		request := ArtifactPrepareRequest{
 			TaskID:       u.cfg.TaskID,
 			ExecutionID:  u.cfg.ExecutionID,
 			RelativePath: file.RelativePath,
@@ -183,44 +197,76 @@ func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file Wor
 			ContentType:  snapshot.contentType,
 			Size:         snapshot.size,
 			SHA256:       snapshot.hash,
-		})
-		if err != nil {
-			primary := fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, err)
-			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 		}
-		if err := artifactContextCause(ctx); err != nil {
-			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, err)
-		}
-		if prepared == nil {
-			primary := fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
-			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
-		}
-		if prepared.MaxSize > 0 && snapshot.size > prepared.MaxSize {
-			primary := fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
-			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
-		}
-		objectKey := strings.TrimSpace(prepared.Key)
-		if objectKey == "" {
-			primary := fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
-			return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
-		}
-
-		contentType := prepared.Headers["Content-Type"]
-		if contentType == "" {
-			contentType = snapshot.contentType
-		}
-		if prepared.UploadRequired {
-			preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
-			if preparedSHA256 == "" || preparedSHA256 != snapshot.hash {
-				primary := fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+		var objectKey, contentType string
+		switch u.cfg.ArtifactUploadMode {
+		case ArtifactUploadDirect, "":
+			prepared, prepareErr := u.reporter.PrepareArtifactUpload(ctx, request)
+			if prepareErr != nil {
+				primary := fmt.Errorf("prepare artifact upload %s: %w", file.RelativePath, prepareErr)
 				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
-			prepared.Headers[artifactSHA256Header] = preparedSHA256
-			if err := snapshot.rewind(); err != nil {
-				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, err)
+			if cause := artifactContextCause(ctx); cause != nil {
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, cause)
+			}
+			if prepared == nil {
+				primary := fmt.Errorf("prepare artifact upload %s: empty response", file.RelativePath)
 				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
 			}
-			_, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
+			if prepared.MaxSize > 0 && snapshot.size > prepared.MaxSize {
+				primary := fmt.Errorf("artifact %s exceeds prepared upload limit", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			objectKey = strings.TrimSpace(prepared.Key)
+			if objectKey == "" {
+				primary := fmt.Errorf("prepare artifact upload %s returned empty object key", file.RelativePath)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			contentType = prepared.Headers["Content-Type"]
+			if contentType == "" {
+				contentType = snapshot.contentType
+			}
+			if prepared.UploadRequired {
+				preparedSHA256 := strings.ToLower(strings.TrimSpace(prepared.Headers[artifactSHA256Header]))
+				if preparedSHA256 == "" || preparedSHA256 != snapshot.hash {
+					primary := fmt.Errorf("prepare artifact upload %s returned missing or mismatched SHA-256 metadata", file.RelativePath)
+					return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+				}
+				prepared.Headers[artifactSHA256Header] = preparedSHA256
+				if rewindErr := snapshot.rewind(); rewindErr != nil {
+					primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, rewindErr)
+					return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+				}
+				_, err = u.putObject(ctx, prepared, artifactUploadSource{ReadSeeker: snapshot.file}, contentType)
+			}
+		case ArtifactUploadStream:
+			if rewindErr := snapshot.rewind(); rewindErr != nil {
+				primary := fmt.Errorf("rewind artifact %s: %w", file.RelativePath, rewindErr)
+				return ArtifactManifestFile{}, closeArtifactFile(file.RelativePath, snapshot.file, primary)
+			}
+			streamed, streamErr := u.reporter.StreamArtifactContent(ctx, ArtifactStreamRequest{
+				TaskID: request.TaskID, ExecutionID: request.ExecutionID, RelativePath: request.RelativePath,
+				ContentType: request.ContentType, Size: request.Size, SHA256: request.SHA256,
+			}, artifactUploadSource{ReadSeeker: snapshot.file})
+			if streamErr != nil {
+				err = streamErr
+				break
+			}
+			if streamed == nil {
+				err = fmt.Errorf("stream upload returned empty response")
+				break
+			}
+			if streamed.Size != snapshot.size || !strings.EqualFold(strings.TrimSpace(streamed.SHA256), snapshot.hash) {
+				err = fmt.Errorf("stream upload response does not match artifact")
+				break
+			}
+			objectKey = strings.TrimSpace(streamed.ObjectKey)
+			contentType = firstNonEmpty(streamed.ContentType, snapshot.contentType)
+			if objectKey == "" {
+				err = fmt.Errorf("stream upload returned empty object key")
+			}
+		default:
+			err = fmt.Errorf("unsupported artifact upload mode %q", u.cfg.ArtifactUploadMode)
 		}
 
 		stable, stabilityErr := snapshot.unchanged()

@@ -376,6 +376,13 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		}
 	} else {
 		if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			authoritative, err := tx.Tasks().FindByIDForUpdate(ctx, task.ID)
+			if err != nil {
+				return err
+			}
+			if authoritative.DeletingAt != nil {
+				return ErrTaskDeleting
+			}
 			for _, file := range files {
 				if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
 					return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
@@ -397,11 +404,15 @@ func buildTaskMCPArtifactStoragePrefix(task *model.Task, executionID string) str
 }
 
 func buildTaskArtifactStoragePrefix(task *model.Task, executionID string) string {
-	segments := []string{"uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID}
+	segments := []string{strings.TrimSuffix(buildTaskArtifactTaskStoragePrefix(task), "/")}
 	if executionID != "" {
 		segments = append(segments, "executions", executionID)
 	}
 	return path.Join(append(segments, "artifacts")...) + "/"
+}
+
+func buildTaskArtifactTaskStoragePrefix(task *model.Task) string {
+	return path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID) + "/"
 }
 
 func buildTaskArtifactFinalStorageKey(task *model.Task, executionID, hash, relPath string) string {

@@ -450,6 +450,9 @@ func (r *taskFileRepository) UpsertPendingCurrentExecution(ctx context.Context, 
 		if err != nil {
 			return err
 		}
+		if task.DeletingAt != nil {
+			return ErrTaskFileTaskNotRunning
+		}
 		if execution.ManifestSealed {
 			return ErrTaskFileManifestState
 		}
@@ -509,6 +512,9 @@ func (r *taskFileRepository) UpdatePendingCurrentExecutionMetadata(ctx context.C
 		task, execution, err := lockCurrentArtifactExecution(tx, original.TaskID, original.ExecutionID)
 		if err != nil {
 			return err
+		}
+		if task.DeletingAt != nil {
+			return ErrTaskFileTaskNotRunning
 		}
 		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
 			return ErrTaskFileManifestState
@@ -588,6 +594,9 @@ func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context,
 		task, execution, err := lockCurrentArtifactExecution(tx, taskID, executionID)
 		if err != nil {
 			return err
+		}
+		if task.DeletingAt != nil {
+			return ErrTaskFileTaskNotRunning
 		}
 		if execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending {
 			return ErrTaskFileManifestState

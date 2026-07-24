@@ -112,7 +112,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskSvc := NewTaskService(repo, nil, nil, store, &logger, "", nil, "", nil, nil)
+	taskSvc := NewTaskService(repo, nil, store, &logger, "", nil, nil)
 	bundle := &serverbilling.Bundle{Products: serverbilling.ProductCatalog{
 		CatalogID: "retail-task-image-v1", Currency: "credits",
 		SKUs: []serverbilling.SKUConfig{
@@ -300,6 +300,14 @@ func TestTaskDeleteRemovesEveryImmutableImageOperationObject(t *testing.T) {
 	keys = append(keys, collectedKey, cleanupKey)
 	if err := f.repo.Tasks().UpdateStatus(ctx, f.taskID, model.TaskStatusCompleted); err != nil {
 		t.Fatal(err)
+	}
+	if won, err := f.repo.TaskExecutions().Transition(ctx, f.executionID,
+		[]string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded,
+		model.ExecutionTransition{
+			FinalizationStatus: model.TaskExecutionFinalizationDone,
+			CleanupStatus:      model.TaskExecutionCleanupDone,
+		}); err != nil || !won {
+		t.Fatalf("complete execution cleanup: won=%v err=%v", won, err)
 	}
 	if err := f.service.tasks.Delete(ctx, f.taskID); err != nil {
 		t.Fatal(err)

@@ -111,7 +111,7 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 	workCtx, cancelWork := finalization.workContext()
 	defer cancelWork()
 
-	if cfg.ArtifactUploadMode == ArtifactUploadDirect {
+	if cfg.ArtifactUploadMode == ArtifactUploadDirect || cfg.ArtifactUploadMode == ArtifactUploadStream {
 		uploader := NewArtifactUploader(cfg, reporter)
 		if uploadErr := uploader.UploadWorkspaceArtifacts(workCtx, result); uploadErr != nil {
 			_ = reporter.ReportProgress(workCtx, "artifact upload failed: "+uploadErr.Error())

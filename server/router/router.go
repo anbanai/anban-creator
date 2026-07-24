@@ -16,7 +16,6 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
@@ -37,7 +36,6 @@ type Services struct {
 	WechatSvc                *auth.WeChatService
 	WSHub                    *handler.WebSocketHub
 	AuthHandler              *handler.AuthHandler
-	Executor                 agent.TaskExecutor
 	PlanService              *service.PlanService
 	TaskService              *service.TaskService
 	PlanHandler              *handler.PlanHandler
@@ -69,10 +67,11 @@ type Services struct {
 // NewRouter creates a new Fiber app with middleware and route groups.
 func NewRouter(svc *Services) *fiber.App {
 	app := fiber.New(fiber.Config{
-		BodyLimit:    50 * 1024 * 1024, // 50 MB
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 16 * time.Minute, // > plugin .mcp.json timeout (15min) so long LLM calls survive
-		IdleTimeout:  120 * time.Second,
+		BodyLimit:         50 * 1024 * 1024, // 50 MB
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      16 * time.Minute, // > plugin .mcp.json timeout (15min) so long LLM calls survive
+		IdleTimeout:       120 * time.Second,
+		StreamRequestBody: true,
 	})
 
 	// ---------------------------------------------------------------------------
@@ -190,6 +189,7 @@ func NewRouter(svc *Services) *fiber.App {
 		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
 		agentAPI.Post("/upload", svc.AgentHandler.Upload)
 		agentAPI.Post("/artifacts/prepare", svc.AgentHandler.PrepareArtifactUpload)
+		agentAPI.Post("/artifacts/content", svc.AgentHandler.StreamArtifactContent)
 		agentAPI.Post("/artifacts/manifest", svc.AgentHandler.ReportArtifactManifest)
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 		agentAPI.Post("/claim", svc.AgentHandler.Claim)

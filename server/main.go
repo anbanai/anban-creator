@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	dockerclient "github.com/docker/docker/client"
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -27,7 +28,6 @@ import (
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
-	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -221,39 +221,42 @@ func main() {
 		log.Error().Msg("CRITICAL: repository is nil — API key service not created, all MCP authentication will fail. Check MySQL connectivity.")
 	}
 
-	var memoryMgr *projectmemory.ProjectMemoryManager
-	if cfg.Claude.Executor != "kubernetes" && cfg.Memory.Enabled && store != nil {
-		memoryMgr = projectmemory.NewProjectMemoryManager(store, cfg.Memory, service.NewRedisMemoryLocker(rdb, log), *log)
-		log.Info().
-			Str("provider", cfg.Memory.Provider).
-			Str("oss_prefix", cfg.Memory.OSSPrefix).
-			Str("runtime_dir", cfg.Memory.RuntimeDir).
-			Msg("project memory manager initialized")
-	}
-
-	// 12. Create agent executor.
-	var agentExecutor agent.TaskExecutor
+	// 12. Create the selected managed runtime provider.
 	var kubeClient kubernetes.Interface
-	var kubeDispatcher agent.KubernetesDispatcher
-	var kubeVerifier *agent.KubernetesWorkloadVerifier
-	var executionTokens *auth.ExecutionTokenService
+	var runtimeDispatcher agent.RuntimeDispatcher
+	var workloadVerifier agent.WorkloadVerifier
+	var runtimeClientCloser interface{ Close() error }
+	executionTokens, err := auth.NewExecutionTokenService(cfg.Claude.ExecutionTokenSecret)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create execution token service")
+	}
+	workloadTokens, err := auth.NewWorkloadTokenService(cfg.Claude.ExecutionTokenSecret)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create workload token service")
+	}
 	var bootstrapSvc *service.AgentBootstrapService
-	var kubeReconciler *agent.KubernetesReconciler
+	var runtimeReconciler *agent.RuntimeReconciler
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
+		dockerClient, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to create Docker executor")
+			log.Fatal().Err(err).Msg("failed to create Docker client")
 		}
-		agentExecutor = dockerExec
-		dockerExec.CleanupOrphanedContainers()
+		runtimeClientCloser = dockerClient
+		runtimeDispatcher, err = agent.NewDockerDispatcher(cfg.Claude.RuntimeImages, cfg.Claude.Docker, cfg.AgentServerURL(), workloadTokens, dockerClient, time.Now)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Docker runtime dispatcher")
+		}
+		workloadVerifier, err = agent.NewDockerWorkloadVerifier(dockerClient, workloadTokens)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Docker workload verifier")
+		}
 		log.Info().
-			Str("article_image", cfg.Claude.Docker.ArticleImage).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
-			Bool("per_user_mcp", apiKeySvc != nil).
-			Msg("docker agent executor created")
+			Msg("Docker one-shot runtime dispatcher created")
 	case "kubernetes":
 		restConfig, err := rest.InClusterConfig()
 		if err != nil {
@@ -263,18 +266,37 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Kubernetes client")
 		}
+		runtimeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
+		}
+		workloadVerifier, err = agent.NewKubernetesWorkloadVerifier(kubeClient, cfg.Claude.Kubernetes.Namespace, cfg.Claude.Kubernetes.ServiceAccount)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Kubernetes workload verifier")
+		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
-			Str("article_image", cfg.Claude.Kubernetes.ArticleImage).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
 			Msg("Kubernetes Job runtime client created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.RuntimeEnv(), cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Models.Default, cfg.Claude.RuntimeModelUsageAliases(), apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
-		log.Info().
-			Str("plugin_dir", cfg.Claude.PluginDir).
-			Bool("sandbox", cfg.Claude.Sandbox).
-			Bool("per_user_mcp", apiKeySvc != nil).
-			Msg("local agent executor created")
+		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")
 	}
+	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes)
+	activeDeadline := reconcilerConfig.ActiveDeadline
+	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
+		Model:                   cfg.Claude.Models.Default,
+		MaxTurns:                cfg.Claude.MaxTurns,
+		TokenTTL:                activeDeadline,
+		ActiveDeadline:          activeDeadline,
+		SignedURLTTL:            cfg.Storage.DirectUploadExpiresSeconds,
+		Store:                   store,
+		ImageAPIConfig:          &cfg.ImageAPI,
+		MontageToolPolicy:       cfg.Montage.ToolPolicy,
+		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
+		MontageEnv:              cfg.Montage.Env,
+		RuntimeEnv:              cfg.Claude.RuntimeEnv(),
+		ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
+	}, *log)
 
 	// 13. Create services.
 	var planSvc *service.PlanService
@@ -288,7 +310,6 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
-	workspaceSvc := service.NewWorkspaceService()
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		projectSvc = service.NewProjectService(repo, log)
@@ -308,62 +329,37 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetReferenceAssetService(referenceAssetSvc)
 		taskSvc.SetProviderCostService(fixedBilling.Cost)
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
-		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
-		// Wire executor defaults so local-executor claim responses carry the same
-		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
+		// Standalone desktop Agent claims use the same model and max-turn defaults
+		// as managed workloads.
 		taskSvc.SetExecutorDefaults(cfg.Claude.Models.Default, cfg.Claude.MaxTurns)
-		if cfg.Claude.Executor == "kubernetes" {
-			var err error
-			executionTokens, err = auth.NewExecutionTokenService(cfg.Claude.Kubernetes.ExecutionTokenSecret)
-			if err != nil {
-				log.Fatal().Err(err).Msg("failed to create Kubernetes execution token service")
-			}
-			kubeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.AgentServerURL(), kubeClient)
-			if err != nil {
-				log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
-			}
-			kubeVerifier, err = agent.NewKubernetesWorkloadVerifier(kubeClient, cfg.Claude.Kubernetes.Namespace, cfg.Claude.Kubernetes.ServiceAccount)
-			if err != nil {
-				log.Fatal().Err(err).Msg("failed to create Kubernetes workload verifier")
-			}
-			activeDeadline := time.Duration(cfg.Claude.Kubernetes.ActiveDeadlineSeconds) * time.Second
-			bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
-				Model:                   cfg.Claude.Models.Default,
-				MaxTurns:                cfg.Claude.MaxTurns,
-				TokenTTL:                activeDeadline,
-				ActiveDeadline:          activeDeadline,
-				SignedURLTTL:            cfg.Storage.DirectUploadExpiresSeconds,
-				Store:                   store,
-				ImageAPIConfig:          &cfg.ImageAPI,
-				MontageToolPolicy:       cfg.Montage.ToolPolicy,
-				MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
-				MontageEnv:              cfg.Montage.Env,
-				RuntimeEnv:              cfg.Claude.RuntimeEnv(),
-				ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
-			}, *log)
-			taskSvc.SetKubernetesDispatcher(kubeDispatcher)
-			workspaceLifecycle, ok := kubeDispatcher.(service.TaskWorkspaceLifecycle)
-			if !ok {
-				log.Fatal().Msg("Kubernetes dispatcher does not manage task workspaces")
-			}
-			taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
-			projectSvc.SetProjectMemoryLifecycle(kubeDispatcher)
-			kubeReconciler = agent.NewKubernetesReconciler(kubeDispatcher, taskSvc, agent.KubernetesReconcilerConfig{
-				PreStartRetryLimit: cfg.Claude.Kubernetes.PreStartRetryLimit,
-				HeartbeatTimeout:   time.Duration(cfg.Claude.Kubernetes.HeartbeatTimeoutSeconds) * time.Second,
-			}, log)
-			taskSvc.SetNASResumeEnabled(true)
-			taskSvc.SetProjectConcurrencyCap(1)
-			log.Info().Msg("Kubernetes Job runtime enabled: project task concurrency capped at 1 per memory PVC")
+		taskSvc.SetRuntimeDispatcher(runtimeDispatcher)
+		workspaceLifecycle, ok := runtimeDispatcher.(service.TaskWorkspaceLifecycle)
+		if !ok {
+			log.Fatal().Str("provider", cfg.Claude.Executor).Msg("runtime dispatcher does not manage task workspaces")
+		}
+		taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
+		projectMemoryLifecycle, ok := runtimeDispatcher.(service.ProjectMemoryLifecycle)
+		if !ok {
+			log.Fatal().Str("provider", cfg.Claude.Executor).Msg("runtime dispatcher does not manage project memory")
+		}
+		projectSvc.SetProjectMemoryLifecycle(projectMemoryLifecycle)
+		runtimeReconciler = agent.NewRuntimeReconciler(runtimeDispatcher, taskSvc, reconcilerConfig, *log)
+		taskSvc.SetNASResumeEnabled(true)
+		if cap := managedRuntimeProjectConcurrencyCap(cfg.Claude.Executor); cap > 0 {
+			taskSvc.SetProjectConcurrencyCap(cap)
+			log.Info().
+				Str("executor", cfg.Claude.Executor).
+				Int("cap", cap).
+				Msg("managed runtime project concurrency capped for shared project memory")
 		}
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
@@ -530,10 +526,8 @@ func main() {
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
 		agentHandler.SetAdminAPIKey(cfg.BillingRuntime.AdminAPIKey)
-		if executionTokens != nil {
-			agentHandler.SetExecutionTokenService(executionTokens)
-			agentHandler.SetBootstrap(kubeVerifier, bootstrapSvc)
-		}
+		agentHandler.SetExecutionTokenService(executionTokens)
+		agentHandler.SetBootstrap(workloadVerifier, bootstrapSvc)
 		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
 			Storage: cfg.Storage,
 		})
@@ -659,7 +653,6 @@ func main() {
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
 			WritingSvc:             writingSvc,
 			PublishingSvc:          publishingSvc,
-			WorkspaceSvc:           workspaceSvc,
 			TemplateSvc:            templateSvc,
 			LiveSliceSvc:           liveSliceSvc,
 			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
@@ -692,6 +685,12 @@ func main() {
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
+	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
@@ -704,10 +703,9 @@ func main() {
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
-	if kubeReconciler != nil {
-		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
-		defer reconcilerCancel()
-		go kubeReconciler.Run(reconcilerCtx)
+	var runtimeReconcilerDone <-chan struct{}
+	if runtimeReconciler != nil {
+		runtimeReconcilerDone = startRuntimeReconciler(ctx, runtimeReconciler)
 	}
 
 	// 15.2 Clean up expirable derived records without touching NAS task workspaces.
@@ -725,8 +723,8 @@ func main() {
 		defer reclaimCancel()
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
-	if repo != nil && store != nil && store.Name() == "oss" {
-		if finalStore, ok := store.(service.DirectUploadFinalizationStorage); ok {
+	if repo != nil && store != nil {
+		if finalStore, ok := uploadSessionCleanupStorage(store); ok {
 			uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
 			defer uploadCleanupCancel()
 			service.StartUploadSessionCleanup(uploadCleanupCtx, finalStore, repo, 30*time.Minute, log)
@@ -756,7 +754,6 @@ func main() {
 		WechatSvc:                wechatSvc,
 		WSHub:                    wsHub,
 		AuthHandler:              authHandler,
-		Executor:                 agentExecutor,
 		PlanService:              planSvc,
 		TaskService:              taskSvc,
 		ProjectHandler:           projectHandler,
@@ -799,12 +796,6 @@ func main() {
 
 	// 18. Start HTTP server with graceful shutdown.
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-
-	// Use signal.NotifyContext for graceful shutdown.
-	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithCancel(signalCtx)
-	defer cancel()
 
 	var billingWorkerWG sync.WaitGroup
 	if fixedBilling != nil && fixedBilling.Worker != nil {
@@ -855,10 +846,13 @@ func main() {
 			log.Info().Msg("Asynq server stopped")
 		}
 
-		// Close Docker executor client if applicable.
-		if closer, ok := agentExecutor.(interface{ Close() error }); ok {
-			if err := closer.Close(); err != nil {
-				log.Error().Err(err).Msg("failed to close agent executor")
+		if runtimeReconcilerDone != nil {
+			<-runtimeReconcilerDone
+		}
+
+		if runtimeClientCloser != nil {
+			if err := runtimeClientCloser.Close(); err != nil {
+				log.Error().Err(err).Msg("failed to close runtime provider client")
 			}
 		}
 
@@ -910,6 +904,15 @@ func main() {
 	case <-time.After(60 * time.Second):
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
+	}
+}
+
+func managedRuntimeProjectConcurrencyCap(executor string) int {
+	switch strings.TrimSpace(executor) {
+	case "docker", "kubernetes":
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -1081,6 +1084,11 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+func uploadSessionCleanupStorage(store storage.Provider) (service.DirectUploadFinalizationStorage, bool) {
+	finalStore, ok := store.(service.DirectUploadFinalizationStorage)
+	return finalStore, ok
 }
 
 // parseLogLevel converts a LOG_LEVEL string to a zerolog level.

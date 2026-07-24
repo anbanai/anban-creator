@@ -106,8 +106,7 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
 	}
-	filePath := s.resolveTaskPath(req.TaskID, req.FilePath)
-	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, filePath)
+	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, req.FilePath)
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
 	}
@@ -124,7 +123,7 @@ func (s *TaskImageOperationsService) Compress(ctx context.Context, req CompressT
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, ""); err != nil {
 		return nil, err
 	}
-	filePath, compressed, err := s.images.CompressImage(s.resolveTaskPath(req.TaskID, req.FilePath), req.MaxWidth)
+	filePath, compressed, err := s.images.CompressImage(req.FilePath, req.MaxWidth)
 	if err != nil {
 		return nil, fmt.Errorf("compress image: %w", err)
 	}
@@ -147,7 +146,7 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
 	}
-	imageSource, err := s.loadAnalysisSource(ctx, req.TaskID, req.ImageURL, req.FilePath)
+	imageSource, err := s.loadAnalysisSource(ctx, req.ImageURL, req.FilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -181,26 +180,16 @@ func (s *TaskImageOperationsService) validateTask(ctx context.Context, userID, t
 	return nil
 }
 
-func (s *TaskImageOperationsService) resolveTaskPath(taskID, filePath string) string {
-	if s != nil && s.tasks != nil {
-		if resolved, ok := s.tasks.ResolveWorkspacePath(taskID, filePath); ok {
-			return resolved
-		}
-	}
-	return filePath
-}
-
-func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, taskID, imageURL, filePath string) (string, error) {
+func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, imageURL, filePath string) (string, error) {
 	if filePath != "" {
-		path := s.resolveTaskPath(taskID, filePath)
-		info, err := os.Stat(path)
+		info, err := os.Stat(filePath)
 		if err != nil {
 			return "", fmt.Errorf("read image file: %w", err)
 		}
 		if info.Size() > maxAnalyzedTaskImageBytes {
 			return "", errors.New("image file is too large for analysis (max 10MB)")
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", fmt.Errorf("read image file: %w", err)
 		}

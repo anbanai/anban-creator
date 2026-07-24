@@ -32,6 +32,15 @@ type BootstrapFile struct {
 	MaxBytes     int64  `json:"max_bytes,omitempty"`
 }
 
+const (
+	ArtifactTransportDirect = "direct"
+	ArtifactTransportStream = "stream"
+)
+
+type ArtifactTransport struct {
+	Mode string `json:"mode"`
+}
+
 type AgentBootstrapResponse struct {
 	ExecutionToken      string                                    `json:"execution_token"`
 	TaskID              string                                    `json:"task_id"`
@@ -48,6 +57,7 @@ type AgentBootstrapResponse struct {
 	ModelUsageAliases   map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
 	Env                 map[string]string                         `json:"env,omitempty"`
 	Files               []BootstrapFile                           `json:"files"`
+	ArtifactTransport   ArtifactTransport                         `json:"artifact_transport"`
 }
 
 type AgentBootstrapConfig struct {
@@ -100,30 +110,45 @@ func (s *AgentBootstrapService) currentTime() time.Time {
 	return time.Now().UTC()
 }
 
-func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *serveragent.KubernetesWorkloadIdentity) (*AgentBootstrapResponse, error) {
+func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *serveragent.WorkloadIdentity) (*AgentBootstrapResponse, error) {
 	if s == nil || s.repo == nil || s.tokens == nil || identity == nil {
 		return nil, errors.New("agent bootstrap is not configured")
+	}
+	if err := validateBootstrapWorkloadIdentity(identity, s.currentTime()); err != nil {
+		return nil, err
 	}
 	execution, task, project, err := s.loadAndValidate(ctx, s.repo, identity)
 	if err != nil {
 		return nil, err
 	}
-	response, err := s.buildResponse(ctx, execution, task, project, identity.JobDeadline)
+	response, err := s.buildResponse(ctx, execution, task, project, identity.Deadline)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskExecutions().SetRuntimeIdentity(ctx, identity.ExecutionID, identity.RuntimeIdentity); err != nil {
+			if errors.Is(err, repository.ErrRuntimeIdentityConflict) || errors.Is(err, repository.ErrRuntimeIdentityInactive) {
+				return fmt.Errorf("%w: workload runtime identity changed", ErrAgentBootstrapConflict)
+			}
+			return err
+		}
 		execution, _, _, err := s.loadAndValidate(ctx, tx, identity)
 		if err != nil {
 			return err
 		}
 		if execution.Status == model.TaskExecutionStarting {
-			won, err := tx.TaskExecutions().Transition(ctx, execution.ID, []string{model.TaskExecutionStarting}, model.TaskExecutionRunning, model.ExecutionTransition{Started: true, PodUID: identity.PodUID})
+			won, err := tx.TaskExecutions().Transition(ctx, execution.ID, []string{model.TaskExecutionStarting}, model.TaskExecutionRunning, model.ExecutionTransition{Started: true, RuntimeInstanceID: identity.InstanceID})
 			if err != nil {
 				return err
 			}
 			if !won {
-				return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
+				refreshed, _, _, err := s.loadAndValidate(ctx, tx, identity)
+				if err != nil {
+					return err
+				}
+				if refreshed.Status != model.TaskExecutionRunning {
+					return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
+				}
 			}
 		}
 		now := time.Now()
@@ -137,7 +162,32 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 	return response, nil
 }
 
-func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo repository.Repository, identity *serveragent.KubernetesWorkloadIdentity) (*model.TaskExecution, *model.Task, *model.Project, error) {
+func validateBootstrapWorkloadIdentity(identity *serveragent.WorkloadIdentity, now time.Time) error {
+	for _, member := range []struct {
+		name  string
+		value string
+	}{
+		{name: "target", value: identity.Target},
+		{name: "scope", value: identity.Scope},
+		{name: "workload", value: identity.Workload},
+		{name: "instance", value: identity.InstanceID},
+		{name: "execution", value: identity.ExecutionID},
+		{name: "task", value: identity.TaskID},
+		{name: "project", value: identity.ProjectID},
+		{name: "user", value: identity.UserID},
+	} {
+		trimmed := strings.TrimSpace(member.value)
+		if trimmed == "" || trimmed != member.value {
+			return fmt.Errorf("%w: verified workload %s identity is incomplete or non-canonical", ErrAgentBootstrapConflict, member.name)
+		}
+	}
+	if identity.Deadline.IsZero() || !identity.Deadline.After(now) {
+		return fmt.Errorf("%w: verified workload deadline is not in the future", ErrAgentBootstrapConflict)
+	}
+	return nil
+}
+
+func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo repository.Repository, identity *serveragent.WorkloadIdentity) (*model.TaskExecution, *model.Task, *model.Project, error) {
 	execution, err := repo.TaskExecutions().FindByID(ctx, identity.ExecutionID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("find execution: %w", err)
@@ -157,20 +207,20 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID || execution.TaskID != identity.TaskID || task.ID != identity.TaskID || task.ProjectID != identity.ProjectID || task.UserID != identity.UserID || project.ID != identity.ProjectID || project.UserID != identity.UserID || user.ID != identity.UserID {
 		return nil, nil, nil, fmt.Errorf("%w: workload identity does not match current task execution ownership", ErrAgentBootstrapConflict)
 	}
-	if execution.Target != "kubernetes" || execution.Namespace != identity.Namespace || execution.JobName != identity.JobName {
-		return nil, nil, nil, fmt.Errorf("%w: workload Kubernetes runtime identity mismatch", ErrAgentBootstrapConflict)
+	if execution.Target != identity.Target || execution.RuntimeScope != identity.Scope || execution.RuntimeWorkload != identity.Workload {
+		return nil, nil, nil, fmt.Errorf("%w: workload runtime identity mismatch", ErrAgentBootstrapConflict)
 	}
 	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
 		return nil, nil, nil, fmt.Errorf("%w: task is terminal", ErrAgentBootstrapConflict)
 	}
 	switch execution.Status {
 	case model.TaskExecutionStarting:
-		if execution.PodUID != "" && execution.PodUID != identity.PodUID {
-			return nil, nil, nil, fmt.Errorf("%w: execution is bound to another Pod", ErrAgentBootstrapConflict)
+		if execution.RuntimeInstanceID != "" && execution.RuntimeInstanceID != identity.InstanceID {
+			return nil, nil, nil, fmt.Errorf("%w: execution is bound to another runtime instance", ErrAgentBootstrapConflict)
 		}
 	case model.TaskExecutionRunning:
-		if !execution.Started || execution.PodUID == "" || execution.PodUID != identity.PodUID {
-			return nil, nil, nil, fmt.Errorf("%w: running execution is bound to another Pod", ErrAgentBootstrapConflict)
+		if !execution.Started || execution.RuntimeInstanceID == "" || execution.RuntimeInstanceID != identity.InstanceID {
+			return nil, nil, nil, fmt.Errorf("%w: running execution is bound to another runtime instance", ErrAgentBootstrapConflict)
 		}
 	default:
 		return nil, nil, nil, fmt.Errorf("%w: execution status %q cannot bootstrap", ErrAgentBootstrapConflict, execution.Status)
@@ -178,24 +228,24 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 	return execution, task, project, nil
 }
 
-func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, jobDeadline time.Time) (*AgentBootstrapResponse, error) {
+func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, workloadDeadline time.Time) (*AgentBootstrapResponse, error) {
 	issuedAt := s.currentTime()
 	credentialDeadline := issuedAt.Add(s.cfg.TokenTTL)
-	if jobDeadline.Before(credentialDeadline) {
-		credentialDeadline = jobDeadline
+	if workloadDeadline.Before(credentialDeadline) {
+		credentialDeadline = workloadDeadline
 	}
 	// JWT NumericDate serializes at whole-second precision. Use that exact
 	// boundary for download signing as well, never a rounded-up duration.
 	credentialDeadline = credentialDeadline.UTC().Truncate(time.Second)
 	if !credentialDeadline.After(issuedAt) || credentialDeadline.Sub(issuedAt) < time.Second {
-		return nil, fmt.Errorf("%w: Kubernetes Job has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
+		return nil, fmt.Errorf("%w: workload has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	effective := serveragent.EffectiveProject(project, task)
 	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
 	}
-	files := []BootstrapFile{{Path: ".task-context", Text: "TASK_ID=" + task.ID + "\n", Mode: 0644}}
+	var files []BootstrapFile
 	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, referenceAsset != nil)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)
@@ -248,7 +298,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	}
 	tokenIssuedAt := s.currentTime()
 	if !credentialDeadline.After(tokenIssuedAt) || credentialDeadline.Sub(tokenIssuedAt) < time.Second {
-		return nil, fmt.Errorf("%w: Kubernetes Job has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
+		return nil, fmt.Errorf("%w: workload has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	token, err := s.tokens.IssueAt(auth.ExecutionClaims{UserID: task.UserID, ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: execution.ID}, tokenIssuedAt, credentialDeadline)
 	if err != nil {
@@ -276,7 +326,14 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files}, nil
+	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()}}, nil
+}
+
+func (s *AgentBootstrapService) artifactTransportMode() string {
+	if s != nil && s.cfg.Store != nil && strings.EqualFold(strings.TrimSpace(s.cfg.Store.Name()), "oss") {
+		return ArtifactTransportDirect
+	}
+	return ArtifactTransportStream
 }
 
 func cloneBootstrapModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {

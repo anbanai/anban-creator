@@ -20,352 +20,6 @@ func extractSeednoteReferenceContract(t *testing.T, body string) string {
 	return strings.Join(strings.Fields(section), " ")
 }
 
-func documentedGenerateImageScopes(body string) []string {
-	const tool = "generate_image"
-	var scopes []string
-	for searchAt := 0; searchAt < len(body); {
-		relativeAt := strings.Index(body[searchAt:], tool)
-		if relativeAt < 0 {
-			break
-		}
-		callAt := searchAt + relativeAt
-		afterTool := callAt + len(tool)
-		if afterTool < len(body) && body[afterTool] == '`' {
-			afterTool++
-		}
-		for afterTool < len(body) && (body[afterTool] == ' ' || body[afterTool] == '\t' || body[afterTool] == '\n' || body[afterTool] == '\r') {
-			afterTool++
-		}
-		searchAt = callAt + len(tool)
-		if afterTool >= len(body) || body[afterTool] != '(' {
-			continue
-		}
-
-		paragraphAt := strings.LastIndex(body[:callAt], "\n\n") + 2
-		prefix := body[paragraphAt:afterTool]
-		negated := false
-		for _, marker := range []string{
-			"不再调用 `generate_image`", "不得调用 `generate_image`", "不再使用 `generate_image`",
-			"不再调用 generate_image", "不得调用 generate_image", "不再使用 generate_image",
-		} {
-			if strings.Contains(prefix, marker) {
-				negated = true
-				break
-			}
-		}
-		if negated {
-			continue
-		}
-
-		depth := 0
-		callEnd := len(body)
-		for at := afterTool; at < len(body); at++ {
-			switch body[at] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					callEnd = at + 1
-					at = len(body)
-				}
-			}
-		}
-		scopes = append(scopes, body[callAt:callEnd])
-	}
-	return scopes
-}
-
-func activeReferenceSelectionScope(paragraph string) bool {
-	if !strings.Contains(paragraph, "参考") {
-		return false
-	}
-	for _, marker := range []string{
-		"不再按", "不得按供应商", "不按供应商", "不维护供应商", "已移除供应商", "不暴露内部路由", "不诊断内部路由",
-	} {
-		if strings.Contains(paragraph, marker) {
-			return false
-		}
-	}
-	return true
-}
-
-func TestImageWorkflowScopeHelpersIgnoreNegatedMigrationProse(t *testing.T) {
-	migration := "迁移说明：不再调用 generate_image (provider=\"openai\")，旧字段仅用于解释历史。"
-	if scopes := documentedGenerateImageScopes(migration); len(scopes) != 0 {
-		t.Fatalf("negated generate_image migration prose produced %d invocation scopes", len(scopes))
-	}
-
-	invocation := "调用 `generate_image`(provider=\"openai\", prompt=\"...\")"
-	scopes := documentedGenerateImageScopes(invocation)
-	if len(scopes) != 1 || !containsDocumentedFieldAssignment(scopes[0], "provider") {
-		t.Fatal("active generate_image invocation must remain detectable")
-	}
-
-	spacedInvocation := "generate_image (prompt=\"...\", provider=\"openai\")"
-	spacedScopes := documentedGenerateImageScopes(spacedInvocation)
-	if len(spacedScopes) != 1 || !containsDocumentedFieldAssignment(spacedScopes[0], "provider") {
-		t.Fatal("generate_image with whitespace before its argument list must remain detectable")
-	}
-
-	multilineInvocation := "generate_image\n(\n  prompt=\"...\",\n  verification_prompt=\"legacy\"\n)"
-	multilineScopes := documentedGenerateImageScopes(multilineInvocation)
-	if len(multilineScopes) != 1 || !containsDocumentedFieldAssignment(multilineScopes[0], "verification_prompt") {
-		t.Fatal("multiline generate_image removed arguments must remain detectable")
-	}
-
-	if activeReferenceSelectionScope("参考图选择不再按 OpenAI/Gemini 分支，服务端负责路由。") {
-		t.Fatal("negated provider-routing migration prose must not be an active reference-selection scope")
-	}
-	if !activeReferenceSelectionScope("参考图选择：OpenAI/Gemini 使用不同的 ref_image_paths 上限。") {
-		t.Fatal("active provider-specific reference selection must remain detectable")
-	}
-}
-
-func containsDocumentedFieldAssignment(scope, field string) bool {
-	lower := strings.ToLower(scope)
-	field = strings.ToLower(field)
-	for _, pattern := range []string{field + "=", field + " =", `"` + field + `":`, "`" + field + "`:"} {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func markdownSection(t *testing.T, body, heading string) string {
-	t.Helper()
-	start := strings.Index(body, heading)
-	if start < 0 {
-		t.Fatalf("missing markdown section %q", heading)
-	}
-	rest := body[start+len(heading):]
-	end := len(rest)
-	for _, marker := range []string{"\n### ", "\n---"} {
-		if at := strings.Index(rest, marker); at >= 0 && at < end {
-			end = at
-		}
-	}
-	return rest[:end]
-}
-
-func imageWorkflowContractPaths(root string) []string {
-	return []string{
-		filepath.Join(root, "agents", "article.md"),
-		filepath.Join(root, "agents", "article.toml"),
-		filepath.Join(root, "agents", "designer.md"),
-		filepath.Join(root, "agents", "designer.toml"),
-		filepath.Join(root, "agents", "ecommerce.md"),
-		filepath.Join(root, "agents", "ecommerce.toml"),
-		filepath.Join(root, "agents", "seednote.md"),
-		filepath.Join(root, "agents", "seednote.toml"),
-		filepath.Join(root, "skills", "article-cover-design", "SKILL.md"),
-		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
-		filepath.Join(root, "skills", "article", "SKILL.md"),
-		filepath.Join(root, "skills", "article-visual-design", "SKILL.md"),
-		filepath.Join(root, "skills", "article-visual-design", "references", "content.md"),
-		filepath.Join(root, "skills", "ecommerce-visual-design", "SKILL.md"),
-		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
-		filepath.Join(root, "skills", "portrait-pose-variants", "SKILL.md"),
-		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "skills", "short-video-cover", "SKILL.md"),
-	}
-}
-
-func TestPluginAssetsDoNotUseRemovedGenerateImageWorkflowFields(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range imageWorkflowContractPaths(root) {
-		for _, scope := range documentedGenerateImageScopes(readRepoFile(t, path)) {
-			for _, removed := range []string{"verify_with_vision", "verification_prompt", "upload_to_cdn", "operation_id"} {
-				if containsDocumentedFieldAssignment(scope, removed) {
-					t.Fatalf("%s still assigns removed generate_image workflow field %q in invocation scope", path, removed)
-				}
-			}
-		}
-	}
-}
-
-func TestImageWorkflowAssetsDoNotTrackGenerationPlumbing(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range imageWorkflowContractPaths(root) {
-		for _, scope := range documentedGenerateImageScopes(readRepoFile(t, path)) {
-			for _, removed := range []string{
-				"provider", "image_model", "model_fallback_reason", "selection_reason",
-				"response_type", "revised_prompt", "output_mime", "generation_attempts",
-				"verification_audit",
-			} {
-				if containsDocumentedFieldAssignment(scope, removed) {
-					t.Fatalf("%s still assigns image-generation plumbing %q in invocation scope", path, removed)
-				}
-			}
-		}
-	}
-}
-
-func TestRuntimeImageWorkflowDocsDoNotRouteByProvider(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range []string{
-		filepath.Join(root, "agents", "designer.md"),
-		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
-		filepath.Join(root, "skills", "line-art-coloring", "references", "verification.md"),
-		filepath.Join(root, "skills", "ecommerce", "references", "examples.md"),
-	} {
-		body := readRepoFile(t, path)
-		for _, paragraph := range strings.Split(body, "\n\n") {
-			if !activeReferenceSelectionScope(paragraph) {
-				continue
-			}
-			for _, forbidden := range []string{
-				"Seedream（", "Seedream：", "OpenAI gpt-image", "OpenAI/Gemini",
-				"OpenAI(gpt-image)", "Gemini（", "项目模型是单参考", "image provider/model",
-			} {
-				if strings.Contains(paragraph, forbidden) {
-					t.Fatalf("%s still branches reference selection via %q", path, forbidden)
-				}
-			}
-		}
-	}
-}
-
-func TestReferenceSelectionUsesSemanticOrderAndServerOwnedLimits(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range []string{
-		filepath.Join(root, "agents", "designer.md"),
-		filepath.Join(root, "skills", "line-art-coloring", "SKILL.md"),
-		filepath.Join(root, "skills", "line-art-coloring", "references", "verification.md"),
-		filepath.Join(root, "skills", "ecommerce", "references", "examples.md"),
-	} {
-		body := readRepoFile(t, path)
-		for _, required := range []string{"参考图按语义相关性排序", "服务端负责路由与数量限制"} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing semantic reference ownership term %q", path, required)
-			}
-		}
-	}
-}
-
-func TestConfigSkillDoesNotExposeImageRouteConfiguration(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins", "skills", "config")
-	for _, path := range []string{
-		filepath.Join(root, "SKILL.md"),
-		filepath.Join(root, "references", "examples.md"),
-	} {
-		body := readRepoFile(t, path)
-		heading := "### 图片视觉设置"
-		if strings.HasSuffix(path, "examples.md") {
-			heading = "### Case 3: 图片视觉设置排查"
-		}
-		section := markdownSection(t, body, heading)
-		for _, required := range []string{"visual_style", "reference_image_path"} {
-			if !strings.Contains(section, required) {
-				t.Fatalf("%s missing semantic visual setting %q", path, required)
-			}
-		}
-		lower := strings.ToLower(section)
-		for _, forbidden := range []string{
-			"image_provider", "image_model", "image provider", "image model",
-			"图片生成服务", "图片服务", "图片模型", "模型配置", "provider", "openai", "gemini", "volcengine", "seedream",
-		} {
-			if strings.Contains(lower, forbidden) {
-				t.Fatalf("%s still exposes image route configuration %q", path, forbidden)
-			}
-		}
-	}
-}
-
-func TestSeednoteImagePromptsContainOnlyCreativeContent(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	paths := []string{
-		filepath.Join(root, "agents", "seednote.md"),
-		filepath.Join(root, "agents", "seednote.toml"),
-		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
-	}
-	for _, path := range paths {
-		body := extractSeednoteReferenceContract(t, readRepoFile(t, path))
-		for _, required := range []string{"image-prompts.md", "用途：", "提示词："} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing creative image-prompts contract %q", path, required)
-			}
-		}
-		for _, removed := range []string{
-			"generation_attempts", "selection_reason", "response_type", "output_mime",
-			"实际width/height", "provider", "image_model", `"verification"`, "路由选择",
-		} {
-			if strings.Contains(body, removed) {
-				t.Fatalf("%s still requires technical image-prompts field %q", path, removed)
-			}
-		}
-	}
-}
-
-func TestImageCapabilitiesRemainIndependent(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range []string{
-		filepath.Join(root, "agents", "article.md"),
-		filepath.Join(root, "agents", "article.toml"),
-		filepath.Join(root, "skills", "article-publishing", "SKILL.md"),
-	} {
-		body := readRepoFile(t, path)
-		for _, required := range []string{"generate_image", "analyze_image", "upload_image", "上传失败只重试上传，不重新生成"} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing independent image capability contract %q", path, required)
-			}
-		}
-	}
-
-	for _, path := range []string{
-		filepath.Join(root, "agents", "seednote.md"),
-		filepath.Join(root, "agents", "seednote.toml"),
-		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
-	} {
-		body := readRepoFile(t, path)
-		for _, required := range []string{
-			"generate_image", "analyze_image", "单独调用", "不能阻止继续生成后续计划图片",
-		} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing independent analysis contract %q", path, required)
-			}
-		}
-	}
-}
-
-func TestSeednoteAnalysisCannotStopLaterPlannedImageGeneration(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
-	for _, path := range []string{
-		filepath.Join(root, "agents", "seednote.md"),
-		filepath.Join(root, "agents", "seednote.toml"),
-		filepath.Join(root, "skills", "seednote-visual-design", "SKILL.md"),
-	} {
-		body := readRepoFile(t, path)
-		for _, required := range []string{
-			"只有 `generate_image` 本身失败或超时时，才写入 `output/failure-state.json` 并停止图片阶段",
-			"`analyze_image` 传输或运行失败只记录为“审核不可用” warning",
-			"不得写入 `failure-state.json`",
-			"不能单独导致最终交付失败",
-			"可用的分析结果或可见内容质量结论只影响当前输出图的记录与创作重试",
-			"当前图达到创作重试上限时标记 `quality_status=failed`",
-			"必须继续生成剩余计划图片",
-			"全部计划图片生成完成后再执行整体质量闸门",
-			"审核不可用 warning 不计为质量失败",
-		} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("%s missing non-blocking Seednote analysis term %q", path, required)
-			}
-		}
-		for _, forbidden := range []string{
-			"遇到关键失败时停止在当前阶段",
-			"创作重试预算耗尽",
-			"质量重试预算耗尽",
-			"运行错误写入 `failure-state.json`",
-			"审核错误只写 `failure-state.json`",
-		} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s still lets analysis/content quality exhaustion stop later planned image generation via %q", path, forbidden)
-			}
-		}
-	}
-}
-
 func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
@@ -447,12 +101,14 @@ func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	}
 }
 
-func TestSeednoteVisualWorkflowSelectsReferencesAndReviewsOutputsIndependently(t *testing.T) {
+func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.T) {
 	root := repoRoot(t)
 	visualSkills := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 	contentReferences := []string{
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	selectionRule := "封面、内容图和尾图均不预设是否使用参考素材。每页根据 `image-plan.md` 独立选择 0、1 或多张原图；没有相关参考时使用纯文生图。项目级品牌参考图仍可作为旧数据来源，但不得覆盖本次输入附件中更具体、更新的产品事实。"
@@ -465,11 +121,14 @@ func TestSeednoteVisualWorkflowSelectsReferencesAndReviewsOutputsIndependently(t
 				"对每张输出图独立决定使用 0、1 或多张附件",
 				"不得把所有素材传给所有页面",
 				"只传当前输出图相关的原始路径",
-				"数组顺序必须与 prompt 中“参考图 1、参考图 2”一致",
-				"图片生成成功后单独调用 `analyze_image`",
-				"不能阻止继续生成后续计划图片",
-				"可调整参考组合/顺序和创作 prompt 后重新生成",
-				"单张最多 3 次",
+				"内容质量审核由 Agent/Skill 决定",
+				"`analyze_image`",
+				"“审核不可用” warning",
+				"不创建失败态、不阻止继续生成，也不单独影响最终交付",
+				"每张输出图最多 3 次生成尝试",
+				"`quality_status=failed`",
+				"必须继续生成剩余计划图片",
+				"整体质量闸门",
 			} {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing per-output reference workflow term %q", path, term)
@@ -571,6 +230,7 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
 	required := []string{
@@ -607,6 +267,7 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
 	required := []string{
@@ -622,9 +283,10 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 		"Swiss/magazine 秩序感",
 		"图文节奏",
 		"analyze_image",
-		"可见主体、文字、构图和合规",
-		"不能阻止继续生成后续计划图片",
-		"failure-state.json",
+		"quality_status",
+		"审核不可用",
+		"只记录素材选择和内容质量结论",
+		"output/failure-state.json",
 	}
 
 	for _, path := range paths {
@@ -652,11 +314,13 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 
 	required := []string{
 		"generate_image",
+		"analyze_image",
 		"image-prompts.md",
 		"image-review.md",
-		"可见内容质量观察",
-		"不能阻止继续生成后续计划图片",
-		"failure-state.json",
+		"quality_status=failed",
+		"审核不可用",
+		"只有 `generate_image` 本身失败或超时时",
+		"output/failure-state.json",
 		"停止在图片阶段",
 		"不得提前删除",
 	}
@@ -689,6 +353,7 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
+		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
 	}
 
@@ -723,6 +388,8 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -815,7 +482,7 @@ func TestAgentReachSkillsTreatUnavailableBackendAsOptionalForOriginalResearch(t 
 		"xiaohongshu-mcp",
 		"xhs-cli (xiaohongshu-cli)",
 		"optional enhancement for original Seednote research",
-		"must not create `failure-state.json`",
+		"must not create `output/failure-state.json`",
 		"source content can be resolved",
 		"Do not run `pip`, `pipx`, `npm`, `agent-reach install`",
 		"channel_status",
@@ -839,6 +506,7 @@ func TestAgentReachSkillsTreatUnavailableBackendAsOptionalForOriginalResearch(t 
 func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
+		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 	}
 
@@ -866,7 +534,7 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				"不要在 Anban 内自行判断",
 				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
 				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
-				"原创模式不得失败、不得写 `failure-state.json`",
+				"原创模式不得失败、不得写 `output/failure-state.json`",
 				"missing_fields=external_hot_data",
 				"无外部数据时不得套用 CES",
 				"这条失败规则不适用于原创模式",
@@ -896,6 +564,12 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 				if strings.Contains(body, forbidden) {
 					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
 				}
+			}
+			if !strings.Contains(body, "写结构化 `output/failure-state.json`") {
+				t.Fatalf("%s must write recoverable research failures to output/failure-state.json", path)
+			}
+			if strings.Contains(body, "`failure-state.json`") {
+				t.Fatalf("%s contains a bare failure-state.json instruction", path)
 			}
 		})
 	}

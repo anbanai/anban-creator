@@ -33,6 +33,7 @@ func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
 					"项目/频道默认比例次之",
 					"业务默认比例只作兜底",
 					"不得从工具缺省值反推业务比例",
+					"比例只由用户、任务、项目或业务场景决定",
 					"微信文章封面/正文图默认 `16:9`",
 					"Seednote/XLS/移动信息流默认 `3:4`",
 				} {

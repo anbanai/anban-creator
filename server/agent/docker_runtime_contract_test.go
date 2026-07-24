@@ -6,9 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestCreatorAgentImageNamingContract(t *testing.T) {
@@ -24,9 +28,9 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.T) {
 	validMakefile := "AGENT_IMAGE := creator-agent-article:latest\n"
 	validCompose := `services:
-  agent:
-    image: creator-agent-article:latest
-    container_name: creator-agent-article
+	  server:
+	    environment:
+	      ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
 `
 
 	for _, tc := range []struct {
@@ -60,39 +64,31 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			compose:  validCompose,
 		},
 		{
-			name:     "Compose values outside agent block",
+			name:     "Compose image outside Server environment",
 			makefile: validMakefile,
 			compose: `services:
-  worker:
-    image: creator-agent-article:latest
-    container_name: creator-agent-article
+	  server:
+	    image: creator-agent-article:latest
+`,
+		},
+		{
+			name:     "persistent Agent service remains",
+			makefile: validMakefile,
+			compose: validCompose + `  agent:
+	    image: creator-agent-article:latest
 `,
 		},
 		{
 			name:     "legacy Compose identity remains",
 			makefile: validMakefile,
-			compose: validCompose + `  legacy-agent:
-    image: anban-creator-agent:latest
-    container_name: anban-creator-agent
+			compose: validCompose + `  old-agent:
+	    image: anban-agent:latest
 `,
 		},
 		{
-			name:     "retired short Compose identity remains",
+			name:     "duplicate Compose environment overrides expected value",
 			makefile: validMakefile,
-			compose: validCompose + `  legacy-agent:
-    image: anban-agent:latest
-    container_name: anban-agent
-`,
-		},
-		{
-			name:     "duplicate Compose image overrides expected value",
-			makefile: validMakefile,
-			compose:  validCompose + "    image: wrong-agent:latest\n",
-		},
-		{
-			name:     "duplicate Compose container name overrides expected value",
-			makefile: validMakefile,
-			compose:  validCompose + "    container_name: wrong-agent\n",
+			compose:  validCompose + "      ANBAN_AGENT_IMAGE_ARTICLE: \"wrong-agent:latest\"\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,40 +111,168 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 	if containsRetiredAgentIdentity(compose) {
 		return fmt.Errorf("docker-compose.yml must not retain anban-creator-agent or anban-agent identities")
 	}
-	lines := strings.Split(compose, "\n")
-	agentBlockCount := 0
-	var imageValues []string
-	var containerNameValues []string
-	for i, line := range lines {
-		if line != "  agent:" {
-			continue
-		}
-		agentBlockCount++
-
-		for _, blockLine := range lines[i+1:] {
-			if !strings.HasPrefix(blockLine, "    ") {
-				break
-			}
-			content := strings.TrimPrefix(blockLine, "    ")
-			if strings.HasPrefix(content, " ") {
-				continue
-			}
-			key, value, found := strings.Cut(content, ":")
-			if !found {
-				continue
-			}
-			switch key {
-			case "image":
-				imageValues = append(imageValues, strings.TrimSpace(value))
-			case "container_name":
-				containerNameValues = append(containerNameValues, strings.TrimSpace(value))
-			}
-		}
+	if strings.Contains("\n"+compose, "\n  agent:\n") {
+		return fmt.Errorf("docker-compose.yml must not define a persistent agent service")
 	}
-	if agentBlockCount != 1 || len(imageValues) != 1 || imageValues[0] != "creator-agent-article:latest" || len(containerNameValues) != 1 || containerNameValues[0] != "creator-agent-article" {
-		return fmt.Errorf("docker-compose.yml must define exactly one agent service with one image creator-agent-article:latest and one container_name creator-agent-article")
+	values := composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_ARTICLE")
+	if len(values) != 1 || values[0] != `"creator-agent-article:latest"` {
+		return fmt.Errorf("docker-compose.yml must configure the Server Article runtime image exactly once")
 	}
 	return nil
+}
+
+func composeEnvironmentAssignments(text, service, variable string) []string {
+	lines := strings.Split(text, "\n")
+	inService := false
+	inEnvironment := false
+	var values []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") {
+			inService = line == "  "+service+":"
+			inEnvironment = false
+			continue
+		}
+		if !inService {
+			continue
+		}
+		if line == "    environment:" {
+			inEnvironment = true
+			continue
+		}
+		if inEnvironment && strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") {
+			inEnvironment = false
+		}
+		if !inEnvironment {
+			continue
+		}
+		name, value, found := strings.Cut(strings.TrimSpace(line), ":")
+		if found && name == variable {
+			values = append(values, strings.TrimSpace(value))
+		}
+	}
+	return values
+}
+
+func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
+	root := repositoryRoot(t)
+	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+	productionGo := readProductionGoFiles(t, filepath.Join(root, "server"))
+	for _, required := range []struct {
+		path   string
+		marker string
+	}{
+		{path: "server/main.go", marker: "func main() {"},
+		{path: "server/config/config.go", marker: "type Config struct {"},
+	} {
+		if !strings.Contains(productionGo, required.marker) {
+			t.Errorf("production runtime scan excludes %s", required.path)
+		}
+	}
+	testOnlyMarker := "func TestConfigRejectsLegacyManagedExecutorFields("
+	configTest := readTextFile(t, filepath.Join(root, "server", "config", "runtime_images_test.go"))
+	if !strings.Contains(configTest, testOnlyMarker) {
+		t.Fatal("runtime scan test marker is missing from server/config/runtime_images_test.go")
+	}
+	if strings.Contains(productionGo, testOnlyMarker) {
+		t.Error("production runtime scan includes _test.go files")
+	}
+	for _, forbidden := range []string{
+		"NewLocalExecutor(",
+		"NewDockerExecutor(",
+		"ContainerExecCreate(",
+		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
+		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+		"agent.TaskExecutor",
+		"uploadMissingTaskFiles(",
+		"ExtractTitleFromWorkspace(",
+	} {
+		if strings.Contains(productionGo, forbidden) {
+			t.Errorf("removed host execution contract remains: %s", forbidden)
+		}
+	}
+	if strings.Contains(compose, `"sleep", "infinity"`) {
+		t.Error("docker-compose.yml retains a persistent agent process")
+	}
+	for _, obsolete := range []string{
+		"server/agent/docker_executor.go",
+		"server/agent/executor_interface.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, obsolete)); !os.IsNotExist(err) {
+			t.Errorf("obsolete host executor %s still exists (stat error %v)", obsolete, err)
+		}
+	}
+	if strings.Contains("\n"+compose, "\n  agent:\n") {
+		t.Error("docker-compose.yml still defines a persistent agent service")
+	}
+	for _, forbidden := range []string{"depends_on.agent", "./data/workspace:/workspace", "./data/workspace:/app/data/workspace"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("docker-compose.yml retains shared host execution contract %q", forbidden)
+		}
+	}
+}
+
+func readProductionGoFiles(t *testing.T, root string) string {
+	t.Helper()
+	var contents strings.Builder
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path == root {
+				return nil
+			}
+			switch entry.Name() {
+			case ".git", "generated", "gen", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		source := readTextFile(t, path)
+		if strings.Contains(source, "// Code generated ") && strings.Contains(source, " DO NOT EDIT.") {
+			return nil
+		}
+		contents.WriteString(source)
+		contents.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan production Go sources under %s: %v", root, err)
+	}
+	return contents.String()
+}
+
+func TestManagedRuntimeWiring(t *testing.T) {
+	root := repositoryRoot(t)
+	serverMain := readTextFile(t, filepath.Join(root, "server", "main.go"))
+	for _, required := range []string{
+		"NewDockerDispatcher",
+		"NewKubernetesDispatcherWithClient",
+		"NewRuntimeReconciler",
+		"SetRuntimeDispatcher",
+		"SetTaskWorkspaceLifecycle",
+		"SetProjectMemoryLifecycle",
+		"NewExecutionTokenService",
+		"NewWorkloadTokenService",
+		"NewAgentBootstrapService",
+	} {
+		if !strings.Contains(serverMain, required) {
+			t.Errorf("server/main.go missing managed runtime wiring %s", required)
+		}
+	}
+	taskExecution := readTextFile(t, filepath.Join(root, "server", "service", "task_execution.go"))
+	if strings.Contains(taskExecution, "s.runtimeDispatcher != nil") {
+		t.Error("HandleExecutionFromPayload must not retain a synchronous executor branch")
+	}
+	if !strings.Contains(taskExecution, "return s.dispatchRuntime(ctx, task)") {
+		t.Error("HandleExecutionFromPayload must always dispatch a durable managed execution")
+	}
 }
 
 func containsRetiredAgentIdentity(text string) bool {
@@ -444,37 +568,14 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 	}
 }
 
-func TestDockerRuntimeAgentSourceUsesResolvedLocalIdentity(t *testing.T) {
+func TestDockerRuntimeAgentSourceUsesFixedOneShotIdentity(t *testing.T) {
 	root := repositoryRoot(t)
-	dockerExecutor := readTextFile(t, filepath.Join(root, "server", "agent", "docker_executor.go"))
-	if strings.Contains(dockerExecutor, `User:         "node"`) || strings.Contains(dockerExecutor, `User:       "node"`) {
-		t.Fatal("Docker executor must use numeric runtime identity")
+	dockerRuntime := readTextFile(t, filepath.Join(root, "server", "agent", "docker_runtime.go"))
+	if !strings.Contains(dockerRuntime, "containerConfig.User = ContainerRuntimeUser") {
+		t.Fatal("Docker one-shot runtime must use the fixed image identity")
 	}
-	for _, want := range []string{
-		"currentDockerRuntimeUser()",
-		"dockerWorkspacePreparationExecOptions(workDirInContainer, runtimeUser)",
-		"dockerAgentExecOptions(cmd, env, workDirInContainer, runtimeUser)",
-		"dockerAgentContainerConfig(image, cmd, env, runtimeUser)",
-	} {
-		if !strings.Contains(dockerExecutor, want) {
-			t.Fatalf("Docker executor missing resolved local identity flow %q", want)
-		}
-	}
-	if strings.Contains(dockerExecutor, "chown -R") || strings.Contains(dockerExecutor, "os.Chmod") {
-		t.Fatal("Docker executor must not recursively change bind-mounted host permissions")
-	}
-	for _, want := range []string{
-		"prepare persistent container workspace exec",
-		"start persistent container workspace preparation",
-		"inspect persistent container workspace preparation",
-		"persistent container workspace preparation exited with code",
-	} {
-		if !strings.Contains(dockerExecutor, want) {
-			t.Fatalf("Docker executor missing explicit workspace preparation error %q", want)
-		}
-	}
-	if strings.Contains(dockerExecutor, "if err == nil {\n\t\t\t_ = e.dockerCLI.ContainerExecStart") {
-		t.Fatal("Docker executor must not ignore persistent workspace preparation failures")
+	if _, err := os.Stat(filepath.Join(root, "server", "agent", "docker_executor.go")); !os.IsNotExist(err) {
+		t.Fatalf("legacy Docker executor must be deleted, stat error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "server", "agent", "kubernetes_executor.go")); !os.IsNotExist(err) {
 		t.Fatalf("legacy Kubernetes executor must be deleted, stat error = %v", err)
@@ -794,7 +895,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"agent:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.agent-article",
 		"wcflink:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.wcflink",
 		"server:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.server",
 		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio",
@@ -832,47 +932,65 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	}
 }
 
-func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
+func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"pull_policy: build\n    container_name: creator-agent-article",
-		"entrypoint: [\"tini\", \"--\"]\n    command: [\"sleep\", \"infinity\"]",
-		"- ./data/workspace:/workspace",
-		"agent:\n        condition: service_started",
-		"ANBAN_CLAUDE_EXECUTOR: \"docker\"",
+		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE: \"creator-agent-article:latest\"",
-		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: \"creator-agent-seednote:latest\"",
-		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: \"creator-agent-montage:latest\"",
-		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: \"creator-agent-article\"",
-		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: \"/app/data/workspace\"",
-		"- ./data/workspace:/app/data/workspace",
+		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET:",
+		"ANBAN_AGENT_IMAGE_ARTICLE: \"creator-agent-article:latest\"",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
+		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
+		"anban-creator-network:\n    name: anban-creator-network\n    driver: bridge",
 	} {
 		if !strings.Contains(compose, want) {
-			t.Fatalf("docker-compose.yml missing persistent Docker executor contract %q", want)
+			t.Fatalf("docker-compose.yml missing managed Docker runtime contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"\n  agent:\n",
+		`["sleep", "infinity"]`,
+		"./data/workspace:/workspace",
+		"./data/workspace:/app/data/workspace",
+		"ANBAN_CLAUDE_EXECUTOR",
+		"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE",
+		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
+		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+	} {
+		if strings.Contains("\n"+compose, forbidden) {
+			t.Fatalf("docker-compose.yml retains obsolete managed runtime contract %q", forbidden)
 		}
 	}
 
 	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
-			"article_image: \"${ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE:-creator-agent-article:latest}\"",
-			"seednote: \"${ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE:-creator-agent-seednote:latest}\"",
-			"montage: \"${ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE:-creator-agent-montage:latest}\"",
-			"container_name: \"${ANBAN_CLAUDE_DOCKER_CONTAINER_NAME}\"",
-			"workspace_dir: \"${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR}\"",
+			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
+			"article: \"${ANBAN_AGENT_IMAGE_ARTICLE}\"",
+			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
+			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
+			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-anban-creator-network}\"",
+			"pids_limit: 512",
 		} {
 			if !strings.Contains(body, want) {
-				t.Fatalf("%s missing Docker executor config contract %q", configPath, want)
+				t.Fatalf("%s missing Docker runtime config contract %q", configPath, want)
+			}
+		}
+		for _, legacy := range []string{"article_image:", "image_profiles:", "ANBAN_CLAUDE_DOCKER_CONTAINER_NAME", "ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR"} {
+			if strings.Contains(body, legacy) {
+				t.Fatalf("%s retains legacy Docker runtime config %q", configPath, legacy)
 			}
 		}
 	}
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
+		"docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {
@@ -880,6 +998,212 @@ func TestComposeUsesPersistentDockerExecutorRuntime(t *testing.T) {
 			t.Fatalf("Makefile missing Docker socket group contract %q", want)
 		}
 	}
+}
+
+func TestDockerRuntimeContract(t *testing.T) {
+	root := repositoryRoot(t)
+
+	t.Run("Compose configures the scheduler without a persistent Agent", func(t *testing.T) {
+		body := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+		var compose struct {
+			Services map[string]struct {
+				Environment map[string]string `yaml:"environment"`
+				EnvFile     []string          `yaml:"env_file"`
+				Volumes     []string          `yaml:"volumes"`
+				GroupAdd    []string          `yaml:"group_add"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal([]byte(body), &compose); err != nil {
+			t.Fatalf("parse docker-compose.yml: %v", err)
+		}
+		server, ok := compose.Services["server"]
+		if !ok {
+			t.Fatal("docker-compose.yml has no server service")
+		}
+		for name, want := range map[string]string{
+			"ANBAN_AGENT_EXECUTOR":               "docker",
+			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":        "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":               "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ENDPOINT":                 "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":            "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":        "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"CLAUDE_CODE_AUTH_TOKEN":             "${CLAUDE_CODE_AUTH_TOKEN:?CLAUDE_CODE_AUTH_TOKEN is required}",
+			"MOONSHOT_API_KEY":                   "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+		} {
+			if got := server.Environment[name]; got != want {
+				t.Errorf("server environment %s = %q, want %q", name, got, want)
+			}
+		}
+		if _, exists := compose.Services["agent"]; exists {
+			t.Fatal("docker-compose.yml must not define a persistent agent service")
+		}
+		if len(server.EnvFile) != 1 || server.EnvFile[0] != ".env" {
+			t.Fatalf("server env_file = %v, want root .env", server.EnvFile)
+		}
+		if !containsString(server.Volumes, "/var/run/docker.sock:/var/run/docker.sock") {
+			t.Fatalf("server volumes = %v, want Docker daemon socket", server.Volumes)
+		}
+		if !containsString(server.GroupAdd, "${DOCKER_GID:-0}") {
+			t.Fatalf("server group_add = %v, want Docker socket group", server.GroupAdd)
+		}
+		for _, volume := range server.Volumes {
+			if strings.Contains(volume, ":/workspace") || strings.Contains(volume, ":/app/data/workspace") {
+				t.Fatalf("server retains persistent Agent workspace mount %q", volume)
+			}
+		}
+
+		dotenv := dotenvAssignments(readTextFile(t, filepath.Join(root, ".env.example")))
+		for _, name := range []string{
+			"ANBAN_BILLING_ADMIN_API_KEY",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE",
+			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_JWT_SECRET_KEY",
+			"ANBAN_OSS_ENDPOINT",
+			"ANBAN_OSS_ACCESS_KEY_ID",
+			"ANBAN_OSS_ACCESS_KEY_SECRET",
+			"CLAUDE_CODE_AUTH_TOKEN",
+			"MOONSHOT_API_KEY",
+			"VOLCENGINE_ARK_API_KEY",
+			"WANGCAI_OPENAI_API_KEY",
+		} {
+			if _, ok := dotenv[name]; !ok {
+				t.Errorf(".env.example missing required Server variable %s", name)
+			}
+		}
+
+		makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+		for _, target := range []string{"server-run:", "server-dev:"} {
+			start := strings.Index(makefile, target)
+			if start < 0 {
+				t.Fatalf("Makefile missing %s", target)
+			}
+			body := makefile[start:]
+			if next := strings.Index(body[len(target):], "\n\n"); next >= 0 {
+				body = body[:len(target)+next]
+			}
+			if !strings.Contains(body, ". ./.env") {
+				t.Errorf("Makefile %s does not load the documented root .env", target)
+			}
+		}
+	})
+
+	t.Run("repository config loads with the documented Compose environment", func(t *testing.T) {
+		configPath := filepath.Join(root, "server", "config.yaml")
+		configBody := readTextFile(t, configPath)
+		envReference := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
+		for _, match := range envReference.FindAllStringSubmatch(configBody, -1) {
+			t.Setenv(match[1], "")
+		}
+		for name, value := range map[string]string{
+			"ANBAN_DATABASE_DSN":                 "root:dev@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local",
+			"ANBAN_REDIS_ADDR":                   "redis:6379",
+			"ANBAN_BILLING_ADMIN_API_KEY":        "test-billing-admin-key",
+			"ANBAN_AGENT_EXECUTOR":               "docker",
+			"ANBAN_CLAUDE_AGENT_SERVER_URL":      "http://server:8080",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "0123456789abcdef0123456789abcdef",
+			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_JWT_SECRET_KEY":               "0123456789abcdef0123456789abcdef",
+			"ANBAN_OSS_ENDPOINT":                 "oss-cn-test.aliyuncs.com",
+			"ANBAN_OSS_ACCESS_KEY_ID":            "test-access-key-id",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":        "test-access-key-secret",
+			"CLAUDE_CODE_AUTH_TOKEN":             "test-claude-auth-token",
+			"MOONSHOT_API_KEY":                   "test-moonshot-api-key",
+		} {
+			t.Setenv(name, value)
+		}
+
+		cfg, err := srvconfig.NewConfig(configPath)
+		if err != nil {
+			t.Fatalf("load repository config with documented Compose environment: %v", err)
+		}
+		if cfg.Claude.Executor != "docker" || cfg.Storage.Provider != "oss" || cfg.Storage.Endpoint != "oss-cn-test.aliyuncs.com" {
+			t.Fatalf("loaded Compose config = executor %q storage %q/%q", cfg.Claude.Executor, cfg.Storage.Provider, cfg.Storage.Endpoint)
+		}
+	})
+
+	t.Run("current deployment documentation describes live managed dispatch", func(t *testing.T) {
+		docs := map[string]string{
+			"README.md":               readTextFile(t, filepath.Join(root, "README.md")),
+			"AGENTS.md":               readTextFile(t, filepath.Join(root, "AGENTS.md")),
+			"docs/montage-upgrade.md": readTextFile(t, filepath.Join(root, "docs", "montage-upgrade.md")),
+		}
+		normalizedDocs := make(map[string]string, len(docs))
+		for path, body := range docs {
+			normalizedDocs[path] = strings.Join(strings.Fields(body), " ")
+			for _, forbidden := range []string{
+				"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
+				"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+				"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
+				"ANBAN_ARTICLE_AGENT_IMAGE",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("%s retains obsolete variable %s", path, forbidden)
+				}
+			}
+			if regexp.MustCompile(`(?m)^\s*(article_image|image_profiles):`).MatchString(body) {
+				t.Errorf("%s retains an obsolete literal YAML key", path)
+			}
+		}
+
+		for _, want := range []string{
+			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE",
+			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"never builds missing runtime images",
+			"fresh container",
+			"runtime owns the task workspace and output",
+			"/var/run/docker.sock",
+			"immutable image digests",
+			"VOLCENGINE_ARK_API_KEY",
+			"WANGCAI_OPENAI_API_KEY",
+		} {
+			if !strings.Contains(normalizedDocs["README.md"], want) {
+				t.Errorf("README.md missing managed dispatch contract %q", want)
+			}
+		}
+		operatorDocs := normalizedDocs["AGENTS.md"] + " " + normalizedDocs["docs/montage-upgrade.md"]
+		for _, want := range []string{
+			"server never builds a missing runtime image",
+			"fresh container",
+			"runtime owns its workspace and output",
+			"/workspace/openmontage",
+		} {
+			if !strings.Contains(strings.ToLower(operatorDocs), strings.ToLower(want)) {
+				t.Errorf("operator documentation missing managed dispatch rule %q", want)
+			}
+		}
+
+		obsolete := filepath.Join(root, "docs", "superpowers", "specs", "2026-04-15-persistent-docker-executor-design.md")
+		if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
+			t.Errorf("superseded persistent executor design must be removed; stat error = %v", err)
+		}
+	})
+}
+
+func dotenvAssignments(body string) map[string]string {
+	assignments := make(map[string]string)
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(line, "=")
+		if ok {
+			assignments[strings.TrimSpace(name)] = value
+		}
+	}
+	return assignments
 }
 
 func TestNoStaleDockerfileReferences(t *testing.T) {

@@ -61,6 +61,25 @@ func TestWorkspaceManifestSealMigration(t *testing.T) {
 	}
 }
 
+func TestDeletionAuthorityMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260724_deletion_authority.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table `tasks`",
+		"add column `deleting_at` datetime(3) null",
+		"add index `idx_tasks_deleting_at` (`deleting_at`)",
+		"alter table `projects`",
+		"add index `idx_projects_deleting_at` (`deleting_at`)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("deletion authority migration missing %q", fragment)
+		}
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {
@@ -130,18 +149,42 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	}
 }
 
+func TestRuntimeDispatchIdentityMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260722_runtime_dispatch_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	required := []string{
+		"CHANGE COLUMN `namespace` `runtime_scope` varchar(63)",
+		"CHANGE COLUMN `job_name` `runtime_workload` varchar(63)",
+		"CHANGE COLUMN `pod_uid` `runtime_instance_id` varchar(64)",
+		"DROP INDEX `idx_task_executions_job_name`",
+		"ADD INDEX `idx_task_executions_runtime_workload` (`runtime_workload`)",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("migration SQL missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"IF EXISTS", "IF NOT EXISTS", "ADD COLUMN", "UPDATE `task_executions`", "NOT NULL", "DEFAULT"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Errorf("migration SQL contains compatibility fragment %q", forbidden)
+		}
+	}
+}
+
 func TestCloneInputSourceProjectMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260722_clone_input_source_project.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sql := string(raw)
-	required := []string{
+	for _, fragment := range []string{
 		"ALTER TABLE `tasks`",
 		"ADD COLUMN `input_source_project_id` char(36) NOT NULL DEFAULT ''",
 		"ADD KEY `idx_tasks_input_source_project_id` (`input_source_project_id`)",
-	}
-	for _, fragment := range required {
+	} {
 		if !strings.Contains(sql, fragment) {
 			t.Errorf("migration SQL missing %q", fragment)
 		}

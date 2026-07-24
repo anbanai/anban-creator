@@ -53,7 +53,6 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"planCreateHandler":                    "svcs.PlanSvc.Create",
 	"planListHandler":                      "svcs.PlanSvc.List",
 	"prepareFileUploadHandler":             "svcs.FileUploadSvc.Prepare",
-	"prepareWorkspaceHandler":              "svcs.WorkspaceSvc.Prepare",
 	"progressUpdateHandler":                "svcs.TaskSvc.UpdateProgress",
 	"projectGetHandler":                    "svcs.ProjectSvc.Get",
 	"projectListHandler":                   "svcs.ProjectSvc.List",
@@ -1302,6 +1301,20 @@ func TestGenerateImageSchemaContainsOnlySemanticInputs(t *testing.T) {
 	for _, value := range required {
 		if value == "operation_id" {
 			t.Fatal("generate_image still requires operation_id")
+		}
+	}
+}
+
+func TestGenerateImageImplementationDoesNotContainRemovedCompositeWorkflow(t *testing.T) {
+	for _, path := range []string{"image_tools.go", "../service/image.go"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, removed := range []string{"verify_with_vision", "verification_prompt", "upload_to_cdn", "operation_id"} {
+			if strings.Contains(string(data), removed) {
+				t.Fatalf("%s retains removed generate_image composite workflow term %q", path, removed)
+			}
 		}
 	}
 }

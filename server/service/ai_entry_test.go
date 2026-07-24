@@ -288,7 +288,7 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 				t.Fatal(err)
 			}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
-			taskSvc := NewTaskService(repo, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			taskSvc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
 			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
@@ -356,7 +356,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			}
 			repoWithTopics := &taskCreationRepositoryOverride{Repository: repo, topicPools: topics}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
-			taskSvc := NewTaskService(repoWithTopics, nil, &mockEnqueuer{}, store, &logger, "", nil, "", nil, nil)
+			taskSvc := NewTaskService(repoWithTopics, &mockEnqueuer{}, store, &logger, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repoWithTopics, &logger))
 			referenceSvc := NewReferenceAssetService(repoWithTopics, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)

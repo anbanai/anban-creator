@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -68,23 +69,34 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		})
 	}
 
-	workflowPaths := []string{
-		"plugins/agents/seednote.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/moments.md",
-		"plugins/agents/article.md",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/agents/moments.toml",
-		"plugins/agents/article.toml",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
+	workflowOutputs := []struct {
+		path    string
+		outputs []string
+	}{
+		{path: "plugins/agents/article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "plugins/agents/article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "plugins/agents/seednote.md", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "plugins/agents/seednote.toml", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "plugins/agents/moments.md", outputs: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md"}},
+		{path: "plugins/agents/moments.toml", outputs: []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md"}},
+		{path: "plugins/agents/ecommerce.md", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "plugins/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "plugins/agents/designer.md", outputs: []string{"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"}},
+		{path: "plugins/agents/designer.toml", outputs: []string{"output/color-bible.md", "output/colored_00.png", "output/consistency-report.md"}},
+		{path: "plugins/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
+		{path: "plugins/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
+		{path: "plugins/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
+		{path: "plugins/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 	}
-	for _, relativePath := range workflowPaths {
-		t.Run(relativePath+"/canonical-output", func(t *testing.T) {
+	for _, workflow := range workflowOutputs {
+		relativePath := workflow.path
+		t.Run(relativePath+"/explicit-output", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			for _, requiredOutput := range workflow.outputs {
+				if !strings.Contains(body, requiredOutput) {
+					t.Errorf("%s missing explicit managed-runtime artifact path %q", relativePath, requiredOutput)
+				}
+			}
 			for _, term := range []string{
 				"$TASK_ID",
 				"output/",
@@ -117,6 +129,112 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	}
 }
 
+func TestServerDoesNotExposeHostWorkspacePathResolution(t *testing.T) {
+	root := repoRoot(t)
+	for _, relativePath := range []string{
+		"server/service/task.go",
+		"server/service/task_image.go",
+		"server/service/task_image_operations.go",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			if strings.Contains(body, "ResolveWorkspacePath") {
+				t.Fatalf("%s still exposes server-side workspace path resolution", relativePath)
+			}
+		})
+	}
+}
+
+func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
+	root := repoRoot(t)
+	for _, agentName := range []string{
+		"article",
+		"designer",
+		"ecommerce",
+		"live-slicer",
+		"moments",
+		"montage",
+		"seednote",
+	} {
+		t.Run(agentName, func(t *testing.T) {
+			markdownPath := "plugins/agents/" + agentName + ".md"
+			tomlPath := "plugins/agents/" + agentName + ".toml"
+			markdownOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(markdownPath))))
+			tomlOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(tomlPath))))
+			if strings.Join(markdownOutputs, "\n") != strings.Join(tomlOutputs, "\n") {
+				t.Errorf("native agent output path mismatch:\n%s: %v\n%s: %v", markdownPath, markdownOutputs, tomlPath, tomlOutputs)
+			}
+
+			if agentName != "seednote" {
+				return
+			}
+			for _, required := range []string{
+				"output/cover.png",
+				"output/image_01.png",
+				"output/image_02.png",
+				"output/image_03.png",
+				"output/tail.png",
+			} {
+				if !containsOutputPath(markdownOutputs, required) {
+					t.Errorf("%s missing mode-dependent Seednote image path %q", markdownPath, required)
+				}
+				if !containsOutputPath(tomlOutputs, required) {
+					t.Errorf("%s missing mode-dependent Seednote image path %q", tomlPath, required)
+				}
+			}
+		})
+	}
+}
+
+func TestSeednoteNativeAgentsDeclareModeAwareImageSemantics(t *testing.T) {
+	root := repoRoot(t)
+	for _, relativePath := range []string{
+		"plugins/agents/seednote.md",
+		"plugins/agents/seednote.toml",
+	} {
+		t.Run(relativePath, func(t *testing.T) {
+			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+			for _, required := range []string{
+				"cover_only 和 cover_tail 模式的内容图数量必须为 0",
+				"cover_content 和 full 模式的内容图数量必须为 1~3",
+				"内容图文件必须从 output/image_01.png 开始连续编号",
+				"只允许使用 output/image_01.png、output/image_02.png、output/image_03.png",
+				"不得跳号或使用其他 image_*.png 文件名",
+			} {
+				if !strings.Contains(body, required) {
+					t.Errorf("%s missing Seednote image-mode semantic %q", relativePath, required)
+				}
+			}
+			if strings.Contains(body, "封面 1 + 内容图 1~3 + 尾图 0~1") {
+				t.Errorf("%s makes 1~3 content images unconditional across zero-content modes", relativePath)
+			}
+		})
+	}
+}
+
+func explicitOutputPaths(body string) []string {
+	matches := regexp.MustCompile(`\boutput/[A-Za-z0-9._/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+\b`).FindAllString(body, -1)
+	seen := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		seen[match] = struct{}{}
+	}
+	outputs := make([]string, 0, len(seen))
+	for output := range seen {
+		outputs = append(outputs, output)
+	}
+	sort.Strings(outputs)
+	return outputs
+}
+
+func containsOutputPath(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
@@ -143,6 +261,31 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEcommerceProductAnalysisPreservesBootstrapInputDirectory(t *testing.T) {
+	root := repoRoot(t)
+	relativePath := "plugins/skills/ecommerce-product-analysis/SKILL.md"
+	body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
+
+	for _, forbidden := range []string{
+		"output/.anban-creator/products/index.json",
+		"output/.anban-creator/products/product_01.png",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("%s incorrectly relocates bootstrap input under output: %q", relativePath, forbidden)
+		}
+	}
+	for _, required := range []string{
+		"`$PRODUCT_PHOTO_DIR/index.json`",
+		"`$PRODUCT_PHOTO_DIR/product_01.png`",
+		"`output/product-photos.md`",
+		"`output/product-bible.md`",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("%s missing product photo path contract %q", relativePath, required)
+		}
 	}
 }
 
@@ -211,7 +354,6 @@ func TestDeliverableRelocationCommandDetection(t *testing.T) {
 		})
 	}
 }
-
 func assertVariableDefinedBeforeUse(t *testing.T, path, body, variable, definition string) {
 	t.Helper()
 	definitionAt := strings.Index(body, definition)
@@ -269,7 +411,6 @@ func normalizeShellPath(path string) string {
 func isUnderOutput(path string) bool {
 	return path == "output" || strings.HasPrefix(path, "output/")
 }
-
 func indexAfterText(body, needle string, after int) int {
 	if after < 0 || after >= len(body) {
 		return -1

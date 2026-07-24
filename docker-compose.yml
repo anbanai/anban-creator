@@ -106,26 +106,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Persistent Agent runtime used by the server's Docker executor. The image's
-  # normal one-shot entrypoint is overridden so each task can run via docker exec
-  # while sharing the same workspace volume with the server container.
-  agent:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.agent-article
-    image: creator-agent-article:latest
-    pull_policy: build
-    container_name: creator-agent-article
-    restart: unless-stopped
-    entrypoint: ["tini", "--"]
-    command: ["sleep", "infinity"]
-    volumes:
-      - ./data/workspace:/workspace
-    networks:
-      - anban-creator-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   server:
     build:
       context: .
@@ -142,19 +122,27 @@ services:
         condition: service_healthy
       wcflink:
         condition: service_started
-      agent:
-        condition: service_started
+    # Compose uses the root .env for interpolation only unless it is also an
+    # env_file. Forward it so every ${...} reference in server/config.yaml can
+    # be configured without duplicating optional integration variables here.
+    env_file:
+      - .env
     environment:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
       ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
-      ANBAN_CLAUDE_EXECUTOR: "docker"
+      ANBAN_JWT_SECRET_KEY: "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}"
+      ANBAN_OSS_ENDPOINT: "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}"
+      ANBAN_OSS_ACCESS_KEY_ID: "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}"
+      ANBAN_OSS_ACCESS_KEY_SECRET: "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}"
+      CLAUDE_CODE_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN:?CLAUDE_CODE_AUTH_TOKEN is required}"
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}"
+      ANBAN_AGENT_EXECUTOR: "docker"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
-      ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE: "creator-agent-article:latest"
-      ANBAN_CLAUDE_DOCKER_SEEDNOTE_IMAGE: "creator-agent-seednote:latest"
-      ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE: "creator-agent-montage:latest"
-      ANBAN_CLAUDE_DOCKER_CONTAINER_NAME: "creator-agent-article"
-      ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
+      ANBAN_AGENT_EXECUTION_TOKEN_SECRET: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}"
+      ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
+      ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
+      ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://wcflink:18070"
@@ -162,7 +150,6 @@ services:
       - ./server/config.yaml:/app/conf/config.yaml:ro
       - ./data/files:/app/data/files
       - ./data/logs:/app/data/logs
-      - ./data/workspace:/app/data/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     # make docker-up resolves this from the host socket. Direct Compose users
     # can export DOCKER_GID=$(stat -L -c '%g' /var/run/docker.sock) on Linux.
@@ -202,4 +189,5 @@ services:
 
 networks:
   anban-creator-network:
+    name: anban-creator-network
     driver: bridge
