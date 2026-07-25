@@ -38,12 +38,6 @@ func registerImageTools(server *mcp.Server) {
 	}, uploadImageHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "register_rendered_image",
-		Description: "Register one PNG, JPEG, or WebP rendered by an agent as a durable task file. Use image_base64 for agent/client-local bytes or file_path for an absolute server-local file.",
-		InputSchema: registerRenderedImageInputSchema(),
-	}, registerRenderedImageHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "compress_image",
 		Description: "Compress an absolute server-local image file (resize and re-encode). The path is not the agent client's current working directory. Returns the server-local path to the compressed file. No credit deduction; task_id only associates and authorizes the operation.",
 		InputSchema: map[string]any{
@@ -214,44 +208,6 @@ func categorizeImageGenFailure(err error, refPath string) string {
 	return "provider"
 }
 
-func registerRenderedImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.TaskSvc == nil {
-		return errorResult("task service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	taskID, _ := args["task_id"].(string)
-	name, _ := args["name"].(string)
-	role, _ := args["role"].(string)
-	imageBase64, _ := args["image_base64"].(string)
-	filePath, _ := args["file_path"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	if taskID == "" {
-		return errorResult("task_id is required"), nil
-	}
-	if name == "" {
-		return errorResult("name is required"), nil
-	}
-	result, err := svcs.TaskSvc.RegisterRenderedImage(ctx, service.RegisterRenderedImageRequest{
-		UserID: userID, ProjectID: projectID, TaskID: taskID, ExecutionID: getExecutionID(ctx),
-		Name: name, Role: role, ImageBase64: imageBase64, FilePath: filePath,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrRenderedImageTaskNotFound) {
-			return errorResult("task not found"), nil
-		}
-		if errors.Is(err, service.ErrRenderedImageProjectMismatch) {
-			return errorResult("task does not belong to the requested project"), nil
-		}
-		return errorResult(fmt.Sprintf("register rendered image: %v", err)), nil
-	}
-	return textResult(result)
-}
-
 func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
@@ -302,22 +258,6 @@ func generateImageInputSchema() map[string]any {
 			"watermark":       map[string]any{"type": "boolean", "description": "Whether the generated image should include a watermark", "default": false},
 		},
 		"required": []any{"project_id", "task_id", "prompt", "output_path"},
-	}
-}
-
-func registerRenderedImageInputSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]any{
-			"project_id":   map[string]any{"type": "string", "description": "Project ID that owns the task"},
-			"task_id":      map[string]any{"type": "string", "description": "Task ID that owns the rendered image"},
-			"name":         map[string]any{"type": "string", "description": "Task-relative image name or path"},
-			"role":         map[string]any{"type": "string", "enum": []any{"cover", "image", "other"}, "description": "Semantic task-file role"},
-			"image_base64": map[string]any{"type": "string", "description": "Base64 image bytes or a data:image URL"},
-			"file_path":    map[string]any{"type": "string", "description": "Absolute server-local image path"},
-		},
-		"required": []any{"project_id", "task_id", "name"},
 	}
 }
 

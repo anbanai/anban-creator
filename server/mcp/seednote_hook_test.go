@@ -4,11 +4,73 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestSeednoteQualityGateRejectsEmptyOrNonPNGImages(t *testing.T) {
+	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
+	hookPath := filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh")
+	workspace := t.TempDir()
+	output := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(output, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"content.md", "request-analysis.json", "request-analysis.md", "reference-analysis.json",
+		"reference-analysis.md", "image-prompts.md", "image-review.md",
+	} {
+		if err := os.WriteFile(filepath.Join(output, name), []byte("complete"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(output, "image-plan.md"), []byte("计划图片数量：1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	summary := `{"outputs":[{"file_name":"cover.png","quality_status":"accepted"}]}`
+	if err := os.WriteFile(filepath.Join(output, "reference-usage-summary.json"), []byte(summary), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverPath := filepath.Join(output, "cover.png")
+	if err := os.WriteFile(coverPath, []byte("\x89PNG\r\n\x1a\nvalid-for-mechanical-gate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runGate := func() string {
+		t.Helper()
+		cmd := exec.Command("bash", hookPath)
+		cmd.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+workspace, "LC_ALL=C", "LANG=C")
+		cmd.Stdin = strings.NewReader(`{"agent_type":"anban:seednote"}`)
+		result, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("run quality gate: %v\n%s", err, result)
+		}
+		return string(result)
+	}
+	if result := runGate(); strings.TrimSpace(result) != "" {
+		t.Fatalf("valid PNG was blocked: %s", result)
+	}
+	for _, test := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "empty", data: nil, want: "图片文件为空"},
+		{name: "wrong magic", data: []byte("not-an-image"), want: "文件内容不是有效 PNG"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.WriteFile(coverPath, test.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if result := runGate(); !strings.Contains(result, `"decision": "block"`) || !strings.Contains(result, test.want) {
+				t.Fatalf("quality gate result = %s, want block containing %q", result, test.want)
+			}
+		})
+	}
+}
 
 func TestSeednoteFinalizationOwnership(t *testing.T) {
 	wd, err := os.Getwd()

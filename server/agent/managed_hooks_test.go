@@ -480,7 +480,11 @@ func writeSeednoteGateFixture(t *testing.T, workspace string, passed bool) strin
 		"image-review.md",
 		"cover.png",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o644); err != nil {
+		data := []byte("fixture")
+		if strings.HasSuffix(name, ".png") {
+			data = []byte("\x89PNG\r\n\x1a\nfixture")
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -514,7 +518,7 @@ func writeSeednoteGateImageSet(t *testing.T, workspace string, images []string) 
 		if name == "cover.png" {
 			continue
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("\x89PNG\r\n\x1a\nfixture"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

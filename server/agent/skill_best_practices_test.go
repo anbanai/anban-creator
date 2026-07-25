@@ -209,7 +209,6 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	userEntrypoints := map[string]bool{
 		"anban-setup":            true,
 		"article":                true,
-		"config":                 true,
 		"ecommerce":              true,
 		"portrait-pose-variants": true,
 		"short-video-cover":      true,
