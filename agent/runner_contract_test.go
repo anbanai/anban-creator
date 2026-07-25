@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,88 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
+
+type messageIteratorStub struct {
+	messages []claudecode.Message
+	index    int
+}
+
+func (i *messageIteratorStub) Next(context.Context) (claudecode.Message, error) {
+	if i.index >= len(i.messages) {
+		return nil, claudecode.ErrNoMoreMessages
+	}
+	message := i.messages[i.index]
+	i.index++
+	return message, nil
+}
+
+func (i *messageIteratorStub) Close() error { return nil }
+
+func TestRunnerConsumesToolResultsFromSDKUserMessages(t *testing.T) {
+	workspace := t.TempDir()
+	server := imageArtifactServer(t, testPNG, "image/png", nil)
+	defer server.Close()
+	path := "output/cover.png"
+	iterator := &messageIteratorStub{messages: []claudecode.Message{
+		&claudecode.AssistantMessage{Content: []claudecode.ContentBlock{
+			&claudecode.ToolUseBlock{ToolUseID: "tool-1", Name: "mcp__plugin_anban_creator__generate_image", Input: map[string]any{"output_path": path}},
+		}},
+		&claudecode.UserMessage{Content: []claudecode.ContentBlock{
+			&claudecode.ToolResultBlock{ToolUseID: "tool-1", Content: artifactToolResult(t, path, server.URL+"/image", testPNG, "image/png")},
+		}},
+	}}
+	runner := NewRunner(&Config{Workspace: workspace, TaskType: "seednote"}, nil, NewDownloader(&Config{Workspace: workspace, TaskType: "seednote", ServerURL: server.URL}))
+	state := newRunnerStreamState()
+	err := runner.consumeResponse(context.Background(), iterator, &serveragent.ExecutionResult{}, state)
+	if err == nil || !strings.Contains(err.Error(), "ended without a result message") {
+		t.Fatalf("consumeResponse terminal error = %v, want post-stream result validation", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "output", "cover.png")); err != nil {
+		t.Fatalf("SDK UserMessage tool result was not materialized: %v", err)
+	}
+	if len(state.toolCalls) != 0 {
+		t.Fatalf("resolved tool calls retained: %#v", state.toolCalls)
+	}
+}
+
+func TestRunnerStopsBeforeNextModelTurnWhenMaterializationFails(t *testing.T) {
+	workspace := t.TempDir()
+	path := "output/cover.png"
+	badPayload := downloadPayload{
+		TaskFileID: "file-1", FilePath: path, DownloadURL: "https://example.invalid/image.png",
+		MimeType: "image/png", FileSize: int64(len(testPNG)), ContentHash: strings.Repeat("0", 64),
+	}
+	data, err := json.Marshal(badPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iterator := &messageIteratorStub{messages: []claudecode.Message{
+		&claudecode.AssistantMessage{Content: []claudecode.ContentBlock{
+			&claudecode.ToolUseBlock{ToolUseID: "tool-1", Name: "generate_image", Input: map[string]any{"output_path": path}},
+		}},
+		&claudecode.UserMessage{Content: []claudecode.ContentBlock{
+			&claudecode.ToolResultBlock{ToolUseID: "tool-1", Content: string(data)},
+		}},
+		&claudecode.AssistantMessage{Content: []claudecode.ContentBlock{
+			&claudecode.TextBlock{Text: "must not be consumed"},
+		}},
+	}}
+	downloadError := errors.New("injected download failure")
+	downloader := NewDownloader(&Config{Workspace: workspace, TaskType: "seednote"})
+	downloader.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, downloadError })
+	runner := NewRunner(&Config{Workspace: workspace, TaskType: "seednote"}, nil, downloader)
+	state := newRunnerStreamState()
+	err = runner.consumeResponse(context.Background(), iterator, &serveragent.ExecutionResult{}, state)
+	if err == nil || !strings.Contains(err.Error(), runtimeArtifactMaterializationFailureCode) {
+		t.Fatalf("consumeResponse error = %v", err)
+	}
+	if iterator.index != 2 {
+		t.Fatalf("runner consumed %d messages, want exactly assistant tool use + user tool result", iterator.index)
+	}
+	if state.turnNum != 1 || strings.Contains(state.resultText, "must not be consumed") {
+		t.Fatalf("state after materialization failure = %#v", state)
+	}
+}
 
 func TestRunnerUsesManagedAgentRuntimePolicy(t *testing.T) {
 	data, err := os.ReadFile("runner.go")

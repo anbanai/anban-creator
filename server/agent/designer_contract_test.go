@@ -125,8 +125,8 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 		"compress_image",
 		"upload_image",
 		"`output_path` 使用任务相对路径",
-		"output/server-paths.md",
-		"下载 `download_url` 到 `output/colored_NN.png`",
+		"托管运行时自动写入",
+		"不执行手工下载或 base64 转存",
 		"output/color-bible.md",
 		"output/colored_00.png",
 		"output/consistency-report.md",
@@ -200,8 +200,8 @@ func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) 
 		"先为原始线稿生成线稿指纹",
 		"将上色图审计结果与线稿指纹逐项比对",
 		"同时传 `file_path` 和 `image_url` 时服务端只会使用 `file_path`",
-		"不能把 `download_image` 当作写入 `output/colored_NN.png` 的本地归档步骤",
-		"下载 `download_url` 到 `output/colored_NN.png`",
+		"托管运行时写入声明的 `output_path`",
+		"不得再用 shell、`download_image` 或 base64 重复物化",
 	}
 	for _, term := range required {
 		if !strings.Contains(all, term) {

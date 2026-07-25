@@ -32,10 +32,12 @@ type GenerateTaskImageRequest struct {
 }
 
 type TaskImageAsset struct {
-	Name        string `json:"name"`
-	Role        string `json:"role"`
+	TaskFileID  string `json:"task_file_id"`
+	FilePath    string `json:"file_path"`
 	DownloadURL string `json:"download_url"`
-	FilePath    string `json:"file_path,omitempty"`
+	MimeType    string `json:"mime_type"`
+	FileSize    int64  `json:"file_size"`
+	ContentHash string `json:"content_hash"`
 }
 
 type TaskImageModelResolver interface {
@@ -192,10 +194,12 @@ func (s *TaskImageService) replayAsset(ctx context.Context, file *model.TaskFile
 		return nil, fmt.Errorf("decode fixed image operation replay: %w", err)
 	}
 	s.tasks.EnrichFilesWithURLs(ctx, []*model.TaskFile{file})
-	stored.Asset.Name = file.FileName
-	stored.Asset.Role = file.Role
+	stored.Asset.TaskFileID = file.ID
 	stored.Asset.FilePath = file.FilePath
 	stored.Asset.DownloadURL = firstTaskFileURL(file)
+	stored.Asset.MimeType = file.MimeType
+	stored.Asset.FileSize = file.FileSize
+	stored.Asset.ContentHash = file.ContentHash
 	if stored.Asset.DownloadURL == "" {
 		return nil, errors.New("replayed task image has no fetchable URL")
 	}
@@ -218,7 +222,7 @@ func (s *TaskImageService) persist(ctx context.Context, req GenerateTaskImageReq
 		mimeType = DetectTaskFileMIME(sourcePath)
 	}
 	asset := TaskImageAsset{
-		Name: filepath.Base(req.OutputPath), Role: DetermineTaskFileRole(req.OutputPath, mimeType), FilePath: req.OutputPath,
+		FilePath: req.OutputPath,
 	}
 	snapshot, err := json.Marshal(taskImageOperationSnapshot{Asset: asset})
 	if err != nil {
@@ -236,8 +240,9 @@ func (s *TaskImageService) persist(ctx context.Context, req GenerateTaskImageReq
 		return nil, fmt.Errorf("register task image: %w", err)
 	}
 	s.tasks.EnrichFilesWithURLs(ctx, []*model.TaskFile{taskFile})
-	asset.Name, asset.Role, asset.FilePath = taskFile.FileName, taskFile.Role, taskFile.FilePath
+	asset.TaskFileID, asset.FilePath = taskFile.ID, taskFile.FilePath
 	asset.DownloadURL = firstTaskFileURL(taskFile)
+	asset.MimeType, asset.FileSize, asset.ContentHash = taskFile.MimeType, taskFile.FileSize, taskFile.ContentHash
 	if asset.DownloadURL == "" {
 		return nil, errors.New("registered task image has no fetchable URL")
 	}

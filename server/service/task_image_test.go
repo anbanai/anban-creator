@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -160,7 +162,8 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asset.Name != "cover.png" || asset.Role != model.FileRoleCover || asset.FilePath != "output/cover.png" || asset.DownloadURL == "" {
+	if asset.TaskFileID == "" || asset.FilePath != "output/cover.png" || asset.DownloadURL == "" ||
+		asset.MimeType != "image/png" || asset.FileSize != int64(len(taskImageTinyPNG())) || asset.ContentHash != hashTaskFileContent(taskImageTinyPNG()) {
 		t.Fatalf("asset = %#v", asset)
 	}
 	var files, settlements int64
@@ -372,58 +375,6 @@ func TestTaskDeleteRejectsUnknownTaskFileStorageProvider(t *testing.T) {
 	}
 }
 
-func TestRegisterRenderedImageRejectsReservedOperationObjectPath(t *testing.T) {
-	f := newTaskImageFixture(t)
-	_, err := f.service.tasks.RegisterRenderedImage(context.Background(), RegisterRenderedImageRequest{
-		UserID: f.userID, ProjectID: f.projectID, TaskID: f.taskID, ExecutionID: f.executionID,
-		Name: "operation-objects/cover.png", Role: model.FileRoleCover,
-		ImageBase64: base64.StdEncoding.EncodeToString(taskImageTinyPNG()),
-	})
-	if err == nil {
-		t.Fatal("rendered image was accepted in reserved operation-objects namespace")
-	}
-}
-
-func TestGeneratedOperationReplaySurvivesRenderedImageReplacement(t *testing.T) {
-	f := newTaskImageFixture(t)
-	ctx := context.Background()
-	req := f.request()
-	if _, err := f.service.Generate(ctx, req); err != nil {
-		t.Fatal(err)
-	}
-	operationID, fingerprint, err := taskImageOperationIdentity(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	originalFile, _, err := f.service.tasks.FindExecutionTaskFileSettlement(
-		ctx, f.taskID, f.executionID, operationID, fingerprint, "image", taskImageSettlementScope,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	variant := append(append([]byte(nil), taskImageTinyPNG()...), []byte("rendered-variant")...)
-	if _, err := f.service.tasks.RegisterRenderedImage(ctx, RegisterRenderedImageRequest{
-		UserID: f.userID, ProjectID: f.projectID, TaskID: f.taskID, ExecutionID: f.executionID,
-		Name: "output/cover.png", Role: model.FileRoleCover,
-		ImageBase64: base64.StdEncoding.EncodeToString(variant),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	replayed, _, err := f.service.tasks.FindExecutionTaskFileSettlement(
-		ctx, f.taskID, f.executionID, operationID, fingerprint, "image", taskImageSettlementScope,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := f.service.tasks.Storage().Read(ctx, replayed.OSSKey)
-	if err != nil {
-		t.Fatalf("read immutable operation object after rendered replacement: %v", err)
-	}
-	if replayed.OSSKey != originalFile.OSSKey || string(data) != string(taskImageTinyPNG()) {
-		t.Fatalf("replayed object=%q bytes=%q, want original %q", replayed.OSSKey, data, originalFile.OSSKey)
-	}
-}
-
 func TestGenerateTaskImageDoesNotAnalyzeOrUpload(t *testing.T) {
 	f := newTaskImageFixture(t)
 	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
@@ -435,7 +386,10 @@ func TestGenerateTaskImageDoesNotAnalyzeOrUpload(t *testing.T) {
 }
 
 func TestTaskImageAssetDoesNotExposeProviderMetadata(t *testing.T) {
-	raw, err := json.Marshal(TaskImageAsset{Name: "cover.png", Role: "cover", DownloadURL: "/files/cover.png", FilePath: "output/cover.png"})
+	raw, err := json.Marshal(TaskImageAsset{
+		TaskFileID: "file-1", FilePath: "output/cover.png", DownloadURL: "/files/cover.png",
+		MimeType: "image/png", FileSize: 123, ContentHash: strings.Repeat("a", 64),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,4 +403,9 @@ func TestTaskImageAssetDoesNotExposeProviderMetadata(t *testing.T) {
 func taskImageTinyPNG() []byte {
 	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
 	return data
+}
+
+func hashTaskFileContent(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

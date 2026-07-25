@@ -61,7 +61,6 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"recognizeLiveInvalidSentencesHandler": "svcs.LiveSliceSvc.RecognizeLiveInvalidSentences",
 	"recognizeLiveSegmentsHandler":         "svcs.LiveSliceSvc.RecognizeLiveSegments",
 	"recognizeLiveSubjectsHandler":         "svcs.LiveSliceSvc.RecognizeLiveSubjects",
-	"registerRenderedImageHandler":         "svcs.TaskSvc.RegisterRenderedImage",
 	"renderTemplateHandler":                "svcs.WritingSvc.RenderTemplate",
 	"saveTemplateHandler":                  "svcs.TemplateSvc.SaveGlobal",
 	"scoreArticleHandler":                  "svcs.ArticleScoreSvc.Score",
@@ -1319,13 +1318,6 @@ func TestGenerateImageImplementationDoesNotContainRemovedCompositeWorkflow(t *te
 	}
 }
 
-func TestRegisterRenderedImageSchemaDoesNotUpload(t *testing.T) {
-	properties := registerRenderedImageInputSchema()["properties"].(map[string]any)
-	if _, ok := properties["upload_to_cdn"]; ok {
-		t.Fatal("register_rendered_image still exposes upload_to_cdn")
-	}
-}
-
 func TestDownloadImageSchemaDoesNotUpload(t *testing.T) {
 	properties := downloadImageInputSchema()["properties"].(map[string]any)
 	if _, ok := properties["upload"]; ok {
@@ -1335,7 +1327,8 @@ func TestDownloadImageSchemaDoesNotUpload(t *testing.T) {
 
 func TestGenerateImagePublicResultContainsOnlyDurableAssetFields(t *testing.T) {
 	raw, err := json.Marshal(service.TaskImageAsset{
-		Name: "cover.png", Role: "cover", DownloadURL: "/files/cover.png", FilePath: "output/cover.png",
+		TaskFileID: "file-1", FilePath: "output/cover.png", DownloadURL: "/files/cover.png",
+		MimeType: "image/png", FileSize: 123, ContentHash: strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatal(err)
