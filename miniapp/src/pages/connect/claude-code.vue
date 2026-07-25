@@ -30,11 +30,8 @@
     </view>
 
     <view class="step-card">
-      <text class="step-card__title">4. 写入用户配置</text>
-      <view class="copy-block" @tap="copyText(settingsSnippet)">
-        <text class="copy-block__code">{{ settingsSnippet }}</text>
-        <text class="copy-block__hint">点击复制</text>
-      </view>
+      <text class="step-card__title">4. 配置插件 API Key</text>
+      <text class="step-text">官方服务地址已内置在插件中。安装或启用插件时，在插件配置的 api_key 字段填写完整 API Key，Claude Code 会将它保存为插件的安全用户配置。</text>
     </view>
 
     <view class="step-card">
@@ -56,12 +53,6 @@ import AbButton from '@/components/common/AbButton.vue'
 
 const keys = ref<APIKey[]>([])
 const keyPrefixes = computed(() => keys.value.map((key) => key.key_prefix).join('、') || '暂无密钥')
-const settingsSnippet = `{
-  "env": {
-    "ANBAN_API_KEY": "你的完整 API Key",
-    "ANBAN_API_URL": "https://api.creator.anbanai.com"
-  }
-}`
 
 function copyText(text: string) {
   uni.setClipboardData({

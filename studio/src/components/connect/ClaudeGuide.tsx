@@ -60,21 +60,7 @@ claude plugin install --scope user anban@anbanai`}
       <StepCard step={4} title="配置 API Key">
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            把完整 API Key 写入 Claude Code 的用户级配置。推荐写入 `~/.claude/settings.json`，这样所有项目都能复用。
-          </p>
-          <CodeBlock
-            code={`{
-  "env": {
-    "ANBAN_API_KEY": "你的完整 API Key"
-  }
-}`}
-            language="json"
-          />
-          <p className="text-xs text-muted-foreground">
-            如果这个文件原来已经有别的配置，只需要把 `env` 字段合并进去，不要覆盖已有内容。
-          </p>
-          <p className="text-xs text-muted-foreground">
-            如果你使用官方在线服务，可以额外配置 `ANBAN_API_URL=https://api.creator.anbanai.com`；如果你接的是自建或本地服务，就填你自己的服务地址。
+            官方服务地址已内置在插件中。安装或启用插件时，在插件配置的 `api_key` 字段填写完整 API Key；Claude Code 会将它保存为插件的安全用户配置。
           </p>
         </div>
       </StepCard>

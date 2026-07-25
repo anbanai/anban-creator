@@ -53,10 +53,189 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "插件内的 MCP server key 固定为 `creator`")
 	assertFileNotExists(t, filepath.Join(root, "plugins", "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(root, "plugins", "docs", "plugin-development.md"), "Plugin developer notes")
-	assertFileContains(t, filepath.Join(root, "plugins", ".mcp.json"), "${user_config.api_url}/mcp")
+	assertJSONMCPServerURL(t, filepath.Join(root, "plugins", ".mcp.json"), "creator", "https://creator.anbanai.com/mcp")
+	assertFileNotContains(t, filepath.Join(root, "plugins", ".mcp.json"), "user_config.api_url")
 	assertFileContains(t, filepath.Join(root, "plugins", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
+}
+
+func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
+	root := repoRoot(t)
+	const endpoint = "https://creator.anbanai.com/mcp"
+
+	cases := []struct {
+		name      string
+		path      string
+		assertURL func(*testing.T, string, string)
+	}{
+		{
+			name: "claude plugin",
+			path: filepath.Join(root, "plugins", ".mcp.json"),
+			assertURL: func(t *testing.T, path, want string) {
+				assertJSONMCPServerURL(t, path, "creator", want)
+			},
+		},
+		{
+			name: "codex registration",
+			path: filepath.Join(root, "plugins", "install", "agents-registration.toml"),
+			assertURL: func(t *testing.T, path, want string) {
+				assertTOMLMCPServerURL(t, path, "creator", want)
+			},
+		},
+	}
+
+	agentPaths, err := filepath.Glob(filepath.Join(root, "plugins", "agents", "*.toml"))
+	if err != nil {
+		t.Fatalf("glob Codex agent configurations: %v", err)
+	}
+	if len(agentPaths) == 0 {
+		t.Fatal("no plugins/agents/*.toml files found")
+	}
+	for _, path := range agentPaths {
+		cases = append(cases, struct {
+			name      string
+			path      string
+			assertURL func(*testing.T, string, string)
+		}{
+			name: "Codex agent " + strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			path: path,
+			assertURL: func(t *testing.T, path, want string) {
+				assertTOMLMCPServerURL(t, path, "creator", want)
+			},
+		})
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.assertURL(t, tc.path, endpoint)
+
+			// Source scans intentionally remain separate from semantic URL lookup.
+			body := readTextFile(t, tc.path)
+			for _, obsolete := range []string{
+				"ANBAN_API_URL",
+				"user_config.api_url",
+				"https://api.creator.anbanai.com/mcp",
+			} {
+				if strings.Contains(body, obsolete) {
+					t.Errorf("%s still contains obsolete MCP connection term %q", tc.path, obsolete)
+				}
+			}
+		})
+	}
+}
+
+func TestAnbanSetupExamplesUseFixedHostedEndpoint(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "plugins", "skills", "anban-setup", "references", "examples.md")
+	body := readTextFile(t, path)
+
+	for _, required := range []string{
+		"https://creator.anbanai.com/mcp",
+		"list_projects",
+		"网络可达性",
+		"Claude Code：检查插件 `api_key`",
+		"Codex：用 `test -n \"$ANBAN_API_KEY\"`",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("%s missing fixed-endpoint setup guidance %q", path, required)
+		}
+	}
+	for _, finding := range configurableSetupEndpointGuidance(body) {
+		t.Errorf("%s contains configurable endpoint guidance %q", path, finding)
+	}
+}
+
+func TestConfigurableSetupEndpointGuidanceScanner(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "legitimate negative wording", body: "固定端点不是 API URL 配置项。", want: false},
+		{name: "obsolete manifest field", body: "修改 api_url 后重启。", want: true},
+		{name: "obsolete environment variable", body: "设置 ANBAN_API_URL 后重启。", want: true},
+		{name: "obsolete hosted endpoint", body: "连接 https://api.creator.anbanai.com/mcp。", want: true},
+		{name: "custom endpoint guidance", body: "使用自定义 API 地址。", want: true},
+		{name: "format diagnostic", body: "检查 API URL 格式。", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(configurableSetupEndpointGuidance(tc.body)) > 0; got != tc.want {
+				t.Fatalf("configurable endpoint guidance = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPluginAgentCredentialDiagnosticsStayHostSpecific(t *testing.T) {
+	root := repoRoot(t)
+	for _, relPath := range []string{
+		"plugins/agents/designer.md",
+		"plugins/agents/ecommerce.md",
+	} {
+		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
+		for _, required := range []string{"`api_key`", "原始认证错误", "MCP"} {
+			if !strings.Contains(body, required) {
+				t.Errorf("%s missing Claude credential diagnostic %q", relPath, required)
+			}
+		}
+		if strings.Contains(body, "ANBAN_API_KEY") {
+			t.Errorf("%s must not inspect the Codex bearer-token environment variable", relPath)
+		}
+	}
+
+	for _, relPath := range []string{
+		"plugins/agents/designer.toml",
+		"plugins/agents/ecommerce.toml",
+	} {
+		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
+		for _, required := range []string{
+			`test -n "$ANBAN_API_KEY"`,
+			`bearer_token_env_var = "ANBAN_API_KEY"`,
+		} {
+			if !strings.Contains(body, required) {
+				t.Errorf("%s missing Codex credential diagnostic %q", relPath, required)
+			}
+		}
+	}
+}
+
+func configurableSetupEndpointGuidance(body string) []string {
+	var findings []string
+	for _, forbidden := range []string{
+		"api_url",
+		"ANBAN_API_URL",
+		"https://api.creator.anbanai.com/mcp",
+		"自定义 API 地址",
+		"检查 API URL 格式",
+	} {
+		if strings.Contains(body, forbidden) {
+			findings = append(findings, forbidden)
+		}
+	}
+	return findings
+}
+
+func TestAnbanCreatorNamingContractTOMLEndpointLookupIsSectionAware(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	body := `developer_instructions = """
+[mcp_servers.creator]
+url = "https://creator.anbanai.com/mcp"
+"""
+
+[unrelated]
+url = "https://creator.anbanai.com/mcp"
+
+[mcp_servers.creator]
+url = "https://wrong.example/mcp"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write TOML fixture: %v", err)
+	}
+
+	if got := tomlStringInTable(t, path, "mcp_servers.creator", "url"); got != "https://wrong.example/mcp" {
+		t.Fatalf("section-aware TOML lookup = %q, want actual mcp_servers.creator URL", got)
+	}
 }
 
 func assertClaudeMarketplacePlugin(t *testing.T, path string) {
@@ -269,19 +448,18 @@ func assertClaudePluginUserConfig(t *testing.T, path string) {
 		} `json:"userConfig"`
 	}
 	readJSONFile(t, path, &object)
+	if _, ok := object.UserConfig["api_url"]; ok {
+		t.Fatalf("%s must not expose userConfig.api_url", path)
+	}
+	if len(object.UserConfig) != 1 {
+		t.Fatalf("%s has %d userConfig entries, want exactly api_key", path, len(object.UserConfig))
+	}
 	apiKey, ok := object.UserConfig["api_key"]
 	if !ok {
 		t.Fatalf("%s missing userConfig.api_key", path)
 	}
 	if apiKey.Type != "string" || !apiKey.Required || !apiKey.Sensitive {
 		t.Fatalf("%s userConfig.api_key = %+v, want required sensitive string", path, apiKey)
-	}
-	apiURL, ok := object.UserConfig["api_url"]
-	if !ok {
-		t.Fatalf("%s missing userConfig.api_url", path)
-	}
-	if apiURL.Type != "string" || apiURL.Default != "https://api.creator.anbanai.com" {
-		t.Fatalf("%s userConfig.api_url = %+v, want string default official API URL", path, apiURL)
 	}
 }
 
@@ -297,6 +475,84 @@ func assertOnlyMCPServerKey(t *testing.T, path, want string) {
 	if _, ok := object.MCPServers[want]; !ok {
 		t.Fatalf("%s MCP server keys = %v, want only %q", path, keys(object.MCPServers), want)
 	}
+}
+
+func assertJSONMCPServerURL(t *testing.T, path, serverName, want string) {
+	t.Helper()
+	var object struct {
+		MCPServers map[string]struct {
+			URL string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	readJSONFile(t, path, &object)
+	server, ok := object.MCPServers[serverName]
+	if !ok {
+		t.Fatalf("%s missing mcpServers.%s", path, serverName)
+	}
+	if server.URL != want {
+		t.Errorf("%s mcpServers.%s.url = %q, want %q", path, serverName, server.URL, want)
+	}
+}
+
+func assertTOMLMCPServerURL(t *testing.T, path, serverName, want string) {
+	t.Helper()
+	got := tomlStringInTable(t, path, "mcp_servers."+serverName, "url")
+	if got != want {
+		t.Errorf("%s [mcp_servers.%s].url = %q, want %q", path, serverName, got, want)
+	}
+}
+
+func tomlStringInTable(t *testing.T, path, wantTable, wantKey string) string {
+	t.Helper()
+	lines := strings.Split(readTextFile(t, path), "\n")
+	currentTable := ""
+	multilineDelimiter := ""
+	for lineNumber, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if multilineDelimiter != "" {
+			if strings.Count(line, multilineDelimiter)%2 == 1 {
+				multilineDelimiter = ""
+			}
+			continue
+		}
+		if strings.Count(line, `"""`)%2 == 1 {
+			multilineDelimiter = `"""`
+			continue
+		}
+		if strings.Count(line, `'''`)%2 == 1 {
+			multilineDelimiter = `'''`
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			if strings.HasPrefix(line, "[[") {
+				currentTable = ""
+				continue
+			}
+			closeAt := strings.IndexByte(line, ']')
+			if closeAt < 0 {
+				t.Fatalf("%s:%d has unterminated TOML table header", path, lineNumber+1)
+			}
+			currentTable = strings.TrimSpace(line[1:closeAt])
+			continue
+		}
+		if currentTable != wantTable {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != wantKey {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+			t.Fatalf("%s:%d %s.%s must be a quoted TOML string", path, lineNumber+1, wantTable, wantKey)
+		}
+		return value[1 : len(value)-1]
+	}
+	t.Fatalf("%s missing [%s].%s", path, wantTable, wantKey)
+	return ""
 }
 
 func assertFileContains(t *testing.T, path, want string) {
