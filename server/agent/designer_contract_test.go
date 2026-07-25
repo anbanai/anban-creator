@@ -38,9 +38,9 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 		"output/color-bible.md",
 		"output/colored_00.png",
 		"output/consistency-report.md",
-		"ANBAN_API_URL",
 		"ANBAN_DEFAULT_PROJECT",
-		"ANBAN_API_KEY",
+		"插件配置中更新 `api_key`",
+		"原始认证错误",
 		"无法看到 `generate_image` 等 MCP 能力",
 		"停止并报告 MCP 工具未注入",
 		"不要绕过 MCP",
@@ -54,9 +54,9 @@ func TestDesignerAgentKeepsMCPAndSkillContract(t *testing.T) {
 			t.Fatalf("designer agent missing required term %q", term)
 		}
 	}
-	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载"} {
+	for _, forbidden := range []string{"`Skill` 工具", "anban:line-art-coloring", "不要在 Agent frontmatter 预加载", "ANBAN_API_URL", "ANBAN_API_KEY"} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("designer agent contains obsolete Skill loading instruction %q", forbidden)
+			t.Fatalf("designer agent contains forbidden term %q", forbidden)
 		}
 	}
 }

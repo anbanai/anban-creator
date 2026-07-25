@@ -96,7 +96,7 @@ func TestManagedAgentRuntimePolicyBlocksAdHocMCPClients(t *testing.T) {
 	}
 	callback := hooks[claudecode.HookEventPreToolUse][0].Hooks[0]
 	result, err := callback(context.Background(), &claudecode.PreToolUseHookInput{
-		ToolInput: map[string]any{"command": `curl -s "$ANBAN_API_URL/mcp"`},
+		ToolInput: map[string]any{"command": `curl -s "https://server.example.com/mcp"`},
 	}, nil, claudecode.HookContext{})
 	if err != nil {
 		t.Fatalf("callback: %v", err)

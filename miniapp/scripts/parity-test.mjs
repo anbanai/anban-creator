@@ -20,6 +20,13 @@ function assertContains(path, terms) {
   }
 }
 
+function assertNotContains(path, terms) {
+  const body = read(path)
+  for (const term of terms) {
+    assert.equal(body.includes(term), false, `${path} should not contain ${term}`)
+  }
+}
+
 function filesUnder(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(dir, entry.name)
@@ -263,6 +270,10 @@ assertContains('src/api/api-base.ts', [
   'https://api.creator.anbanai.com/api/v1',
   'VITE_API_BASE_URL',
 ])
+assertContains('src/pages/connect/claude-code.vue', ['api_key'])
+assertNotContains('src/pages/connect/claude-code.vue', ['ANBAN_API_KEY', 'settings.json'])
+assertContains('src/pages/connect/codex.vue', ['ANBAN_API_KEY'])
+assertNotContains('src/pages/connect/codex.vue', ['api_key', 'userConfig'])
 assertContains('src/api/request.ts', [
   'apiUrl(',
 ])

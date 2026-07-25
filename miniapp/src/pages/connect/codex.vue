@@ -50,19 +50,15 @@
     <view class="step-card">
       <text class="step-card__title">4. 配置 API Key</text>
       <text class="step-text">
-        Codex 插件通过环境变量读取平台连接信息。最少只需要配置 API Key：
+        官方服务地址已内置在插件中，连接时只需配置 API Key：
       </text>
       <view class="copy-block" @tap="copyText(envKeySnippet)">
         <text class="copy-block__code">{{ envKeySnippet }}</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
       <text class="step-text">
-        把这行写入 ~/.zshrc（或 ~/.bashrc），然后执行 source ~/.zshrc，或重新打开终端。如果使用官方在线服务，可以再加一行 ANBAN_API_URL；接自建或本地服务则填你自己的服务地址。
+        把这行写入 ~/.zshrc（或 ~/.bashrc），然后执行 source ~/.zshrc，或重新打开终端。
       </text>
-      <view class="copy-block" @tap="copyText(envUrlSnippet)">
-        <text class="copy-block__code">{{ envUrlSnippet }}</text>
-        <text class="copy-block__hint">点击复制</text>
-      </view>
     </view>
 
     <view class="step-card">
@@ -125,7 +121,6 @@ codex plugin install anban
 bash plugins/install/install-subagents.sh`
 
 const envKeySnippet = `export ANBAN_API_KEY="你的完整 API Key"`
-const envUrlSnippet = `export ANBAN_API_URL="https://api.creator.anbanai.com"`
 
 const naturalExample = `写一篇关于 AI Agent 的公众号文章
 种草笔记，主题是降噪耳机`

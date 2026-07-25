@@ -81,10 +81,12 @@ availability, and stop-on-failure requirements unchanged.
 
 - [ ] **Step 5: Add Miniapp guide regression assertions**
 
-Extend `miniapp/scripts/parity-test.mjs` with `assertContains` checks proving
-both connection guides contain `ANBAN_API_KEY`, plus file-content assertions
-that reject `ANBAN_API_URL` and `api.creator.anbanai.com` in those two guide
-files. Do not change the existing assertion that
+Extend `miniapp/scripts/parity-test.mjs` with host-specific credential checks.
+The Claude guide must contain plugin userConfig `api_key` guidance and must not
+contain `ANBAN_API_KEY` or `settings.json`. The Codex guide must contain only
+the `ANBAN_API_KEY` credential path and must not contain standalone `api_key`
+or `userConfig` guidance. Both guides must reject `ANBAN_API_URL` and the old
+MCP host. Do not change the existing assertion that
 `src/api/api-base.ts` contains `https://api.creator.anbanai.com/api/v1`.
 
 - [ ] **Step 6: Run tests and confirm the expected red state**
@@ -192,18 +194,24 @@ Record the resulting child SHA for the parent gitlink.
 - Modify: `studio/src/components/connect/CodexGuide.tsx`
 - Modify: `miniapp/src/pages/connect/claude-code.vue`
 - Modify: `miniapp/src/pages/connect/codex.vue`
+- Add: `server/agent/connection_guide_contract_test.go`
 - Modify: `server/agent/runtime_policy_test.go`
 
 - [ ] **Step 1: Remove Studio endpoint configuration guidance**
 
-Delete the paragraphs offering `ANBAN_API_URL` and self-host/local service
-addresses. Keep the API-key instructions and state that the official endpoint
-is configured by the plugin.
+In the Claude guide, remove `settings.json`/environment credential setup and
+instruct users to fill the plugin userConfig `api_key` field. In the Codex
+guide, keep only `ANBAN_API_KEY` environment setup. Delete all paragraphs
+offering `ANBAN_API_URL` or self-host/local service addresses, and state that
+the official endpoint is configured by the plugin.
 
 - [ ] **Step 2: Remove Miniapp endpoint snippets**
 
-Remove `ANBAN_API_URL` from the Claude settings JSON. Remove the Codex endpoint
-paragraph, copy block, and `envUrlSnippet`; keep only `ANBAN_API_KEY`.
+Remove the Claude settings JSON entirely and instruct users to fill the plugin
+userConfig `api_key` field; the Claude guide must not contain `ANBAN_API_KEY`
+or `settings.json`. Remove the Codex endpoint paragraph, copy block, and
+`envUrlSnippet`; keep only `ANBAN_API_KEY`, with no standalone `api_key` or
+`userConfig` credential guidance.
 
 - [ ] **Step 3: Decouple the runtime policy example from the removed variable**
 
@@ -220,7 +228,7 @@ The policy behavior and assertions remain unchanged.
 Run:
 
 ```bash
-go test ./server/agent -run 'TestAnbanCreatorNamingContract|TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields|TestDesignerAgentKeepsMCPAndSkillContract|TestManagedAgentRuntimePolicyBlocksAdHocMCPClients' -count=1
+go test ./server/agent -run 'TestAnbanCreatorNamingContract|TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields|TestDesignerAgentKeepsMCPAndSkillContract|TestConnectionGuidesUseFixedPluginEndpoint|TestConnectionGuideContractScanner|TestMiniappRESTAPIBaseRemainsUnchanged|TestManagedAgentRuntimePolicyBlocksAdHocMCPClients' -count=1
 cd miniapp && bun run test
 ```
 

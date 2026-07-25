@@ -479,13 +479,12 @@ func TestClaudeCodePluginManifestMatchesOfficialBestPracticeFields(t *testing.T)
 			t.Fatalf("userConfig.%s must set type, title, and description", key)
 		}
 	}
+	if len(manifest.UserConfig) != 1 {
+		t.Fatalf("plugin.json must expose exactly one userConfig entry named api_key, got %d", len(manifest.UserConfig))
+	}
 	apiKey := manifest.UserConfig["api_key"]
 	if apiKey.Type != "string" || !apiKey.Required || !apiKey.Sensitive {
 		t.Fatalf("api_key userConfig must be a required sensitive string, got %+v", apiKey)
-	}
-	apiURL := manifest.UserConfig["api_url"]
-	if apiURL.Type != "string" || apiURL.Default != "https://api.creator.anbanai.com" {
-		t.Fatalf("api_url userConfig must be a string with official hosted default, got %+v", apiURL)
 	}
 
 	var marketplace struct {
