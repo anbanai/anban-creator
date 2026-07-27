@@ -17,6 +17,7 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -172,10 +173,6 @@ func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx r
 	if sku.Policy != "task_admission" {
 		return nil, fmt.Errorf("%w: SKU policy is %q", ErrBillingInvalid, sku.Policy)
 	}
-	expectedCharge := newTaskCharge(req, sku, s.now().UTC())
-	if replay, replayErr := findExpectedChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
-		return replay, replayErr
-	}
 	if _, findErr := billingRepo.FindChargeByTask(ctx, req.TaskID); findErr == nil {
 		return nil, ErrBillingConflict
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
@@ -185,21 +182,26 @@ func (s *BillingWalletService) ChargeTaskAdmissionInTx(ctx context.Context, tx r
 	if lockErr != nil {
 		return nil, lockErr
 	}
-	if replay, replayErr := findLockedTaskChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
-		return replay, replayErr
-	}
 	quote, lockErr := billingRepo.LockQuote(ctx, req.QuoteID)
 	if lockErr != nil {
 		return nil, lockErr
 	}
 	now := s.now().UTC()
-	if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
+	pricing, err := pricingFromQuote(quote, req.UserID, sku, req.RequestFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	expectedCharge := newTaskCharge(req, sku, pricing, now)
+	if replay, replayErr := findLockedTaskChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
+	if err := validateQuoteAvailability(quote, now); err != nil {
 		return nil, err
 	}
 	if account.DebtCredits > 0 {
 		return nil, ErrBillingDebtOutstanding
 	}
-	charge := newTaskCharge(req, sku, now)
+	charge := expectedCharge
 	allocations, entries, paid, promotional, _, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, false)
 	if spendErr != nil {
 		if errors.Is(spendErr, errBillingSpendInsufficient) {
@@ -287,6 +289,9 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 		return nil, err
 	}
 	billingRepo := tx.Billing()
+	if replay, replayErr := findOperationChargeReplay(ctx, billingRepo, req, accepted); replayErr != nil || replay != nil {
+		return replay, replayErr
+	}
 	sku, err := billingRepo.FindSKU(ctx, req.CatalogID, req.SKUID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -301,38 +306,42 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 	if sku.Policy != wantPolicy {
 		return nil, fmt.Errorf("%w: SKU policy is %q", ErrBillingInvalid, sku.Policy)
 	}
-	expectedCharge := newOperationCharge(req, sku, accepted, s.now().UTC())
-	if replay, replayErr := findExpectedChargeReplay(ctx, billingRepo, expectedCharge); replayErr != nil || replay != nil {
-		return replay, replayErr
-	}
-	if accepted {
-		if _, findErr := billingRepo.FindChargeByOperation(ctx, req.TaskID, req.AttemptID, req.ToolCallID, req.CatalogID, req.SKUID); findErr == nil {
-			return nil, ErrBillingConflict
-		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return nil, findErr
-		}
-	}
 	account, lockErr := lockRequiredBillingAccount(ctx, billingRepo, req.UserID)
 	if lockErr != nil {
 		return nil, lockErr
 	}
-	if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
-		return replay, replayErr
-	}
 	now := s.now().UTC()
+	var pricing *ResolvedSKUPrice
 	if !accepted {
 		quote, quoteErr := billingRepo.LockQuote(ctx, req.QuoteID)
 		if quoteErr != nil {
 			return nil, quoteErr
 		}
-		if err := validateAdmissionQuote(quote, req.UserID, sku, req.RequestFingerprint, now); err != nil {
+		pricing, quoteErr = pricingFromQuote(quote, req.UserID, sku, req.RequestFingerprint)
+		if quoteErr != nil {
+			return nil, quoteErr
+		}
+		expectedCharge := newOperationCharge(req, sku, pricing, accepted, now)
+		if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
+			return replay, replayErr
+		}
+		if err := validateQuoteAvailability(quote, now); err != nil {
 			return nil, err
 		}
 		if account.DebtCredits > 0 {
 			return nil, ErrBillingDebtOutstanding
 		}
+	} else {
+		pricing, err = s.resolveAcceptedOperationPrice(ctx, tx, req, sku)
+		if err != nil {
+			return nil, err
+		}
+		expectedCharge := newOperationCharge(req, sku, pricing, accepted, now)
+		if replay, replayErr := findLockedOperationChargeReplay(ctx, billingRepo, expectedCharge, accepted); replayErr != nil || replay != nil {
+			return replay, replayErr
+		}
 	}
-	charge := newOperationCharge(req, sku, accepted, now)
+	charge := newOperationCharge(req, sku, pricing, accepted, now)
 	allocations, entries, paid, promotional, debt, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, accepted)
 	if spendErr != nil {
 		if accepted || !errors.Is(spendErr, errBillingSpendInsufficient) {
@@ -363,6 +372,52 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 		return nil, err
 	}
 	return charge, nil
+}
+
+func (s *BillingWalletService) resolveAcceptedOperationPrice(ctx context.Context, tx repository.Repository, req OperationChargeRequest, sku *model.BillingSKU) (*ResolvedSKUPrice, error) {
+	catalog, err := tx.Billing().FindCatalogVersion(ctx, sku.CatalogID)
+	if err != nil {
+		return nil, err
+	}
+	task, err := tx.Tasks().FindByID(ctx, req.TaskID)
+	if err != nil && !(errors.Is(err, gorm.ErrRecordNotFound) && catalog.PricingModel != billing.PricingModelTierMatrixV1) {
+		return nil, err
+	}
+	if task != nil {
+		if task.UserID != req.UserID {
+			return nil, ErrBillingQuoteMismatch
+		}
+		if catalog.PricingModel == billing.PricingModelTierMatrixV1 || task.BillingCatalogID != "" {
+			if task.BillingCatalogID != req.CatalogID {
+				return nil, ErrBillingQuoteMismatch
+			}
+		}
+	}
+	var tier model.Tier
+	if task != nil {
+		tier = model.Tier(task.BillingPricingTier)
+	}
+	if !model.ValidTiers[tier] && catalog.PricingModel != billing.PricingModelTierMatrixV1 {
+		user, userErr := tx.Users().FindByID(ctx, req.UserID)
+		if userErr != nil {
+			return nil, userErr
+		}
+		tier = model.ResolveTier(user.Tier)
+	}
+	if !model.ValidTiers[tier] {
+		return nil, fmt.Errorf("%w: task pricing tier is invalid", ErrBillingInvalid)
+	}
+	if catalog.PricingModel != billing.PricingModelTierMatrixV1 {
+		return flatResolvedSKUPrice(sku, tier), nil
+	}
+	price, err := tx.Billing().FindSKUTierPrice(ctx, sku.CatalogID, sku.SKUID, tier)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrBillingSKUNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return tierResolvedSKUPrice(sku, price)
 }
 
 func (s *BillingWalletService) consumeForCharge(ctx context.Context, repo repository.BillingRepository, account *model.BillingWalletAccount, sku model.BillingSKU, charge *model.BillingCharge, allowDebt bool) ([]model.BillingChargeAllocation, []*model.BillingWalletEntry, int64, int64, int64, error) {
@@ -1090,11 +1145,25 @@ func settlementRetryDelay(attempts int) time.Duration {
 	return time.Duration(1<<uint(attempts-1)) * time.Second
 }
 
-func validateAdmissionQuote(quote *model.BillingQuote, userID string, sku *model.BillingSKU, fingerprint string, now time.Time) error {
+func pricingFromQuote(quote *model.BillingQuote, userID string, sku *model.BillingSKU, fingerprint string) (*ResolvedSKUPrice, error) {
 	if quote == nil || sku == nil || quote.UserID != userID || quote.CatalogID != sku.CatalogID || quote.SKUID != sku.SKUID ||
-		quote.PriceCredits != sku.PriceCredits || quote.RequestFingerprint != fingerprint || string(quote.SKUSnapshot) != string(sku.Snapshot) {
-		return ErrBillingQuoteMismatch
+		quote.RequestFingerprint != fingerprint || string(quote.SKUSnapshot) != string(sku.Snapshot) {
+		return nil, ErrBillingQuoteMismatch
 	}
+	tier := model.Tier(quote.PricingTier)
+	if !model.ValidTiers[tier] || quote.ListPriceCredits != sku.PriceCredits || quote.PriceCredits < 0 ||
+		quote.DiscountCredits < 0 || quote.PriceCredits > quote.ListPriceCredits || quote.ListPriceCredits-quote.PriceCredits != quote.DiscountCredits ||
+		strings.TrimSpace(quote.PricingRuleID) == "" || len(quote.PricingSnapshot) == 0 || !json.Valid(quote.PricingSnapshot) {
+		return nil, ErrBillingQuoteMismatch
+	}
+	return &ResolvedSKUPrice{
+		SKU: sku, PricingTier: tier, ListPriceCredits: quote.ListPriceCredits, PriceCredits: quote.PriceCredits,
+		DiscountCredits: quote.DiscountCredits, PricingRuleID: quote.PricingRuleID,
+		PricingSnapshot: append(datatypes.JSON(nil), quote.PricingSnapshot...),
+	}, nil
+}
+
+func validateQuoteAvailability(quote *model.BillingQuote, now time.Time) error {
 	if quote.ConsumedAt != nil {
 		return ErrBillingQuoteConsumed
 	}
@@ -1104,23 +1173,62 @@ func validateAdmissionQuote(quote *model.BillingQuote, userID string, sku *model
 	return nil
 }
 
-func newTaskCharge(req TaskChargeRequest, sku *model.BillingSKU, now time.Time) *model.BillingCharge {
+func flatResolvedSKUPrice(sku *model.BillingSKU, tier model.Tier) *ResolvedSKUPrice {
+	ruleID := sku.CatalogID + ":" + sku.SKUID + ":flat"
+	snapshot, _ := json.Marshal(struct {
+		CatalogID     string     `json:"catalog_id"`
+		SKUID         string     `json:"sku_id"`
+		Tier          model.Tier `json:"tier"`
+		PriceCredits  int64      `json:"price_credits"`
+		PricingRuleID string     `json:"pricing_rule_id"`
+	}{sku.CatalogID, sku.SKUID, tier, sku.PriceCredits, ruleID})
+	return &ResolvedSKUPrice{
+		SKU: sku, PricingTier: tier, ListPriceCredits: sku.PriceCredits, PriceCredits: sku.PriceCredits,
+		PricingRuleID: ruleID, PricingSnapshot: snapshot,
+	}
+}
+
+func tierResolvedSKUPrice(sku *model.BillingSKU, price *model.BillingSKUTierPrice) (*ResolvedSKUPrice, error) {
+	if sku == nil || price == nil || price.CatalogID != sku.CatalogID || price.SKUID != sku.SKUID ||
+		!model.ValidTiers[price.Tier] || price.PriceCredits < 0 || price.PriceCredits > sku.PriceCredits ||
+		strings.TrimSpace(price.RuleID) == "" || len(price.Snapshot) == 0 || !json.Valid(price.Snapshot) {
+		return nil, ErrBillingQuoteMismatch
+	}
+	return &ResolvedSKUPrice{
+		SKU: sku, PricingTier: price.Tier, ListPriceCredits: sku.PriceCredits, PriceCredits: price.PriceCredits,
+		DiscountCredits: sku.PriceCredits - price.PriceCredits, PricingRuleID: price.RuleID,
+		PricingSnapshot: append(datatypes.JSON(nil), price.Snapshot...),
+	}, nil
+}
+
+func applyResolvedPricing(charge *model.BillingCharge, pricing *ResolvedSKUPrice) {
+	charge.PriceCredits = pricing.PriceCredits
+	charge.PricingTier = string(pricing.PricingTier)
+	charge.ListPriceCredits = pricing.ListPriceCredits
+	charge.DiscountCredits = pricing.DiscountCredits
+	charge.PricingRuleID = pricing.PricingRuleID
+	charge.PricingSnapshot = append(datatypes.JSON(nil), pricing.PricingSnapshot...)
+}
+
+func newTaskCharge(req TaskChargeRequest, sku *model.BillingSKU, pricing *ResolvedSKUPrice, now time.Time) *model.BillingCharge {
 	taskID, quoteID := req.TaskID, req.QuoteID
-	return &model.BillingCharge{
+	charge := &model.BillingCharge{
 		ID: uuid.NewString(), UserID: req.UserID, CatalogID: sku.CatalogID, SKUID: sku.SKUID, QuoteID: &quoteID,
 		ResourceType: "task", ResourceID: req.TaskID, Kind: model.BillingChargeKindTask, Policy: sku.Policy,
-		Status: model.BillingChargeStatusPosted, PriceCredits: sku.PriceCredits, TaskID: &taskID,
+		Status: model.BillingChargeStatusPosted, TaskID: &taskID,
 		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey, RequestFingerprint: req.RequestFingerprint,
 		ActorType: req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
 		RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
 	}
+	applyResolvedPricing(charge, pricing)
+	return charge
 }
 
-func newOperationCharge(req OperationChargeRequest, sku *model.BillingSKU, accepted bool, now time.Time) *model.BillingCharge {
+func newOperationCharge(req OperationChargeRequest, sku *model.BillingSKU, pricing *ResolvedSKUPrice, accepted bool, now time.Time) *model.BillingCharge {
 	charge := &model.BillingCharge{
 		ID: uuid.NewString(), UserID: req.UserID, CatalogID: sku.CatalogID, SKUID: sku.SKUID,
 		ResourceType: req.ResourceType, ResourceID: req.ResourceID, Kind: model.BillingChargeKindOperation,
-		Policy: sku.Policy, Status: model.BillingChargeStatusPosted, PriceCredits: sku.PriceCredits,
+		Policy: sku.Policy, Status: model.BillingChargeStatusPosted,
 		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey, RequestFingerprint: req.RequestFingerprint,
 		ActorType: req.ActorType, ActorID: req.ActorID, SourceService: req.SourceService,
 		RequestID: req.RequestID, CorrelationID: req.CorrelationID, CreatedAt: now,
@@ -1130,6 +1238,7 @@ func newOperationCharge(req OperationChargeRequest, sku *model.BillingSKU, accep
 	} else {
 		charge.QuoteID = stringPtr(req.QuoteID)
 	}
+	applyResolvedPricing(charge, pricing)
 	return charge
 }
 
@@ -1151,6 +1260,8 @@ func newReversalCharge(original *model.BillingCharge, key, fingerprint string, n
 		ResourceType: original.ResourceType, ResourceID: original.ResourceID,
 		Kind: model.BillingChargeKindReversal, Policy: "reversal", Status: model.BillingChargeStatusPosted,
 		PriceCredits: original.PriceCredits, PaidCredits: original.PaidCredits, PromotionalCredits: original.PromotionalCredits,
+		PricingTier: original.PricingTier, ListPriceCredits: original.ListPriceCredits, DiscountCredits: original.DiscountCredits,
+		PricingRuleID: original.PricingRuleID, PricingSnapshot: append(datatypes.JSON(nil), original.PricingSnapshot...),
 		ReversalOfID: &original.ID, IdempotencyScope: "reversal", IdempotencyKey: key,
 		RequestFingerprint: fingerprint, CreatedAt: now,
 	}
@@ -1210,9 +1321,15 @@ func findTaskChargeReplay(ctx context.Context, repo repository.BillingRepository
 	if err != nil {
 		return nil, err
 	}
-	expected := newTaskCharge(req, &model.BillingSKU{
+	sku := &model.BillingSKU{
 		CatalogID: req.CatalogID, SKUID: req.SKUID, PriceCredits: existing.PriceCredits, Policy: "task_admission",
-	}, existing.CreatedAt)
+	}
+	pricing := &ResolvedSKUPrice{
+		SKU: sku, PricingTier: model.Tier(existing.PricingTier), ListPriceCredits: existing.ListPriceCredits,
+		PriceCredits: existing.PriceCredits, DiscountCredits: existing.DiscountCredits, PricingRuleID: existing.PricingRuleID,
+		PricingSnapshot: append(datatypes.JSON(nil), existing.PricingSnapshot...),
+	}
+	expected := newTaskCharge(req, sku, pricing, existing.CreatedAt)
 	if !sameChargeImmutableIdentity(existing, expected) {
 		return nil, ErrBillingConflict
 	}
@@ -1231,9 +1348,15 @@ func findOperationChargeReplay(ctx context.Context, repo repository.BillingRepos
 	if accepted {
 		policy = "accepted_task_operation"
 	}
-	expected := newOperationCharge(req, &model.BillingSKU{
+	sku := &model.BillingSKU{
 		CatalogID: req.CatalogID, SKUID: req.SKUID, PriceCredits: existing.PriceCredits, Policy: policy,
-	}, accepted, existing.CreatedAt)
+	}
+	pricing := &ResolvedSKUPrice{
+		SKU: sku, PricingTier: model.Tier(existing.PricingTier), ListPriceCredits: existing.ListPriceCredits,
+		PriceCredits: existing.PriceCredits, DiscountCredits: existing.DiscountCredits, PricingRuleID: existing.PricingRuleID,
+		PricingSnapshot: append(datatypes.JSON(nil), existing.PricingSnapshot...),
+	}
+	expected := newOperationCharge(req, sku, pricing, accepted, existing.CreatedAt)
 	if !sameChargeImmutableIdentity(existing, expected) {
 		return nil, ErrBillingConflict
 	}
@@ -1303,6 +1426,8 @@ func sameChargeImmutableIdentity(left, right *model.BillingCharge) bool {
 		left.UserID == right.UserID && left.CatalogID == right.CatalogID && left.SKUID == right.SKUID &&
 		optionalStringPointersEqual(left.QuoteID, right.QuoteID) && left.ResourceType == right.ResourceType && left.ResourceID == right.ResourceID &&
 		left.Kind == right.Kind && left.Policy == right.Policy && left.Status == right.Status && left.PriceCredits == right.PriceCredits &&
+		left.PricingTier == right.PricingTier && left.ListPriceCredits == right.ListPriceCredits && left.DiscountCredits == right.DiscountCredits &&
+		left.PricingRuleID == right.PricingRuleID && string(left.PricingSnapshot) == string(right.PricingSnapshot) &&
 		optionalStringPointersEqual(left.TaskID, right.TaskID) && optionalStringPointersEqual(left.OperationTaskID, right.OperationTaskID) &&
 		optionalStringPointersEqual(left.AttemptID, right.AttemptID) && optionalStringPointersEqual(left.ToolCallID, right.ToolCallID) &&
 		left.IdempotencyScope == right.IdempotencyScope && left.IdempotencyKey == right.IdempotencyKey &&

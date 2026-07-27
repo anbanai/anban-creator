@@ -32,6 +32,9 @@ export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
       pricingType: pricing?.pricing_type ?? 'fixed_sku',
       currency: pricing?.currency ?? 'credits',
       billingNote: pricing?.billing_note ?? 'fixed retail SKU',
+      pricingTier: pricing?.pricing_tier,
+      listPriceCredits: pricing?.list_price_credits,
+      discountCredits: pricing?.discount_credits,
     },
   }
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -225,6 +226,7 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
     operation: "task.article"
     charge_policy: "task_admission"
     price_credits: 1
+    tier_prices: { free: 1, pro: 1, enterprise: 1 }
     delivery: "alternate"
 `,
 			want: "duplicates billable identity",
@@ -362,7 +364,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		"image.seedream.designer.v1":      {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
 		"image.gpt-image-2.designer.v1":   {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
 	}
-	if catalog.CatalogID != "retail-2026-07-22-v3" || catalog.Currency != "credits" {
+	if catalog.CatalogID != "retail-2026-07-27-v4" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))
@@ -377,6 +379,14 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		}
 		if actual != expected {
 			return fmt.Errorf("SKU %q snapshot = %#v, want %#v", sku.ID, actual, expected)
+		}
+		wantTierPrices := map[string]int64{
+			"free":       sku.PriceCredits,
+			"pro":        sku.PriceCredits * 9 / 10,
+			"enterprise": sku.PriceCredits * 8 / 10,
+		}
+		if !reflect.DeepEqual(sku.TierPrices, wantTierPrices) {
+			return fmt.Errorf("SKU %q tier prices = %#v, want %#v", sku.ID, sku.TierPrices, wantTierPrices)
 		}
 		seen[sku.ID]++
 		if seen[sku.ID] != 1 {

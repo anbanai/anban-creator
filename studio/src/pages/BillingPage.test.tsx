@@ -167,4 +167,22 @@ describe('BillingPage', () => {
     expect(screen.getByText('欠费减少 500 · 已包含在对应充值总额中')).toBeInTheDocument()
     expect(screen.queryByText('固定价扣费')).not.toBeInTheDocument()
   })
+
+  it('shows tier price, list price, and discount on a paid charge', async () => {
+    vi.mocked(api.billing.transactions).mockResolvedValueOnce({
+      total: 1,
+      offset: 0,
+      limit: 20,
+      items: [{
+        id: 'tier-charge', event_kind: 'charge', paid_delta: -450, promotional_delta: 0, debt_delta: 0,
+        charge_kind: 'operation', sku_id: 'image.content.v1', price_credits: 450,
+        pricing_tier: 'pro', list_price_credits: 500, discount_credits: 50,
+        created_at: '2026-07-27T11:03:30.725Z',
+      }],
+    })
+
+    render(<BillingPage />)
+
+    expect(await screen.findByText('专业版价格 450 · 标准价 500 · 优惠 50 · 现金积分 -450')).toBeInTheDocument()
+  })
 })

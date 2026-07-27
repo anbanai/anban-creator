@@ -25,6 +25,16 @@ export interface BillingTransaction {
   resource_id?: string
   source_type?: string
   source_id?: string
+  charge_kind?: 'task' | 'operation' | 'reversal'
+  charge_policy?: string
+  sku_id?: string
+  price_credits?: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
+  task_id?: string
+  operation_task_id?: string
+  tool_call_id?: string
   created_at: string
 }
 
@@ -40,6 +50,9 @@ export interface BillingSKU {
   operation: string
   charge_policy: 'task_admission' | 'accepted_task_operation' | 'standalone_operation'
   price_credits: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
   route?: string
   delivery: string
   selectors?: Record<string, string>
@@ -48,6 +61,8 @@ export interface BillingSKU {
 export interface BillingCatalog {
   catalog_id: string
   currency: 'credits'
+  pricing_model?: 'flat_v1' | 'tier_matrix_v1'
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
   skus: BillingSKU[]
 }
 

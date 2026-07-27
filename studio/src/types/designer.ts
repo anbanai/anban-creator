@@ -16,6 +16,9 @@ export interface DesignerProviderPricing {
   pricingType: 'fixed_sku'
   currency: 'credits'
   billingNote: string
+  pricingTier?: 'free' | 'pro' | 'enterprise'
+  listPriceCredits?: number
+  discountCredits?: number
 }
 
 export interface RawDesignerProvider {
@@ -46,6 +49,9 @@ export interface RawDesignerProvider {
     pricing_type: 'fixed_sku'
     currency: 'credits'
     billing_note: string
+    pricing_tier?: 'free' | 'pro' | 'enterprise'
+    list_price_credits?: number
+    discount_credits?: number
   }
 }
 
@@ -100,7 +106,10 @@ export interface GenerateQuote {
   request_fingerprint: string
   catalog_id: string
   sku_id: string
+  pricing_tier: 'free' | 'pro' | 'enterprise'
+  list_price_credits: number
   price_credits: number
+  discount_credits: number
   expires_at: string
 }
 

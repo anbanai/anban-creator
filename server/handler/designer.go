@@ -57,7 +57,7 @@ func (h *DesignerHandler) SetDirectUploadDependencies(repo repository.Repository
 
 // GetProviders handles GET /api/v1/designer/providers
 func (h *DesignerHandler) GetProviders(c fiber.Ctx) error {
-	providers := h.svc.GetProviders(c.Context())
+	providers := h.svc.GetProviders(c.Context(), GetUserID(c))
 	return Success(c, providers)
 }
 

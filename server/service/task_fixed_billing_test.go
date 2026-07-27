@@ -41,7 +41,7 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	}
 	for _, task := range tasks {
 		if task.BillingQuoteID == "" || task.BillingCatalogID != "retail-test-v1" || task.BillingSKUID != "task.article.v1" ||
-			task.BillingChargeID == nil || *task.BillingChargeID == "" || task.BillingPriceCredits != 500 {
+			task.BillingPricingTier != string(model.TierFree) || task.BillingChargeID == nil || *task.BillingChargeID == "" || task.BillingPriceCredits != 500 {
 			t.Fatalf("task billing identity = %#v", task)
 		}
 		charge, err := f.repo.Billing().FindChargeByTask(ctx, task.ID)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ skus:
 		ID: "image.standard.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation",
 		PriceCredits: 500, Route: "image_generation.content", Delivery: "persisted_image",
 	}
-	if got := bundle.Products.SKUs[0]; got != want {
+	if got := bundle.Products.SKUs[0]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SKU = %#v, want %#v", got, want)
 	}
 }
@@ -217,6 +218,18 @@ func TestLoadBundleCanonicalizesSinglePaddedOperation(t *testing.T) {
 	}
 	if got := bundle.Products.SKUs[0].Operation; got != "task.seednote" {
 		t.Fatalf("operation = %q, want canonical task.seednote", got)
+	}
+}
+
+func TestLoadBundleRequiresCompleteTierMatrix(t *testing.T) {
+	base := strings.Replace(validProductsYAML, "currency: credits\n", "currency: credits\npricing_model: tier_matrix_v1\n", 1)
+	base = strings.Replace(base, "    price_credits: 5000\n", "    price_credits: 5000\n    tier_prices: { free: 5000, pro: 4500, enterprise: 4000 }\n", 1)
+	if _, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": base})); err != nil {
+		t.Fatalf("complete tier matrix: %v", err)
+	}
+	missing := strings.Replace(base, ", enterprise: 4000", "", 1)
+	if _, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": missing})); !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "exactly free, pro, and enterprise") {
+		t.Fatalf("missing tier error = %v", err)
 	}
 }
 

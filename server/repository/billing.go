@@ -61,6 +61,9 @@ type BillingRepository interface {
 	ListSKUsByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKU, error)
 	FindSKU(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error)
 	FindSKUByOperation(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error)
+	CreateSKUTierPrices(ctx context.Context, prices []model.BillingSKUTierPrice) error
+	ListSKUTierPricesByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKUTierPrice, error)
+	FindSKUTierPrice(ctx context.Context, catalogID, skuID string, tier model.Tier) (*model.BillingSKUTierPrice, error)
 
 	CreateQuote(ctx context.Context, quote *model.BillingQuote) error
 	FindQuoteByKey(ctx context.Context, scope, key string) (*model.BillingQuote, error)
@@ -384,6 +387,33 @@ func (r *billingRepository) FindSKUByOperation(ctx context.Context, catalogID, o
 		return nil, err
 	}
 	return &sku, nil
+}
+
+func (r *billingRepository) CreateSKUTierPrices(ctx context.Context, prices []model.BillingSKUTierPrice) error {
+	if len(prices) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&prices).Error
+}
+
+func (r *billingRepository) ListSKUTierPricesByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKUTierPrice, error) {
+	var prices []model.BillingSKUTierPrice
+	err := r.db.WithContext(ctx).
+		Where("catalog_id = ?", catalogID).
+		Order("sku_id ASC, tier ASC").
+		Find(&prices).Error
+	return prices, err
+}
+
+func (r *billingRepository) FindSKUTierPrice(ctx context.Context, catalogID, skuID string, tier model.Tier) (*model.BillingSKUTierPrice, error) {
+	var price model.BillingSKUTierPrice
+	err := r.db.WithContext(ctx).
+		Where("catalog_id = ? AND sku_id = ? AND tier = ?", catalogID, skuID, tier).
+		First(&price).Error
+	if err != nil {
+		return nil, err
+	}
+	return &price, nil
 }
 
 func (r *billingRepository) CreateQuote(ctx context.Context, quote *model.BillingQuote) error {

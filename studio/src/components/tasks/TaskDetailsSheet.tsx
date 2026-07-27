@@ -131,6 +131,13 @@ function taskChargeLabel(detail: TaskBillingChargeDetail) {
   return detail.charge_kind === 'reversal' ? `${label}退回` : label
 }
 
+function pricingTierLabel(tier?: TaskBillingChargeDetail['pricing_tier']) {
+  if (tier === 'enterprise') return '企业版'
+  if (tier === 'pro') return '专业版'
+  if (tier === 'free') return '免费版'
+  return ''
+}
+
 function TaskBillingDetails({ task }: { task: Task }) {
   const total = task.billing_total_credits ?? task.billing_price_credits
   const details = task.billing_charge_details?.length
@@ -161,6 +168,13 @@ function TaskBillingDetails({ task }: { task: Task }) {
               <p className="mt-1 break-all text-xs text-muted-foreground">
                 {[detail.sku_id, detail.tool_call_id].filter(Boolean).join(' · ') || '固定 SKU'}
               </p>
+              {(detail.pricing_tier || (detail.discount_credits ?? 0) > 0) ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {[pricingTierLabel(detail.pricing_tier), (detail.discount_credits ?? 0) > 0
+                    ? `标准价 ${(detail.list_price_credits ?? detail.credits).toLocaleString()}，优惠 ${detail.discount_credits?.toLocaleString()}`
+                    : ''].filter(Boolean).join(' · ')}
+                </p>
+              ) : null}
             </div>
             <span className={`shrink-0 text-sm font-medium tabular-nums ${detail.credits < 0 ? 'text-emerald-600' : 'text-foreground'}`}>
               {detail.credits < 0 ? `退回 ${Math.abs(detail.credits).toLocaleString()}` : detail.credits.toLocaleString()} 积分

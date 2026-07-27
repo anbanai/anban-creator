@@ -735,7 +735,12 @@ export function TaskFormDialog({
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">固定价格</p>
                 <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                   {costPreview.priceAvailable ? (
-                    <p className="text-muted-foreground">固定任务价：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分</p>
+                    <div className="space-y-1 text-muted-foreground">
+                      <p>{billingCatalog?.pricing_tier ? `${billingCatalog.pricing_tier === 'enterprise' ? '企业版' : billingCatalog.pricing_tier === 'pro' ? '专业版' : '免费版'}任务价` : '固定任务价'}：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分</p>
+                      {costPreview.discountPerTask > 0 ? (
+                        <p className="text-xs">标准价 <span className="line-through">{costPreview.listBaseCost.toLocaleString()}</span> · 每个任务优惠 {costPreview.discountPerTask.toLocaleString()} 积分</p>
+                      ) : null}
+                    </div>
                   ) : <p className="font-medium text-red-500">固定任务价暂不可用</p>}
                   <p className="text-xs text-muted-foreground">{runLocally && !isMontageTask ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}</p>
                   <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>

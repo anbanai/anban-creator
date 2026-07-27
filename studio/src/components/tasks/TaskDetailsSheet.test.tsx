@@ -146,6 +146,25 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('region', { name: '积分明细' })).toBeInTheDocument()
   })
 
+  it('shows the total first and tier pricing evidence for every charge', () => {
+    render(<ControlledTaskDetailsSheet {...createSheetProps({
+      task: {
+        ...articleTask,
+        billing_total_credits: 5850,
+        billing_charge_details: [
+          { id: 'task-charge', charge_kind: 'task', credits: 5400, pricing_tier: 'pro', list_price_credits: 6000, discount_credits: 600 },
+          { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.content.v1', credits: 450, pricing_tier: 'pro', list_price_credits: 500, discount_credits: 50 },
+        ],
+      },
+    })} />)
+
+    const billing = screen.getByRole('region', { name: '积分明细' })
+    expect(within(billing).getByText('5,850 积分')).toBeInTheDocument()
+    expect(within(billing).getAllByText(/专业版/)).toHaveLength(2)
+    expect(within(billing).getByText(/标准价 6,000，优惠 600/)).toBeInTheDocument()
+    expect(within(billing).getByText(/标准价 500，优惠 50/)).toBeInTheDocument()
+  })
+
   it('places configuration, materials, and logs in named grouped surfaces', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 

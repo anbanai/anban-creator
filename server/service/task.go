@@ -761,6 +761,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 				return err
 			}
 			item.task.BillingQuoteID, item.task.BillingCatalogID, item.task.BillingSKUID = item.quote.ID, item.quote.CatalogID, item.quote.SKUID
+			item.task.BillingPricingTier = charge.PricingTier
 			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
 			if err := createTask(tx, item.task); err != nil {
 				return err

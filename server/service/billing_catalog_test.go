@@ -191,6 +191,66 @@ func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 	}
 }
 
+func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := tieredTestBillingBundle()
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{})
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		tier model.Tier
+		want int64
+	}{{model.TierFree, 500}, {model.TierPro, 450}, {model.TierEnterprise, 400}}
+	for _, tt := range tests {
+		user.Tier = tt.tier
+		if err := repo.Users().Update(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+		quote, err := svc.CreateQuote(ctx, QuoteRequest{
+			UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("tier", string(tt.tier)),
+			IdempotencyScope: "tier-quote", IdempotencyKey: string(tt.tier),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if quote.PricingTier != string(tt.tier) || quote.ListPriceCredits != 500 || quote.PriceCredits != tt.want || quote.DiscountCredits != 500-tt.want {
+			t.Fatalf("%s quote = %#v", tt.tier, quote)
+		}
+	}
+
+	user.Tier = model.TierPro
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	req := QuoteRequest{
+		UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("frozen-quote"),
+		IdempotencyScope: "frozen-tier-quote", IdempotencyKey: "stable",
+	}
+	first, err := svc.CreateQuote(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := svc.CreateQuote(ctx, req)
+	if err != nil || replay.ID != first.ID || replay.PriceCredits != 450 || replay.PricingTier != string(model.TierPro) {
+		t.Fatalf("frozen replay = %#v, %v", replay, err)
+	}
+	req.IdempotencyKey = "new"
+	newQuote, err := svc.CreateQuote(ctx, req)
+	if err != nil || newQuote.ID == first.ID || newQuote.PriceCredits != 400 || newQuote.PricingTier != string(model.TierEnterprise) {
+		t.Fatalf("new tier quote = %#v, %v", newQuote, err)
+	}
+}
+
 func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)
@@ -386,6 +446,11 @@ func newBillingServiceRepositoryWithDB(t *testing.T) (repository.Repository, *go
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	repo := repository.New(db)
+	if err := repo.Users().Create(context.Background(), &model.User{
+		ID: billingCatalogUserID, Email: "catalog-pricing@example.com", Password: "fixture", InviteCode: "CATALOG1",
+	}); err != nil {
+		t.Fatalf("create billing catalog user: %v", err)
+	}
 	t.Cleanup(func() { _ = repo.Close() })
 	return repo, db
 }
@@ -412,4 +477,17 @@ func testBillingBundle() billing.Bundle {
 			},
 		},
 	}
+}
+
+func tieredTestBillingBundle() billing.Bundle {
+	bundle := testBillingBundle()
+	bundle.Products.CatalogID = "retail-tiered-test-v1"
+	bundle.Products.PricingModel = billing.PricingModelTierMatrixV1
+	for index := range bundle.Products.SKUs {
+		listPrice := bundle.Products.SKUs[index].PriceCredits
+		bundle.Products.SKUs[index].TierPrices = map[string]int64{
+			"free": listPrice, "pro": listPrice * 9 / 10, "enterprise": listPrice * 8 / 10,
+		}
+	}
+	return bundle
 }

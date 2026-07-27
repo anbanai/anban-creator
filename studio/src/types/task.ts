@@ -95,6 +95,7 @@ export interface Task {
   billing_quote_id?: string
   billing_catalog_id?: string
   billing_sku_id?: string
+  billing_pricing_tier?: 'free' | 'pro' | 'enterprise'
   billing_charge_id?: string
   billing_price_credits: number
   billing_total_credits?: number
@@ -116,6 +117,9 @@ export interface TaskBillingChargeDetail {
   policy?: string
   sku_id?: string
   credits: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
   resource_type?: string
   resource_id?: string
   tool_call_id?: string

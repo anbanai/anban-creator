@@ -91,7 +91,13 @@ function amountExplanation(entry: BillingTransaction) {
   if (entry.paid_delta !== 0) parts.push(`现金积分 ${entry.paid_delta > 0 ? '+' : ''}${entry.paid_delta.toLocaleString()}`)
   if (entry.promotional_delta !== 0) parts.push(`奖励积分 ${entry.promotional_delta > 0 ? '+' : ''}${entry.promotional_delta.toLocaleString()}`)
   if (entry.debt_delta !== 0) parts.push(`欠费 ${entry.debt_delta > 0 ? '+' : ''}${entry.debt_delta.toLocaleString()}`)
-  if (entry.price_credits && entry.event_kind === 'charge') parts.unshift(`固定价格 ${entry.price_credits.toLocaleString()}`)
+  if (entry.price_credits && entry.event_kind === 'charge') {
+    const tier = entry.pricing_tier === 'enterprise' ? '企业版' : entry.pricing_tier === 'pro' ? '专业版' : entry.pricing_tier === 'free' ? '免费版' : ''
+    const discount = (entry.discount_credits ?? 0) > 0
+      ? ` · 标准价 ${(entry.list_price_credits ?? entry.price_credits).toLocaleString()} · 优惠 ${entry.discount_credits?.toLocaleString()}`
+      : ''
+    parts.unshift(`${tier ? `${tier}价格` : '固定价格'} ${entry.price_credits.toLocaleString()}${discount}`)
+  }
   return parts.join(' · ') || '无积分变化'
 }
 

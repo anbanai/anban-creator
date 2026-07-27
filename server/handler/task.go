@@ -242,6 +242,9 @@ type taskBillingChargeDetailResponse struct {
 	Policy       string                  `json:"policy,omitempty"`
 	SKUID        string                  `json:"sku_id,omitempty"`
 	Credits      int64                   `json:"credits"`
+	PricingTier  string                  `json:"pricing_tier,omitempty"`
+	ListPrice    int64                   `json:"list_price_credits,omitempty"`
+	Discount     int64                   `json:"discount_credits,omitempty"`
 	ResourceType string                  `json:"resource_type,omitempty"`
 	ResourceID   string                  `json:"resource_id,omitempty"`
 	ToolCallID   *string                 `json:"tool_call_id,omitempty"`
@@ -802,7 +805,8 @@ func (h *TaskHandler) enrichTaskBilling(ctx context.Context, userID string, task
 		totalsByTaskID[taskID] = total + credits
 		detailsByTaskID[taskID] = append(detailsByTaskID[taskID], taskBillingChargeDetailResponse{
 			ID: charge.ID, ChargeKind: charge.Kind, Policy: charge.Policy, SKUID: charge.SKUID,
-			Credits: credits, ResourceType: charge.ResourceType, ResourceID: charge.ResourceID,
+			Credits: credits, PricingTier: charge.PricingTier, ListPrice: charge.ListPriceCredits, Discount: charge.DiscountCredits,
+			ResourceType: charge.ResourceType, ResourceID: charge.ResourceID,
 			ToolCallID: charge.ToolCallID, ReversalOfID: charge.ReversalOfID, CreatedAt: charge.CreatedAt,
 		})
 	}
@@ -816,7 +820,8 @@ func (h *TaskHandler) enrichTaskBilling(ctx context.Context, userID string, task
 			}
 			detail := taskBillingChargeDetailResponse{
 				ChargeKind: model.BillingChargeKindTask, Policy: "task_admission", SKUID: task.BillingSKUID,
-				Credits: task.BillingPriceCredits, ResourceType: "task", ResourceID: task.ID, CreatedAt: task.CreatedAt,
+				Credits: task.BillingPriceCredits, PricingTier: task.BillingPricingTier, ListPrice: task.BillingPriceCredits,
+				ResourceType: "task", ResourceID: task.ID, CreatedAt: task.CreatedAt,
 			}
 			if task.BillingChargeID != nil {
 				detail.ID = *task.BillingChargeID

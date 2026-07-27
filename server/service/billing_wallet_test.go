@@ -450,6 +450,89 @@ func TestAcceptedTaskOperationMayCreateDebt(t *testing.T) {
 	}
 }
 
+func TestBillingWalletTaskOperationUsesFrozenTierAfterUserChange(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := tieredTestBillingBundle()
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	catalog := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := catalog.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierPro
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: billingCatalogUserID, PaidCredits: 1_000}); err != nil {
+		t.Fatal(err)
+	}
+	createBillingLot(t, repo, model.BillingCreditLot{
+		ID: uuid.NewString(), UserID: billingCatalogUserID, Kind: model.BillingCreditLotKindPaid,
+		SourceType: "fixture", SourceID: "tier-frozen-paid", CatalogID: bundle.Products.CatalogID,
+		OriginalCredits: 1_000, AvailableCredits: 1_000, CreatedAt: now,
+	})
+	taskID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: billingCatalogUserID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: bundle.Products.CatalogID, BillingSKUID: bundle.Products.SKUs[0].ID,
+		BillingPricingTier: string(model.TierPro),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wallet := NewBillingWalletService(repo, &bundle, BillingWalletOptions{Now: func() time.Time { return now }})
+	chargeOperation := func(identity string) *model.BillingCharge {
+		t.Helper()
+		charge, err := wallet.ChargeAcceptedOperation(ctx, OperationChargeRequest{
+			UserID: billingCatalogUserID, CatalogID: bundle.Products.CatalogID, SKUID: bundle.Products.SKUs[1].ID,
+			TaskID: taskID, AttemptID: uuid.NewString(), ToolCallID: identity,
+			ResourceType: "image", ResourceID: identity, RequestFingerprint: billingFingerprint(identity),
+			IdempotencyScope: "tiered-operation", IdempotencyKey: identity,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return charge
+	}
+	first := chargeOperation("pro-operation")
+	if first.PricingTier != string(model.TierPro) || first.ListPriceCredits != 100 || first.PriceCredits != 90 || first.DiscountCredits != 10 {
+		t.Fatalf("pro operation = %#v", first)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	second := chargeOperation("after-tier-change")
+	if second.PricingTier != string(model.TierPro) || second.PriceCredits != 90 {
+		t.Fatalf("operation after tier change = %#v", second)
+	}
+	standaloneQuote, err := catalog.CreateQuote(ctx, QuoteRequest{
+		UserID: billingCatalogUserID, Operation: "designer.generate_image", Route: "image.designer",
+		RequestFingerprint: billingFingerprint("tiered-standalone"), IdempotencyScope: "tiered-standalone-quote", IdempotencyKey: "tiered-standalone",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	standalone, err := wallet.ChargeStandaloneOperation(ctx, OperationChargeRequest{
+		UserID: billingCatalogUserID, QuoteID: standaloneQuote.ID, CatalogID: standaloneQuote.CatalogID, SKUID: standaloneQuote.SKUID,
+		ResourceType: "image", ResourceID: "tiered-standalone", RequestFingerprint: standaloneQuote.RequestFingerprint,
+		IdempotencyScope: "tiered-standalone", IdempotencyKey: "tiered-standalone",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversal, err := wallet.ReverseStandaloneOperation(ctx, standalone.ID, "provider_error", "tiered-operation-reversal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reversal.PriceCredits != standalone.PriceCredits || reversal.PricingTier != standalone.PricingTier || reversal.ListPriceCredits != standalone.ListPriceCredits || reversal.DiscountCredits != standalone.DiscountCredits {
+		t.Fatalf("reversal pricing = %#v, original %#v", reversal, standalone)
+	}
+}
+
 func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 	t.Run("task identity", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
@@ -891,7 +974,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newTaskCharge(req, sku, f.now)
+		existing := newTaskCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), f.now)
 		existing.ID = "committed-task-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		raceRepo := &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -919,7 +1002,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newOperationCharge(req, sku, true, f.now)
+		existing := newOperationCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), true, f.now)
 		existing.ID = "committed-operation-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -944,7 +1027,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newOperationCharge(req, sku, false, f.now)
+		existing := newOperationCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), false, f.now)
 		existing.ID = "committed-standalone-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -1012,7 +1095,7 @@ func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		drift := newTaskCharge(req, sku, f.now)
+		drift := newTaskCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), f.now)
 		drift.ID = "committed-drift-task-charge"
 		drift.ResourceID = "different-task"
 		state := &postLockCurrentReadState{keyCharge: drift, identityCharge: drift}
