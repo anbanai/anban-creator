@@ -70,6 +70,9 @@ type BillingRepository interface {
 	CreateCharge(ctx context.Context, charge *model.BillingCharge, allocations []model.BillingChargeAllocation) error
 	ListChargeAllocations(ctx context.Context, chargeID string) ([]model.BillingChargeAllocation, error)
 	FindChargeByID(ctx context.Context, chargeID string) (*model.BillingCharge, error)
+	ListChargesByIDs(ctx context.Context, userID string, chargeIDs []string) ([]model.BillingCharge, error)
+	ListChargesByTaskIDs(ctx context.Context, userID string, taskIDs []string) ([]model.BillingCharge, error)
+	ListTaskChargeTotals(ctx context.Context, userID string, taskIDs []string) ([]BillingTaskChargeTotal, error)
 	FindChargeByKey(ctx context.Context, scope, key string) (*model.BillingCharge, error)
 	FindChargeByTask(ctx context.Context, taskID string) (*model.BillingCharge, error)
 	FindChargeByOperation(ctx context.Context, taskID, attemptID, toolCallID, catalogID, skuID string) (*model.BillingCharge, error)
@@ -106,6 +109,12 @@ type BillingOutstandingDebtCharge struct {
 	ChargeID           string
 	OutstandingCredits int64
 	CreatedAt          time.Time
+}
+
+type BillingTaskChargeTotal struct {
+	TaskID          string
+	TotalCredits    int64
+	TaskChargeCount int64
 }
 
 type billingRepository struct {
@@ -445,6 +454,52 @@ func (r *billingRepository) FindChargeByID(ctx context.Context, chargeID string)
 		return nil, err
 	}
 	return &charge, nil
+}
+
+func (r *billingRepository) ListChargesByIDs(ctx context.Context, userID string, chargeIDs []string) ([]model.BillingCharge, error) {
+	if len(chargeIDs) == 0 {
+		return []model.BillingCharge{}, nil
+	}
+	var charges []model.BillingCharge
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND id IN ?", userID, chargeIDs).
+		Find(&charges).Error
+	return charges, err
+}
+
+func (r *billingRepository) ListChargesByTaskIDs(ctx context.Context, userID string, taskIDs []string) ([]model.BillingCharge, error) {
+	if len(taskIDs) == 0 {
+		return []model.BillingCharge{}, nil
+	}
+	originalChargeIDs := r.db.WithContext(ctx).
+		Model(&model.BillingCharge{}).
+		Select("id").
+		Where("user_id = ? AND (task_id IN ? OR operation_task_id IN ?)", userID, taskIDs, taskIDs)
+	var charges []model.BillingCharge
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND status = ?", userID, model.BillingChargeStatusPosted).
+		Where("task_id IN ? OR operation_task_id IN ? OR reversal_of_id IN (?)", taskIDs, taskIDs, originalChargeIDs).
+		Order("created_at ASC, id ASC").
+		Find(&charges).Error
+	return charges, err
+}
+
+func (r *billingRepository) ListTaskChargeTotals(ctx context.Context, userID string, taskIDs []string) ([]BillingTaskChargeTotal, error) {
+	if len(taskIDs) == 0 {
+		return []BillingTaskChargeTotal{}, nil
+	}
+	var totals []BillingTaskChargeTotal
+	err := r.db.WithContext(ctx).
+		Table("billing_charges AS original").
+		Select(`COALESCE(original.task_id, original.operation_task_id) AS task_id,
+			COALESCE(SUM(CASE WHEN reversal.id IS NULL THEN original.price_credits ELSE 0 END), 0) AS total_credits,
+			SUM(CASE WHEN original.charge_kind = ? THEN 1 ELSE 0 END) AS task_charge_count`, model.BillingChargeKindTask).
+		Joins("LEFT JOIN billing_charges AS reversal ON reversal.reversal_of_id = original.id AND reversal.user_id = original.user_id AND reversal.status = ?", model.BillingChargeStatusPosted).
+		Where("original.user_id = ? AND original.status = ? AND original.charge_kind <> ?", userID, model.BillingChargeStatusPosted, model.BillingChargeKindReversal).
+		Where("original.task_id IN ? OR original.operation_task_id IN ?", taskIDs, taskIDs).
+		Group("COALESCE(original.task_id, original.operation_task_id)").
+		Scan(&totals).Error
+	return totals, err
 }
 
 func (r *billingRepository) FindChargeByKey(ctx context.Context, scope, key string) (*model.BillingCharge, error) {

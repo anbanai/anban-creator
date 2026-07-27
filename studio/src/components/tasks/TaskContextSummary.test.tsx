@@ -37,6 +37,7 @@ const snapshotTask: Task = {
   published: false,
   published_at: null,
   billing_price_credits: 5000,
+  billing_total_credits: 6800,
   plan_id: null,
   project_snapshot: {
     project_name: '茶小茶',
@@ -88,7 +89,7 @@ describe('TaskContextSummary', () => {
     expect(screen.getByText('茶小茶')).toBeInTheDocument()
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
-    expect(screen.getByText('固定价 5,000 积分')).toBeInTheDocument()
+    expect(screen.getByText('累计扣费 6,800 积分')).toBeInTheDocument()
     expect(screen.queryByText('后来修改的项目')).not.toBeInTheDocument()
     expect(screen.queryByText('后来修改的视觉 · 1:1')).not.toBeInTheDocument()
   })
@@ -171,7 +172,7 @@ describe('TaskContextSummary', () => {
       screen.getByRole('button', { name: '打开执行日志' }),
     ]
 
-    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*固定价 5,000 积分/)
+    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*累计扣费 6,800 积分/)
     expect(actions[3]).toHaveAccessibleDescription(/2 条 · 实时.*最新日志状态/)
 
     const descriptionIds = actions.map((action) => action.getAttribute('aria-describedby'))

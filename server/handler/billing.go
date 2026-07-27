@@ -61,19 +61,30 @@ type BillingWalletResponse struct {
 }
 
 type BillingTransactionResponse struct {
-	ID               string                       `json:"id"`
-	EventKind        model.BillingWalletEventKind `json:"event_kind"`
-	PaidDelta        int64                        `json:"paid_delta"`
-	PromotionalDelta int64                        `json:"promotional_delta"`
-	DebtDelta        int64                        `json:"debt_delta"`
-	CatalogID        string                       `json:"catalog_id,omitempty"`
-	ChargeID         *string                      `json:"charge_id,omitempty"`
-	LotID            *string                      `json:"lot_id,omitempty"`
-	ResourceType     string                       `json:"resource_type,omitempty"`
-	ResourceID       string                       `json:"resource_id,omitempty"`
-	SourceType       *string                      `json:"source_type,omitempty"`
-	SourceID         *string                      `json:"source_id,omitempty"`
-	CreatedAt        time.Time                    `json:"created_at"`
+	ID                 string                       `json:"id"`
+	EventKind          model.BillingWalletEventKind `json:"event_kind"`
+	PaidDelta          int64                        `json:"paid_delta"`
+	PromotionalDelta   int64                        `json:"promotional_delta"`
+	DebtDelta          int64                        `json:"debt_delta"`
+	CatalogID          string                       `json:"catalog_id,omitempty"`
+	ChargeID           *string                      `json:"charge_id,omitempty"`
+	LotID              *string                      `json:"lot_id,omitempty"`
+	ResourceType       string                       `json:"resource_type,omitempty"`
+	ResourceID         string                       `json:"resource_id,omitempty"`
+	SourceType         *string                      `json:"source_type,omitempty"`
+	SourceID           *string                      `json:"source_id,omitempty"`
+	ChargeKind         model.BillingChargeKind      `json:"charge_kind,omitempty"`
+	ChargePolicy       string                       `json:"charge_policy,omitempty"`
+	SKUID              string                       `json:"sku_id,omitempty"`
+	PriceCredits       int64                        `json:"price_credits,omitempty"`
+	ChargeResourceType string                       `json:"charge_resource_type,omitempty"`
+	ChargeResourceID   string                       `json:"charge_resource_id,omitempty"`
+	TaskID             *string                      `json:"task_id,omitempty"`
+	OperationTaskID    *string                      `json:"operation_task_id,omitempty"`
+	ToolCallID         *string                      `json:"tool_call_id,omitempty"`
+	TopUpCredits       int64                        `json:"topup_credits,omitempty"`
+	DebtRepaidCredits  int64                        `json:"debt_repaid_credits,omitempty"`
+	CreatedAt          time.Time                    `json:"created_at"`
 }
 
 type BillingQuoteResponse struct {
@@ -150,6 +161,21 @@ func (h *BillingHandler) Transactions(c fiber.Ctx) error {
 		h.logError(err, userID, "list billing transactions")
 		return writeBillingServiceError(c, err)
 	}
+	chargeIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.ChargeID != nil && strings.TrimSpace(*entry.ChargeID) != "" {
+			chargeIDs = append(chargeIDs, *entry.ChargeID)
+		}
+	}
+	charges, err := h.repo.Billing().ListChargesByIDs(c.Context(), userID, chargeIDs)
+	if err != nil {
+		h.logError(err, userID, "list billing transaction charges")
+		return writeBillingServiceError(c, err)
+	}
+	chargesByID := make(map[string]model.BillingCharge, len(charges))
+	for _, charge := range charges {
+		chargesByID[charge.ID] = charge
+	}
 	total, err := h.repo.Billing().CountEntriesByUser(c.Context(), userID)
 	if err != nil {
 		h.logError(err, userID, "count billing transactions")
@@ -157,12 +183,35 @@ func (h *BillingHandler) Transactions(c fiber.Ctx) error {
 	}
 	items := make([]BillingTransactionResponse, 0, len(entries))
 	for _, entry := range entries {
-		items = append(items, BillingTransactionResponse{
+		item := BillingTransactionResponse{
 			ID: entry.ID, EventKind: entry.EventKind, PaidDelta: entry.PaidDelta,
 			PromotionalDelta: entry.PromotionalDelta, DebtDelta: entry.DebtDelta, CatalogID: entry.CatalogID,
 			ChargeID: entry.ChargeID, LotID: entry.LotID, ResourceType: entry.ResourceType, ResourceID: entry.ResourceID,
 			SourceType: entry.SourceType, SourceID: entry.SourceID, CreatedAt: entry.CreatedAt,
-		})
+		}
+		if entry.ChargeID != nil {
+			if charge, ok := chargesByID[*entry.ChargeID]; ok {
+				item.ChargeKind = charge.Kind
+				item.ChargePolicy = charge.Policy
+				item.SKUID = charge.SKUID
+				item.PriceCredits = charge.PriceCredits
+				item.ChargeResourceType = charge.ResourceType
+				item.ChargeResourceID = charge.ResourceID
+				item.TaskID = charge.TaskID
+				item.OperationTaskID = charge.OperationTaskID
+				item.ToolCallID = charge.ToolCallID
+			}
+		}
+		if entry.EventKind == model.BillingWalletEventKindTopUp {
+			debtRepaid, sumErr := h.repo.Billing().SumDebtAllocationsBySourceEntryID(c.Context(), userID, entry.ID)
+			if sumErr != nil {
+				h.logError(sumErr, userID, "sum billing transaction debt repayment")
+				return writeBillingServiceError(c, sumErr)
+			}
+			item.DebtRepaidCredits = debtRepaid
+			item.TopUpCredits = entry.PaidDelta + debtRepaid
+		}
+		items = append(items, item)
 	}
 	return Success(c, fiber.Map{"items": items, "total": total, "offset": offset, "limit": limit})
 }

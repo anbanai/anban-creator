@@ -505,6 +505,9 @@ export default function TasksPage() {
                         {task.completed_at && (
                           <span>完成：{formatDateTimeCN(task.completed_at)}</span>
                         )}
+                        <span className="font-medium text-foreground">
+                          累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
+                        </span>
                       </div>
                       {task.status === 'completed' && (
                         <button

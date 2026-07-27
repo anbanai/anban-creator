@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -233,6 +234,19 @@ type bulkTasksResponse struct {
 	Succeeded int              `json:"succeeded"`
 	Skipped   int              `json:"skipped"`
 	Results   []bulkTaskResult `json:"results"`
+}
+
+type taskBillingChargeDetailResponse struct {
+	ID           string                  `json:"id,omitempty"`
+	ChargeKind   model.BillingChargeKind `json:"charge_kind"`
+	Policy       string                  `json:"policy,omitempty"`
+	SKUID        string                  `json:"sku_id,omitempty"`
+	Credits      int64                   `json:"credits"`
+	ResourceType string                  `json:"resource_type,omitempty"`
+	ResourceID   string                  `json:"resource_id,omitempty"`
+	ToolCallID   *string                 `json:"tool_call_id,omitempty"`
+	ReversalOfID *string                 `json:"reversal_of_id,omitempty"`
+	CreatedAt    time.Time               `json:"created_at,omitempty"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -656,9 +670,14 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	if err := h.presentTaskReferences(c.Context(), userID, tasks); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	responses := taskAPIResponses(tasks, h.store)
+	if err := h.enrichTaskBilling(c.Context(), userID, tasks, responses, false); err != nil {
+		h.logger.Error().Err(err).Msg("enrich task billing failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to load task billing")
+	}
 
 	return Success(c, fiber.Map{
-		"items": taskAPIResponses(tasks, h.store),
+		"items": responses,
 		"total": total,
 	})
 }
@@ -688,8 +707,128 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	resp := taskAPIResponse(task, h.store)
+	if err := h.enrichTaskBilling(c.Context(), userID, []*model.Task{task}, []map[string]any{resp}, true); err != nil {
+		h.logger.Error().Err(err).Str("task_id", task.ID).Msg("enrich task billing failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to load task billing")
+	}
 
 	return Success(c, resp)
+}
+
+func (h *TaskHandler) enrichTaskBilling(ctx context.Context, userID string, tasks []*model.Task, responses []map[string]any, includeDetails bool) error {
+	if len(tasks) != len(responses) {
+		return fmt.Errorf("task billing response count mismatch")
+	}
+	if len(tasks) == 0 || h.repo == nil {
+		return nil
+	}
+	taskIDs := make([]string, 0, len(tasks))
+	tasksByID := make(map[string]*model.Task, len(tasks))
+	responsesByID := make(map[string]map[string]any, len(tasks))
+	for index, task := range tasks {
+		if task == nil {
+			continue
+		}
+		taskIDs = append(taskIDs, task.ID)
+		tasksByID[task.ID] = task
+		responsesByID[task.ID] = responses[index]
+	}
+	if !includeDetails {
+		totals, err := h.repo.Billing().ListTaskChargeTotals(ctx, userID, taskIDs)
+		if err != nil {
+			return err
+		}
+		totalsByTaskID := make(map[string]repository.BillingTaskChargeTotal, len(totals))
+		for _, total := range totals {
+			totalsByTaskID[total.TaskID] = total
+		}
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			total := totalsByTaskID[task.ID]
+			if total.TaskChargeCount == 0 {
+				if task.BillingPriceCredits > 0 && total.TotalCredits > math.MaxInt64-task.BillingPriceCredits {
+					return fmt.Errorf("task billing total overflow for %s", task.ID)
+				}
+				total.TotalCredits += task.BillingPriceCredits
+			}
+			responsesByID[task.ID]["billing_total_credits"] = total.TotalCredits
+		}
+		return nil
+	}
+	charges, err := h.repo.Billing().ListChargesByTaskIDs(ctx, userID, taskIDs)
+	if err != nil {
+		return err
+	}
+	chargeTaskIDs := make(map[string]string, len(charges))
+	for _, charge := range charges {
+		if charge.Kind == model.BillingChargeKindReversal {
+			continue
+		}
+		taskID := ""
+		if charge.TaskID != nil {
+			taskID = *charge.TaskID
+		} else if charge.OperationTaskID != nil {
+			taskID = *charge.OperationTaskID
+		}
+		if _, ok := tasksByID[taskID]; ok {
+			chargeTaskIDs[charge.ID] = taskID
+		}
+	}
+	detailsByTaskID := make(map[string][]taskBillingChargeDetailResponse, len(tasks))
+	totalsByTaskID := make(map[string]int64, len(tasks))
+	hasTaskCharge := make(map[string]bool, len(tasks))
+	for _, charge := range charges {
+		taskID := chargeTaskIDs[charge.ID]
+		credits := charge.PriceCredits
+		if charge.Kind == model.BillingChargeKindReversal {
+			if charge.ReversalOfID == nil {
+				continue
+			}
+			taskID = chargeTaskIDs[*charge.ReversalOfID]
+			credits = -credits
+		}
+		if taskID == "" {
+			continue
+		}
+		if charge.Kind == model.BillingChargeKindTask {
+			hasTaskCharge[taskID] = true
+		}
+		total := totalsByTaskID[taskID]
+		if (credits > 0 && total > math.MaxInt64-credits) || (credits < 0 && total < math.MinInt64-credits) {
+			return fmt.Errorf("task billing total overflow for %s", taskID)
+		}
+		totalsByTaskID[taskID] = total + credits
+		detailsByTaskID[taskID] = append(detailsByTaskID[taskID], taskBillingChargeDetailResponse{
+			ID: charge.ID, ChargeKind: charge.Kind, Policy: charge.Policy, SKUID: charge.SKUID,
+			Credits: credits, ResourceType: charge.ResourceType, ResourceID: charge.ResourceID,
+			ToolCallID: charge.ToolCallID, ReversalOfID: charge.ReversalOfID, CreatedAt: charge.CreatedAt,
+		})
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if !hasTaskCharge[task.ID] && task.BillingPriceCredits > 0 {
+			if totalsByTaskID[task.ID] > math.MaxInt64-task.BillingPriceCredits {
+				return fmt.Errorf("task billing total overflow for %s", task.ID)
+			}
+			detail := taskBillingChargeDetailResponse{
+				ChargeKind: model.BillingChargeKindTask, Policy: "task_admission", SKUID: task.BillingSKUID,
+				Credits: task.BillingPriceCredits, ResourceType: "task", ResourceID: task.ID, CreatedAt: task.CreatedAt,
+			}
+			if task.BillingChargeID != nil {
+				detail.ID = *task.BillingChargeID
+			}
+			detailsByTaskID[task.ID] = append([]taskBillingChargeDetailResponse{detail}, detailsByTaskID[task.ID]...)
+			totalsByTaskID[task.ID] += task.BillingPriceCredits
+		}
+		response := responsesByID[task.ID]
+		response["billing_total_credits"] = totalsByTaskID[task.ID]
+		response["billing_charge_details"] = detailsByTaskID[task.ID]
+	}
+	return nil
 }
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.

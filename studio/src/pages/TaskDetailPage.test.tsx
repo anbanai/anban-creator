@@ -1545,6 +1545,45 @@ describe('TaskDetailPage', () => {
       type: 'article',
       status: 'completed',
       billing_price_credits: 6000,
+      billing_total_credits: 7300,
+      billing_charge_details: [
+        {
+          id: 'task-charge',
+          charge_kind: 'task',
+          policy: 'task_admission',
+          sku_id: 'task.article.standard.v1',
+          credits: 6000,
+          created_at: '2026-07-10T00:00:00.000Z',
+        },
+        {
+          id: 'content-image-charge',
+          charge_kind: 'operation',
+          policy: 'accepted_task_operation',
+          sku_id: 'image.seedream.content.v1',
+          credits: 500,
+          tool_call_id: 'image:content-1',
+          created_at: '2026-07-10T00:01:00.000Z',
+        },
+        {
+          id: 'cover-image-charge',
+          charge_kind: 'operation',
+          policy: 'accepted_task_operation',
+          sku_id: 'image.seedream.cover.v1',
+          credits: 500,
+          tool_call_id: 'image:cover-1',
+          created_at: '2026-07-10T00:02:00.000Z',
+        },
+        {
+          id: 'analysis-charge',
+          charge_kind: 'operation',
+          policy: 'accepted_task_operation',
+          sku_id: 'analysis.content.v1',
+          credits: 300,
+          resource_type: 'analysis',
+          tool_call_id: 'analysis:content-1',
+          created_at: '2026-07-10T00:03:00.000Z',
+        },
+      ],
       result: null,
       project_snapshot: {
         project_name: '快照项目',
@@ -1580,9 +1619,16 @@ describe('TaskDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '概览' }))
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('任务固定价')).toBeInTheDocument()
+    expect(screen.getByText('积分明细')).toBeInTheDocument()
+    expect(screen.getByText('累计扣费')).toBeInTheDocument()
+    expect(screen.getByText('7,300 积分')).toBeInTheDocument()
+    expect(screen.getByText('任务固定费')).toBeInTheDocument()
+    expect(screen.getByText('内容图生成费')).toBeInTheDocument()
+    expect(screen.getByText('封面图生成费')).toBeInTheDocument()
+    expect(screen.getByText('增值操作费')).toBeInTheDocument()
     expect(screen.getByText('6,000 积分')).toBeInTheDocument()
-    expect(screen.queryByText('积分明细')).not.toBeInTheDocument()
+    expect(screen.getAllByText('500 积分')).toHaveLength(2)
+    expect(screen.getByText('300 积分')).toBeInTheDocument()
   })
 
   it('opens project details in a dialog instead of navigating to the projects list', async () => {

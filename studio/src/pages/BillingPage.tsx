@@ -7,19 +7,20 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { SimplePagination } from '@/components/SimplePagination'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import type { BillingTransaction, BillingWalletEventKind } from '@/types'
 
 const PAGE_SIZE = 20
 
-const eventLabels: Record<BillingWalletEventKind, string> = {
+const fallbackEventLabels: Record<BillingWalletEventKind, string> = {
   topup: '充值',
   promotion: '推广奖励',
-  charge: '固定价扣费',
+  charge: '积分扣费',
   debt_created: '新增欠费',
   debt_repayment: '补缴欠费',
   reversal: '费用退回',
@@ -30,19 +31,68 @@ function entryBalanceDelta(entry: BillingTransaction) {
   return entry.paid_delta + entry.promotional_delta - entry.debt_delta
 }
 
-function entryDescription(entry: BillingTransaction) {
-  const resource = [entry.resource_type, entry.resource_id].filter(Boolean).join(' / ')
-  if (resource) return resource
-  const source = [entry.source_type, entry.source_id].filter(Boolean).join(' / ')
-  return source || entry.catalog_id || '钱包调整'
+function chargeItemName(entry: BillingTransaction) {
+  const sku = entry.sku_id?.toLowerCase() ?? ''
+  if (sku.includes('image.seedream.cover') || sku.includes('image.cover')) return '封面图生成费'
+  if (sku.includes('image.seedream.content') || sku.includes('image.content')) return '内容图生成费'
+  if (sku.includes('image') || entry.charge_resource_type === 'image') return '图片生成费'
+  if (entry.charge_kind === 'task' || entry.charge_policy === 'task_admission') return '任务固定费'
+  if (entry.charge_kind === 'operation') return '增值操作费'
+  return fallbackEventLabels[entry.event_kind]
 }
 
-function deltaDetails(entry: BillingTransaction) {
+function entryLabel(entry: BillingTransaction) {
+  const chargeName = chargeItemName(entry)
+  if (entry.event_kind === 'debt_created') return `${chargeName}转欠费`
+  if (entry.event_kind === 'debt_repayment') {
+    if (chargeName === '封面图生成费') return '补缴封面图欠费'
+    if (chargeName === '内容图生成费') return '补缴内容图欠费'
+    if (chargeName === '图片生成费') return '补缴图片欠费'
+    return `补缴${chargeName.replace(/费$/, '')}欠费`
+  }
+  return entry.event_kind === 'charge' ? chargeName : fallbackEventLabels[entry.event_kind]
+}
+
+function entryAssociation(entry: BillingTransaction) {
+  const taskID = entry.operation_task_id || entry.task_id
+  if (entry.event_kind === 'debt_repayment' && entry.resource_id) {
+    return {
+      primary: `本次充值 ${entry.resource_id}`,
+      secondary: taskID ? `原任务 ${taskID}${entry.tool_call_id ? ` · ${entry.tool_call_id}` : ''}` : entry.sku_id,
+    }
+  }
+  if (taskID) {
+    return {
+      primary: `任务 ${taskID}`,
+      secondary: entry.tool_call_id ? `操作 ${entry.tool_call_id}` : entry.charge_resource_id ? `${entry.charge_resource_type || '资源'} ${entry.charge_resource_id}` : undefined,
+    }
+  }
+  const resource = [entry.resource_type, entry.resource_id].filter(Boolean).join(' / ')
+  if (resource) return { primary: resource, secondary: entry.sku_id }
+  const source = [entry.source_type, entry.source_id].filter(Boolean).join(' / ')
+  return { primary: source || entry.catalog_id || '钱包调整', secondary: entry.sku_id }
+}
+
+function amountExplanation(entry: BillingTransaction) {
+  if (entry.event_kind === 'topup') {
+    const total = entry.topup_credits ?? entry.paid_delta
+    const repaid = entry.debt_repaid_credits ?? 0
+    const details = [`充值总额 ${total.toLocaleString()}`, `现金到账 ${entry.paid_delta.toLocaleString()}`]
+    if (repaid > 0) details.push(`补缴欠费 ${repaid.toLocaleString()}`)
+    return details.join(' · ')
+  }
+  if (entry.event_kind === 'debt_repayment') {
+    return `欠费减少 ${Math.abs(entry.debt_delta).toLocaleString()} · 已包含在对应充值总额中`
+  }
+  if (entry.event_kind === 'debt_created') {
+    return `${chargeItemName(entry)} ${entry.price_credits?.toLocaleString() ?? Math.abs(entry.debt_delta).toLocaleString()} · 余额不足转为欠费 ${entry.debt_delta.toLocaleString()}`
+  }
   const parts: string[] = []
   if (entry.paid_delta !== 0) parts.push(`现金积分 ${entry.paid_delta > 0 ? '+' : ''}${entry.paid_delta.toLocaleString()}`)
   if (entry.promotional_delta !== 0) parts.push(`奖励积分 ${entry.promotional_delta > 0 ? '+' : ''}${entry.promotional_delta.toLocaleString()}`)
   if (entry.debt_delta !== 0) parts.push(`欠费 ${entry.debt_delta > 0 ? '+' : ''}${entry.debt_delta.toLocaleString()}`)
-  return parts.join(' · ')
+  if (entry.price_credits && entry.event_kind === 'charge') parts.unshift(`固定价格 ${entry.price_credits.toLocaleString()}`)
+  return parts.join(' · ') || '无积分变化'
 }
 
 export default function BillingPage() {
@@ -139,13 +189,13 @@ export default function BillingPage() {
       )}
 
       <Card>
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <ReceiptText className="size-4 text-muted-foreground" />
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">钱包流水</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">用户价格只记录固定 SKU，不展示供应商 token 或成本。</p>
-          </div>
-        </div>
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <ReceiptText className="size-4 text-muted-foreground" />
+            钱包流水
+          </CardTitle>
+          <CardDescription className="text-xs">任务固定费和每次增值操作费均按实际扣款单独列出。</CardDescription>
+        </CardHeader>
         {transactionsQuery.isError ? (
           <QueryErrorState onRetry={() => transactionsQuery.refetch()} />
         ) : transactionsQuery.isLoading ? (
@@ -162,35 +212,40 @@ export default function BillingPage() {
           <div className="py-12 text-center text-sm text-muted-foreground">暂无钱包流水</div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-3 font-medium">类型</th>
-                    <th className="px-4 py-3 font-medium">余额变化</th>
-                    <th className="px-4 py-3 font-medium">分账</th>
-                    <th className="px-4 py-3 font-medium">关联对象</th>
-                    <th className="px-4 py-3 font-medium">时间</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <Table>
+                <TableHeader>
+                  <TableRow className="text-xs text-muted-foreground hover:bg-transparent">
+                    <TableHead className="px-4">计费项目</TableHead>
+                    <TableHead className="px-4">钱包影响</TableHead>
+                    <TableHead className="min-w-80 px-4">金额说明</TableHead>
+                    <TableHead className="min-w-72 px-4">关联任务 / 操作</TableHead>
+                    <TableHead className="px-4">时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {transactions.map((entry) => {
                     const delta = entryBalanceDelta(entry)
+                    const association = entryAssociation(entry)
                     return (
-                      <tr key={entry.id} className="border-b border-border hover:bg-accent">
-                        <td className="px-4 py-3"><Badge variant="secondary">{eventLabels[entry.event_kind]}</Badge></td>
-                        <td className={`px-4 py-3 font-medium ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                          {delta > 0 ? '+' : ''}{delta.toLocaleString()}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{deltaDetails(entry)}</td>
-                        <td className="max-w-72 truncate px-4 py-3 text-muted-foreground" title={entryDescription(entry)}>{entryDescription(entry)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatFullDateTimeCN(entry.created_at)}</td>
-                      </tr>
+                      <TableRow key={entry.id}>
+                        <TableCell className="px-4 py-3"><Badge variant={entry.event_kind === 'charge' || entry.event_kind === 'debt_created' ? 'outline' : 'secondary'}>{entryLabel(entry)}</Badge></TableCell>
+                        <TableCell className="px-4 py-3">
+                          <p className={`font-semibold tabular-nums ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                            {delta > 0 ? '+' : ''}{delta.toLocaleString()}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">可用余额变化</p>
+                        </TableCell>
+                        <TableCell className="whitespace-normal px-4 py-3 text-xs leading-5 text-muted-foreground">{amountExplanation(entry)}</TableCell>
+                        <TableCell className="max-w-96 whitespace-normal px-4 py-3 text-xs text-muted-foreground">
+                          <p className="break-all text-foreground" title={association.primary}>{association.primary}</p>
+                          {association.secondary && <p className="mt-1 break-all" title={association.secondary}>{association.secondary}</p>}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-xs text-muted-foreground">{formatFullDateTimeCN(entry.created_at)}</TableCell>
+                      </TableRow>
                     )
                   })}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+            </Table>
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-border px-4 py-3">
                 <p className="text-xs text-muted-foreground">共 {total} 条记录，第 {page}/{totalPages} 页</p>

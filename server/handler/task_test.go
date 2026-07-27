@@ -2210,7 +2210,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 }
 
-func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
+func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -2236,10 +2236,57 @@ func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	now := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	attemptID := uuid.NewString()
+	toolCallID := "image:content-test"
+	operationChargeID := uuid.NewString()
+	analysisToolCallID := "analysis:content-test"
+	analysisChargeID := uuid.NewString()
+	if err := repo.WithTx(ctx, func(tx repository.Repository) error {
+		charges := []*model.BillingCharge{
+			{
+				ID: chargeID, UserID: userID, CatalogID: "retail-v1", SKUID: "task.article.standard.v1",
+				ResourceType: "task", ResourceID: taskID, Kind: model.BillingChargeKindTask,
+				Policy: "task_admission", Status: model.BillingChargeStatusPosted,
+				PriceCredits: 6000, PaidCredits: 6000, TaskID: &taskID,
+				IdempotencyScope: "task-charge", IdempotencyKey: taskID,
+				RequestFingerprint: strings.Repeat("a", 64), CreatedAt: now,
+			},
+			{
+				ID: operationChargeID, UserID: userID, CatalogID: "retail-v1", SKUID: "image.seedream.content.v1",
+				ResourceType: "image", ResourceID: uuid.NewString(), Kind: model.BillingChargeKindOperation,
+				Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
+				PriceCredits: 500, PaidCredits: 500, OperationTaskID: &taskID, AttemptID: &attemptID, ToolCallID: &toolCallID,
+				IdempotencyScope: "operation-charge", IdempotencyKey: operationChargeID,
+				RequestFingerprint: strings.Repeat("b", 64), CreatedAt: now.Add(time.Minute),
+			},
+			{
+				ID: analysisChargeID, UserID: userID, CatalogID: "retail-v1", SKUID: "analysis.content.v1",
+				ResourceType: "analysis", ResourceID: uuid.NewString(), Kind: model.BillingChargeKindOperation,
+				Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
+				PriceCredits: 300, PaidCredits: 300, OperationTaskID: &taskID, AttemptID: &attemptID, ToolCallID: &analysisToolCallID,
+				IdempotencyScope: "operation-charge", IdempotencyKey: analysisChargeID,
+				RequestFingerprint: strings.Repeat("c", 64), CreatedAt: now.Add(2 * time.Minute),
+			},
+		}
+		for _, charge := range charges {
+			if err := tx.Billing().CreateCharge(ctx, charge, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("create billing charges: %v", err)
+	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewTaskHandler(service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil), &logger)
+	h.SetRepository(repo)
 	app := fiber.New()
+	app.Get("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.List(c)
+	})
 	app.Get("/tasks/:id", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return h.GetByID(c)
@@ -2254,11 +2301,19 @@ func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	}
 	var body struct {
 		Data struct {
-			ID                  string  `json:"id"`
-			BillingCatalogID    string  `json:"billing_catalog_id"`
-			BillingSKUID        string  `json:"billing_sku_id"`
-			BillingChargeID     *string `json:"billing_charge_id"`
-			BillingPriceCredits int64   `json:"billing_price_credits"`
+			ID                   string  `json:"id"`
+			BillingCatalogID     string  `json:"billing_catalog_id"`
+			BillingSKUID         string  `json:"billing_sku_id"`
+			BillingChargeID      *string `json:"billing_charge_id"`
+			BillingPriceCredits  int64   `json:"billing_price_credits"`
+			BillingTotalCredits  int64   `json:"billing_total_credits"`
+			BillingChargeDetails []struct {
+				ID         string  `json:"id"`
+				ChargeKind string  `json:"charge_kind"`
+				SKUID      string  `json:"sku_id"`
+				Credits    int64   `json:"credits"`
+				ToolCallID *string `json:"tool_call_id"`
+			} `json:"billing_charge_details"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -2266,8 +2321,40 @@ func TestGetTaskByIDIncludesFixedBillingIdentity(t *testing.T) {
 	}
 	if body.Data.ID != taskID || body.Data.BillingCatalogID != "retail-v1" ||
 		body.Data.BillingSKUID != "task.article.standard.v1" || body.Data.BillingChargeID == nil ||
-		*body.Data.BillingChargeID != chargeID || body.Data.BillingPriceCredits != 6000 {
+		*body.Data.BillingChargeID != chargeID || body.Data.BillingPriceCredits != 6000 ||
+		body.Data.BillingTotalCredits != 6800 || len(body.Data.BillingChargeDetails) != 3 ||
+		body.Data.BillingChargeDetails[1].SKUID != "image.seedream.content.v1" ||
+		body.Data.BillingChargeDetails[1].Credits != 500 || body.Data.BillingChargeDetails[1].ToolCallID == nil ||
+		*body.Data.BillingChargeDetails[1].ToolCallID != toolCallID ||
+		body.Data.BillingChargeDetails[2].SKUID != "analysis.content.v1" ||
+		body.Data.BillingChargeDetails[2].Credits != 300 {
 		t.Fatalf("task billing identity = %#v", body.Data)
+	}
+
+	listResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks?offset=0&limit=20", nil))
+	if err != nil {
+		t.Fatalf("list request failed: %v", err)
+	}
+	if listResp.StatusCode != fiber.StatusOK {
+		t.Fatalf("list status = %d, want 200", listResp.StatusCode)
+	}
+	var listBody struct {
+		Data struct {
+			Items []struct {
+				ID                   string `json:"id"`
+				BillingTotalCredits  int64  `json:"billing_total_credits"`
+				BillingChargeDetails []struct {
+					Credits int64 `json:"credits"`
+				} `json:"billing_charge_details"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listBody.Data.Items) != 1 || listBody.Data.Items[0].ID != taskID ||
+		listBody.Data.Items[0].BillingTotalCredits != 6800 || len(listBody.Data.Items[0].BillingChargeDetails) != 0 {
+		t.Fatalf("task list billing = %#v", listBody.Data.Items)
 	}
 }
 func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Repository, context.Context, string, string) {

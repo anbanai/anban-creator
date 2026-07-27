@@ -261,6 +261,18 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect((await screen.findAllByText('审核后放行到公众号草稿箱')).length).toBeGreaterThan(0)
   })
 
+  it('shows the task total including image operation charges', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [{ ...fixtures.failedTask, billing_total_credits: 6800 } as Task],
+      total: 1,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByText('累计扣费：6,800 积分')).toBeInTheDocument()
+    expect(screen.queryByText('累计扣费：6,000 积分')).not.toBeInTheDocument()
+  })
+
   it('uses the active catalog price for article tasks', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')

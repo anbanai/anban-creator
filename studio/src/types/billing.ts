@@ -27,6 +27,17 @@ export interface BillingTransaction {
   resource_id?: string
   source_type?: string
   source_id?: string
+  charge_kind?: 'task' | 'operation' | 'reversal'
+  charge_policy?: string
+  sku_id?: string
+  price_credits?: number
+  charge_resource_type?: string
+  charge_resource_id?: string
+  task_id?: string
+  operation_task_id?: string
+  tool_call_id?: string
+  topup_credits?: number
+  debt_repaid_credits?: number
   created_at: string
 }
 

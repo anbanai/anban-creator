@@ -219,6 +219,94 @@ func TestBillingHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("transactions explain topup debt split and image charges", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		ctx := context.Background()
+		now := time.Date(2026, 7, 27, 10, 15, 22, 0, time.UTC)
+		topupID := uuid.NewString()
+		debtChargeID := uuid.NewString()
+		imageChargeID := uuid.NewString()
+		taskID := uuid.NewString()
+		attemptID := uuid.NewString()
+		debtToolCallID := "image:old-debt"
+		imageToolCallID := "image:new-paid"
+		if err := f.repo.WithTx(ctx, func(tx repository.Repository) error {
+			for _, charge := range []*model.BillingCharge{
+				{
+					ID: debtChargeID, UserID: f.inviteeID, CatalogID: f.bundle.Products.CatalogID, SKUID: "image.seedream.cover.v1",
+					ResourceType: "image", ResourceID: uuid.NewString(), Kind: model.BillingChargeKindOperation,
+					Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
+					PriceCredits: 3_000, DebtCredits: 3_000, OperationTaskID: &taskID, AttemptID: &attemptID, ToolCallID: &debtToolCallID,
+					IdempotencyScope: "operation-charge", IdempotencyKey: "old-debt", RequestFingerprint: strings.Repeat("a", 64), CreatedAt: now.Add(-time.Hour),
+				},
+				{
+					ID: imageChargeID, UserID: f.inviteeID, CatalogID: f.bundle.Products.CatalogID, SKUID: "image.seedream.content.v1",
+					ResourceType: "image", ResourceID: uuid.NewString(), Kind: model.BillingChargeKindOperation,
+					Policy: "accepted_task_operation", Status: model.BillingChargeStatusPosted,
+					PriceCredits: 500, PaidCredits: 500, OperationTaskID: &taskID, AttemptID: &attemptID, ToolCallID: &imageToolCallID,
+					IdempotencyScope: "operation-charge", IdempotencyKey: "new-paid", RequestFingerprint: strings.Repeat("b", 64), CreatedAt: now.Add(time.Minute),
+				},
+			} {
+				if err := tx.Billing().CreateCharge(ctx, charge, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		sourceType, sourceID := "manual_transfer", "manual-transfer-20260727-000001"
+		chargeEntries := []*model.BillingWalletEntry{
+			{
+				ID: topupID, UserID: f.inviteeID, EventKind: model.BillingWalletEventKindTopUp, PaidDelta: 97_000,
+				CatalogID: f.bundle.Products.CatalogID, RequestFingerprint: strings.Repeat("c", 64), SourceType: &sourceType, SourceID: &sourceID,
+				IdempotencyScope: "admin-topup", IdempotencyKey: sourceID, CreatedAt: now,
+			},
+			{
+				ID: uuid.NewString(), UserID: f.inviteeID, EventKind: model.BillingWalletEventKindDebtRepayment, DebtDelta: -3_000,
+				CatalogID: f.bundle.Products.CatalogID, ChargeID: &debtChargeID, ResourceType: "topup", ResourceID: topupID,
+				IdempotencyScope: "topup-repayment:" + topupID, IdempotencyKey: "000000:" + debtChargeID, CreatedAt: now,
+			},
+			{
+				ID: uuid.NewString(), UserID: f.inviteeID, EventKind: model.BillingWalletEventKindCharge, PaidDelta: -500,
+				CatalogID: f.bundle.Products.CatalogID, ChargeID: &imageChargeID, ResourceType: "image", ResourceID: uuid.NewString(),
+				IdempotencyScope: "wallet-entry", IdempotencyKey: "new-paid", CreatedAt: now.Add(time.Minute),
+			},
+		}
+		for _, entry := range chargeEntries {
+			if err := f.repo.Billing().AppendEntry(ctx, entry); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.repo.WithTx(ctx, func(tx repository.Repository) error {
+			return tx.Billing().CreateDebtAllocation(ctx, &model.BillingDebtAllocation{
+				ID: uuid.NewString(), UserID: f.inviteeID, ChargeID: debtChargeID, EntryID: chargeEntries[1].ID,
+				SourceEntryID: topupID, Kind: model.BillingDebtAllocationKindRepayment, Credits: 3_000, CreatedAt: now,
+			})
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		resp := f.publicRequest(t, http.MethodGet, "/api/billing/transactions?offset=0&limit=20", nil)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+		items := billingResponseData(t, resp)["items"].([]any)
+		byID := make(map[string]map[string]any, len(items))
+		for _, raw := range items {
+			item := raw.(map[string]any)
+			byID[item["id"].(string)] = item
+		}
+		assertJSONNumbers(t, byID[topupID], map[string]float64{"paid_delta": 97_000, "topup_credits": 100_000, "debt_repaid_credits": 3_000})
+		paidImage := byID[chargeEntries[2].ID]
+		assertJSONNumbers(t, paidImage, map[string]float64{"price_credits": 500, "paid_delta": -500})
+		if paidImage["sku_id"] != "image.seedream.content.v1" || paidImage["operation_task_id"] != taskID || paidImage["tool_call_id"] != imageToolCallID {
+			t.Fatalf("paid image transaction metadata = %#v", paidImage)
+		}
+		repayment := byID[chargeEntries[1].ID]
+		if repayment["sku_id"] != "image.seedream.cover.v1" || repayment["charge_kind"] != "operation" {
+			t.Fatalf("debt repayment transaction metadata = %#v", repayment)
+		}
+	})
+
 	t.Run("admin topup rejects invalid provenance before wallet mutation", func(t *testing.T) {
 		const missingUserID = "30000000-0000-4000-8000-000000000099"
 		tests := []struct {

@@ -53,6 +53,7 @@ func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 		return nil
 	}
 	resp := modelAPIMap(task)
+	resp["billing_total_credits"] = task.BillingPriceCredits
 	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
 	enrichOwnedObjectKeys(resp, store)
 	return resp

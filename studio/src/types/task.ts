@@ -97,6 +97,8 @@ export interface Task {
   billing_sku_id?: string
   billing_charge_id?: string
   billing_price_credits: number
+  billing_total_credits?: number
+  billing_charge_details?: TaskBillingChargeDetail[]
   billing_terminal_reason?: string
   // Where the task runs (mirrors server model.ExecutionTarget*):
   // ''/'cloud' = cloud Asynq/Docker; 'local' = awaiting a desktop local-executor
@@ -106,6 +108,19 @@ export interface Task {
   created_at: string
   started_at: string
   completed_at: string
+}
+
+export interface TaskBillingChargeDetail {
+  id?: string
+  charge_kind: 'task' | 'operation' | 'reversal'
+  policy?: string
+  sku_id?: string
+  credits: number
+  resource_type?: string
+  resource_id?: string
+  tool_call_id?: string
+  reversal_of_id?: string
+  created_at?: string
 }
 
 // Publish-approval gate state (mirrors server model.PublishApprovalState*).

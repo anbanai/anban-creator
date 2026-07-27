@@ -163,7 +163,7 @@ export function TaskContextSummary({
             label="任务概览"
             value={projectName}
             detail={task.plan_id ? '计划任务' : '手动创建'}
-            detailSuffix={`固定价 ${task.billing_price_credits.toLocaleString()} 积分`}
+            detailSuffix={`累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分`}
             onClick={() => onOpenTab('overview')}
           />
           <SummaryItem

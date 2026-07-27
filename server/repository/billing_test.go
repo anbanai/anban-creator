@@ -681,6 +681,14 @@ func TestBillingRepositoryChargeReplayAndDatabaseIdentities(t *testing.T) {
 	if err != nil || byOperation.ID != operation.ID {
 		t.Fatalf("FindChargeByOperation = %+v, %v", byOperation, err)
 	}
+	listed, err := repo.Billing().ListChargesByIDs(ctx, "u1", []string{taskCharge.ID, operation.ID, "missing"})
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("ListChargesByIDs = %+v, %v", listed, err)
+	}
+	otherUser, err := repo.Billing().ListChargesByIDs(ctx, "other-user", []string{taskCharge.ID, operation.ID})
+	if err != nil || len(otherUser) != 0 {
+		t.Fatalf("ListChargesByIDs leaked cross-user charges = %+v, %v", otherUser, err)
+	}
 	operationConflict := billingOperationCharge("charge-operation-conflict", "task-op", "attempt-1", "call-1", "op-key-2")
 	if err := create(operationConflict); err == nil {
 		t.Fatal("duplicate accepted-operation identity unexpectedly succeeded")
@@ -693,6 +701,28 @@ func TestBillingRepositoryChargeReplayAndDatabaseIdentities(t *testing.T) {
 	foundReversal, err := repo.Billing().FindReversal(ctx, taskCharge.ID)
 	if err != nil || foundReversal.ID != reversal.ID {
 		t.Fatalf("FindReversal = %+v, %v", foundReversal, err)
+	}
+	taskCharges, err := repo.Billing().ListChargesByTaskIDs(ctx, "u1", []string{"task-1", "task-op"})
+	if err != nil || len(taskCharges) != 3 {
+		t.Fatalf("ListChargesByTaskIDs = %+v, %v", taskCharges, err)
+	}
+	totals, err := repo.Billing().ListTaskChargeTotals(ctx, "u1", []string{"task-1", "task-op"})
+	if err != nil || len(totals) != 2 {
+		t.Fatalf("ListTaskChargeTotals = %+v, %v", totals, err)
+	}
+	totalsByTaskID := make(map[string]BillingTaskChargeTotal, len(totals))
+	for _, total := range totals {
+		totalsByTaskID[total.TaskID] = total
+	}
+	if total := totalsByTaskID["task-1"]; total.TotalCredits != 0 || total.TaskChargeCount != 1 {
+		t.Fatalf("reversed task total = %+v", total)
+	}
+	if total := totalsByTaskID["task-op"]; total.TotalCredits != 100 || total.TaskChargeCount != 0 {
+		t.Fatalf("operation task total = %+v", total)
+	}
+	otherTaskCharges, err := repo.Billing().ListChargesByTaskIDs(ctx, "other-user", []string{"task-1", "task-op"})
+	if err != nil || len(otherTaskCharges) != 0 {
+		t.Fatalf("ListChargesByTaskIDs leaked cross-user charges = %+v, %v", otherTaskCharges, err)
 	}
 	reversalConflict := billingReversalCharge("charge-reversal-conflict", taskCharge.ID, "reversal-key-2")
 	if err := create(reversalConflict); err == nil {

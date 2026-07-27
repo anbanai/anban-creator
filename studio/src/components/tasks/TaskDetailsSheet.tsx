@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  ReceiptText,
   ScrollText,
   Settings2,
   type LucideIcon,
@@ -36,7 +37,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatFullDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
-import type { Project, Task, TaskFile } from '@/types'
+import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
 
 export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
 
@@ -120,6 +121,57 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
   )
 }
 
+function taskChargeLabel(detail: TaskBillingChargeDetail) {
+  const sku = detail.sku_id?.toLowerCase() ?? ''
+  let label = '增值操作费'
+  if (detail.charge_kind === 'task' || detail.policy === 'task_admission' || detail.resource_type === 'task') label = '任务固定费'
+  else if (sku.includes('image.seedream.cover') || sku.includes('image.cover')) label = '封面图生成费'
+  else if (sku.includes('image.seedream.content') || sku.includes('image.content')) label = '内容图生成费'
+  else if (sku.includes('image') || detail.resource_type === 'image') label = '图片生成费'
+  return detail.charge_kind === 'reversal' ? `${label}退回` : label
+}
+
+function TaskBillingDetails({ task }: { task: Task }) {
+  const total = task.billing_total_credits ?? task.billing_price_credits
+  const details = task.billing_charge_details?.length
+    ? task.billing_charge_details
+    : [{
+        id: task.billing_charge_id,
+        charge_kind: 'task' as const,
+        policy: 'task_admission',
+        sku_id: task.billing_sku_id,
+        credits: task.billing_price_credits,
+        created_at: task.created_at,
+      }]
+
+  return (
+    <TaskDetailsSection label="积分明细" title="积分明细" icon={ReceiptText}>
+      <div className="mb-3 flex items-baseline justify-between gap-4 border-b border-border pb-3">
+        <span className="text-xs text-muted-foreground">累计扣费</span>
+        <span className="text-lg font-semibold tabular-nums text-foreground">{total.toLocaleString()} 积分</span>
+      </div>
+      <div className="flex flex-col">
+        {details.map((detail, index) => (
+          <div
+            key={detail.id || `${detail.sku_id || detail.charge_kind}-${detail.created_at || index}-${index}`}
+            className="flex items-start justify-between gap-4 border-b border-border py-3 first:pt-0 last:border-b-0 last:pb-0"
+          >
+            <div className="min-w-0">
+              <p className="text-sm text-foreground">{taskChargeLabel(detail)}</p>
+              <p className="mt-1 break-all text-xs text-muted-foreground">
+                {[detail.sku_id, detail.tool_call_id].filter(Boolean).join(' · ') || '固定 SKU'}
+              </p>
+            </div>
+            <span className={`shrink-0 text-sm font-medium tabular-nums ${detail.credits < 0 ? 'text-emerald-600' : 'text-foreground'}`}>
+              {detail.credits < 0 ? `退回 ${Math.abs(detail.credits).toLocaleString()}` : detail.credits.toLocaleString()} 积分
+            </span>
+          </div>
+        ))}
+      </div>
+    </TaskDetailsSection>
+  )
+}
+
 function TaskOverviewDetails({
   task,
   project,
@@ -144,12 +196,12 @@ function TaskOverviewDetails({
       >
         <DetailRows rows={timingRows} />
       </TaskDetailsSection>
-      <TaskDetailsSection label="项目与价格" title="项目与价格" icon={FolderKanban}>
+      <TaskDetailsSection label="项目" title="项目" icon={FolderKanban}>
         <DetailRows rows={[
           ['项目', projectName],
-          ['任务固定价', `${task.billing_price_credits.toLocaleString()} 积分`],
         ]} />
       </TaskDetailsSection>
+      <TaskBillingDetails task={task} />
     </div>
   )
 }

@@ -126,7 +126,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
-  it('opens on Overview with semantic task values and fixed price', () => {
+  it('opens on Overview with semantic task values and cumulative billing', () => {
     const props = createSheetProps()
 
     render(<ControlledTaskDetailsSheet {...props} />)
@@ -135,14 +135,15 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('手动创建')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('创建时项目名称')).toBeInTheDocument()
-    expect(screen.getByText('6,000 积分')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '积分明细' })).getAllByText('6,000 积分')).toHaveLength(2)
   })
 
-  it('groups Overview into timing and project-price surfaces', () => {
+  it('groups Overview into timing, project, and billing surfaces', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     expect(screen.getByRole('region', { name: '任务时间与来源' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '项目与价格' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '项目' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '积分明细' })).toBeInTheDocument()
   })
 
   it('places configuration, materials, and logs in named grouped surfaces', () => {
