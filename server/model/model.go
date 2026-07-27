@@ -35,6 +35,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&BillingWalletEntry{},
 		&BillingCatalogVersion{},
 		&BillingSKU{},
+		&BillingSKUTierPrice{},
 		&BillingQuote{},
 		&BillingCharge{},
 		&BillingChargeAllocation{},

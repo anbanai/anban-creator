@@ -105,7 +105,15 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if resolved == nil {
 		return nil, errors.New("image model unavailable: resolver returned no descriptor")
 	}
-	sku, err := s.catalog.ResolveSKU(ctx, "", "mcp.generate_image", "image_generation."+req.ImageType)
+	var pricing *ResolvedSKUPrice
+	if task.BillingPricingTier != "" {
+		pricing, err = s.catalog.ResolvePriceForTier(ctx, task.BillingCatalogID, "mcp.generate_image", "image_generation."+req.ImageType, model.Tier(task.BillingPricingTier))
+	} else {
+		// Tasks admitted before tier pricing did not persist a pricing tier. Their
+		// immutable flat catalog remains authoritative; the user tier only labels
+		// the frozen-price evidence for the operation.
+		pricing, err = s.catalog.ResolvePrice(ctx, req.UserID, task.BillingCatalogID, "mcp.generate_image", "image_generation."+req.ImageType)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve fixed image SKU: %w", err)
 	}
@@ -140,7 +148,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		result.FilePath = req.OutputPath
 	}
 
-	asset, err := s.persist(ctx, req, operationID, fingerprint, sku, result)
+	asset, err := s.persist(ctx, req, operationID, fingerprint, pricing, result)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +214,7 @@ func (s *TaskImageService) replayAsset(ctx context.Context, file *model.TaskFile
 	return &stored.Asset, nil
 }
 
-func (s *TaskImageService) persist(ctx context.Context, req GenerateTaskImageRequest, operationID, fingerprint string, sku *model.BillingSKU, result *ImageResult) (*TaskImageAsset, error) {
+func (s *TaskImageService) persist(ctx context.Context, req GenerateTaskImageRequest, operationID, fingerprint string, pricing *ResolvedSKUPrice, result *ImageResult) (*TaskImageAsset, error) {
 	sourcePath := result.SavedFilePath()
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -232,7 +240,7 @@ func (s *TaskImageService) persist(ctx context.Context, req GenerateTaskImageReq
 		ctx, req.TaskID, req.UserID, req.ExecutionID, req.OutputPath, file, mimeType, info.Size(),
 		GenericTaskFileOperationSettlement{
 			ResourceType: "image", IdempotencyScope: taskImageSettlementScope,
-			CatalogID: sku.CatalogID, SKUID: sku.SKUID, PriceCredits: sku.PriceCredits,
+			CatalogID: pricing.SKU.CatalogID, SKUID: pricing.SKU.SKUID, PriceCredits: pricing.PriceCredits,
 			OperationID: operationID, RequestFingerprint: fingerprint, ResultSnapshot: snapshot,
 		},
 	)

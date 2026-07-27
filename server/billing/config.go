@@ -77,19 +77,28 @@ type TaskFailureReversalPolicy struct {
 }
 
 type ProductCatalog struct {
-	CatalogID string      `yaml:"catalog_id"`
-	Currency  string      `yaml:"currency"`
-	SKUs      []SKUConfig `yaml:"skus"`
+	CatalogID    string      `yaml:"catalog_id" json:"catalog_id"`
+	Currency     string      `yaml:"currency" json:"currency"`
+	PricingModel string      `yaml:"pricing_model" json:"pricing_model"`
+	SKUs         []SKUConfig `yaml:"skus" json:"skus"`
 }
 
 type SKUConfig struct {
-	ID           string `yaml:"id" json:"id"`
-	Operation    string `yaml:"operation" json:"operation"`
-	ChargePolicy string `yaml:"charge_policy" json:"charge_policy"`
-	PriceCredits int64  `yaml:"price_credits" json:"price_credits"`
-	Route        string `yaml:"route" json:"route,omitempty"`
-	Delivery     string `yaml:"delivery" json:"delivery"`
+	ID           string           `yaml:"id" json:"id"`
+	Operation    string           `yaml:"operation" json:"operation"`
+	ChargePolicy string           `yaml:"charge_policy" json:"charge_policy"`
+	PriceCredits int64            `yaml:"price_credits" json:"price_credits"`
+	TierPrices   map[string]int64 `yaml:"tier_prices" json:"tier_prices,omitempty"`
+	Route        string           `yaml:"route" json:"route,omitempty"`
+	Delivery     string           `yaml:"delivery" json:"delivery"`
 }
+
+const (
+	PricingModelFlatV1       = "flat_v1"
+	PricingModelTierMatrixV1 = "tier_matrix_v1"
+)
+
+var RequiredPricingTiers = []string{"free", "pro", "enterprise"}
 
 type rawCostCatalog struct {
 	CatalogID     string                    `yaml:"catalog_id"`
@@ -311,11 +320,18 @@ func validateBundle(bundle *Bundle) error {
 
 	bundle.Products.CatalogID = strings.TrimSpace(bundle.Products.CatalogID)
 	bundle.Products.Currency = strings.TrimSpace(bundle.Products.Currency)
+	bundle.Products.PricingModel = strings.TrimSpace(bundle.Products.PricingModel)
+	if bundle.Products.PricingModel == "" {
+		bundle.Products.PricingModel = PricingModelFlatV1
+	}
 	if bundle.Products.CatalogID == "" {
 		return configError("products.yaml", "catalog_id", errors.New("is required"))
 	}
 	if bundle.Products.Currency != "credits" {
 		return configError("products.yaml", "currency", errors.New("must be credits"))
+	}
+	if bundle.Products.PricingModel != PricingModelFlatV1 && bundle.Products.PricingModel != PricingModelTierMatrixV1 {
+		return configError("products.yaml", "pricing_model", fmt.Errorf("unsupported value %q", bundle.Products.PricingModel))
 	}
 	if len(bundle.Products.SKUs) == 0 {
 		return configError("products.yaml", "skus", errors.New("must not be empty"))
@@ -344,6 +360,32 @@ func validateBundle(bundle *Bundle) error {
 		seenSKUs[sku.ID] = struct{}{}
 		if sku.PriceCredits < 0 {
 			return configError("products.yaml", field+".price_credits", errors.New("must be non-negative"))
+		}
+		if bundle.Products.PricingModel == PricingModelFlatV1 {
+			if len(sku.TierPrices) != 0 {
+				return configError("products.yaml", field+".tier_prices", errors.New("must be empty for flat_v1 pricing"))
+			}
+		} else {
+			if len(sku.TierPrices) != len(RequiredPricingTiers) {
+				return configError("products.yaml", field+".tier_prices", errors.New("must define exactly free, pro, and enterprise"))
+			}
+			for _, tier := range RequiredPricingTiers {
+				price, exists := sku.TierPrices[tier]
+				if !exists {
+					return configError("products.yaml", field+".tier_prices", fmt.Errorf("missing tier %q", tier))
+				}
+				if price < 0 || price > sku.PriceCredits {
+					return configError("products.yaml", field+".tier_prices."+tier, errors.New("must be non-negative and no greater than price_credits"))
+				}
+			}
+			if sku.TierPrices["free"] != sku.PriceCredits {
+				return configError("products.yaml", field+".tier_prices.free", errors.New("must equal price_credits list price"))
+			}
+			for tier := range sku.TierPrices {
+				if tier != "free" && tier != "pro" && tier != "enterprise" {
+					return configError("products.yaml", field+".tier_prices", fmt.Errorf("unsupported tier %q", tier))
+				}
+			}
 		}
 		switch sku.ChargePolicy {
 		case "task_admission":

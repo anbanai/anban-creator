@@ -31,6 +31,9 @@ export interface BillingTransaction {
   charge_policy?: string
   sku_id?: string
   price_credits?: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
   charge_resource_type?: string
   charge_resource_id?: string
   task_id?: string
@@ -53,6 +56,9 @@ export interface BillingSKU {
   operation: string
   charge_policy: 'task_admission' | 'accepted_task_operation' | 'standalone_operation'
   price_credits: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
   route?: string
   delivery: string
 }
@@ -60,6 +66,8 @@ export interface BillingSKU {
 export interface BillingCatalog {
   catalog_id: string
   currency: 'credits'
+  pricing_model?: 'flat_v1' | 'tier_matrix_v1'
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
   skus: BillingSKU[]
 }
 

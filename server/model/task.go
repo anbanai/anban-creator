@@ -145,6 +145,7 @@ type Task struct {
 	BillingQuoteID        string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
 	BillingCatalogID      string                                `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
 	BillingSKUID          string                                `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
+	BillingPricingTier    string                                `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
 	BillingChargeID       *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
 	BillingPriceCredits   int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
 	BillingTerminalReason string                                `gorm:"type:varchar(64);index" json:"billing_terminal_reason,omitempty"`

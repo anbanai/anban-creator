@@ -232,6 +232,21 @@ beforeEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('shows the authenticated tier price and savings before task creation', async () => {
+    vi.mocked(api.billing.catalog).mockResolvedValueOnce({
+      catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_model: 'tier_matrix_v1', pricing_tier: 'pro',
+      skus: [{
+        id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission',
+        list_price_credits: 6000, price_credits: 5400, discount_credits: 600, pricing_tier: 'pro',
+        delivery: 'article_artifacts_verified',
+      }],
+    })
+    renderDialog()
+
+    expect(await screen.findByText(/专业版任务价：5,400 × 1 =/)).toBeInTheDocument()
+    expect(screen.getByText(/每个任务优惠 600 积分/)).toBeInTheDocument()
+  })
+
   it('renders create mode with the shared operational controls and no static type panel', async () => {
     renderDialog()
 

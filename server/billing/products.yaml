@@ -1,52 +1,61 @@
-catalog_id: "retail-2026-07-22-v3"
+catalog_id: "retail-2026-07-27-v4"
 currency: "credits"
+pricing_model: "tier_matrix_v1"
 skus:
   - id: "task.article.standard.v1"
     operation: "task.article"
     charge_policy: "task_admission"
     price_credits: 6000
+    tier_prices: { free: 6000, pro: 5400, enterprise: 4800 }
     delivery: "article_artifacts_verified"
 
   - id: "task.seednote.standard.v1"
     operation: "task.seednote"
     charge_policy: "task_admission"
     price_credits: 5000
+    tier_prices: { free: 5000, pro: 4500, enterprise: 4000 }
     delivery: "seednote_artifacts_verified"
 
   - id: "task.moments.standard.v1"
     operation: "task.moments"
     charge_policy: "task_admission"
     price_credits: 3000
+    tier_prices: { free: 3000, pro: 2700, enterprise: 2400 }
     delivery: "moments_artifacts_verified"
 
   - id: "task.ecommerce.standard.v1"
     operation: "task.ecommerce"
     charge_policy: "task_admission"
     price_credits: 3000
+    tier_prices: { free: 3000, pro: 2700, enterprise: 2400 }
     delivery: "ecommerce_artifacts_verified"
 
   - id: "task.montage.standard.v1"
     operation: "task.montage"
     charge_policy: "task_admission"
     price_credits: 2000
+    tier_prices: { free: 2000, pro: 1800, enterprise: 1600 }
     delivery: "montage_artifacts_verified"
 
   - id: "task.viral-analysis.standard.v1"
     operation: "task.viral_analysis"
     charge_policy: "task_admission"
     price_credits: 1200
+    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
     delivery: "viral_analysis_report_verified"
 
   - id: "image.seedream.cover.v1"
     operation: "mcp.generate_image"
     charge_policy: "accepted_task_operation"
     price_credits: 500
+    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.cover"
     delivery: "persisted_image"
   - id: "image.seedream.content.v1"
     operation: "mcp.generate_image"
     charge_policy: "accepted_task_operation"
     price_credits: 500
+    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.content"
     delivery: "persisted_image"
 
@@ -54,6 +63,7 @@ skus:
     operation: "designer.generate_image"
     charge_policy: "standalone_operation"
     price_credits: 500
+    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.designer.seedream"
     delivery: "persisted_image"
 
@@ -61,5 +71,6 @@ skus:
     operation: "designer.generate_image"
     charge_policy: "standalone_operation"
     price_credits: 500
+    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.designer.gpt_image_2"
     delivery: "persisted_image"

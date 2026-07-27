@@ -77,6 +77,9 @@ type BillingTransactionResponse struct {
 	ChargePolicy       string                       `json:"charge_policy,omitempty"`
 	SKUID              string                       `json:"sku_id,omitempty"`
 	PriceCredits       int64                        `json:"price_credits,omitempty"`
+	PricingTier        string                       `json:"pricing_tier,omitempty"`
+	ListPriceCredits   int64                        `json:"list_price_credits,omitempty"`
+	DiscountCredits    int64                        `json:"discount_credits,omitempty"`
 	ChargeResourceType string                       `json:"charge_resource_type,omitempty"`
 	ChargeResourceID   string                       `json:"charge_resource_id,omitempty"`
 	TaskID             *string                      `json:"task_id,omitempty"`
@@ -88,18 +91,35 @@ type BillingTransactionResponse struct {
 }
 
 type BillingQuoteResponse struct {
-	ID           string         `json:"id"`
-	CatalogID    string         `json:"catalog_id"`
-	SKUID        string         `json:"sku_id"`
-	PriceCredits int64          `json:"price_credits"`
-	SKUSnapshot  datatypes.JSON `json:"sku_snapshot"`
-	ExpiresAt    time.Time      `json:"expires_at"`
+	ID               string         `json:"id"`
+	CatalogID        string         `json:"catalog_id"`
+	SKUID            string         `json:"sku_id"`
+	PricingTier      string         `json:"pricing_tier"`
+	ListPriceCredits int64          `json:"list_price_credits"`
+	PriceCredits     int64          `json:"price_credits"`
+	DiscountCredits  int64          `json:"discount_credits"`
+	SKUSnapshot      datatypes.JSON `json:"sku_snapshot"`
+	ExpiresAt        time.Time      `json:"expires_at"`
+}
+
+type BillingCatalogSKUResponse struct {
+	ID               string `json:"id"`
+	Operation        string `json:"operation"`
+	ChargePolicy     string `json:"charge_policy"`
+	PricingTier      string `json:"pricing_tier"`
+	ListPriceCredits int64  `json:"list_price_credits"`
+	PriceCredits     int64  `json:"price_credits"`
+	DiscountCredits  int64  `json:"discount_credits"`
+	Route            string `json:"route,omitempty"`
+	Delivery         string `json:"delivery"`
 }
 
 type BillingCatalogResponse struct {
-	CatalogID string                    `json:"catalog_id"`
-	Currency  string                    `json:"currency"`
-	SKUs      []serverbilling.SKUConfig `json:"skus"`
+	CatalogID    string                      `json:"catalog_id"`
+	Currency     string                      `json:"currency"`
+	PricingModel string                      `json:"pricing_model"`
+	PricingTier  string                      `json:"pricing_tier"`
+	SKUs         []BillingCatalogSKUResponse `json:"skus"`
 }
 
 func NewBillingHandler(repo repository.Repository, catalog *service.BillingCatalogService, referrals *service.BillingReferralService, bundle *serverbilling.Bundle, opts BillingHandlerOptions, logger *zerolog.Logger) *BillingHandler {
@@ -138,11 +158,28 @@ func (h *BillingHandler) Wallet(c fiber.Ctx) error {
 }
 
 func (h *BillingHandler) Catalog(c fiber.Ctx) error {
-	skus := append([]serverbilling.SKUConfig(nil), h.bundle.Products.SKUs...)
+	userID, ok := billingUserID(c)
+	if !ok {
+		return billingErrorResponse(c, fiber.StatusUnauthorized, BillingCodeUnauthorized, "billing_unauthorized")
+	}
+	skus := make([]BillingCatalogSKUResponse, 0, len(h.bundle.Products.SKUs))
+	pricingTier := ""
+	for _, configured := range h.bundle.Products.SKUs {
+		resolved, err := h.catalog.ResolvePrice(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.Route)
+		if err != nil {
+			return writeBillingServiceError(c, err)
+		}
+		pricingTier = string(resolved.PricingTier)
+		skus = append(skus, BillingCatalogSKUResponse{
+			ID: configured.ID, Operation: configured.Operation, ChargePolicy: configured.ChargePolicy,
+			PricingTier: pricingTier, ListPriceCredits: resolved.ListPriceCredits,
+			PriceCredits: resolved.PriceCredits, DiscountCredits: resolved.DiscountCredits,
+			Route: configured.Route, Delivery: configured.Delivery,
+		})
+	}
 	return Success(c, BillingCatalogResponse{
-		CatalogID: h.bundle.Products.CatalogID,
-		Currency:  h.bundle.Products.Currency,
-		SKUs:      skus,
+		CatalogID: h.bundle.Products.CatalogID, Currency: h.bundle.Products.Currency,
+		PricingModel: h.bundle.Products.PricingModel, PricingTier: pricingTier, SKUs: skus,
 	})
 }
 
@@ -195,6 +232,9 @@ func (h *BillingHandler) Transactions(c fiber.Ctx) error {
 				item.ChargePolicy = charge.Policy
 				item.SKUID = charge.SKUID
 				item.PriceCredits = charge.PriceCredits
+				item.PricingTier = charge.PricingTier
+				item.ListPriceCredits = charge.ListPriceCredits
+				item.DiscountCredits = charge.DiscountCredits
 				item.ChargeResourceType = charge.ResourceType
 				item.ChargeResourceID = charge.ResourceID
 				item.TaskID = charge.TaskID
@@ -240,7 +280,8 @@ func (h *BillingHandler) CreateQuote(c fiber.Ctx) error {
 		return writeBillingServiceError(c, err)
 	}
 	return Success(c, BillingQuoteResponse{
-		ID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, PriceCredits: quote.PriceCredits,
+		ID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, PricingTier: quote.PricingTier,
+		ListPriceCredits: quote.ListPriceCredits, PriceCredits: quote.PriceCredits, DiscountCredits: quote.DiscountCredits,
 		SKUSnapshot: append(datatypes.JSON(nil), quote.SKUSnapshot...), ExpiresAt: quote.ExpiresAt,
 	})
 }

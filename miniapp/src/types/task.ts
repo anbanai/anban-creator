@@ -58,6 +58,7 @@ export interface Task {
   billing_sku_id?: string
   billing_charge_id?: string | null
   billing_price_credits?: number
+  billing_pricing_tier?: 'free' | 'pro' | 'enterprise'
   created_at: string
   started_at: string | null
   completed_at: string | null

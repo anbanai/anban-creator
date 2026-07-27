@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -195,12 +196,13 @@ func (BillingWalletEntry) TableName() string { return "billing_wallet_entries" }
 
 // BillingCatalogVersion is an immutable published retail-catalog snapshot.
 type BillingCatalogVersion struct {
-	CatalogID   string         `gorm:"type:varchar(128);primaryKey" json:"catalog_id"`
-	Currency    string         `gorm:"type:varchar(20);not null" json:"currency"`
-	Status      string         `gorm:"type:varchar(20);index;not null" json:"status"`
-	PublishedAt time.Time      `gorm:"index;not null" json:"published_at"`
-	Snapshot    datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
-	CreatedAt   time.Time      `json:"created_at"`
+	CatalogID    string         `gorm:"type:varchar(128);primaryKey" json:"catalog_id"`
+	Currency     string         `gorm:"type:varchar(20);not null" json:"currency"`
+	PricingModel string         `gorm:"type:varchar(32);not null;default:flat_v1" json:"pricing_model"`
+	Status       string         `gorm:"type:varchar(20);index;not null" json:"status"`
+	PublishedAt  time.Time      `gorm:"index;not null" json:"published_at"`
+	Snapshot     datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
+	CreatedAt    time.Time      `json:"created_at"`
 }
 
 func (BillingCatalogVersion) TableName() string { return "billing_catalog_versions" }
@@ -221,6 +223,20 @@ type BillingSKU struct {
 
 func (BillingSKU) TableName() string { return "billing_skus" }
 
+// BillingSKUTierPrice is one immutable audience price within a published SKU.
+type BillingSKUTierPrice struct {
+	ID           string         `gorm:"type:char(36);primaryKey" json:"id"`
+	CatalogID    string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_sku_tier_price,priority:1;not null" json:"catalog_id"`
+	SKUID        string         `gorm:"column:sku_id;type:varchar(128);uniqueIndex:idx_billing_sku_tier_price,priority:2;not null" json:"sku_id"`
+	Tier         Tier           `gorm:"type:varchar(20);uniqueIndex:idx_billing_sku_tier_price,priority:3;not null" json:"tier"`
+	PriceCredits int64          `gorm:"not null;check:chk_billing_sku_tier_price,price_credits >= 0" json:"price_credits"`
+	RuleID       string         `gorm:"type:varchar(128);not null" json:"rule_id"`
+	Snapshot     datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
+	CreatedAt    time.Time      `json:"created_at"`
+}
+
+func (BillingSKUTierPrice) TableName() string { return "billing_sku_tier_prices" }
+
 // BillingQuote pins a fixed SKU price for one idempotent client request.
 type BillingQuote struct {
 	ID                 string         `gorm:"type:char(36);primaryKey" json:"id"`
@@ -228,6 +244,11 @@ type BillingQuote struct {
 	CatalogID          string         `gorm:"type:varchar(128);index;not null" json:"catalog_id"`
 	SKUID              string         `gorm:"type:varchar(128);index;not null" json:"sku_id"`
 	PriceCredits       int64          `gorm:"not null;check:chk_billing_quote_price,price_credits >= 0" json:"price_credits"`
+	PricingTier        string         `gorm:"type:varchar(20);index" json:"pricing_tier,omitempty"`
+	ListPriceCredits   int64          `gorm:"not null;default:0" json:"list_price_credits"`
+	DiscountCredits    int64          `gorm:"not null;default:0" json:"discount_credits"`
+	PricingRuleID      string         `gorm:"type:varchar(128)" json:"pricing_rule_id,omitempty"`
+	PricingSnapshot    datatypes.JSON `gorm:"type:json" json:"pricing_snapshot,omitempty"`
 	RequestFingerprint string         `gorm:"type:char(64);not null" json:"request_fingerprint"`
 	SKUSnapshot        datatypes.JSON `gorm:"type:json;not null" json:"sku_snapshot"`
 	ExpiresAt          time.Time      `gorm:"index;not null" json:"expires_at"`
@@ -255,6 +276,11 @@ type BillingCharge struct {
 	Policy             string              `gorm:"type:varchar(40);index;not null;check:chk_billing_charge_accepted_operation_identity,policy <> 'accepted_task_operation' OR (charge_kind = 'operation' AND operation_task_id IS NOT NULL AND TRIM(operation_task_id) <> '' AND attempt_id IS NOT NULL AND TRIM(attempt_id) <> '' AND tool_call_id IS NOT NULL AND TRIM(tool_call_id) <> '')" json:"policy"`
 	Status             BillingChargeStatus `gorm:"type:varchar(20);index;not null" json:"status"`
 	PriceCredits       int64               `gorm:"not null;check:chk_billing_charge_conservation,price_credits >= 0 AND price_credits = paid_credits + promotional_credits + debt_credits" json:"price_credits"`
+	PricingTier        string              `gorm:"type:varchar(20);index" json:"pricing_tier,omitempty"`
+	ListPriceCredits   int64               `gorm:"not null;default:0" json:"list_price_credits"`
+	DiscountCredits    int64               `gorm:"not null;default:0" json:"discount_credits"`
+	PricingRuleID      string              `gorm:"type:varchar(128)" json:"pricing_rule_id,omitempty"`
+	PricingSnapshot    datatypes.JSON      `gorm:"type:json" json:"pricing_snapshot,omitempty"`
 	PaidCredits        int64               `gorm:"not null;check:chk_billing_charge_paid,paid_credits >= 0" json:"paid_credits"`
 	PromotionalCredits int64               `gorm:"not null;check:chk_billing_charge_promotional,promotional_credits >= 0" json:"promotional_credits"`
 	DebtCredits        int64               `gorm:"not null;check:chk_billing_charge_debt,debt_credits >= 0;check:chk_billing_charge_debt_policy,debt_credits = 0 OR (charge_kind = 'operation' AND policy = 'accepted_task_operation')" json:"debt_credits"`
@@ -297,6 +323,18 @@ func (c BillingCharge) Validate() error {
 	}
 	if total != c.PriceCredits {
 		return fmt.Errorf("charge components must equal price credits")
+	}
+	pricingPresent := c.PricingTier != "" || c.ListPriceCredits != 0 || c.DiscountCredits != 0 || c.PricingRuleID != "" || len(c.PricingSnapshot) != 0
+	if pricingPresent {
+		if !ValidTiers[Tier(c.PricingTier)] {
+			return fmt.Errorf("charge pricing tier is invalid")
+		}
+		if c.ListPriceCredits < 0 || c.DiscountCredits < 0 || c.PriceCredits > c.ListPriceCredits || c.ListPriceCredits-c.PriceCredits != c.DiscountCredits {
+			return fmt.Errorf("charge list price must equal price plus discount")
+		}
+		if strings.TrimSpace(c.PricingRuleID) == "" || len(c.PricingSnapshot) == 0 || !json.Valid(c.PricingSnapshot) {
+			return fmt.Errorf("charge pricing evidence is required")
+		}
 	}
 	if c.DebtCredits > 0 && (c.Kind != BillingChargeKindOperation || c.Policy != "accepted_task_operation") {
 		return fmt.Errorf("debt is allowed only for accepted-task operation charges")

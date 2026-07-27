@@ -199,6 +199,25 @@ func TestBillingChargeValidation(t *testing.T) {
 	}{
 		{name: "posted original conserves price", charge: valid},
 		{
+			name: "tier pricing evidence is valid",
+			charge: BillingCharge{
+				Kind: BillingChargeKindTask, Status: BillingChargeStatusPosted,
+				PriceCredits: 90, PaidCredits: 90, PricingTier: string(TierPro),
+				ListPriceCredits: 100, DiscountCredits: 10, PricingRuleID: "catalog:sku:pro",
+				PricingSnapshot: []byte(`{"tier":"pro","price_credits":90}`),
+			},
+		},
+		{
+			name: "tier pricing rejects invalid snapshot",
+			charge: BillingCharge{
+				Kind: BillingChargeKindTask, Status: BillingChargeStatusPosted,
+				PriceCredits: 90, PaidCredits: 90, PricingTier: string(TierPro),
+				ListPriceCredits: 100, DiscountCredits: 10, PricingRuleID: "catalog:sku:pro",
+				PricingSnapshot: []byte(`{"tier":`),
+			},
+			wantErr: true,
+		},
+		{
 			name: "posted reversal uses positive exact magnitudes and original identity",
 			charge: BillingCharge{
 				Kind: BillingChargeKindReversal, Status: BillingChargeStatusPosted,
@@ -336,6 +355,7 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 		"billing_quotes",
 		"billing_referral_issues",
 		"billing_settlement_outbox",
+		"billing_sku_tier_prices",
 		"billing_skus",
 		"billing_wallet_accounts",
 		"billing_wallet_entries",

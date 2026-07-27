@@ -78,6 +78,8 @@ export function getProjectCreationDefaults(project?: Project | null): ProjectCre
 export interface CreationCostPreview {
   priceAvailable: boolean
   baseCost: number
+  listBaseCost: number
+  discountPerTask: number
   billableQuantity: number
   totalCost: number
   remaining: number
@@ -96,15 +98,20 @@ export function taskCreationCostPreview({
   balance: number
 }): CreationCostPreview {
   const isEcommerce = type === 'ecommerce'
+  const sku = catalog?.skus.find((item) => item.charge_policy === 'task_admission' && item.operation === `task.${type}`)
   const resolvedPrice = taskCostFor(catalog, type)
   const priceAvailable = resolvedPrice !== undefined
   const baseCost = resolvedPrice ?? 0
+  const listBaseCost = sku?.list_price_credits ?? baseCost
+  const discountPerTask = sku?.discount_credits ?? Math.max(0, listBaseCost - baseCost)
   const billableQuantity = isEcommerce ? 1 : quantity
   const totalCost = baseCost * billableQuantity
   const remaining = balance - totalCost
   return {
     priceAvailable,
     baseCost,
+    listBaseCost,
+    discountPerTask,
     billableQuantity,
     totalCost,
     remaining,

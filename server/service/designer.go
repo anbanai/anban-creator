@@ -132,7 +132,10 @@ type DesignerGenerationQuote struct {
 	RequestFingerprint string    `json:"request_fingerprint"`
 	CatalogID          string    `json:"catalog_id"`
 	SKUID              string    `json:"sku_id"`
+	PricingTier        string    `json:"pricing_tier"`
+	ListPriceCredits   int64     `json:"list_price_credits"`
 	PriceCredits       int64     `json:"price_credits"`
+	DiscountCredits    int64     `json:"discount_credits"`
 	ExpiresAt          time.Time `json:"expires_at"`
 }
 
@@ -173,7 +176,9 @@ func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID stri
 	}
 	return &DesignerGenerationQuote{
 		QuoteID: quote.ID, OperationID: req.OperationID, RequestFingerprint: fingerprint,
-		CatalogID: quote.CatalogID, SKUID: quote.SKUID, PriceCredits: quote.PriceCredits, ExpiresAt: quote.ExpiresAt,
+		CatalogID: quote.CatalogID, SKUID: quote.SKUID, PricingTier: quote.PricingTier,
+		ListPriceCredits: quote.ListPriceCredits, PriceCredits: quote.PriceCredits,
+		DiscountCredits: quote.DiscountCredits, ExpiresAt: quote.ExpiresAt,
 	}, nil
 }
 
@@ -299,14 +304,12 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		Status:             model.ImageGenerationStatusGenerating,
 		ReferenceFiles:     string(refFilesJSON),
 		MaskFileID:         req.MaskFileID,
-		Cost:               int(sku.PriceCredits),
-		EstimatedCost:      int(sku.PriceCredits),
 		BillingMode:        "fixed_sku",
 		BillingStatus:      "charged",
 		BillingQuoteID:     req.QuoteID,
 		RequestFingerprint: wantFingerprint,
-		PriceSnapshot:      append([]byte(nil), sku.Snapshot...),
 	}
+	var chargedPrice int64
 	chargeReq := OperationChargeRequest{
 		UserID: userID, QuoteID: req.QuoteID, CatalogID: sku.CatalogID, SKUID: sku.SKUID,
 		ResourceType: "image_generation", ResourceID: genID, RequestFingerprint: wantFingerprint,
@@ -317,6 +320,10 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		if chargeErr != nil {
 			return chargeErr
 		}
+		chargedPrice = charge.PriceCredits
+		gen.Cost = int(charge.PriceCredits)
+		gen.EstimatedCost = int(charge.PriceCredits)
+		gen.PriceSnapshot = append([]byte(nil), charge.PricingSnapshot...)
 		gen.BillingChargeID = stringPtr(charge.ID)
 		return tx.ImageGenerations().Create(ctx, gen)
 	})
@@ -327,7 +334,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		return nil, fmt.Errorf("create fixed-SKU generation: %w", err)
 	}
 
-	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, PriceCredits: int(sku.PriceCredits)}, nil
+	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, PriceCredits: int(chargedPrice)}, nil
 }
 
 func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) string {
@@ -1088,12 +1095,15 @@ type DesignerProviderInfo struct {
 type DesignerProviderCapabilities = srvconfig.DesignerProviderCapabilities
 
 type DesignerProviderPricing struct {
-	PricingType string `json:"pricing_type"`
-	Currency    string `json:"currency"`
-	BillingNote string `json:"billing_note"`
+	PricingType      string `json:"pricing_type"`
+	Currency         string `json:"currency"`
+	BillingNote      string `json:"billing_note"`
+	PricingTier      string `json:"pricing_tier,omitempty"`
+	ListPriceCredits int    `json:"list_price_credits,omitempty"`
+	DiscountCredits  int    `json:"discount_credits,omitempty"`
 }
 
-func (s *DesignerService) GetProviders(ctx context.Context) []DesignerProviderInfo {
+func (s *DesignerService) GetProviders(ctx context.Context, userID string) []DesignerProviderInfo {
 	if s.imageCfg == nil || s.imageCfg.Designer == nil {
 		return nil
 	}
@@ -1130,9 +1140,16 @@ func (s *DesignerService) GetProviders(ctx context.Context) []DesignerProviderIn
 		capabilities := route.Capabilities
 		capabilities.MaxBatch = 1
 		credits := 0
+		listPrice, discount := 0, 0
+		pricingTier := ""
 		if s.billingCatalog != nil {
-			if sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName); err == nil {
-				credits = int(sku.PriceCredits)
+			if userID != "" {
+				if resolved, err := s.billingCatalog.ResolvePrice(ctx, userID, "", "designer.generate_image", routeName); err == nil {
+					credits, listPrice, discount = int(resolved.PriceCredits), int(resolved.ListPriceCredits), int(resolved.DiscountCredits)
+					pricingTier = string(resolved.PricingTier)
+				}
+			} else if sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName); err == nil {
+				credits, listPrice = int(sku.PriceCredits), int(sku.PriceCredits)
 			}
 		}
 		providers = append(providers, DesignerProviderInfo{
@@ -1149,6 +1166,7 @@ func (s *DesignerService) GetProviders(ctx context.Context) []DesignerProviderIn
 			Capabilities: capabilities,
 			Pricing: DesignerProviderPricing{
 				PricingType: "fixed_sku", Currency: "credits", BillingNote: "fixed retail SKU",
+				PricingTier: pricingTier, ListPriceCredits: listPrice, DiscountCredits: discount,
 			},
 		})
 	}
