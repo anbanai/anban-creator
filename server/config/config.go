@@ -765,11 +765,6 @@ func (c ClaudeConfig) Validate() error {
 		if strings.TrimSpace(name) == "" {
 			errs = append(errs, "claude.execution_profiles contains an empty profile name")
 		}
-		if strings.TrimSpace(profile.Provider) == "" {
-			errs = append(errs, path+".provider is required")
-		} else if _, ok := c.Providers[profile.Provider]; !ok {
-			errs = append(errs, fmt.Sprintf("%s.provider %q is not configured in claude.providers", path, profile.Provider))
-		}
 		models := []struct {
 			role  string
 			value string

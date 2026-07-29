@@ -110,6 +110,17 @@ func TestClaudeControlsPreserveOmittedFalseAndZero(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigAllowsProfileWithUnavailableProvider(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "      provider: moonshot", "      provider: not_configured", 1)
+	cfg, err := loadClaudeConfigYAML(t, body)
+	if err != nil {
+		t.Fatalf("provider availability belongs to the profile registry: %v", err)
+	}
+	if got := cfg.Claude.ExecutionProfiles["maximum_quality"].Provider; got != "not_configured" {
+		t.Fatalf("profile provider = %q", got)
+	}
+}
+
 func TestClaudeConfigRejectsLegacySingleProviderFields(t *testing.T) {
 	for _, test := range []struct {
 		name  string
