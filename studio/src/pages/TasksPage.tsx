@@ -145,10 +145,9 @@ export default function TasksPage() {
     : undefined
 
   useEffect(() => {
-    if (bulkAction !== 'clone') return
-    if (bulkCloneTotal !== undefined) return
-    setBulkExecutionProfile(defaultBulkExecutionProfile ?? '')
-  }, [bulkAction, bulkCloneTotal, defaultBulkExecutionProfile])
+    if (bulkAction !== 'clone' || bulkExecutionProfile || !defaultBulkExecutionProfile) return
+    setBulkExecutionProfile(defaultBulkExecutionProfile)
+  }, [bulkAction, bulkExecutionProfile, defaultBulkExecutionProfile])
 
   useEffect(() => {
     const visibleTaskIds = new Set(filteredTasks.map((task) => task.id))

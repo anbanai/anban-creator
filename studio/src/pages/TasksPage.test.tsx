@@ -384,6 +384,24 @@ describe('TasksPage bulk clone execution profile', () => {
     expect(within(dialog).getByRole('button', { name: '确认克隆' })).toBeDisabled()
     expect(within(dialog).getByText('暂时无法获取所选配置的任务价格')).toBeInTheDocument()
   })
+
+  it('keeps an explicit profile selection visible when its SKU is missing', async () => {
+    vi.mocked(api.billing.catalog).mockResolvedValueOnce({
+      catalog_id: 'retail-test-v1',
+      currency: 'credits',
+      skus: [
+        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+      ],
+    })
+    const dialog = await openBulkCloneDialog()
+    const balanced = within(dialog).getByRole('button', { name: /平衡型.*豆包 Seed Evolving/ })
+
+    fireEvent.click(balanced)
+
+    await waitFor(() => expect(balanced).toHaveAttribute('aria-pressed', 'true'))
+    expect(within(dialog).getByRole('button', { name: '确认克隆' })).toBeDisabled()
+    expect(within(dialog).getByText('暂时无法获取所选配置的任务价格')).toBeInTheDocument()
+  })
 })
 
 
