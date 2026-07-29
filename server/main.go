@@ -308,7 +308,6 @@ func main() {
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
 		Registry:                agentProfiles,
-		RuntimeControls:         cfg.Claude.Env,
 	}, *log)
 
 	// 13. Create services.

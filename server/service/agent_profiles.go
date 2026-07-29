@@ -220,8 +220,41 @@ func (p AgentExecutionProfile) RuntimeEnv() map[string]string {
 		"ANTHROPIC_DEFAULT_FABLE_MODEL": p.Models.Fable, "ANTHROPIC_DEFAULT_SONNET_MODEL": p.Models.Sonnet,
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL": p.Models.Haiku,
 	}
+	if p.Claude.EffortLevel != nil {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = *p.Claude.EffortLevel
+	}
+	if p.Claude.AlwaysEnableEffort != nil {
+		env["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"] = strconv.FormatBool(*p.Claude.AlwaysEnableEffort)
+	}
 	if p.Claude.MaxContextTokens != nil {
 		env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(*p.Claude.MaxContextTokens)
+	}
+	if p.Claude.MaxOutputTokens != nil {
+		env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = strconv.Itoa(*p.Claude.MaxOutputTokens)
+	}
+	if p.Claude.MaxThinkingTokens != nil {
+		env["MAX_THINKING_TOKENS"] = strconv.Itoa(*p.Claude.MaxThinkingTokens)
+	}
+	if p.Claude.DisableAdaptiveThinking != nil {
+		env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = strconv.FormatBool(*p.Claude.DisableAdaptiveThinking)
+	}
+	if p.Claude.DisableThinking != nil {
+		env["CLAUDE_CODE_DISABLE_THINKING"] = strconv.FormatBool(*p.Claude.DisableThinking)
+	}
+	if p.Claude.AutoCompactWindow != nil {
+		env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = strconv.Itoa(*p.Claude.AutoCompactWindow)
+	}
+	if p.Claude.AutocompactPctOverride != nil {
+		env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = strconv.Itoa(*p.Claude.AutocompactPctOverride)
+	}
+	if p.Claude.Disable1MContext != nil {
+		env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = strconv.FormatBool(*p.Claude.Disable1MContext)
+	}
+	if p.Claude.SubagentModel != nil {
+		env["CLAUDE_CODE_SUBAGENT_MODEL"] = *p.Claude.SubagentModel
+	}
+	if p.Claude.EnableToolSearch != nil {
+		env["ENABLE_TOOL_SEARCH"] = strconv.FormatBool(*p.Claude.EnableToolSearch)
 	}
 	return env
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -42,16 +43,15 @@ type ArtifactTransport struct {
 }
 
 type AgentRuntimeProfile struct {
-	ProfileID         string                                    `json:"profile_id"`
-	Provider          string                                    `json:"provider"`
-	ModelID           string                                    `json:"model_id"`
-	Protocol          string                                    `json:"protocol"`
-	ContextWindow     int                                       `json:"context_window"`
-	ReasoningEffort   string                                    `json:"reasoning_effort"`
-	ThinkingRequired  bool                                      `json:"thinking_required"`
-	DisplayName       string                                    `json:"display_name"`
-	RuntimeEnv        map[string]string                         `json:"runtime_env"`
-	ModelUsageAliases map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
+	ProfileID          string                                    `json:"profile_id"`
+	Provider           string                                    `json:"provider"`
+	Protocol           string                                    `json:"protocol"`
+	Models             model.AgentModelMatrix                    `json:"models"`
+	Claude             model.AgentClaudeControls                 `json:"claude"`
+	DisplayName        string                                    `json:"display_name"`
+	ProfileFingerprint string                                    `json:"profile_fingerprint"`
+	RuntimeEnv         map[string]string                         `json:"runtime_env"`
+	ModelUsageAliases  map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
 }
 
 type AgentBootstrapResponse struct {
@@ -82,7 +82,6 @@ type AgentBootstrapConfig struct {
 	MontagePipelineDefaults map[string]map[string]any
 	MontageEnv              map[string]string
 	Registry                *AgentProfileRegistry
-	RuntimeControls         map[string]string
 }
 
 type AgentBootstrapService struct {
@@ -329,19 +328,8 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, err
 	}
-	configuredRuntimeEnv := profile.RuntimeEnv()
-	for key, value := range s.cfg.RuntimeControls {
-		if strings.HasPrefix(key, "CLAUDE_CODE_") {
-			configuredRuntimeEnv[key] = value
-		}
-	}
-	runtimeEnv := serveragent.ClaudeRuntimeEnv(configuredRuntimeEnv)
-	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
-		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
-	}
-	aliases := map[string]serveragent.ModelUsageIdentity{
-		profile.ModelID: {Provider: profile.Provider, Model: profile.ModelID},
-	}
+	runtimeEnv := profile.RuntimeEnv()
+	aliases := make(map[string]serveragent.ModelUsageIdentity, len(profile.ModelUsageAliases))
 	for raw, target := range profile.ModelUsageAliases {
 		aliases[raw] = serveragent.ModelUsageIdentity{Provider: profile.Provider, Model: target}
 	}
@@ -351,10 +339,9 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
-			ProfileID: profile.ID, Provider: profile.Provider, ModelID: profile.ModelID, Protocol: profile.Protocol,
-			ContextWindow: profile.ContextWindow, ReasoningEffort: profile.ReasoningEffort,
-			ThinkingRequired: profile.ThinkingRequired, DisplayName: profile.DisplayName,
-			RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases,
+			ProfileID: profile.ID, Provider: profile.Provider, Protocol: profile.Protocol,
+			Models: profile.Models, Claude: cloneAgentClaudeControls(profile.Claude), DisplayName: profile.DisplayName,
+			ProfileFingerprint: task.AgentProfileFingerprint, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases,
 		},
 		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
 		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
@@ -370,12 +357,12 @@ func (s *AgentBootstrapService) resolveExecutionProfile(execution *model.TaskExe
 		return AgentExecutionProfile{}, fmt.Errorf("%w: task execution profile is required", ErrAgentBootstrapConflict)
 	}
 	snapshot := task.AgentProfileSnapshot
-	if execution.Provider != snapshot.Provider || execution.ModelID != snapshot.ModelID ||
-		execution.Protocol != snapshot.Protocol || execution.ReasoningEffort != snapshot.ReasoningEffort ||
-		execution.ContextWindow != snapshot.ContextWindow {
+	if execution.ExecutionProfile != task.ExecutionProfile || task.ExecutionProfile != snapshot.ProfileID ||
+		execution.Provider != snapshot.Provider || !reflect.DeepEqual(execution.ModelMatrix, snapshot.Models) ||
+		!reflect.DeepEqual(execution.ClaudeControls, snapshot.Claude) || execution.ProfileFingerprint != task.AgentProfileFingerprint {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: execution profile identity does not match task snapshot", ErrAgentBootstrapConflict)
 	}
-	profile, err := s.cfg.Registry.ResolveRuntime(task.ExecutionProfile, snapshot)
+	profile, err := s.cfg.Registry.ResolveRuntime(task.ExecutionProfile, snapshot, task.AgentProfileFingerprint)
 	if err != nil {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: %v", ErrAgentBootstrapUnavailable, err)
 	}

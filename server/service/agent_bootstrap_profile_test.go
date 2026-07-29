@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,35 +12,85 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func TestAgentBootstrapJSONIncludesEmptyReasoningEffort(t *testing.T) {
-	profile := AgentExecutionProfile{
-		ID: "cost_effective", DisplayName: "性价比", ModelName: "DeepSeek 4 Pro",
-		Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic",
-		MinTier: model.TierFree, Available: true,
+func profileWithControls(controls model.AgentClaudeControls) AgentExecutionProfile {
+	return AgentExecutionProfile{
+		ID: "maximum_quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic",
+		Models: model.AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
+		Claude: controls, ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
+		BaseURL: "https://api.moonshot.cn/anthropic", AuthToken: "moonshot-secret", MinTier: model.TierEnterprise, Available: true,
 	}
-	if _, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile}); err != nil {
-		t.Fatalf("valid cost_effective profile: %v", err)
-	}
+}
 
+func TestAgentRuntimeProfileEmitsConfiguredFalseAndZero(t *testing.T) {
+	zero, disabled, pct := 0, false, 85
+	env := profileWithControls(model.AgentClaudeControls{MaxThinkingTokens: &zero, EnableToolSearch: &disabled, AutocompactPctOverride: &pct}).RuntimeEnv()
+	if env["MAX_THINKING_TOKENS"] != "0" || env["ENABLE_TOOL_SEARCH"] != "false" || env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] != "85" {
+		t.Fatalf("runtime env = %#v", env)
+	}
+	if _, exists := env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"]; exists {
+		t.Fatal("omitted control emitted")
+	}
+}
+
+func TestAgentRuntimeProfileMapsEveryClaudeControl(t *testing.T) {
+	effort, enabled, integer, disabled, subagent := "max", true, 123, false, "kimi-k3[1m]"
+	controls := model.AgentClaudeControls{
+		EffortLevel: &effort, AlwaysEnableEffort: &enabled, MaxContextTokens: &integer, MaxOutputTokens: &integer,
+		MaxThinkingTokens: &integer, DisableAdaptiveThinking: &disabled, DisableThinking: &disabled,
+		AutoCompactWindow: &integer, AutocompactPctOverride: &integer, Disable1MContext: &disabled,
+		SubagentModel: &subagent, EnableToolSearch: &enabled,
+	}
+	env := profileWithControls(controls).RuntimeEnv()
+	want := map[string]string{
+		"CLAUDE_CODE_EFFORT_LEVEL": "max", "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT": "true",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "123", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "123",
+		"MAX_THINKING_TOKENS": "123", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
+		"CLAUDE_CODE_DISABLE_THINKING": "false", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "123",
+		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "123", "CLAUDE_CODE_DISABLE_1M_CONTEXT": "false",
+		"CLAUDE_CODE_SUBAGENT_MODEL": "kimi-k3[1m]", "ENABLE_TOOL_SEARCH": "true",
+	}
+	for key, value := range want {
+		if env[key] != value {
+			t.Fatalf("runtime env[%s] = %q, want %q; env=%#v", key, env[key], value, env)
+		}
+	}
+	for key, value := range map[string]string{
+		"ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic", "ANTHROPIC_AUTH_TOKEN": "moonshot-secret",
+		"ANTHROPIC_MODEL": "kimi-k3[1m]", "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k3[1m]",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL": "kimi-k3[1m]", "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3[1m]",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k3[1m]",
+	} {
+		if env[key] != value {
+			t.Fatalf("runtime env[%s] = %q", key, env[key])
+		}
+	}
+}
+
+func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
+	profile := profileWithControls(model.AgentClaudeControls{})
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
-		ProfileID: profile.ID, Provider: profile.Provider, ModelID: profile.ModelID,
-		Protocol: profile.Protocol, ReasoningEffort: profile.ReasoningEffort,
+		ProfileID: snapshot.ProfileID, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
+		Models: snapshot.Models, Claude: snapshot.Claude, DisplayName: snapshot.DisplayName,
+		ProfileFingerprint: fingerprint, RuntimeEnv: profile.RuntimeEnv(),
+		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3[1m]": {Provider: "moonshot", Model: "kimi-k3"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload struct {
-		ExecutionProfile map[string]json.RawMessage `json:"execution_profile"`
+	encoded := string(raw)
+	for _, required := range []string{`"models":`, `"claude":`, `"profile_fingerprint":`, `"model_usage_aliases":`} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("bootstrap JSON omitted %q: %s", required, encoded)
+		}
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := payload.ExecutionProfile["reasoning_effort"]
-	if !ok {
-		t.Fatalf("execution_profile omitted reasoning_effort: %s", raw)
-	}
-	if string(got) != `""` {
-		t.Fatalf("execution_profile.reasoning_effort = %s, want empty string", got)
+	for _, forbidden := range []string{`"model_id"`, `"context_window"`, `"reasoning_effort"`, `"thinking_required"`} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("bootstrap JSON retained %q: %s", forbidden, encoded)
+		}
 	}
 }
 
@@ -49,58 +100,49 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile := AgentExecutionProfile{
-		ID: "maximum_quality", DisplayName: "极致效果", ModelName: "Kimi K3（1M）",
-		Provider: "kimi", ModelID: "k3", Protocol: "anthropic", MinTier: model.TierEnterprise,
-		BaseURL: "https://api.kimi.com/coding/", AuthToken: "kimi-secret", Available: true,
-		ModelUsageAliases: map[string]string{"kimi-k3-latest": "k3"},
-		ContextWindow:     1048576, ReasoningEffort: "high", ThinkingRequired: true,
-	}
+	zero, disabled := 0, false
+	profile := profileWithControls(model.AgentClaudeControls{MaxThinkingTokens: &zero, EnableToolSearch: &disabled})
 	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile})
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := profile.Snapshot()
-	task := &model.Task{
-		ID: "task-profile", UserID: "user-profile", ProjectID: "project-profile", Type: model.PlatformArticle,
-		SkipReferenceImage: true, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot,
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
 	}
-	execution := model.NewTaskExecutionAgentProfile(snapshot)
+	task := &model.Task{ID: "task-profile", UserID: "user-profile", ProjectID: "project-profile", Type: model.PlatformArticle, SkipReferenceImage: true, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	execution := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	execution.ID = "execution-profile"
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
-		TokenTTL: time.Hour, Registry: registry, RuntimeControls: map[string]string{
-			"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
-			"ANTHROPIC_MODEL":                 "must-not-override-profile",
-			"UNSAFE_RUNTIME_ENV":              "must-not-pass",
-		},
-	}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Hour, Registry: registry}, zerolog.Nop())
 
 	response, err := svc.buildResponse(t.Context(), &execution, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("buildResponse: %v", err)
 	}
-	if response.ExecutionProfile.ProfileID != profile.ID || response.ExecutionProfile.Provider != profile.Provider ||
-		response.ExecutionProfile.ModelID != "k3" || response.ExecutionProfile.Protocol != profile.Protocol ||
-		response.ExecutionProfile.ContextWindow != 1048576 || response.ExecutionProfile.ReasoningEffort != "high" ||
-		!response.ExecutionProfile.ThinkingRequired || response.ExecutionProfile.DisplayName != profile.DisplayName ||
-		response.ExecutionProfile.RuntimeEnv["ANTHROPIC_BASE_URL"] != profile.BaseURL ||
-		response.ExecutionProfile.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != profile.AuthToken ||
-		response.ExecutionProfile.RuntimeEnv["ANTHROPIC_MODEL"] != "k3" {
-		t.Fatalf("profile runtime response = %#v", response)
+	if response.ExecutionProfile.Models.Default != "kimi-k3[1m]" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" {
+		t.Fatalf("profile runtime response = %#v", response.ExecutionProfile)
 	}
-	if response.ExecutionProfile.RuntimeEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "1" || response.ExecutionProfile.RuntimeEnv["ANTHROPIC_MODEL"] != "k3" || response.ExecutionProfile.RuntimeEnv["UNSAFE_RUNTIME_ENV"] != "" {
-		t.Fatalf("runtime controls/provider isolation = %#v", response.ExecutionProfile.RuntimeEnv)
-	}
-	wantAlias := serveragent.ModelUsageIdentity{Provider: "kimi", Model: "k3"}
-	if len(response.ExecutionProfile.ModelUsageAliases) != 2 ||
-		response.ExecutionProfile.ModelUsageAliases["k3"] != wantAlias ||
-		response.ExecutionProfile.ModelUsageAliases["kimi-k3-latest"] != wantAlias {
+	wantAlias := serveragent.ModelUsageIdentity{Provider: "moonshot", Model: "kimi-k3"}
+	if len(response.ExecutionProfile.ModelUsageAliases) != 1 || response.ExecutionProfile.ModelUsageAliases["kimi-k3[1m]"] != wantAlias {
 		t.Fatalf("model aliases = %#v", response.ExecutionProfile.ModelUsageAliases)
 	}
 
-	drifted := execution
-	drifted.ModelID = "other-model"
-	if _, err := svc.buildResponse(t.Context(), &drifted, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour)); err == nil {
-		t.Fatal("bootstrap accepted drifted execution model")
+	for _, test := range []struct {
+		name   string
+		mutate func(*model.TaskExecution)
+	}{
+		{name: "profile id", mutate: func(candidate *model.TaskExecution) { candidate.ExecutionProfile = "balanced" }},
+		{name: "provider", mutate: func(candidate *model.TaskExecution) { candidate.Provider = "other-provider" }},
+		{name: "model matrix", mutate: func(candidate *model.TaskExecution) { candidate.ModelMatrix.Default = "other-model" }},
+		{name: "Claude controls", mutate: func(candidate *model.TaskExecution) { candidate.ClaudeControls = model.AgentClaudeControls{} }},
+		{name: "fingerprint", mutate: func(candidate *model.TaskExecution) { candidate.ProfileFingerprint = strings.Repeat("f", 64) }},
+	} {
+		t.Run("rejects drifted "+test.name, func(t *testing.T) {
+			drifted := execution
+			test.mutate(&drifted)
+			if _, err := svc.resolveExecutionProfile(&drifted, task); err == nil {
+				t.Fatalf("bootstrap accepted drifted %s", test.name)
+			}
+		})
 	}
 }

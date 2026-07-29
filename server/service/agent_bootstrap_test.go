@@ -35,8 +35,9 @@ type bootstrapSecurityStore struct {
 func bootstrapTestProfile(t *testing.T) (AgentExecutionProfile, *AgentProfileRegistry) {
 	t.Helper()
 	profile := AgentExecutionProfile{
-		ID: "cost_effective", DisplayName: "Cost effective", ModelName: "Test model",
-		Provider: "deepseek", ModelID: "claude-test", Protocol: "anthropic",
+		ID: "cost_effective", DisplayName: "Cost effective",
+		Provider: "deepseek", Protocol: "anthropic", Models: model.AgentModelMatrix{Default: "claude-test", Opus: "claude-test", Fable: "claude-test", Sonnet: "claude-test", Haiku: "claude-test"},
+		ModelUsageAliases: map[string]string{"claude-test": "claude-test"},
 		BaseURL: "https://anthropic.example.com", AuthToken: "test-token",
 		MinTier: model.TierFree, Available: true,
 	}
@@ -51,15 +52,20 @@ func applyBootstrapTestProfile(t *testing.T, svc *AgentBootstrapService, task *m
 	t.Helper()
 	profile, registry := bootstrapTestProfile(t)
 	snapshot := profile.Snapshot()
+	fingerprint, err := model.AgentProfileFingerprint(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	svc.cfg.Registry = registry
 	task.ExecutionProfile = profile.ID
 	task.AgentProfileSnapshot = snapshot
-	profiled := model.NewTaskExecutionAgentProfile(snapshot)
+	task.AgentProfileFingerprint = fingerprint
+	profiled := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
+	execution.ExecutionProfile = profiled.ExecutionProfile
 	execution.Provider = profiled.Provider
-	execution.ModelID = profiled.ModelID
-	execution.Protocol = profiled.Protocol
-	execution.ReasoningEffort = profiled.ReasoningEffort
-	execution.ContextWindow = profiled.ContextWindow
+	execution.ModelMatrix = profiled.ModelMatrix
+	execution.ClaudeControls = profiled.ClaudeControls
+	execution.ProfileFingerprint = profiled.ProfileFingerprint
 }
 
 func buildBootstrapTestResponse(t *testing.T, svc *AgentBootstrapService, ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, deadline time.Time) (*AgentBootstrapResponse, error) {
@@ -367,7 +373,11 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumeSessionID := uuid.NewString()
-	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	task.AgentProfileFingerprint, err = model.AgentProfileFingerprint(task.AgentProfileSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, taskID, 1
 	profiledExecution.ResumeSessionID, profiledExecution.Target, profiledExecution.Status = resumeSessionID, "docker", model.TaskExecutionStarting
 	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "docker", "exec-1"
@@ -691,13 +701,17 @@ func newBootstrapRaceFixture(t *testing.T) (*AgentBootstrapService, *bootstrapRa
 	executionID := "execution-1"
 	profile, registry := bootstrapTestProfile(t)
 	snapshot := profile.Snapshot()
-	profiledExecution := model.NewTaskExecutionAgentProfile(snapshot)
+	fingerprint, err := model.AgentProfileFingerprint(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiledExecution := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	profiledExecution.ID, profiledExecution.TaskID = executionID, "task-1"
 	profiledExecution.Target, profiledExecution.Status = "docker", model.TaskExecutionStarting
 	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "daemon-a", "exec-1"
 	state := &bootstrapRaceState{
 		execution: profiledExecution,
-		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
+		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
 		project:   model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "project", Status: model.ProjectStatusActive},
 		user:      model.User{ID: "user-1"},
 	}
