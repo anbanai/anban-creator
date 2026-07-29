@@ -18,7 +18,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   const options: Options = {
     abortController: controller,
     cwd,
-    model: data.model,
+    model: data.execution_profile.model_id,
     maxTurns: data.max_turns,
     agent: data.agent_flag,
     resume: data.resume_session_id,
@@ -29,7 +29,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
     plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
-    env: { ...process.env, ...data.runtime_env, ...(data.task_type === "montage" ? data.env : {}), ANBAN_API_KEY: token, ANBAN_API_URL: serverURL, ANBAN_DEFAULT_PROJECT: data.project_id },
+    env: { ...process.env, ...data.execution_profile.runtime_env, ...(data.task_type === "montage" ? data.env : {}), ANBAN_API_KEY: token, ANBAN_API_URL: serverURL, ANBAN_DEFAULT_PROJECT: data.project_id },
     includePartialMessages: false,
     stderr: (line) => void reporter.progress(line.trim()),
     hooks: data.task_type === "seednote" ? { Stop: [{ hooks: [createSeednoteStopGate(cwd)] }] } : undefined,
@@ -38,7 +38,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   let initValidated = false;
   const toolCalls = new Map<string, TrackedToolCall>();
   for await (const message of query({ prompt: data.prompt, options })) {
-    const consumed = await consumeMessage(message, reporter, logText, toolCalls, cwd, serverURL, token, controller.signal, data.task_type, data.model_usage_aliases ?? {});
+    const consumed = await consumeMessage(message, reporter, logText, toolCalls, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
     logText = consumed.logText;
     if (message.type === "system" && message.subtype === "init") {
       validateManagedInit(message, data.task_type);
@@ -61,7 +61,7 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
 }
 
-async function consumeMessage(message: SDKMessage, reporter: Reporter, logText: string, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: NonNullable<BootstrapResponse["model_usage_aliases"]>): Promise<{ logText: string; terminal?: ExecutionResult }> {
+async function consumeMessage(message: SDKMessage, reporter: Reporter, logText: string, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
   if (message.type === "assistant") {
     for (const block of message.message.content) {
       if (block.type === "text" && block.text.trim()) {
@@ -83,7 +83,7 @@ async function consumeMessage(message: SDKMessage, reporter: Reporter, logText: 
   return { logText };
 }
 
-export function terminalModelUsage(modelUsage: Record<string, Pick<ModelUsage, "inputTokens" | "outputTokens" | "cacheReadInputTokens" | "cacheCreationInputTokens">>, aliases: NonNullable<BootstrapResponse["model_usage_aliases"]>): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {
+export function terminalModelUsage(modelUsage: Record<string, Pick<ModelUsage, "inputTokens" | "outputTokens" | "cacheReadInputTokens" | "cacheCreationInputTokens">>, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {
   const usage: Array<Record<string, string | number>> = [];
   const diagnostics: Array<{ code: string; raw_model?: string }> = [];
   for (const raw of Object.keys(modelUsage).sort()) {

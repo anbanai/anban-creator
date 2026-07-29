@@ -11,6 +11,26 @@ const MAX_BOOTSTRAP_FILES = 256;
 const MAX_BOOTSTRAP_TURNS = 1000;
 const MAX_BOOTSTRAP_PROMPT_BYTES = 1 << 20;
 const MAX_EXECUTION_TOKEN_BYTES = 16 << 10;
+const MAX_MODEL_USAGE_ALIASES = 128;
+
+const EXECUTION_PROFILE_IDENTITIES = {
+  cost_effective: { provider: "deepseek", model_id: "deepseek-v4-pro" },
+  balanced: { provider: "volcengine_ark", model_id: "doubao-seed-evolving" },
+  maximum_quality: { provider: "kimi", model_id: "k3" },
+} as const;
+
+const CLAUDE_RUNTIME_ENV_KEYS = new Set([
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+]);
 
 export interface BootstrapFile {
   path: string;
@@ -21,20 +41,31 @@ export interface BootstrapFile {
   max_bytes?: number;
 }
 
+export interface ExecutionProfile {
+  profile_id: string;
+  provider: string;
+  model_id: string;
+  protocol: string;
+  context_window: number;
+  reasoning_effort: string;
+  thinking_required: boolean;
+  display_name: string;
+  runtime_env: Record<string, string>;
+  model_usage_aliases: Record<string, { provider: string; model: string }>;
+}
+
 export interface BootstrapResponse {
   execution_token: string;
   task_id: string;
   task_type: string;
   project_id: string;
   prompt: string;
-  model?: string;
+  execution_profile: ExecutionProfile;
   max_turns: number;
   agent_flag: string;
   auto_memory_directory?: string;
   resume_session_id?: string;
   resume_context_path?: string;
-  runtime_env?: Record<string, string>;
-  model_usage_aliases?: Record<string, { provider: string; model: string }>;
   env?: Record<string, string>;
   files?: BootstrapFile[];
   artifact_transport: { mode: "direct" | "stream" };
@@ -62,7 +93,7 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   });
   if (!response.ok) throw new Error(`bootstrap returned HTTP ${response.status}`);
   const body = await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES, "bootstrap response");
-  let envelope: { code: number; msg?: string; data?: BootstrapResponse };
+  let envelope: { code: number; msg?: string; data?: unknown };
   try {
     envelope = JSON.parse(body) as typeof envelope;
   } catch {
@@ -72,7 +103,8 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   return validateBootstrapResponse(config.executionID, envelope.data);
 }
 
-export function validateBootstrapResponse(executionID: string, data: BootstrapResponse): BootstrapResponse {
+export function validateBootstrapResponse(executionID: string, input: unknown): BootstrapResponse {
+  const data = input as BootstrapResponse;
   if (!data || !cleanString(data.execution_token) || !cleanString(data.task_id) || !cleanString(data.project_id)) {
     throw new Error("bootstrap response identity is incomplete");
   }
@@ -83,15 +115,39 @@ export function validateBootstrapResponse(executionID: string, data: BootstrapRe
   if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
   if (data.agent_flag !== `anban:${data.task_type}`) throw new Error("bootstrap agent flag is invalid");
   if (data.auto_memory_directory !== ".claude/memory") throw new Error("bootstrap auto memory directory is invalid");
-  if (data.model !== undefined && (!cleanString(data.model) || Buffer.byteLength(data.model) > 256)) throw new Error("bootstrap model is invalid");
+  validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");
   if (data.resume_session_id && !data.resume_context_path) throw new Error("bootstrap resume session requires resume context");
-  if (!data.model_usage_aliases || Object.keys(data.model_usage_aliases).length === 0 || !Object.values(data.model_usage_aliases).every((identity) => cleanString(identity.provider) && cleanString(identity.model))) throw new Error("bootstrap model usage aliases are invalid");
-  for (const [key, value] of Object.entries(data.runtime_env ?? {})) validateEnvironmentEntry(key, value, "runtime");
   if (data.task_type !== "montage" && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage tasks");
   for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, "Montage");
   preflightBootstrapFiles(data.files ?? []);
   return data;
+}
+
+function validateExecutionProfile(input: unknown): asserts input is ExecutionProfile {
+  if (!isRecord(input)) throw new Error("bootstrap execution profile is invalid");
+  const profile = input as Record<string, unknown>;
+  if (!cleanString(profile.profile_id) || !cleanString(profile.provider) || !cleanString(profile.model_id) || !cleanString(profile.display_name)) {
+    throw new Error("bootstrap execution profile identity is invalid");
+  }
+  const expected = EXECUTION_PROFILE_IDENTITIES[profile.profile_id as keyof typeof EXECUTION_PROFILE_IDENTITIES];
+  if (!expected || profile.provider !== expected.provider || profile.model_id !== expected.model_id) throw new Error("bootstrap execution profile identity is invalid");
+  if (profile.protocol !== "anthropic") throw new Error("bootstrap execution profile protocol is invalid");
+  if (!Number.isInteger(profile.context_window) || (profile.context_window as number) < 0 || (profile.context_window as number) > 1048576) throw new Error("bootstrap execution profile context window is invalid");
+  if (typeof profile.reasoning_effort !== "string" || (profile.reasoning_effort !== "" && !new Set(["low", "medium", "high"]).has(profile.reasoning_effort))) throw new Error("bootstrap execution profile reasoning effort is invalid");
+  if (typeof profile.thinking_required !== "boolean" || (profile.thinking_required && !profile.reasoning_effort)) throw new Error("bootstrap execution profile thinking requirement is invalid");
+  if (!isRecord(profile.runtime_env)) throw new Error("bootstrap execution profile runtime environment is invalid");
+  for (const [key, value] of Object.entries(profile.runtime_env)) {
+    if (!CLAUDE_RUNTIME_ENV_KEYS.has(key)) throw new Error("bootstrap execution profile runtime environment is invalid");
+    validateEnvironmentEntry(key, value, "runtime");
+  }
+  if (!validProviderBaseURL(profile.runtime_env.ANTHROPIC_BASE_URL) || !cleanString(profile.runtime_env.ANTHROPIC_AUTH_TOKEN)) throw new Error("bootstrap execution profile runtime environment is invalid");
+  if (profile.runtime_env.ANTHROPIC_MODEL !== profile.model_id) throw new Error("bootstrap execution profile runtime model is invalid");
+  const aliases = profile.model_usage_aliases;
+  if (!isRecord(aliases) || Object.keys(aliases).length > MAX_MODEL_USAGE_ALIASES || !isRecord(aliases[profile.model_id])) throw new Error("bootstrap execution profile model usage aliases are invalid");
+  if (!Object.entries(aliases).every(([raw, identity]) => isRecord(identity) && validModelUsageAlias(raw, identity.provider, identity.model) && identity.provider === profile.provider && identity.model === profile.model_id)) {
+    throw new Error("bootstrap execution profile model usage aliases are invalid");
+  }
 }
 
 export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[] {
@@ -169,8 +225,24 @@ function validateBootstrapDownloadURL(raw: string): void {
   if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) throw new Error("unsafe bootstrap download URL");
 }
 
-function validateEnvironmentEntry(key: string, value: string, label: string): void {
+function validateEnvironmentEntry(key: string, value: unknown, label: string): void {
   if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || !cleanString(value) || Buffer.byteLength(value) > 16 << 10) throw new Error(`bootstrap ${label} environment is invalid`);
 }
 
-function cleanString(value: string): boolean { return value.length > 0 && value.trim() === value; }
+function validProviderBaseURL(raw: unknown): boolean {
+  if (!cleanString(raw)) return false;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function validModelUsageAlias(raw: string, provider: unknown, model: unknown): provider is string {
+  return cleanString(raw) && !/[\x00\r\n=]/.test(raw) && cleanString(provider) && !/[\x00\r\n/]/.test(provider) && cleanString(model) && !/[\x00\r\n]/.test(model);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+
+function cleanString(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.trim() === value; }
