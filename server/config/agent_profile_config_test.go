@@ -21,20 +21,30 @@ func TestAgentProfilesUseProviderRegistryAndModelMatrices(t *testing.T) {
 			if err := yaml.Unmarshal(raw, &configured); err != nil {
 				t.Fatal(err)
 			}
-			provider := configured.Claude.Providers["volcengine_ark"]
-			if provider.AuthToken != "${ANBAN_DOUBAO_AGENT_API_KEY}" || provider.BaseURL != "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}" {
-				t.Fatalf("balanced provider must use dedicated Agent credentials, got base_url=%q auth_token=%q", provider.BaseURL, provider.AuthToken)
+			doubao := configured.Claude.Providers["volcengine_ark"]
+			if doubao.AuthToken != "${ANBAN_DOUBAO_AGENT_API_KEY}" || doubao.BaseURL != "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}" {
+				t.Fatalf("Doubao provider credentials = %#v", doubao)
+			}
+			costEffective := configured.Claude.ExecutionProfiles["cost_effective"]
+			if costEffective.Provider != "deepseek" || costEffective.Models.Default != "deepseek-v4-flash" || costEffective.Models.Fable != "deepseek-v4-flash" || costEffective.Models.Opus != "deepseek-v4-pro" || costEffective.Models.Sonnet != "deepseek-v4-pro" || costEffective.Models.Haiku != "deepseek-v4-flash" {
+				t.Fatalf("cost_effective profile matrix = %#v", costEffective)
+			}
+			if costEffective.Claude.EffortLevel == nil || *costEffective.Claude.EffortLevel != "medium" || costEffective.Claude.MaxContextTokens == nil || *costEffective.Claude.MaxContextTokens != 1048576 || costEffective.Claude.MaxOutputTokens == nil || *costEffective.Claude.MaxOutputTokens != 393216 || costEffective.Claude.AutoCompactWindow == nil || *costEffective.Claude.AutoCompactWindow != 1048576 {
+				t.Fatalf("cost_effective Claude controls = %#v", costEffective.Claude)
 			}
 			balanced := configured.Claude.ExecutionProfiles["balanced"]
-			if balanced.Provider != "volcengine_ark" || balanced.Models.Default != "doubao-seed-evolving" || balanced.Models.Opus == "" || balanced.Models.Fable == "" || balanced.Models.Sonnet == "" || balanced.Models.Haiku == "" {
+			if balanced.Provider != "zhipu" || balanced.Models.Default != "glm-5.2" || balanced.Models.Opus != "glm-5.2" || balanced.Models.Fable != "glm-5.2" || balanced.Models.Sonnet != "glm-5.2" || balanced.Models.Haiku != "glm-5.2" {
 				t.Fatalf("balanced profile matrix = %#v", balanced)
 			}
-			if balanced.ModelUsageAliases["doubao-seed-evolving-latest-version"] != "doubao-seed-evolving" {
+			if balanced.ModelUsageAliases["glm-5.2"] != "glm-5.2" || balanced.Claude.MaxOutputTokens == nil || *balanced.Claude.MaxOutputTokens != 131072 {
 				t.Fatalf("balanced profile model_usage_aliases = %#v", balanced.ModelUsageAliases)
 			}
 			maximumQuality := configured.Claude.ExecutionProfiles["maximum_quality"]
-			if maximumQuality.ModelUsageAliases["kimi-k2.7-code-highspeed"] != "kimi-k2.7-code-highspeed" {
-				t.Fatalf("maximum_quality highspeed alias must preserve its distinct billing model: %#v", maximumQuality.ModelUsageAliases)
+			if maximumQuality.Provider != "moonshot" || maximumQuality.Models.Default != "kimi-k3[1m]" || maximumQuality.Claude.AlwaysEnableEffort == nil || !*maximumQuality.Claude.AlwaysEnableEffort || maximumQuality.Claude.SubagentModel == nil || *maximumQuality.Claude.SubagentModel != "kimi-k3[1m]" {
+				t.Fatalf("maximum_quality profile = %#v", maximumQuality)
+			}
+			if _, exists := maximumQuality.ModelUsageAliases["kimi-k2.7-code-highspeed"]; exists {
+				t.Fatalf("maximum_quality must not advertise an unused K2.7 highspeed alias: %#v", maximumQuality.ModelUsageAliases)
 			}
 		})
 	}

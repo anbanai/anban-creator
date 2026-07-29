@@ -261,27 +261,33 @@ claude:
       models:
         default: "deepseek-v4-flash"
         opus: "deepseek-v4-pro"
-        fable: "deepseek-v4-pro"
+        fable: "deepseek-v4-flash"
         sonnet: "deepseek-v4-pro"
         haiku: "deepseek-v4-flash"
       model_usage_aliases:
         deepseek-v4-flash: "deepseek-v4-flash"
         deepseek-v4-pro: "deepseek-v4-pro"
       claude:
-        effort_level: "low"
+        effort_level: "medium"
+        max_context_tokens: 1048576
+        max_output_tokens: 393216
+        auto_compact_window: 1048576
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
-      provider: "volcengine_ark"
+      provider: "zhipu"
       models:
-        default: "doubao-seed-evolving"
-        opus: "doubao-seed-evolving"
-        fable: "doubao-seed-evolving"
-        sonnet: "doubao-seed-evolving"
-        haiku: "doubao-seed-evolving"
+        default: "glm-5.2"
+        opus: "glm-5.2"
+        fable: "glm-5.2"
+        sonnet: "glm-5.2"
+        haiku: "glm-5.2"
       model_usage_aliases:
-        doubao-seed-evolving-latest-version: "doubao-seed-evolving"
+        glm-5.2: "glm-5.2"
       claude:
-        effort_level: "medium"
+        effort_level: "high"
+        max_context_tokens: 1048576
+        max_output_tokens: 131072
+        auto_compact_window: 1048576
     maximum_quality:
       description: "旗舰模型与超长上下文，适合高难度任务"
       provider: "moonshot"
@@ -294,11 +300,13 @@ claude:
       model_usage_aliases:
         kimi-k3: "kimi-k3"
         kimi-k3[1m]: "kimi-k3"
-        kimi-k2.7-code: "kimi-k2.7-code"
-        kimi-k2.7-code-highspeed: "kimi-k2.7-code-highspeed"
       claude:
         effort_level: "high"
+        always_enable_effort: true
         max_context_tokens: 1048576
+        max_output_tokens: 131072
+        auto_compact_window: 1048576
+        subagent_model: "kimi-k3[1m]"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
