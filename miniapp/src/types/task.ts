@@ -61,10 +61,28 @@ export interface Task {
   billing_sku_id?: string
   billing_charge_id?: string | null
   billing_price_credits?: number
+  billing_total_credits?: number
+  billing_charge_details?: TaskBillingChargeDetail[]
   billing_pricing_tier?: 'free' | 'pro' | 'enterprise'
   created_at: string
   started_at: string | null
   completed_at: string | null
+}
+
+export interface TaskBillingChargeDetail {
+  id?: string
+  charge_kind: 'task' | 'operation' | 'reversal'
+  policy?: string
+  sku_id?: string
+  credits: number
+  pricing_tier?: 'free' | 'pro' | 'enterprise'
+  list_price_credits?: number
+  discount_credits?: number
+  resource_type?: string
+  resource_id?: string
+  tool_call_id?: string
+  reversal_of_id?: string
+  created_at?: string
 }
 
 export interface TaskResult {

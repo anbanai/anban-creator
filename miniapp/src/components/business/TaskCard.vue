@@ -12,6 +12,10 @@
       </view>
     </view>
 
+    <text v-if="billingCredits !== undefined" class="task-card__billing">
+      累计扣费：{{ billingCredits.toLocaleString() }} 积分
+    </text>
+
     <!-- Progress bar for running tasks -->
     <view class="task-card__progress" v-if="task.status === 'running'">
       <view class="progress-track">
@@ -57,6 +61,7 @@ import { computed } from 'vue'
 import type { Task } from '@/types'
 import { taskStatusLabel, contentTypeLabel } from '@/utils/labels'
 import { relativeTime } from '@/utils/format'
+import { taskBillingTotal } from '@/utils/task-billing'
 import PlatformAvatar from './PlatformAvatar.vue'
 
 const props = defineProps<{
@@ -71,6 +76,7 @@ defineEmits<{
 const platformLabel = computed(() => contentTypeLabel[props.task.type] || props.task.type)
 const statusLabel = computed(() => taskStatusLabel[props.task.status])
 const safeThumbnailUrls = computed(() => props.thumbnailUrls ?? [])
+const billingCredits = computed(() => taskBillingTotal(props.task))
 
 const timeText = computed(() => {
   if (props.task.completed_at) return relativeTime(props.task.completed_at)
@@ -134,6 +140,13 @@ function onPreviewImage(index: number) {
     align-items: center;
     gap: $ab-space-sm;
     margin-bottom: $ab-space-sm;
+  }
+
+  &__billing {
+    display: block;
+    margin-bottom: $ab-space-sm;
+    font-size: $ab-text-xs;
+    color: $ab-text-secondary;
   }
 
   &__images {

@@ -183,10 +183,63 @@ assertContains('src/types/task.ts', [
   'topic?: string',
   'execution_profile: AgentExecutionProfileID',
   'agent_profile_snapshot: AgentProfileSnapshot',
+  'export interface TaskBillingChargeDetail',
+  "charge_kind: 'task' | 'operation' | 'reversal'",
+  'billing_total_credits?: number',
+  'billing_charge_details?: TaskBillingChargeDetail[]',
   'skip_reference_image?: boolean',
   'reference_image?: ReferenceAssetView | null',
   'reference_image?: ReferenceImageSelection | null',
   'watermark?: boolean',
+])
+
+// Task cards show the cumulative amount, while detail pages enumerate every
+// server-owned charge and reversal instead of exposing only task admission.
+assertFile('src/utils/task-billing.ts')
+const {
+  taskBillingAmountLabel,
+  taskBillingChargeLabel,
+  taskBillingDetails,
+  taskBillingIdentity,
+  taskBillingPricingEvidence,
+  taskBillingTotal,
+} = await import('../src/utils/task-billing.ts')
+
+const billedTask = {
+  billing_price_credits: 5000,
+  billing_total_credits: 5750,
+  billing_sku_id: 'task.seednote.standard.v1',
+  billing_charge_details: [
+    { id: 'task-charge', charge_kind: 'task', sku_id: 'task.seednote.standard.v1', credits: 5000 },
+    { id: 'analysis-charge', charge_kind: 'operation', sku_id: 'analysis.content.v1', resource_type: 'analysis', tool_call_id: 'analysis:1', credits: 300 },
+    { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.seedream.content.v1', resource_type: 'image', credits: 500, pricing_tier: 'pro', list_price_credits: 600, discount_credits: 100 },
+    { id: 'reversal', charge_kind: 'reversal', sku_id: 'image.seedream.content.v1', resource_type: 'image', reversal_of_id: 'image-charge', credits: -50 },
+  ],
+}
+assert.equal(taskBillingTotal(billedTask), 5750)
+assert.equal(taskBillingDetails(billedTask).length, 4)
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[0]), '任务固定费')
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[1]), '内容分析费')
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[2]), '内容图生成费')
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[3]), '内容图生成费退回')
+assert.equal(taskBillingIdentity(billedTask.billing_charge_details[1]), 'analysis.content.v1 · analysis:1')
+assert.equal(taskBillingPricingEvidence(billedTask.billing_charge_details[2]), '专业版 · 标准价 600，优惠 100')
+assert.equal(taskBillingAmountLabel(billedTask.billing_charge_details[3]), '退回 50 积分')
+assert.equal(taskBillingDetails({ billing_price_credits: 5000, billing_sku_id: 'task.seednote.standard.v1' }).length, 1)
+
+assertContains('src/components/business/TaskCard.vue', [
+  'taskBillingTotal',
+  '累计扣费：{{ billingCredits.toLocaleString() }} 积分',
+])
+assertContains('src/pages/tasks/detail.vue', [
+  'taskBillingDetails',
+  'taskBillingChargeLabel',
+  'taskBillingIdentity',
+  'taskBillingPricingEvidence',
+  'taskBillingAmountLabel',
+  '积分明细',
+  '累计扣费',
+  'v-for="(detail, index) in billingDetails"',
 ])
 
 assertContains('src/types/project.ts', [

@@ -51,6 +51,33 @@
         </view>
       </view>
 
+      <view v-if="billingTotal !== undefined" class="task-detail__section billing-details">
+        <text class="section-title">积分明细</text>
+        <view class="billing-details__total">
+          <text class="billing-details__total-label">累计扣费</text>
+          <text class="billing-details__total-value">{{ billingTotal.toLocaleString() }} 积分</text>
+        </view>
+        <view
+          v-for="(detail, index) in billingDetails"
+          :key="detail.id || `${detail.sku_id || detail.charge_kind}-${detail.created_at || index}-${index}`"
+          class="billing-detail"
+        >
+          <view class="billing-detail__body">
+            <text class="billing-detail__label">{{ taskBillingChargeLabel(detail) }}</text>
+            <text class="billing-detail__identity">{{ taskBillingIdentity(detail) }}</text>
+            <text v-if="taskBillingPricingEvidence(detail)" class="billing-detail__pricing">
+              {{ taskBillingPricingEvidence(detail) }}
+            </text>
+          </view>
+          <text
+            class="billing-detail__amount"
+            :class="{ 'billing-detail__amount--reversal': detail.charge_kind === 'reversal' || detail.credits < 0 }"
+          >
+            {{ taskBillingAmountLabel(detail) }}
+          </text>
+        </view>
+      </view>
+
       <!-- Next actions -->
       <view v-if="nextActions.length > 0" class="task-detail__section next-actions">
         <view class="section-header">
@@ -434,11 +461,19 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
-import type { Project, SeednoteAnalytics, Task, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
+import type { Project, SeednoteAnalytics, Task, TaskBillingChargeDetail, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { projectsApi } from '@/api/projects'
 import { taskStatusLabel, contentTypeLabel, progressStageLabel } from '@/utils/labels'
 import { formatDateTimeCN, formatFullDateTimeCN, sanitizeHtml } from '@/utils/format'
+import {
+  taskBillingAmountLabel,
+  taskBillingChargeLabel,
+  taskBillingDetails,
+  taskBillingIdentity,
+  taskBillingPricingEvidence,
+  taskBillingTotal,
+} from '@/utils/task-billing'
 import { usePolling } from '@/composables/usePolling'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbProgress from '@/components/common/AbProgress.vue'
@@ -493,6 +528,9 @@ const statusBadgeVariant = computed(() => {
     default: return 'neutral'
   }
 })
+
+const billingTotal = computed(() => task.value ? taskBillingTotal(task.value) : undefined)
+const billingDetails = computed<TaskBillingChargeDetail[]>(() => task.value ? taskBillingDetails(task.value) : [])
 
 const workflowStages = computed<WorkflowStage[]>(() => {
   const ws = task.value?.workflow_status
@@ -1321,6 +1359,78 @@ onShareAppMessage(() => ({
   &--disabled {
     color: $ab-text-tertiary;
     opacity: 0.5;
+  }
+}
+
+.billing-details {
+  &__total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: $ab-space-md;
+    padding-bottom: $ab-space-md;
+    border-bottom: 2rpx solid $ab-divider;
+  }
+
+  &__total-label {
+    font-size: $ab-text-xs;
+    color: $ab-text-secondary;
+  }
+
+  &__total-value {
+    font-size: $ab-text-lg;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+  }
+}
+
+.billing-detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $ab-space-md;
+  padding: $ab-space-md 0;
+  border-bottom: 2rpx solid $ab-divider;
+
+  &:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__label,
+  &__identity,
+  &__pricing {
+    display: block;
+  }
+
+  &__label {
+    font-size: $ab-text-sm;
+    color: $ab-text;
+  }
+
+  &__identity,
+  &__pricing {
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    line-height: 1.4;
+    color: $ab-text-tertiary;
+    overflow-wrap: anywhere;
+  }
+
+  &__amount {
+    flex-shrink: 0;
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-medium;
+    color: $ab-text;
+
+    &--reversal {
+      color: $ab-success;
+    }
   }
 }
 
