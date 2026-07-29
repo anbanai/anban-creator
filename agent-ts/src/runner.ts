@@ -19,6 +19,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
     abortController: controller,
     cwd,
     model: data.execution_profile.model_id,
+    ...executionReasoningOptions(data.execution_profile),
     maxTurns: data.max_turns,
     agent: data.agent_flag,
     resume: data.resume_session_id,
@@ -51,6 +52,13 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
     }
   }
   return { success: false, error: "managed agent stream ended without a result message", work_dir: workspace, log_text: logText };
+}
+
+export function executionReasoningOptions(profile: Pick<BootstrapResponse["execution_profile"], "reasoning_effort" | "thinking_required">): Pick<Options, "effort" | "thinking"> {
+  const options: Pick<Options, "effort" | "thinking"> = {};
+  if (profile.reasoning_effort) options.effort = profile.reasoning_effort;
+  if (profile.thinking_required) options.thinking = { type: "adaptive" };
+  return options;
 }
 
 export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills">, taskType: string): void {

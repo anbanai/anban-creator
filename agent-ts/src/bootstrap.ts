@@ -47,7 +47,7 @@ export interface ExecutionProfile {
   model_id: string;
   protocol: string;
   context_window: number;
-  reasoning_effort: string;
+  reasoning_effort: "" | "low" | "medium" | "high";
   thinking_required: boolean;
   display_name: string;
   runtime_env: Record<string, string>;
