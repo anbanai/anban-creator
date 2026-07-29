@@ -350,9 +350,9 @@ claude:
       min_tier: "free"
   executor: docker
   runtime_images:
-    article: "creator-agent-article:latest"
-    seednote: "creator-agent-seednote:latest"
-    montage: "creator-agent-montage:latest"
+    article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
+    seednote: "${SEEDNOTE_RUNTIME_IMAGE:-creator-agent-seednote:latest}"
+    montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"
@@ -466,11 +466,30 @@ runtime_smoke_main() {
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  case "${ANBAN_RUNTIME_SMOKE_CLIENT:-go}" in
+    go)
+      ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
+      SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
+      MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
+      ARTICLE_DOCKERFILE=Dockerfile.agent-article
+      SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
+      MONTAGE_DOCKERFILE=Dockerfile.agent-montage
+      ;;
+    ts)
+      ARTICLE_RUNTIME_IMAGE=creator-agent-article-ts:latest
+      SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote-ts:latest
+      MONTAGE_RUNTIME_IMAGE=creator-agent-montage-ts:latest
+      ARTICLE_DOCKERFILE=Dockerfile.agent-article-ts
+      SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote-ts
+      MONTAGE_DOCKERFILE=Dockerfile.agent-montage-ts
+      ;;
+    *) fail "ANBAN_RUNTIME_SMOKE_CLIENT must be go or ts" ;;
+  esac
   git -C "$REPO_ROOT" submodule update --init --recursive \
     third_party/claude-agent-sdk-go third_party/Agent-Reach third_party/OpenMontage
-  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-article" -t creator-agent-article:latest "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-seednote" -t creator-agent-seednote:latest "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/Dockerfile.agent-montage" -t creator-agent-montage:latest "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 
   SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anban-runtime-smoke.XXXXXX")"
   COMPOSE_PROJECT="anban-runtime-smoke-$(date +%s)-$$"
@@ -529,21 +548,21 @@ runtime_smoke_main() {
   create_task article "$ARTICLE_PROJECT" "$ARTICLE_MARKER"
   ARTICLE_TASK="$CREATED_TASK_ID"
   ARTICLE_EXECUTION="$(poll_execution_identity "$ARTICLE_TASK" 1 "$ARTICLE_TASK" "$ARTICLE_PROJECT")"
-  verify_persisted_runtime "$ARTICLE_EXECUTION" article creator-agent-article:latest
+  verify_persisted_runtime "$ARTICLE_EXECUTION" article "$ARTICLE_RUNTIME_IMAGE"
 
   create_project seednote "$SEEDNOTE_MARKER"
   SEEDNOTE_PROJECT="$CREATED_PROJECT_ID"
   create_task seednote "$SEEDNOTE_PROJECT" "$SEEDNOTE_MARKER"
   SEEDNOTE_TASK="$CREATED_TASK_ID"
   SEEDNOTE_EXECUTION="$(poll_execution_identity "$SEEDNOTE_TASK" 1 "$SEEDNOTE_TASK" "$SEEDNOTE_PROJECT")"
-  verify_persisted_runtime "$SEEDNOTE_EXECUTION" seednote creator-agent-seednote:latest
+  verify_persisted_runtime "$SEEDNOTE_EXECUTION" seednote "$SEEDNOTE_RUNTIME_IMAGE"
 
   create_project montage "$MONTAGE_MARKER"
   MONTAGE_PROJECT="$CREATED_PROJECT_ID"
   create_task montage "$MONTAGE_PROJECT" "$MONTAGE_MARKER"
   MONTAGE_TASK="$CREATED_TASK_ID"
   MONTAGE_EXECUTION="$(poll_execution_identity "$MONTAGE_TASK" 1 "$MONTAGE_TASK" "$MONTAGE_PROJECT")"
-  verify_persisted_runtime "$MONTAGE_EXECUTION" montage creator-agent-montage:latest
+  verify_persisted_runtime "$MONTAGE_EXECUTION" montage "$MONTAGE_RUNTIME_IMAGE"
 
   poll_task "$ARTICLE_TASK"
   poll_task "$SEEDNOTE_TASK"
@@ -551,9 +570,9 @@ runtime_smoke_main() {
   ARTICLE_VOLUME="$(task_volume "$ARTICLE_TASK")"
   SEEDNOTE_VOLUME="$(task_volume "$SEEDNOTE_TASK")"
   MONTAGE_VOLUME="$(task_volume "$MONTAGE_TASK")"
-  verify_output "$ARTICLE_VOLUME" creator-agent-article:latest "$ARTICLE_MARKER"
-  verify_output "$SEEDNOTE_VOLUME" creator-agent-seednote:latest "$SEEDNOTE_MARKER"
-  verify_output "$MONTAGE_VOLUME" creator-agent-montage:latest "$MONTAGE_MARKER"
+  verify_output "$ARTICLE_VOLUME" "$ARTICLE_RUNTIME_IMAGE" "$ARTICLE_MARKER"
+  verify_output "$SEEDNOTE_VOLUME" "$SEEDNOTE_RUNTIME_IMAGE" "$SEEDNOTE_MARKER"
+  verify_output "$MONTAGE_VOLUME" "$MONTAGE_RUNTIME_IMAGE" "$MONTAGE_MARKER"
   poll_container_removed "$(cut -d'|' -f7 <<<"$ARTICLE_EXECUTION")"
   poll_container_removed "$(cut -d'|' -f7 <<<"$SEEDNOTE_EXECUTION")"
   poll_container_removed "$(cut -d'|' -f7 <<<"$MONTAGE_EXECUTION")"
@@ -561,13 +580,13 @@ runtime_smoke_main() {
   RESUME_MARKER="ARTICLE_RESUMED_RUNTIME_SMOKE_$$"
   api_post "/api/v1/tasks/$ARTICLE_TASK/resume" "$(jq -cn --arg marker "$RESUME_MARKER" '{prompt:("Append the exact RESUMED marker " + $marker + " to /workspace/output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully."),input_attachments:[]}')" >/dev/null
   RESUME_EXECUTION="$(poll_execution_identity "$ARTICLE_TASK" 2 "$ARTICLE_TASK" "$ARTICLE_PROJECT")"
-  verify_persisted_runtime "$RESUME_EXECUTION" article creator-agent-article:latest
+  verify_persisted_runtime "$RESUME_EXECUTION" article "$ARTICLE_RUNTIME_IMAGE"
   [[ "$(cut -d'|' -f3 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f1 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume parent execution identity mismatch"
   [[ "$(cut -d'|' -f5 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f5 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume did not inherit the original runtime image"
   [[ "$(cut -d'|' -f10 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f10 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume did not inherit the original resolved Docker image"
   [[ "$(task_volume "$ARTICLE_TASK")" == "$ARTICLE_VOLUME" ]] || fail "resume did not reuse the same Docker workspace volume"
   poll_task "$ARTICLE_TASK"
-  verify_output "$ARTICLE_VOLUME" creator-agent-article:latest "$RESUME_MARKER"
+  verify_output "$ARTICLE_VOLUME" "$ARTICLE_RUNTIME_IMAGE" "$RESUME_MARKER"
   poll_container_removed "$(cut -d'|' -f7 <<<"$RESUME_EXECUTION")"
 
   printf 'PASS: Docker runtime smoke completed article, seednote, montage, and article resume (%s)\n' "$COMPOSE_PROJECT"

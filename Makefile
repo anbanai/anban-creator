@@ -8,6 +8,9 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+TS_AGENT_IMAGE ?= creator-agent-article-ts:latest
+TS_SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote-ts:latest
+TS_MONTAGE_AGENT_IMAGE ?= creator-agent-montage-ts:latest
 SERVER_IMAGE := anban-creator-server:latest
 WCFLINK_IMAGE := anban-creator-wcflink:latest
 STUDIO_IMAGE := anban-creator-studio:latest
@@ -19,7 +22,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-agent-ts-image docker-seednote-agent-ts-image docker-montage-agent-ts-image docker-server-image docker-wcflink-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke
 
@@ -161,6 +164,25 @@ docker-montage-agent-image:
 	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
+# Build TypeScript runtime candidates. They are published under distinct tags;
+# Server runtime image mappings remain on the Go images until operational cutover.
+docker-agent-ts-image:
+	@echo "Building $(TS_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-article-ts -t $(TS_AGENT_IMAGE) . && \
+	echo "Image build complete: $(TS_AGENT_IMAGE)"
+
+docker-seednote-agent-ts-image:
+	@git submodule update --init --recursive third_party/Agent-Reach
+	@echo "Building $(TS_SEEDNOTE_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-seednote-ts -t $(TS_SEEDNOTE_AGENT_IMAGE) . && \
+	echo "Image build complete: $(TS_SEEDNOTE_AGENT_IMAGE)"
+
+docker-montage-agent-ts-image:
+	@git submodule update --init --recursive third_party/OpenMontage
+	@echo "Building $(TS_MONTAGE_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-montage-ts -t $(TS_MONTAGE_AGENT_IMAGE) . && \
+	echo "Image build complete: $(TS_MONTAGE_AGENT_IMAGE)"
+
 # The script owns its Docker availability check and all isolated smoke builds.
 docker-runtime-smoke:
 	@deploy/docker/runtime-smoke.sh
@@ -251,6 +273,9 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build Seednote agent image with Agent-Reach"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-agent-ts-image - Build TypeScript Article runtime candidate"
+	@echo "  make docker-seednote-agent-ts-image - Build TypeScript Seednote runtime candidate"
+	@echo "  make docker-montage-agent-ts-image - Build TypeScript Montage runtime candidate"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
