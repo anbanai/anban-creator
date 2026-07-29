@@ -2,7 +2,7 @@
 
 ## 目标
 
-删除具有误导性的 `writing` 模型路由，将内容推理统一收归托管的 Claude Code Agent 工作流。同时保留一个明确由 Server 内部使用的大模型路由，用于在任务和 Agent 执行尚未创建前必须同步完成的意图解析。
+删除具有误导性的 `writing` 模型路由，将通用文本生成和内容推理统一收归托管的 Claude Code Agent 工作流。同时保留一个明确由 Server 内部使用的大模型路由，用于在任务和 Agent 执行尚未创建前必须同步完成的意图解析。图片理解和视频理解属于 Agent 无法用普通文本推理替代的多模态能力，继续通过各自的专用模型路由和原子 MCP 工具提供。
 
 ## 当前问题
 
@@ -20,10 +20,11 @@
 
 ## 架构决策
 
-系统采用两个明确的执行边界：
+系统采用三个明确的执行边界：
 
-1. 托管的 Claude Code Agent 执行模型负责内容创作、内容分析、工作流决策、修改迭代和结构化创作产物。
+1. 托管的 Claude Code Agent 执行模型负责内容创作、文本内容分析、对多模态理解结果的解释、工作流决策、修改迭代和结构化创作产物。
 2. Server 自有的 `model_routes.server_internal` 路由只负责必须在 Agent 执行创建前同步完成的 Server 决策。
+3. `image_understanding` 和 `video_understanding` 专用路由分别负责单次图片和视频理解。Agent 只能通过职责单一的多模态 MCP 工具调用这些能力；现有 Server 产品接口如需图片理解，可以继续调用同一个专用 Service，但不得回退到文本路由。
 
 `server_internal` 初始且唯一的调用方是 AI 入口意图解析。它负责把用户的自然语言请求转换成经过校验的任务创建参数，不得撰写内容、选择其他 Agent 执行配置或执行后续工作流步骤。
 
@@ -46,6 +47,16 @@ model_routes:
 运行时配置暴露 `ServerInternal` 文本模型配置，不再暴露 `Writing`。启动时构造 `serverInternalLLMClient`，并且只注入 `AIEntryService`。
 
 AI 入口不得读取用户模型设置。`server_internal` 缺失或无效时，AI 入口意图解析不可用，并返回稳定的配置错误；不得回退到用户模型、理解类路由或新建的 Agent 执行。
+
+`model_routes.image_understanding` 和 `model_routes.video_understanding` 保持独立配置，不合并到 `server_internal`，也不因删除 `writing` 而移除。理解类工具不得回退到 `server_internal`、用户文本模型或另一个多模态路由。
+
+## 多模态理解 MCP
+
+保留 `analyze_image`。它继续接收一张图片、分析提示和可选任务标识，固定使用 `image_understanding` 路由，返回可见内容分析和模型用量。它只执行一次图片理解，不负责生成图片、选择候选、修改提示词或决定工作流是否继续。
+
+新增通用的 `analyze_video`。它接收 `project_id`、分析提示、可选 `task_id`，以及 `video_url` 或可解析为持久化视频的 `task_file_id` 二选一，固定使用 `video_understanding` 路由直接理解完整视频，并返回分析结果和模型用量。供应商不支持原生视频输入时直接失败，不得通过抽帧、图片理解、音频转写或文本模型模拟视频理解。
+
+此前的 `analyze_video_reference` 曾与 Video Creator 的参考视频流程绑定，并会生成和注册 `video-understanding.json`。该工具已随 Video Creator / Video Editor 能力删除，不恢复旧名称或业务编排。新的 `analyze_video` 与 `analyze_image` 保持同一原子能力边界：MCP 只验证输入、调用一个专用模型能力并编码结果；分析提示、业务 Schema、产物落盘、重试、质量门槛和后续决策均由调用它的 Agent/Skill 负责。
 
 ## 调用方迁移
 
@@ -84,7 +95,7 @@ Agent/Skill 契约负责定义并自检这些 JSON 结构。确定性 MCP 工具
 
 ## 删除 MCP 工具
 
-删除下列生成式 MCP 工具，将其推理职责迁移到 Claude Agent 工作流：
+删除面向通用文本生成、文本补全或工作流语义决策的接口。下列生成式 MCP 工具的推理职责迁移到 Claude Agent 工作流：
 
 - `recognize_live_subjects`；
 - `recognize_live_invalid_sentences`；
@@ -93,14 +104,14 @@ Agent/Skill 契约负责定义并自检这些 JSON 结构。确定性 MCP 工具
 
 同步删除这些工具的 Handler、Server 大模型 Service 方法、Schema、计费钩子、测试、Agent 指令和工具列表断言。不保留废弃工具名、别名或回退调用。
 
-保留原子化或确定性的 MCP 能力，包括：
+保留职责单一的 MCP 能力，包括确定性工具和专用的单次模型能力：
 
 - 项目、资源、历史记录和任务状态访问；
 - TingWu 上传、任务创建和结果查询；
 - 用于校验时间并生成 ffmpeg 计划的 `build_live_clip_plan` 和 `build_live_subject_clip_plan`；
 - 切片清单构建；
 - 文章模板渲染；
-- 图片理解和图片生成；
+- `analyze_image` 图片理解、`analyze_video` 视频理解和图片生成；
 - 发布和持久化任务文件注册。
 
 确定性切片计划工具必须接收 Agent 生成的语义 JSON，并拒绝错误的索引、范围或来源标识；不得再调用其他模型尝试修复。
@@ -118,7 +129,7 @@ Agent/Skill 契约负责定义并自检这些 JSON 结构。确定性 MCP 工具
 
 ## Service 清理
 
-删除 `WritingService` 中已经失效的文本生成状态，包括默认文本客户端、超时、用户模型配置依赖和未使用的解析器。仅在其余能力仍具备内聚性的前提下保留或重命名该 Service；剩余能力包括确定性的微信 HTML 渲染，以及专用的图片和视频理解客户端。
+删除 `WritingService` 中已经失效的文本生成状态，包括默认文本客户端、超时、用户模型配置依赖和未使用的解析器。图片与视频理解客户端不能随文本状态一起删除。将它们迁移到名称和职责明确的通用模型或多模态理解 Service，供 `analyze_image` 和 `analyze_video` 分别调用；确定性的微信 HTML 渲染保留在独立的渲染职责中。
 
 通用的 OpenAI 兼容客户端抽象继续供 `server_internal`、图片理解和视频理解使用。其名称和注释必须表达通用模型客户端含义，不得继续描述为写作专用能力。
 
@@ -126,6 +137,8 @@ Agent/Skill 契约负责定义并自检这些 JSON 结构。确定性 MCP 工具
 
 - 未配置 `server_internal` 客户端时，AI 入口必须在创建任务前返回稳定的“配置不可用”结果。
 - AI 意图解析结果必须通过严格 JSON 解析和现有任务字段校验。可以使用同一个 `server_internal` 模型进行次数受限的修复，但不得切换到其他路由。
+- `analyze_image` 缺少 `image_understanding` 配置、`analyze_video` 缺少 `video_understanding` 配置时，分别返回稳定的专用路由不可用错误，不得跨路由回退。
+- `analyze_video` 必须拒绝无法授权、无法解析或不受支持的视频来源；供应商缺少原生视频能力时直接返回能力不支持错误。
 - 未通过 Skill 自检的 Claude Agent 语义产物继续留在当前 Agent 的修正循环中。
 - 确定性 MCP 校验失败时，根据所属 Agent 契约终止任务或将任务标记为可恢复；Server 不得调用其他模型修复产物。
 - 缺失发布标识时必须保持明确的未解析状态，绝不能转化为猜测匹配结果。
@@ -136,11 +149,13 @@ Server 内部的意图解析请求继续记录符合现有供应商成本体系�
 
 Claude Agent 负责的分析和写作成本继续计入 Agent 终态模型用量。删除语义 MCP 模型调用时，必须同时删除对应的独立操作成本归因，避免同一段推理重复计费。
 
+`analyze_image` 和 `analyze_video` 是独立的供应商模型调用，继续按 `image_understanding` 和 `video_understanding` 操作记录 provider、model、usage、任务关联和成本状态。它们不计入已删除的文本写作操作，也不能因 Agent 终态结算而丢失或重复归因。
+
 爆款分析切换后必须使用唯一的标准任务准入和终态结算路径。历史记录继续可读，但新任务不得进入已删除的独立生成流程。
 
 ## 插件与契约更新
 
-更新插件规范源中的 Agent/Skill 指令，使其不再调用已删除的 MCP 工具，而是直接创建所需的语义产物。由于这些变更会影响运行时插件资产，必须在同一变更中升级两个原生清单的版本号：
+更新插件规范源中的 Agent/Skill 指令，使其不再调用已删除的文本 MCP 工具，而是直接创建所需的文本语义产物。需要理解图片或视频的 Agent/Skill 必须分别调用 `analyze_image` 或 `analyze_video`，并自行解释结果和管理工作流。由于这些变更会影响运行时插件资产，必须在同一变更中升级两个原生清单的版本号：
 
 - `plugins/.claude-plugin/plugin.json`；
 - `plugins/.codex-plugin/plugin.json`。
@@ -156,6 +171,9 @@ Claude Agent 负责的分析和写作成本继续计入 Agent 终态模型用量
 - AI 入口只使用 Server 内部客户端，不读取用户覆盖，也不回退到其他模型；
 - 删除 Seednote 画像的大模型补全和文本模型回退；
 - 项目图片分析必须使用 `image_understanding`；
+- `analyze_image` 继续注册并且只能调用 `image_understanding`；
+- `analyze_video` 完成注册，只接受授权的视频 URL 或任务文件，且只能调用支持原生视频的 `video_understanding`；
+- 缺少专用理解路由或供应商能力时，图片和视频理解均稳定失败且不跨路由回退；
 - `viral_analysis` 明确映射到托管的 Seednote Agent、要求执行配置，并进入标准任务生命周期；
 - 根据外部标识进行确定性发布追踪，并支持明确的未解析状态；
 - 4 个直播语义 MCP 工具均不存在；
@@ -172,5 +190,6 @@ Claude Agent 负责的分析和写作成本继续计入 Agent 终态模型用量
 - 不改变三个可选 Agent 执行配置及其供应商。
 - 不允许用户在 Studio 中编辑 `server_internal`。
 - 不使用 `server_internal` 作为图片或视频理解的回退路由。
+- 不恢复与旧 Video Creator 业务产物绑定的 `analyze_video_reference`；通用视频理解使用新的 `analyze_video`。
 - 不在项目设置或发布追踪期间启动隐藏的 Agent 执行。
 - 不保留旧 `writing` 配置键、已删除 MCP 名称或独立的生成式工作流。
