@@ -75,6 +75,12 @@ export default function DashboardPage() {
   const executionProfilePrice = selectedProject && executionProfile
     ? taskCostFor(billingCatalogQuery.data, selectedProject.platform, executionProfile)
     : undefined
+  const selectedExecutionProfile = profilesQuery.data?.find((profile) => profile.id === executionProfile)
+  const executionProfileReady = Boolean(
+    executionProfile
+    && selectedExecutionProfile?.available
+    && executionProfilePrice !== undefined,
+  )
 
   useEffect(() => {
     if (projectsLoading) return
@@ -128,7 +134,7 @@ export default function DashboardPage() {
     modelConfigReady: modelConfig ? hasUsableModelConfig(modelConfig) : null,
   })
   const canSubmit = Boolean(selectedProjectId && selectedProject)
-    && Boolean(executionProfile)
+    && executionProfileReady
     && !dashboardBlocker?.blocking
     && !submitMutation.isPending
     && !attachmentController.uploading
@@ -142,6 +148,10 @@ export default function DashboardPage() {
     }
     if (!text) {
       setEntryError({ message: '请输入创作需求。' })
+      return
+    }
+    if (!executionProfileReady) {
+      setEntryError({ message: '所选执行配置当前不可用，请重新选择。' })
       return
     }
     setEntryError(null)

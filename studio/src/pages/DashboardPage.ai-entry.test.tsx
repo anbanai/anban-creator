@@ -72,6 +72,8 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       skus: [
         { id: 'article-cost', operation: 'task.article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'cost_effective', delivery: 'task' },
         { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
+        { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 3200, execution_profile: 'cost_effective', delivery: 'task' },
+        { id: 'seednote-balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
       ],
     } as const,
   }
@@ -213,6 +215,28 @@ describe('DashboardPage AI entry', () => {
       execution_profile: 'balanced',
       attachments: [],
     }))
+  })
+
+  it('disables submission when the selected profile has no SKU after the project changes', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([
+      { ...articleProject },
+      { ...seednoteProject },
+    ])
+    vi.mocked(api.billing.catalog).mockResolvedValueOnce({
+      ...billingCatalog,
+      skus: billingCatalog.skus.filter((sku) => sku.operation === 'task.article'),
+    })
+    render(<DashboardPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /平衡型，豆包 Seed Evolving/ }))
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '写一篇种草笔记' },
+    })
+    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
   })
 
   it('sends first-time users to project creation from the AI entry', async () => {
