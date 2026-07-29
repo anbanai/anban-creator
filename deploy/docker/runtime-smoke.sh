@@ -49,9 +49,9 @@ create_project() {
 create_task() {
   local profile="$1" project_id="$2" marker="$3" response task_id body
   if [[ "$profile" == "montage" ]]; then
-    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,montage_input:{brief:("Runtime smoke marker " + $marker),pipeline_key:"cinematic",preferences:{duration_seconds:5}}}')"
+    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"cost_effective",montage_input:{brief:("Runtime smoke marker " + $marker),pipeline_key:"cinematic",preferences:{duration_seconds:5}}}')"
   else
-    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,has_content_image:false,has_tail_image:false,article_with_cover:false,article_with_content_images:false}')"
+    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"cost_effective",has_content_image:false,has_tail_image:false,article_with_cover:false,article_with_content_images:false}')"
   fi
   response="$(api_post /api/v1/tasks "$body")" || return
   task_id="$(jq -er 'if .code == 0 and (.data.id | type) == "string" and (.data.id | length) > 0 then .data.id else error("task response is missing data.id") end' <<<"$response")" || {

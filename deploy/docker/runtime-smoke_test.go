@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,6 +108,42 @@ func TestRuntimeSmokeGeneratedServerConfigIsValid(t *testing.T) {
 	t.Setenv("ANBAN_RUNTIME_SMOKE_NETWORK", "runtime-smoke-network")
 	if _, err := serverconfig.NewConfig(configPath); err != nil {
 		t.Fatalf("generated runtime smoke server config is invalid: %v", err)
+	}
+}
+
+func TestRuntimeSmokeCreateTaskUsesCostEffectiveExecutionProfile(t *testing.T) {
+	for _, profile := range []string{"article", "montage"} {
+		t.Run(profile, func(t *testing.T) {
+			requestPath := filepath.Join(t.TempDir(), "create-task.json")
+			body := `
+api_post() {
+  printf '%s' "$2" >"$TEST_REQUEST_PATH"
+  printf '%s\n' '{"code":0,"data":{"id":"task-1"}}'
+}
+create_task "$TEST_PROFILE" project-1 marker-1
+`
+			output, exitCode := runtimeSmokeShell(t, body,
+				"TEST_PROFILE="+profile,
+				"TEST_REQUEST_PATH="+requestPath,
+			)
+			if exitCode != 0 {
+				t.Fatalf("create_task exited %d: %s", exitCode, output)
+			}
+
+			data, err := os.ReadFile(requestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var request struct {
+				ExecutionProfile string `json:"execution_profile"`
+			}
+			if err := json.Unmarshal(data, &request); err != nil {
+				t.Fatalf("decode create_task request: %v", err)
+			}
+			if request.ExecutionProfile != "cost_effective" {
+				t.Fatalf("execution_profile = %q, want cost_effective", request.ExecutionProfile)
+			}
+		})
 	}
 }
 
