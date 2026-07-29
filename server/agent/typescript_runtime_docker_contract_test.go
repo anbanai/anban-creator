@@ -11,7 +11,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 	for _, name := range []string{"Dockerfile.agent-article-ts", "Dockerfile.agent-seednote-ts", "Dockerfile.agent-montage-ts"} {
 		data := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
-			"node:22",
+			"node:bookworm-slim",
 			"agent-ts/package.json agent-ts/package-lock.json",
 			"npm ci",
 			"@anthropic-ai/claude-agent-sdk",

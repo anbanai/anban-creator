@@ -310,7 +310,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	article := readTextFile(t, articlePath)
 	seednote := readTextFile(t, seednotePath)
 	for _, want := range []string{
-		"FROM node:22-bookworm-slim",
+		"FROM node:bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"ARG CLAUDE_CODE_VERSION=2.1.208",
 		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"`,
@@ -479,7 +479,7 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-article")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM node:22-bookworm-slim")
+	from := strings.Index(body, "FROM node:bookworm-slim")
 	if from < 0 {
 		t.Fatalf("%s missing Article runtime", path)
 	}
@@ -716,11 +716,11 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}{
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
-			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim"},
+			want: []string{"FROM golang:alpine AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
-			want: []string{"FROM golang:alpine AS builder", "FROM node:22-bookworm-slim"},
+			want: []string{"FROM golang:alpine AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
