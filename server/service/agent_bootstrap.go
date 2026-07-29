@@ -47,7 +47,7 @@ type AgentRuntimeProfile struct {
 	ModelID           string                                    `json:"model_id"`
 	Protocol          string                                    `json:"protocol"`
 	ContextWindow     int                                       `json:"context_window"`
-	ReasoningEffort   string                                    `json:"reasoning_effort,omitempty"`
+	ReasoningEffort   string                                    `json:"reasoning_effort"`
 	ThinkingRequired  bool                                      `json:"thinking_required"`
 	DisplayName       string                                    `json:"display_name"`
 	RuntimeEnv        map[string]string                         `json:"runtime_env"`

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,38 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
 )
+
+func TestAgentBootstrapJSONIncludesEmptyReasoningEffort(t *testing.T) {
+	profile := AgentExecutionProfile{
+		ID: "cost_effective", DisplayName: "性价比", ModelName: "DeepSeek 4 Pro",
+		Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic",
+		MinTier: model.TierFree, Available: true,
+	}
+	if _, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile}); err != nil {
+		t.Fatalf("valid cost_effective profile: %v", err)
+	}
+
+	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
+		ProfileID: profile.ID, Provider: profile.Provider, ModelID: profile.ModelID,
+		Protocol: profile.Protocol, ReasoningEffort: profile.ReasoningEffort,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		ExecutionProfile map[string]json.RawMessage `json:"execution_profile"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := payload.ExecutionProfile["reasoning_effort"]
+	if !ok {
+		t.Fatalf("execution_profile omitted reasoning_effort: %s", raw)
+	}
+	if string(got) != `""` {
+		t.Fatalf("execution_profile.reasoning_effort = %s, want empty string", got)
+	}
+}
 
 func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
