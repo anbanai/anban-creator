@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
+import type { AgentExecutionProfileID, Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
@@ -41,8 +41,11 @@ export const tasksApi = {
   // non-running), so the count the user sees equals what is actually submitted.
   bulkCancel: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-cancel', { task_ids: ids })),
-  bulkClone: (ids: string[]) =>
-    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-clone', { task_ids: ids })),
+  bulkClone: (ids: string[], executionProfile: AgentExecutionProfileID) =>
+    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-clone', {
+      task_ids: ids,
+      execution_profile: executionProfile,
+    })),
   bulkDelete: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
 

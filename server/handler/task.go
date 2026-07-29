@@ -216,9 +216,14 @@ type bulkDownloadTaskFilesRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
 
-// bulkTaskIDsRequest is the shared request body for bulk cancel / clone / delete.
+// bulkTaskIDsRequest is the shared request body for bulk cancel / delete.
 type bulkTaskIDsRequest struct {
 	TaskIDs []string `json:"task_ids"`
+}
+
+type bulkCloneTasksRequest struct {
+	TaskIDs          []string `json:"task_ids"`
+	ExecutionProfile string   `json:"execution_profile"`
 }
 
 // bulkTaskResult is the per-task outcome of a bulk operation. OK=false tasks
@@ -1246,14 +1251,18 @@ func (h *TaskHandler) parseBulkTaskIDs(c fiber.Ctx) ([]string, error) {
 	if err := c.Bind().Body(&req); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if len(req.TaskIDs) == 0 {
+	return validateBulkTaskIDs(c, req.TaskIDs)
+}
+
+func validateBulkTaskIDs(c fiber.Ctx, taskIDs []string) ([]string, error) {
+	if len(taskIDs) == 0 {
 		return nil, Error(c, fiber.StatusBadRequest, "task_ids is required")
 	}
-	if len(req.TaskIDs) > 100 {
+	if len(taskIDs) > 100 {
 		return nil, Error(c, fiber.StatusBadRequest, "task_ids must not exceed 100")
 	}
-	ids := make([]string, 0, len(req.TaskIDs))
-	for _, id := range req.TaskIDs {
+	ids := make([]string, 0, len(taskIDs))
+	for _, id := range taskIDs {
 		id = strings.TrimSpace(id)
 		if _, err := uuid.Parse(id); err != nil {
 			return nil, Error(c, fiber.StatusBadRequest, "invalid task_ids format")
@@ -1261,6 +1270,22 @@ func (h *TaskHandler) parseBulkTaskIDs(c fiber.Ctx) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+func (h *TaskHandler) parseBulkCloneRequest(c fiber.Ctx) ([]string, string, error) {
+	var req bulkCloneTasksRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return nil, "", Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	ids, err := validateBulkTaskIDs(c, req.TaskIDs)
+	if err != nil {
+		return nil, "", err
+	}
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
+	if req.ExecutionProfile == "" {
+		return nil, "", Error(c, fiber.StatusBadRequest, "execution_profile is required")
+	}
+	return ids, req.ExecutionProfile, nil
 }
 
 // BulkCancel handles POST /api/v1/tasks/bulk-cancel.
@@ -1308,7 +1333,7 @@ func (h *TaskHandler) BulkCancel(c fiber.Ctx) error {
 // fresh billed task. Stops charging once credits are insufficient (each Clone
 // re-reserves credits); remaining tasks are skipped with "insufficient_credits".
 func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
-	ids, err := h.parseBulkTaskIDs(c)
+	ids, executionProfile, err := h.parseBulkCloneRequest(c)
 	if err != nil {
 		return err
 	}
@@ -1342,7 +1367,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})
 			continue
 		}
-		newTasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{ExecutionProfile: task.ExecutionProfile})
+		newTasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{ExecutionProfile: executionProfile})
 		if err != nil {
 			if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})

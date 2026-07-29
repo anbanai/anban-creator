@@ -220,7 +220,7 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	h.SetReferenceAssetService(referenceSvc)
 	app := fiber.New()
 	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
-	resp := postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+source.ID+`"]}`)
+	resp := postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+source.ID+`"],"execution_profile":"cost_effective"}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)

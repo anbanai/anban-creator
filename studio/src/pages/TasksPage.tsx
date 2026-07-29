@@ -6,7 +6,7 @@ import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, C
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskStatus, Project, TaskType } from '@/types'
+import type { AgentExecutionProfileID, TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
@@ -22,6 +22,10 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
+import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
+import { cheapestAvailableExecutionProfileForTasks, taskCostTotalFor } from '@/lib/pricing'
+import { queryKeys } from '@/lib/query-keys'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -52,6 +56,8 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
+  const [bulkExecutionProfile, setBulkExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
   const { submit } = useSubmitLock()
 
   useEffect(() => {
@@ -122,6 +128,27 @@ export default function TasksPage() {
   const selectedDeletable = selectedTasks.filter((task) => task.status !== 'running')
   const completedTasksOnPage = filteredTasks.filter((task) => task.status === 'completed')
   const allCompletedSelected = completedTasksOnPage.length > 0 && completedTasksOnPage.every((task) => selectedTaskIdSet.has(task.id))
+  const profilesQuery = useAgentExecutionProfiles()
+  const billingCatalogQuery = useQuery({
+    queryKey: queryKeys.billing.catalog,
+    queryFn: () => api.billing.catalog(),
+  })
+  const bulkCloneTaskTypes = selectedCloneable.map((task) => task.type)
+  const defaultBulkExecutionProfile = cheapestAvailableExecutionProfileForTasks(
+    profilesQuery.data,
+    billingCatalogQuery.data,
+    bulkCloneTaskTypes,
+  )
+  const selectedBulkProfile = profilesQuery.data?.find((profile) => profile.id === bulkExecutionProfile)
+  const bulkCloneTotal = bulkExecutionProfile && selectedBulkProfile?.available
+    ? taskCostTotalFor(billingCatalogQuery.data, bulkCloneTaskTypes, bulkExecutionProfile)
+    : undefined
+
+  useEffect(() => {
+    if (bulkAction !== 'clone') return
+    if (bulkCloneTotal !== undefined) return
+    setBulkExecutionProfile(defaultBulkExecutionProfile ?? '')
+  }, [bulkAction, bulkCloneTotal, defaultBulkExecutionProfile])
 
   useEffect(() => {
     const visibleTaskIds = new Set(filteredTasks.map((task) => task.id))
@@ -157,12 +184,12 @@ export default function TasksPage() {
   // Bulk cancel / clone / delete — best-effort; the server returns a per-task
   // summary. Each operates only on the subset it can act on; on success we toast
   // the succeeded/skipped counts, invalidate the list, and clear the selection.
-  const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
   const toastBulk = (verb: string, res: { succeeded: number; skipped: number }) =>
     toast.success(`已${verb} ${res.succeeded} 个任务${res.skipped ? `，跳过 ${res.skipped} 个` : ''}`)
   const onBulkDone = (res: { succeeded: number; skipped: number }) => {
     setSelectedTaskIds([])
     setBulkAction(null)
+    setBulkExecutionProfile('')
     return res
   }
   const bulkCancelMutation = useMutation({
@@ -175,7 +202,8 @@ export default function TasksPage() {
     onError: () => toast.error('批量取消失败，请稍后重试'),
   })
   const bulkCloneMutation = useMutation({
-    mutationFn: (taskIds: string[]) => api.tasks.bulkClone(taskIds),
+    mutationFn: ({ taskIds, executionProfile }: { taskIds: string[]; executionProfile: AgentExecutionProfileID }) =>
+      api.tasks.bulkClone(taskIds, executionProfile),
     onSuccess: (res) => {
       toastBulk('克隆', res)
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -241,7 +269,12 @@ export default function TasksPage() {
   // subset it can act on (matching the button counts the user saw).
   function confirmBulkAction() {
     if (bulkAction === 'cancel') bulkCancelMutation.mutate(selectedCancellable.map((t) => t.id))
-    else if (bulkAction === 'clone') bulkCloneMutation.mutate(selectedCloneable.map((t) => t.id))
+    else if (bulkAction === 'clone' && bulkExecutionProfile && bulkCloneTotal !== undefined) {
+      bulkCloneMutation.mutate({
+        taskIds: selectedCloneable.map((task) => task.id),
+        executionProfile: bulkExecutionProfile,
+      })
+    }
     else if (bulkAction === 'delete') bulkDeleteMutation.mutate(selectedDeletable.map((t) => t.id))
   }
 
@@ -573,18 +606,40 @@ export default function TasksPage() {
       {/* 批量操作二次确认：文案/按钮随 bulkAction 变化。取消与删除不可逆 → destructive。 */}
       <AlertDialog
         open={bulkAction !== null}
-        onOpenChange={(open) => { if (!open) setBulkAction(null) }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBulkAction(null)
+            setBulkExecutionProfile('')
+          }
+        }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className={bulkAction === 'clone' ? 'sm:max-w-2xl' : undefined}>
           <AlertDialogHeader>
             <AlertDialogTitle>{bulkAction ? bulkActionCopy[bulkAction].title : ''}</AlertDialogTitle>
             <AlertDialogDescription>{bulkAction ? bulkActionCopy[bulkAction].desc : ''}</AlertDialogDescription>
           </AlertDialogHeader>
+          {bulkAction === 'clone' ? (
+            <section className="flex flex-col gap-3" aria-labelledby="bulk-clone-profile-title">
+              <h3 id="bulk-clone-profile-title" className="text-sm font-medium">执行配置</h3>
+              <ExecutionProfileSelector
+                profiles={profilesQuery.data ?? []}
+                value={bulkExecutionProfile}
+                onChange={setBulkExecutionProfile}
+                loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
+                disabled={bulkAnyPending}
+              />
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                {bulkCloneTotal === undefined
+                  ? '暂时无法获取所选配置的任务价格'
+                  : `预计总计 ${bulkCloneTotal.toLocaleString()} 积分`}
+              </p>
+            </section>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={bulkAnyPending}>再想想</AlertDialogCancel>
             <AlertDialogAction
               variant={bulkAction === 'delete' || bulkAction === 'cancel' ? 'destructive' : 'default'}
-              disabled={bulkAnyPending}
+              disabled={bulkAnyPending || (bulkAction === 'clone' && (!bulkExecutionProfile || bulkCloneTotal === undefined))}
               onClick={confirmBulkAction}
             >
               确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消任务' : bulkAction === 'clone' ? '克隆' : ''}

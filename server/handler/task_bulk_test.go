@@ -69,11 +69,13 @@ func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, s
 	t.Helper()
 	id := uuid.New().String()
 	if err := repo.Tasks().Create(context.Background(), &model.Task{
-		ID:        id,
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
-		Status:    status,
+		ID:               id,
+		UserID:           userID,
+		ProjectID:        projectID,
+		Type:             model.PlatformSeednote,
+		Status:           status,
+		ExecutionTarget:  model.ExecutionTargetCloud,
+		ExecutionProfile: "balanced",
 	}); err != nil {
 		t.Fatalf("seed task (%s): %v", status, err)
 	}
@@ -81,9 +83,10 @@ func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, s
 }
 
 type bulkTestResult struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Reason string `json:"reason"`
+	ID        string `json:"id"`
+	OK        bool   `json:"ok"`
+	Reason    string `json:"reason"`
+	NewTaskID string `json:"new_task_id"`
 }
 
 type bulkTestResp struct {
@@ -106,6 +109,32 @@ func callBulk(t *testing.T, app *fiber.App, path string, ids []string) bulkTestR
 	}
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("%s status = %d, want 200", path, resp.StatusCode)
+	}
+	var env struct {
+		Code int          `json:"code"`
+		Data bulkTestResp `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return env.Data
+}
+
+func callBulkClone(t *testing.T, app *fiber.App, ids []string, executionProfile string) bulkTestResp {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"task_ids":          ids,
+		"execution_profile": executionProfile,
+	})
+	req := httptest.NewRequest("POST", "/tasks/bulk-clone", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("/tasks/bulk-clone status = %d, want 200 body=%s", resp.StatusCode, responseBody)
 	}
 	var env struct {
 		Code int          `json:"code"`
@@ -147,7 +176,9 @@ func TestBulk_RequestValidation(t *testing.T) {
 	}{
 		{"cancel empty ids", "/tasks/bulk-cancel", `{"task_ids":[]}`, fiber.StatusBadRequest},
 		{"cancel missing field", "/tasks/bulk-cancel", `{}`, fiber.StatusBadRequest},
-		{"clone bad uuid", "/tasks/bulk-clone", `{"task_ids":["not-a-uuid"]}`, fiber.StatusBadRequest},
+		{"clone missing execution profile", "/tasks/bulk-clone", `{"task_ids":["` + uuid.New().String() + `"]}`, fiber.StatusBadRequest},
+		{"clone empty execution profile", "/tasks/bulk-clone", `{"task_ids":["` + uuid.New().String() + `"],"execution_profile":"  "}`, fiber.StatusBadRequest},
+		{"clone bad uuid", "/tasks/bulk-clone", `{"task_ids":["not-a-uuid"],"execution_profile":"cost_effective"}`, fiber.StatusBadRequest},
 		{"delete over 100", "/tasks/bulk-delete", `{"task_ids":["` + strings.Repeat(uuid.New().String()+`","`, 101) + `"]}`, fiber.StatusBadRequest},
 	}
 	for _, tt := range tests {
@@ -272,7 +303,7 @@ func TestBulkClone_StatusGatingOnly(t *testing.T) {
 	foreignFailed := seedBulkTask(t, repo, uuid.New().String(), projectID, model.TaskStatusFailed)
 	missingID := uuid.New().String()
 
-	res := callBulk(t, app, "/tasks/bulk-clone", []string{pending, running, completed, foreignFailed, missingID})
+	res := callBulkClone(t, app, []string{pending, running, completed, foreignFailed, missingID}, "cost_effective")
 	if res.Succeeded != 0 || res.Skipped != 5 {
 		t.Fatalf("succeeded/skipped = %d/%d, want 0/5", res.Succeeded, res.Skipped)
 	}
@@ -287,5 +318,35 @@ func TestBulkClone_StatusGatingOnly(t *testing.T) {
 	}
 	if got := byID[missingID]; got.OK || got.Reason != "not_found" {
 		t.Fatalf("missing task = %+v, want reason not_found", got)
+	}
+}
+
+func TestBulkClone_UsesSubmittedProfileForEveryNewTask(t *testing.T) {
+	userID := uuid.New().String()
+	app, repo, projectID := bulkTestApp(t, userID)
+	first := seedBulkTask(t, repo, userID, projectID, model.TaskStatusFailed)
+	second := seedBulkTask(t, repo, userID, projectID, model.TaskStatusCancelled)
+
+	res := callBulkClone(t, app, []string{first, second}, "cost_effective")
+	if res.Succeeded != 2 || res.Skipped != 0 {
+		t.Fatalf("succeeded/skipped = %d/%d, want 2/0: %#v", res.Succeeded, res.Skipped, res)
+	}
+	for _, result := range res.Results {
+		if !result.OK || result.NewTaskID == "" {
+			t.Fatalf("clone result = %#v, want created task", result)
+		}
+		cloned, err := repo.Tasks().FindByID(context.Background(), result.NewTaskID)
+		if err != nil {
+			t.Fatalf("find cloned task %s: %v", result.NewTaskID, err)
+		}
+		if cloned.ExecutionProfile != "cost_effective" {
+			t.Fatalf("cloned task %s execution_profile = %q, want cost_effective", cloned.ID, cloned.ExecutionProfile)
+		}
+		if cloned.AgentProfileSnapshot.ProfileID != "cost_effective" || cloned.AgentProfileSnapshot.ModelID != "deepseek-v4-pro" {
+			t.Fatalf("cloned task %s snapshot = %#v, want frozen cost_effective profile", cloned.ID, cloned.AgentProfileSnapshot)
+		}
+		if cloned.AgentProfileSnapshot.BaseURL != "" || cloned.AgentProfileSnapshot.AuthToken != "" {
+			t.Fatalf("cloned task %s snapshot leaked credentials: %#v", cloned.ID, cloned.AgentProfileSnapshot)
+		}
 	}
 }

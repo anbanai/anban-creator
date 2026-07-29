@@ -128,4 +128,15 @@ describe('tasksApi', () => {
 
     expect(post).toHaveBeenCalledWith('/tasks/task-1/clone', request)
   })
+
+  it('posts only task ids and the selected profile for bulk clone', async () => {
+    const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { total: 2, succeeded: 2, skipped: 0, results: [] } } } as any)
+
+    await tasksApi.bulkClone(['task-1', 'task-2'], 'balanced')
+
+    expect(post).toHaveBeenCalledWith('/tasks/bulk-clone', {
+      task_ids: ['task-1', 'task-2'],
+      execution_profile: 'balanced',
+    })
+  })
 })

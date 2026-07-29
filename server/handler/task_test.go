@@ -1094,7 +1094,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
 		t.Fatalf("fail first clone: %v", err)
 	}
-	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+firstClone.ID+`"]}`)
+	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+firstClone.ID+`"],"execution_profile":"cost_effective"}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()

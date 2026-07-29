@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import TasksPage from './TasksPage'
 import { api } from '@/lib/api'
@@ -321,6 +321,68 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(await screen.findByText(/固定任务价：3,000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
     expect(screen.getByText(/成功交付的图片、视频等增值操作/)).toBeInTheDocument()
+  })
+})
+
+describe('TasksPage bulk clone execution profile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 1 })
+    vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
+    vi.mocked(api.billing.catalog).mockResolvedValue({
+      catalog_id: 'retail-test-v1',
+      currency: 'credits',
+      skus: [
+        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.balanced.v1', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.maximum-quality.v1', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
+      ],
+    })
+  })
+
+  afterEach(() => {
+    vi.mocked(api.billing.catalog).mockResolvedValue({
+      catalog_id: 'retail-test-v1',
+      currency: 'credits',
+      skus: [
+        { id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+        { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+        { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
+        { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+      ],
+    })
+  })
+
+  async function openBulkCloneDialog() {
+    renderTasksPage()
+    fireEvent.click(await screen.findByRole('button', { name: '选择任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '克隆 (1)' }))
+    return screen.findByRole('alertdialog', { name: '批量克隆任务？' })
+  }
+
+  it('defaults to the cheapest available server profile and submits it', async () => {
+    vi.mocked(api.tasks.bulkClone).mockResolvedValueOnce({ total: 1, succeeded: 1, skipped: 0, results: [] })
+    const dialog = await openBulkCloneDialog()
+
+    expect(within(dialog).getByText('执行配置')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /性价比.*DeepSeek 4 Pro/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByText('预计总计 4,800 积分')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认克隆' }))
+
+    await waitFor(() => expect(api.tasks.bulkClone).toHaveBeenCalledWith(['failed-task'], 'cost_effective'))
+  })
+
+  it('disables confirmation when no available profile has a matching SKU', async () => {
+    vi.mocked(api.billing.catalog).mockResolvedValueOnce({
+      catalog_id: 'retail-test-v1',
+      currency: 'credits',
+      skus: [],
+    })
+    const dialog = await openBulkCloneDialog()
+
+    expect(within(dialog).getByRole('button', { name: '确认克隆' })).toBeDisabled()
+    expect(within(dialog).getByText('暂时无法获取所选配置的任务价格')).toBeInTheDocument()
   })
 })
 
