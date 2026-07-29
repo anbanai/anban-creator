@@ -295,7 +295,7 @@ claude:
         kimi-k3: "kimi-k3"
         kimi-k3[1m]: "kimi-k3"
         kimi-k2.7-code: "kimi-k2.7-code"
-        kimi-k2.7-code-highspeed: "kimi-k2.7-code"
+        kimi-k2.7-code-highspeed: "kimi-k2.7-code-highspeed"
       claude:
         effort_level: "high"
         max_context_tokens: 1048576

@@ -32,6 +32,10 @@ func TestAgentProfilesUseProviderRegistryAndModelMatrices(t *testing.T) {
 			if balanced.ModelUsageAliases["doubao-seed-evolving-latest-version"] != "doubao-seed-evolving" {
 				t.Fatalf("balanced profile model_usage_aliases = %#v", balanced.ModelUsageAliases)
 			}
+			maximumQuality := configured.Claude.ExecutionProfiles["maximum_quality"]
+			if maximumQuality.ModelUsageAliases["kimi-k2.7-code-highspeed"] != "kimi-k2.7-code-highspeed" {
+				t.Fatalf("maximum_quality highspeed alias must preserve its distinct billing model: %#v", maximumQuality.ModelUsageAliases)
+			}
 		})
 	}
 }
