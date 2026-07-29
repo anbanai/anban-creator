@@ -52,7 +52,7 @@ type Services struct {
 	ProviderCostSvc        *service.ProviderCostService
 	BillingCatalogSvc      *service.BillingCatalogService
 	GenerateImageTimeout   time.Duration
-	WritingSvc             *service.WritingService
+	ContentRenderSvc       *service.ContentRenderService
 	PublishingSvc          *service.PublishingService
 	TemplateSvc            *service.TemplateService
 	LiveSliceSvc           *service.LiveSliceService
@@ -75,7 +75,7 @@ func RegisterTools(server *mcp.Server) {
 	registerTaskTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
-	registerWritingTools(server)
+	registerContentRenderTools(server)
 	registerPublishingTools(server)
 	registerSeednoteFormatTools(server)
 	registerTemplateTools(server)

@@ -15,9 +15,9 @@ import (
 // Claude Code 60s first-byte budget. See startProgressHeartbeat.
 const longTextHeartbeatInterval = 15 * time.Second
 
-// registerWritingTools registers local conversion/template helpers and scoring.
+// registerContentRenderTools registers local conversion/template helpers and scoring.
 // Generative writing workflows live in Skills, not MCP tools.
-func registerWritingTools(server *mcp.Server) {
+func registerContentRenderTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "convert_markdown",
 		Description: "Convert Markdown content to WeChat-compatible HTML. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. The server renders the HTML with image placeholders.",
@@ -102,8 +102,8 @@ func registerWritingTools(server *mcp.Server) {
 }
 
 func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WritingSvc == nil {
-		return errorResult("writing service not available"), nil
+	if svcs == nil || svcs.ContentRenderSvc == nil {
+		return errorResult("content render service not available"), nil
 	}
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
@@ -125,7 +125,7 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "convert_markdown", longTextHeartbeatInterval)
 	defer stop()
 
-	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, projectID, markdown, theme, taskID)
+	result, err := svcs.ContentRenderSvc.ConvertMarkdown(ctx, userID, projectID, markdown, theme, taskID)
 	if err != nil {
 		return billingError("convert markdown", err), nil
 	}
@@ -134,8 +134,8 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 }
 
 func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WritingSvc == nil {
-		return errorResult("writing service not available"), nil
+	if svcs == nil || svcs.ContentRenderSvc == nil {
+		return errorResult("content render service not available"), nil
 	}
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
@@ -162,7 +162,7 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "render_template", longTextHeartbeatInterval)
 	defer stop()
 
-	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, projectID, markdown, layoutPlan, theme, taskID)
+	result, err := svcs.ContentRenderSvc.RenderTemplate(ctx, userID, projectID, markdown, layoutPlan, theme, taskID)
 	if err != nil {
 		return billingError("render template", err), nil
 	}

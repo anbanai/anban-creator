@@ -360,6 +360,11 @@ type RecordMediaUnreconciledRequest struct {
 	HasAudioInput                                         bool
 }
 
+type RecordProviderTokenUnreconciledRequest struct {
+	TaskID, Provider, Model, ProviderRequestID string
+	ReasonCode                                 model.BillingExecutionCostReasonCode
+}
+
 type AdjustmentRequest struct {
 	OriginalEventID   string
 	IdempotencyKey    string
@@ -399,6 +404,11 @@ type mediaUnreconciledEvidence struct {
 	Resolution      string                               `json:"resolution,omitempty"`
 	HasVideoInput   *bool                                `json:"has_video_input,omitempty"`
 	HasAudioInput   *bool                                `json:"has_audio_input,omitempty"`
+}
+
+type tokenUnreconciledEvidence struct {
+	Kind       string                               `json:"kind"`
+	ReasonCode model.BillingExecutionCostReasonCode `json:"reason_code"`
 }
 
 type unreconciledCalculation struct {
@@ -477,6 +487,24 @@ func (s *ProviderCostService) RecordProviderTokenUsage(ctx context.Context, req 
 		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
 		CatalogID: req.CatalogID, IdempotencyKey: req.IdempotencyKey, Source: model.BillingProviderCostSourceProviderResponse,
 		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY, Evidence: evidence, Calculation: calculation,
+	})
+}
+
+func (s *ProviderCostService) RecordProviderTokenUnreconciled(ctx context.Context, req RecordProviderTokenUnreconciledRequest) (*model.BillingProviderCostEvent, error) {
+	if s == nil || s.repo == nil || s.calculator == nil {
+		return nil, errors.New("provider cost service is not configured")
+	}
+	req.TaskID, req.Provider, req.Model = strings.TrimSpace(req.TaskID), strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model)
+	req.ProviderRequestID = strings.TrimSpace(req.ProviderRequestID)
+	if req.Provider == "" || req.Model == "" || req.ProviderRequestID == "" || !req.ReasonCode.Valid() {
+		return nil, errors.New("unreconciled provider token cost requires provider, model, request, and supported reason")
+	}
+	return s.appendProviderRequestEvent(ctx, providerRequestEvent{
+		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
+		CatalogID: s.catalogID, IdempotencyKey: req.ProviderRequestID, Source: model.BillingProviderCostSourceProviderResponse,
+		Status:      model.BillingProviderCostStatusUnreconciled,
+		Evidence:    tokenUnreconciledEvidence{Kind: "token_unreconciled", ReasonCode: req.ReasonCode},
+		Calculation: unreconciledCalculation{Version: 1, ReasonCode: req.ReasonCode},
 	})
 }
 

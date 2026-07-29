@@ -301,6 +301,20 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 		if evidence.MediaKind == "video" && (evidence.DurationSeconds < 0 || evidence.HasVideoInput == nil || evidence.HasAudioInput == nil) {
 			return fmt.Errorf("unreconciled video evidence requires typed input flags and nonnegative actual duration")
 		}
+	case "token_unreconciled":
+		if event.EventKind != BillingProviderCostEventKindBase || event.Status != BillingProviderCostStatusUnreconciled || event.Source != BillingProviderCostSourceProviderResponse {
+			return fmt.Errorf("unreconciled token evidence requires an unreconciled provider-response base event")
+		}
+		var evidence struct {
+			Kind       string                         `json:"kind"`
+			ReasonCode BillingExecutionCostReasonCode `json:"reason_code"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid unreconciled token provider cost evidence: %w", err)
+		}
+		if !evidence.ReasonCode.Valid() {
+			return fmt.Errorf("unreconciled token evidence requires a supported reason")
+		}
 	case "invoice_adjustment":
 		if event.EventKind != BillingProviderCostEventKindAdjustment {
 			return fmt.Errorf("invoice adjustment evidence requires an adjustment provider cost event")

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -40,12 +41,23 @@ type AIEntrySubmitter interface {
 	Submit(ctx context.Context, req AIEntrySubmitRequest) (*AIEntrySubmitResult, error)
 }
 
+type AIEntryModelConfig struct {
+	ProviderKey string
+	Model       string
+}
+
+type ProviderTokenCostRecorder interface {
+	CatalogID() string
+	RecordProviderTokenUsage(context.Context, RecordProviderTokenCostRequest) (*model.BillingProviderCostEvent, error)
+	RecordProviderTokenUnreconciled(context.Context, RecordProviderTokenUnreconciledRequest) (*model.BillingProviderCostEvent, error)
+}
+
 type AIEntryService struct {
 	repo            repository.Repository
 	taskSvc         *TaskService
-	llm             LLMClient
-	modelConfigSvc  *ModelConfigService
-	llmTimeout      time.Duration
+	llm             ResultLLMClient
+	costs           ProviderTokenCostRecorder
+	config          AIEntryModelConfig
 	logger          *zerolog.Logger
 	referenceAssets *ReferenceAssetService
 }
@@ -75,20 +87,12 @@ var aiEntryEcommerceModuleMax = map[string]int{
 	"sku_images":   20,
 }
 
-func NewAIEntryService(repo repository.Repository, taskSvc *TaskService, llm LLMClient, logger *zerolog.Logger) *AIEntryService {
+func NewAIEntryService(repo repository.Repository, taskSvc *TaskService, llm ResultLLMClient, costs ProviderTokenCostRecorder, cfg AIEntryModelConfig, logger *zerolog.Logger) *AIEntryService {
 	if logger == nil {
 		nop := zerolog.Nop()
 		logger = &nop
 	}
-	return &AIEntryService{repo: repo, taskSvc: taskSvc, llm: llm, logger: logger}
-}
-
-func (s *AIEntryService) SetModelConfigService(modelConfigSvc *ModelConfigService, timeout time.Duration) {
-	if s == nil {
-		return
-	}
-	s.modelConfigSvc = modelConfigSvc
-	s.llmTimeout = timeout
+	return &AIEntryService{repo: repo, taskSvc: taskSvc, llm: llm, costs: costs, config: cfg, logger: logger}
 }
 
 func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (*AIEntrySubmitResult, error) {
@@ -118,12 +122,11 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
-	llm := s.llmForUser(ctx, req.UserID)
-	if llm == nil {
-		return aiEntryNeedsConfiguration("模型配置不可用：请先配置 writing 模型路由或用户文本模型。", "/settings#model-key-settings"), nil
+	if s.llm == nil {
+		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用。", "/settings"), nil
 	}
 
-	intent, parseErr := s.parseIntent(ctx, llm, project, req)
+	intent, parseErr := s.parseIntent(ctx, project, req)
 	if parseErr != nil {
 		if s.logger != nil {
 			s.logger.Warn().Err(parseErr).Str("user_id", req.UserID).Str("project_id", req.ProjectID).Msg("ai entry intent parse failed")
@@ -217,19 +220,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}, nil
 }
 
-func (s *AIEntryService) llmForUser(ctx context.Context, userID string) LLMClient {
-	if s != nil && s.modelConfigSvc != nil {
-		if baseURL, key, mdl, ok := s.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
-			return NewOpenAILLMClient(baseURL, key, mdl, s.llmTimeout)
-		}
-	}
-	if s == nil {
-		return nil
-	}
-	return s.llm
-}
-
-func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project *model.Project, req AIEntrySubmitRequest) (aiEntryIntent, error) {
+func (s *AIEntryService) parseIntent(ctx context.Context, project *model.Project, req AIEntrySubmitRequest) (aiEntryIntent, error) {
 	systemPrompt := strings.TrimSpace(`你是 Anban 的 AI 创作入口意图解析器。
 只做参数解析，不要写正文，不要解释。
 必须只返回严格 JSON 对象，不能包含 Markdown、代码围栏或注释。
@@ -244,7 +235,7 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
 }
 缺失字段请省略。`)
 	userPrompt := aiEntryPrompt(project, req)
-	raw, err := llm.Complete(ctx, systemPrompt, userPrompt)
+	raw, err := s.completeIntent(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return aiEntryIntent{}, err
 	}
@@ -253,7 +244,7 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
 		return intent, nil
 	}
 	repairPrompt := "只返回合法 JSON。修复下面这段意图解析结果，不要解释，不要代码围栏。\n\n原始用户需求：\n" + req.Text + "\n\n待修复内容：\n" + raw
-	repaired, repairErr := llm.Complete(ctx, systemPrompt, repairPrompt)
+	repaired, repairErr := s.completeIntent(ctx, systemPrompt, repairPrompt)
 	if repairErr != nil {
 		return aiEntryIntent{}, repairErr
 	}
@@ -262,6 +253,46 @@ func (s *AIEntryService) parseIntent(ctx context.Context, llm LLMClient, project
 		return aiEntryIntent{}, err
 	}
 	return intent, nil
+}
+
+func (s *AIEntryService) completeIntent(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	result, err := s.llm.CompleteResult(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", fmt.Errorf("server internal model returned no result")
+	}
+	s.recordIntentCost(ctx, result.Usage)
+	return result.Text, nil
+}
+
+func (s *AIEntryService) recordIntentCost(ctx context.Context, usage srvconfig.TokenUsage) {
+	if s == nil || s.costs == nil || strings.TrimSpace(s.config.ProviderKey) == "" || strings.TrimSpace(s.config.Model) == "" {
+		return
+	}
+	providerRequestID := "internal:server_internal:" + uuid.NewString()
+	var err error
+	if usage.TotalTokens <= 0 && usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		_, err = s.costs.RecordProviderTokenUnreconciled(ctx, RecordProviderTokenUnreconciledRequest{
+			Provider: s.config.ProviderKey, Model: s.config.Model, ProviderRequestID: providerRequestID,
+			ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+		})
+	} else {
+		cacheRead := usage.CacheReadInputTokens
+		if cacheRead == 0 {
+			cacheRead = usage.CachedInputTokens
+		}
+		_, err = s.costs.RecordProviderTokenUsage(ctx, RecordProviderTokenCostRequest{
+			Provider: s.config.ProviderKey, Model: s.config.Model, ProviderRequestID: providerRequestID,
+			CatalogID: s.costs.CatalogID(), IdempotencyKey: providerRequestID,
+			Usage:  TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
+			Source: string(model.BillingProviderCostSourceProviderResponse),
+		})
+	}
+	if err != nil && s.logger != nil {
+		s.logger.Error().Err(err).Str("provider_request_id", providerRequestID).Msg("record server internal provider cost; AI entry result remains valid")
+	}
 }
 
 func aiEntryPrompt(project *model.Project, req AIEntrySubmitRequest) string {

@@ -279,7 +279,7 @@ func TestApplySlotsToMarkdown_DedupFooterAlreadyInlined(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRenderTemplate_LongFormEssay(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-render-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -325,7 +325,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 }
 
 func TestRenderTemplate_Listicle(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-listicle-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -361,7 +361,7 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 // reflects that. (Previously this tested an LLM "forgetting" an image — no
 // longer applicable without an LLM.)
 func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-all-rendered-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -398,7 +398,7 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 // carries the same URL, the rendered HTML must contain exactly ONE <img> for
 // that URL — the slot is deduped against the inline image.
 func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-dedup-int-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -421,7 +421,7 @@ func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
 }
 
 func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-image-size-style-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -447,7 +447,7 @@ func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
 }
 
 func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-module-render-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -487,7 +487,7 @@ func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {
 }
 
 func TestRenderTemplate_RejectsLayoutModuleMissingRequiredVars(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-module-missing-vars-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -508,7 +508,7 @@ func TestRenderTemplate_RejectsLayoutModuleMissingRequiredVars(t *testing.T) {
 }
 
 func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-theme-fallback-001"
 	// Project has no theme set → should default to "autumn-warm".
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
@@ -547,7 +547,7 @@ func assertImageStyleContains(t *testing.T, html, url, wantStyle string) {
 }
 
 func TestRenderTemplate_ThemeArgOverridesProjectTheme(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-theme-override-001"
 	// Project has autumn-warm but we override to spring-fresh.
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
@@ -570,7 +570,7 @@ func TestRenderTemplate_ThemeArgOverridesProjectTheme(t *testing.T) {
 }
 
 func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-empty-md"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
@@ -587,7 +587,7 @@ func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 }
 
 func TestRenderTemplate_NilPlan(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-nil-plan"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 

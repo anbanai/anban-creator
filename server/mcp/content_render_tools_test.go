@@ -20,9 +20,9 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-// stubWritingSvc is a minimal non-nil WritingService pointer used to bypass
+// stubContentRenderSvc is a minimal non-nil ContentRenderService pointer used to bypass
 // the nil check in handlers so argument validation tests can reach the arg parsing code.
-var stubWritingSvc = &service.WritingService{}
+var stubContentRenderSvc = &service.ContentRenderService{}
 
 func repositoryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -472,8 +472,8 @@ func TestConvertMarkdownHandler_NoService(t *testing.T) {
 		`{"project_id":"ch-1","markdown":"# Test"}`,
 		"test-api-key")
 
-	if !strings.Contains(text, "writing service not available") {
-		t.Errorf("expected 'writing service not available', got: %q", text)
+	if !strings.Contains(text, "content render service not available") {
+		t.Errorf("expected 'content render service not available', got: %q", text)
 	}
 	t.Logf("  [NO SERVICE] error: %q", text)
 }
@@ -482,8 +482,8 @@ func TestConvertMarkdownHandler_MissingProjectID(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
-	// Need non-nil WritingSvc so the handler passes the nil check and reaches arg validation.
-	SetServices(&Services{WritingSvc: stubWritingSvc})
+	// Need non-nil ContentRenderSvc so the handler passes the nil check and reaches arg validation.
+	SetServices(&Services{ContentRenderSvc: stubContentRenderSvc})
 
 	text := callMCPTool(t, handler, "convert_markdown",
 		`{"markdown":"# Hello"}`,
@@ -499,7 +499,7 @@ func TestConvertMarkdownHandler_MissingMarkdown(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
-	SetServices(&Services{WritingSvc: stubWritingSvc})
+	SetServices(&Services{ContentRenderSvc: stubContentRenderSvc})
 
 	text := callMCPTool(t, handler, "convert_markdown",
 		`{"project_id":"ch-1"}`,
@@ -515,7 +515,7 @@ func TestConvertMarkdownHandler_EmptyStrings(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
-	SetServices(&Services{WritingSvc: stubWritingSvc})
+	SetServices(&Services{ContentRenderSvc: stubContentRenderSvc})
 
 	text := callMCPTool(t, handler, "convert_markdown",
 		`{"project_id":"","markdown":""}`,
