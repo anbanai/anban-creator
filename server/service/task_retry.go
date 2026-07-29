@@ -16,6 +16,7 @@ import (
 // the original's project snapshot verbatim so it uses the same frozen config as
 // the source run.
 type CloneTaskParams struct {
+	ExecutionProfile string
 	Prompt           *string
 	InputAttachments *[]model.EntryAttachment
 	Overrides        *CloneTaskOverrides
@@ -43,6 +44,10 @@ type CloneTaskOverrides struct {
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
+	cloneParams.ExecutionProfile = strings.TrimSpace(cloneParams.ExecutionProfile)
+	if cloneParams.ExecutionProfile == "" {
+		return nil, fmt.Errorf("execution_profile is required")
+	}
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -62,7 +67,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		params := CreateManualParams{
 			UserID:                     src.UserID,
 			ProjectID:                  override.ProjectID,
-			ExecutionProfile:           src.ExecutionProfile,
+			ExecutionProfile:           cloneParams.ExecutionProfile,
 			Prompt:                     override.Prompt,
 			Quantity:                   override.Quantity,
 			ImageRatio:                 override.ImageRatio,
@@ -121,7 +126,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
-		ExecutionProfile:         src.ExecutionProfile,
+		ExecutionProfile:         cloneParams.ExecutionProfile,
 		FrozenTaskType:           src.Type,
 		PreserveFrozenConfig:     true,
 		Prompt:                   prompt,

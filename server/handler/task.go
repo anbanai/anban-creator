@@ -182,6 +182,7 @@ type createTaskRequest struct {
 
 type cloneTaskRequest struct {
 	ProjectID                string                           `json:"project_id"`
+	ExecutionProfile         string                           `json:"execution_profile"`
 	Prompt                   *string                          `json:"prompt"`
 	Quantity                 int                              `json:"quantity"`
 	ImageRatio               string                           `json:"image_ratio"`
@@ -917,6 +918,10 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "invalid request body")
 		}
 	}
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
+	if req.ExecutionProfile == "" {
+		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
+	}
 	if req.ProjectID != "" {
 		prompt := ""
 		if req.Prompt != nil {
@@ -928,7 +933,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		}
 		creationReq := createTaskRequest{
 			ProjectID:                req.ProjectID,
-			ExecutionProfile:         task.ExecutionProfile,
+			ExecutionProfile:         req.ExecutionProfile,
 			Prompt:                   prompt,
 			Quantity:                 req.Quantity,
 			ImageRatio:               req.ImageRatio,
@@ -956,7 +961,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		if err != nil || prepared == nil {
 			return err
 		}
-		tasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{Overrides: &service.CloneTaskOverrides{
+		tasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile, Overrides: &service.CloneTaskOverrides{
 			ProjectID:                prepared.params.ProjectID,
 			Quantity:                 prepared.params.Quantity,
 			Prompt:                   prepared.params.Prompt,
@@ -992,7 +997,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 	if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
-	params := service.CloneTaskParams{}
+	params := service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile}
 	if req.Prompt != nil {
 		prompt := strings.TrimSpace(*req.Prompt)
 		if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
@@ -1337,7 +1342,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})
 			continue
 		}
-		newTasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{})
+		newTasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{ExecutionProfile: task.ExecutionProfile})
 		if err != nil {
 			if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})

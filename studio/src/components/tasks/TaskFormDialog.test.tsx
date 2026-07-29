@@ -361,6 +361,7 @@ describe('TaskFormDialog', () => {
 
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
       type: 'article',
+      execution_profile: 'cost_effective',
       project_id: 'article-project',
       prompt: '复制后的完整创作要求',
       quantity: 1,

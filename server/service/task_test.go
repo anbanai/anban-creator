@@ -974,7 +974,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{ExecutionProfile: src.ExecutionProfile})
 	if err != nil {
 		t.Fatalf("Clone completed task: %v", err)
 	}
@@ -1069,7 +1069,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	articleCover := false
 	articleContent := false
 	attachments := []model.EntryAttachment{{Role: "brief", Text: "edited attachment", FileName: "brief.txt"}}
-	tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+	tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile, Overrides: &CloneTaskOverrides{
 		ProjectID:                destinationProject.ID,
 		Quantity:                 2,
 		Prompt:                   "edited prompt",
@@ -1206,7 +1206,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 
 	clone := func(assetID string) ([]*model.Task, error) {
-		return svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: &CloneTaskOverrides{
+		return svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile, Overrides: &CloneTaskOverrides{
 			ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: assetID,
 		}})
 	}
@@ -1219,7 +1219,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
 		t.Fatalf("complete first clone: %v", err)
 	}
-	exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{})
+	exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile})
 	if err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != inherited.ID {
 		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
 	}
@@ -1316,7 +1316,7 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 				t.Fatalf("create source task: %v", err)
 			}
 
-			tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{Overrides: tt.override(destinationProjectID)})
+			tasks, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile, Overrides: tt.override(destinationProjectID)})
 			if err != nil {
 				t.Fatalf("Clone: %v", err)
 			}
@@ -1353,7 +1353,7 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{ExecutionProfile: src.ExecutionProfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1387,7 +1387,7 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{ExecutionProfile: src.ExecutionProfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1428,7 +1428,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{})
+	clones, err := svc.Clone(ctx, src.ID, CloneTaskParams{ExecutionProfile: src.ExecutionProfile})
 	if err != nil {
 		t.Fatalf("Clone montage task: %v", err)
 	}

@@ -34,11 +34,18 @@ type availableRuntimeDispatcher struct{}
 
 func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
 	t.Helper()
-	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
-		ID: "cost_effective", DisplayName: "Cost effective", Provider: "deepseek", ModelID: "deepseek-v4-pro",
-		Protocol: "anthropic", BaseURL: "https://deepseek.example.com", AuthToken: "test-token",
-		MinTier: model.TierFree, Available: true,
-	}})
+	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
+		{
+			ID: "cost_effective", DisplayName: "Cost effective", Provider: "deepseek", ModelID: "deepseek-v4-pro",
+			Protocol: "anthropic", BaseURL: "https://deepseek.example.com", AuthToken: "test-token",
+			MinTier: model.TierFree, Available: true,
+		},
+		{
+			ID: "balanced", DisplayName: "Balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving",
+			Protocol: "anthropic", BaseURL: "https://ark.example.com", AuthToken: "test-token",
+			MinTier: model.TierPro, Available: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewAgentProfileRegistry: %v", err)
 	}
@@ -784,7 +791,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		Email:      "clone-completed@example.com",
 		Password:   "hashed",
 		InviteCode: "clonecompleted",
-		Tier:       model.TierFree,
+		Tier:       model.TierPro,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -820,8 +827,16 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		c.Locals("user_id", userID)
 		return h.Clone(c)
 	})
+	missingProfile := postJSON(t, app, "/tasks/"+taskID+"/clone", `{}`)
+	if missingProfile.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(missingProfile.Body)
+		missingProfile.Body.Close()
+		t.Fatalf("missing execution profile status = %d, want 400 body=%s", missingProfile.StatusCode, body)
+	}
+	missingProfile.Body.Close()
 
 	resp := postJSON(t, app, "/tasks/"+taskID+"/clone", `{
+		"execution_profile":"balanced",
 		"prompt":"edited exact clone prompt",
 		"input_attachments":[{"type":"text","text":"edited exact attachment","file_name":"brief.txt"}]
 	}`)
@@ -840,6 +855,9 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	if env.Data.Status != model.TaskStatusPending {
 		t.Fatalf("new task status = %q, want pending", env.Data.Status)
 	}
+	if env.Data.ExecutionProfile != "balanced" || env.Data.AgentProfileSnapshot.ProfileID != "balanced" {
+		t.Fatalf("exact clone profile = %q snapshot=%#v, want balanced", env.Data.ExecutionProfile, env.Data.AgentProfileSnapshot)
+	}
 	if env.Data.ProjectID != projectID || env.Data.Type != model.PlatformArticle || env.Data.Prompt != "edited exact clone prompt" {
 		t.Fatalf("exact clone destination/config = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
 	}
@@ -854,7 +872,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "editable-clone@example.com", Password: "hashed", InviteCode: "editableclone", Tier: model.TierFree}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "editable-clone@example.com", Password: "hashed", InviteCode: "editableclone", Tier: model.TierPro}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "Source seednote", Status: model.ProjectStatusActive}
@@ -896,7 +914,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
 	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{
-		"execution_profile":"cost_effective","project_id":"`+destinationProject.ID+`",
+		"execution_profile":"balanced","project_id":"`+destinationProject.ID+`",
 		"quantity":2,
 		"prompt":"edited full clone prompt",
 		"image_ratio":"1:1",
@@ -935,6 +953,9 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		t.Fatalf("destination tasks = %d, want 2", len(tasks))
 	}
 	for _, task := range tasks {
+		if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" {
+			t.Fatalf("clone profile = %q snapshot=%#v, want balanced", task.ExecutionProfile, task.AgentProfileSnapshot)
+		}
 		snapshot := task.ProjectSnapshot.Data()
 		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
@@ -1052,7 +1073,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
 		t.Fatalf("complete first clone: %v", err)
 	}
-	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", `{}`)
+	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", `{"execution_profile":"cost_effective"}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()

@@ -562,7 +562,7 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	h.SetReferenceAssetService(referenceSvc)
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
-	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{}`)
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"execution_profile":"cost_effective"}`)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != fiber.StatusOK || !strings.Contains(string(body), `"reference_image":{"asset_id":"`+asset.ID+`"`) || !strings.Contains(string(body), "https://download.example.com/"+asset.StorageKey) {
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
