@@ -36,7 +36,7 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -111,7 +111,7 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Seednote(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -147,7 +147,7 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 	}
 
 	const explicit = "用户显式指定的主题"
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -188,7 +188,7 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 	}
 
 	const titleTopic = "标题即主题"
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -219,7 +219,7 @@ func TestCreateFromPlan_EmptyPoolFallsBack(t *testing.T) {
 	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
 
 	// No topic seeded → pool empty.
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -253,7 +253,7 @@ func TestCreateManual_ClaimsTopicFromPool_Article(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  1,
@@ -296,7 +296,7 @@ func TestCreateManual_DoesNotClaimWhenPromptSet(t *testing.T) {
 	}
 
 	const explicit = "用户显式指定的主题"
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    explicit,
@@ -333,7 +333,7 @@ func TestCreateManual_DoesNotClaimForEcommerce(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  1,
@@ -375,7 +375,7 @@ func TestCreateManual_ClaimsOnePerTask(t *testing.T) {
 		t.Fatalf("seed topics: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,

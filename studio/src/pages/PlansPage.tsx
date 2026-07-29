@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import type { AgentExecutionProfileID, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
@@ -42,10 +42,14 @@ import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
+import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
+import { queryKeys } from '@/lib/query-keys'
+import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
+import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -56,6 +60,7 @@ const planTypeOptions: { value: PlanType; label: string }[] = [
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
     project_id: plan.project_id || '',
+    execution_profile: plan.execution_profile,
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
@@ -101,6 +106,7 @@ export default function PlansPage() {
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
     defaultValues: {
       project_id: '',
+      execution_profile: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -150,6 +156,7 @@ export default function PlansPage() {
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
+  const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
   const isMontagePlan = watchedType === 'montage'
 
   // Warn before closing with unsaved changes
@@ -203,15 +210,29 @@ export default function PlansPage() {
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
   const { data: billingCatalog } = useQuery({
-    queryKey: ['billing', 'catalog'],
+    queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
     staleTime: 60_000,
   })
   const { data: billingWallet } = useQuery({
-    queryKey: ['billing', 'wallet'],
+    queryKey: queryKeys.billing.wallet,
     queryFn: () => api.billing.wallet(),
     staleTime: 30_000,
   })
+  const executionProfilesQuery = useAgentExecutionProfiles()
+  const selectedExecutionProfileAvailable = executionProfilesQuery.data
+    ?.find((profile) => profile.id === watchedExecutionProfile)
+    ?.available === true
+  const defaultExecutionProfile = cheapestAvailableExecutionProfile(
+    executionProfilesQuery.data,
+    billingCatalog,
+    watchedType,
+  )
+
+  useEffect(() => {
+    if (!modalOpen || form.getValues('execution_profile') || !defaultExecutionProfile) return
+    form.setValue('execution_profile', defaultExecutionProfile, { shouldValidate: true })
+  }, [defaultExecutionProfile, form, modalOpen])
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -287,6 +308,7 @@ export default function PlansPage() {
     attachmentHydratingRef.current = false
     form.reset({
       project_id: createIntent.projectId ?? '',
+      execution_profile: '',
       type: requestedType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -347,6 +369,7 @@ export default function PlansPage() {
     attachmentHydratingRef.current = false
     form.reset({
       project_id: '',
+      execution_profile: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -362,6 +385,10 @@ export default function PlansPage() {
   }
 
   async function onSubmit(values: PlanFormValues) {
+    const submittedProfileAvailable = executionProfilesQuery.data
+      ?.find((profile) => profile.id === values.execution_profile)
+      ?.available === true
+    if (!submittedProfileAvailable) return
     // For edit (PUT), image_model_key is a *string on the backend: nil = leave
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
@@ -379,8 +406,9 @@ export default function PlansPage() {
     }
     setAttachmentSubmitError('')
 
-    const payload: CreatePlanRequest | UpdatePlanRequest = {
+    const payload: CreatePlanRequest = {
       type: values.type,
+      execution_profile: values.execution_profile as AgentExecutionProfileID,
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
@@ -646,6 +674,21 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="execution_profile" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>执行配置</FormLabel>
+                  <FormControl>
+                    <ExecutionProfileSelector
+                      profiles={executionProfilesQuery.data ?? []}
+                      value={field.value}
+                      onChange={field.onChange}
+                      loading={executionProfilesQuery.isLoading}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               <FormField control={form.control} name="cron_expr" render={({ field }) => (
                 <FormItem>
                   <FormLabel>排期设置</FormLabel>
@@ -873,7 +916,7 @@ export default function PlansPage() {
 
               {/* Each scheduled run resolves the active immutable task SKU at admission. */}
               {(() => {
-                const perRun = taskCostFor(billingCatalog, watchedType as string)
+                const perRun = taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined)
                 const balance = billingWallet?.balance ?? 0
                 const remaining = perRun === undefined ? undefined : balance - perRun
                 return (
@@ -908,6 +951,10 @@ export default function PlansPage() {
               form="plan-form"
               loading={isSubmitting}
               disabled={referenceUploading
+                || !watchedExecutionProfile
+                || executionProfilesQuery.isError
+                || !selectedExecutionProfileAvailable
+                || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
                 || (isMontagePlan && montageUploading)}

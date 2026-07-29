@@ -51,6 +51,7 @@ function assertSubmitGuard(path, functionName, guardPattern) {
 }
 
 for (const path of [
+  'src/api/agent-profiles.ts',
   'src/api/request.ts',
   'src/api/api-keys.ts',
   'src/api/designer.ts',
@@ -58,6 +59,7 @@ for (const path of [
   'src/api/resources.ts',
   'src/api/topic-pool.ts',
   'src/types/designer.ts',
+  'src/types/agent-profile.ts',
   'src/types/resource.ts',
   'src/types/topic-pool.ts',
   'src/pages/designer/index.vue',
@@ -79,11 +81,98 @@ assertContains('src/pages.json', [
 
 assertContains('src/api/index.ts', [
   "export const api",
+  'agentProfiles',
   'apiKeys',
   'designer',
   'modelConfig',
   'resources',
   'topicPool',
+])
+
+// === Agent execution profiles (2026-07-28): server-owned capability catalog ===
+assertContains('src/api/agent-profiles.ts', [
+  'export const agentProfilesApi',
+  "'/agent/execution-profiles'",
+])
+
+assertContains('src/types/agent-profile.ts', [
+  "export type AgentExecutionProfileID = 'cost_effective' | 'balanced' | 'maximum_quality'",
+  'display_name: string',
+  'model_name: string',
+  'model_id: string',
+  "min_tier: 'free' | 'pro' | 'enterprise'",
+  'available: boolean',
+  'unavailable_reason?: string',
+])
+
+assertContains('src/types/index.ts', [
+  "from './agent-profile'",
+])
+
+assertFile('src/utils/execution-profiles.ts')
+const {
+  cheapestAvailableExecutionProfile,
+  resolveExecutionProfileSelection,
+  taskPriceForExecutionProfile,
+} = await import('../src/utils/execution-profiles.ts')
+
+const profileCatalog = {
+  catalog_id: 'retail-test',
+  currency: 'credits',
+  skus: [
+    { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'cost_effective', price_credits: 4000, delivery: 'task' },
+    { id: 'seednote-balanced', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 5000, delivery: 'task' },
+    { id: 'seednote-max', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'maximum_quality', price_credits: 3000, delivery: 'task' },
+    { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 6000, delivery: 'task' },
+  ],
+}
+const profileCapabilities = [
+  { id: 'cost_effective', available: true },
+  { id: 'balanced', available: true },
+  { id: 'maximum_quality', available: false, unavailable_reason: '需要企业版' },
+]
+
+assert.equal(taskPriceForExecutionProfile(profileCatalog, 'seednote', 'balanced'), 5000)
+assert.equal(taskPriceForExecutionProfile(profileCatalog, 'article', 'balanced'), 6000)
+assert.equal(taskPriceForExecutionProfile(profileCatalog, 'article', 'cost_effective'), undefined)
+assert.equal(cheapestAvailableExecutionProfile(profileCapabilities, profileCatalog, 'seednote'), 'cost_effective')
+assert.equal(
+  resolveExecutionProfileSelection(
+    'maximum_quality',
+    true,
+    profileCapabilities,
+    profileCatalog,
+    'seednote',
+  ),
+  'maximum_quality',
+)
+assert.equal(
+  resolveExecutionProfileSelection('', false, profileCapabilities, profileCatalog, 'seednote'),
+  'cost_effective',
+)
+
+assertContains('src/types/billing.ts', [
+  'execution_profile?: AgentExecutionProfileID',
+])
+
+assertFile('src/components/business/ExecutionProfileSelector.vue')
+assertContains('src/components/business/ExecutionProfileSelector.vue', [
+  'v-for="profile in profiles"',
+  'profile.display_name',
+  'profile.model_name',
+  'profile.model_id',
+  'profile.min_tier',
+  'profile.available',
+  'profile.unavailable_reason',
+  'unavailableReason(profile)',
+  '@tap="selectProfile(profile)"',
+  '最低套餐：Pro 版及以上',
+])
+assertNotContains('src/components/business/ExecutionProfileSelector.vue', [
+  "'cost_effective'",
+  "'balanced'",
+  "'maximum_quality'",
+  'min_tier ===',
 ])
 
 assertContains('src/types/auth.ts', [
@@ -92,6 +181,8 @@ assertContains('src/types/auth.ts', [
 
 assertContains('src/types/task.ts', [
   'topic?: string',
+  'execution_profile: AgentExecutionProfileID',
+  'agent_profile_snapshot: AgentProfileSnapshot',
   'skip_reference_image?: boolean',
   'reference_image?: ReferenceAssetView | null',
   'reference_image?: ReferenceImageSelection | null',
@@ -124,6 +215,18 @@ assertContains('src/types/designer.ts', [
   'provider_id?: string',
 ])
 
+for (const path of [
+  'src/api/designer.ts',
+  'src/types/designer.ts',
+  'src/pages/designer/index.vue',
+]) {
+  assertNotContains(path, [
+    'execution_profile',
+    'agentProfilesApi',
+    'ExecutionProfileSelector',
+  ])
+}
+
 assertContains('src/pages/projects/detail.vue', [
   "resourcesApi.list('themes'",
   "resourcesApi.list('layouts'",
@@ -147,6 +250,10 @@ assertContains('src/pages/tasks/detail.vue', [
   'tasksApi.zipDownloadUrl',
 ])
 
+assertContains('src/pages/tasks/detail.vue', [
+  '`execution_profile=${encodeURIComponent(t.execution_profile)}`',
+])
+
 assertContains('src/pages/designer/index.vue', [
   'canInpaint',
   'startEdit',
@@ -164,6 +271,18 @@ assertContains('src/pages/tasks/create.vue', [
   'skip_reference_image: form.skip_reference_image',
   'reference_image: form.reference_image',
   'watermark: form.watermark',
+  '<ExecutionProfileSelector',
+  'v-model="form.execution_profile"',
+  'agentProfilesApi.list()',
+  'resolveExecutionProfileSelection',
+  'taskPriceForExecutionProfile',
+  'execution_profile: executionProfile',
+  'form.execution_profile = String(query.execution_profile) as AgentExecutionProfileID',
+  'resolveExecutionProfileSelection',
+])
+
+assertContains('src/types/task.ts', [
+  'execution_profile: AgentExecutionProfileID',
 ])
 
 assertContains('src/pages/plans/create.vue', [
@@ -174,6 +293,18 @@ assertContains('src/pages/plans/create.vue', [
   'watermark',
   'skip_reference_image: form.skipReferenceImage',
   'reference_image: form.referenceImage',
+  '<ExecutionProfileSelector',
+  'v-model="form.executionProfile"',
+  'agentProfilesApi.list()',
+  'resolveExecutionProfileSelection',
+  'taskPriceForExecutionProfile',
+  'execution_profile: executionProfile',
+  'form.executionProfile = plan.execution_profile',
+  'resolveExecutionProfileSelection',
+])
+
+assertContains('src/types/plan.ts', [
+  'execution_profile: AgentExecutionProfileID',
 ])
 
 assertContains('src/pages/projects/detail.vue', [
@@ -192,8 +323,8 @@ assertContains('src/types/asset.ts', [
 
 assertSubmitButtonsDisabled('src/pages/projects/detail.vue', 'onSave', 'referenceUploading', 2)
 assertSubmitGuard('src/pages/projects/detail.vue', 'onSave', /if \(saving\.value \|\| referenceUploading\.value\) return/)
-assertSubmitButtonsDisabled('src/pages/plans/create.vue', 'handleSubmit', 'referenceUploading', 1)
-assertSubmitGuard('src/pages/plans/create.vue', 'handleSubmit', /if \(submitting\.value \|\| referenceUploading\.value\) return/)
+assertSubmitButtonsDisabled('src/pages/plans/create.vue', 'handleSubmit', '!canSubmit', 1)
+assertSubmitGuard('src/pages/plans/create.vue', 'handleSubmit', /if \(!canSubmit\.value \|\| referenceUploading\.value\) return/)
 assertSubmitButtonsDisabled('src/pages/tasks/create.vue', 'onSubmit', '!canSubmit', 1)
 assertSubmitGuard('src/pages/tasks/create.vue', 'onSubmit', /if \(!canSubmit\.value \|\| referenceUploading\.value\) return/)
 assert.match(
@@ -340,6 +471,15 @@ assertContains('src/pages/workshop/viral-analysis.vue', [
   'buildClonePrompt',
   'copyClonePrompt',
   'createCloneTask',
+])
+
+assertContains('src/pages/workshop/clone.vue', [
+  '<ExecutionProfileSelector',
+  'v-model="selectedExecutionProfile"',
+  'agentProfilesApi.list()',
+  'resolveExecutionProfileSelection',
+  'taskPriceForExecutionProfile',
+  'execution_profile: executionProfile',
 ])
 
 assertContains('src/pages/workshop/poster.vue', [

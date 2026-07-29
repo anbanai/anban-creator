@@ -14,7 +14,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/service"
 )
 
 // These tests cover the Batch 3A bulk endpoints (BulkCancel / BulkClone /
@@ -53,7 +52,7 @@ func bulkTestApp(t *testing.T, userID string) (app *fiber.App, repo repository.R
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 
 	app = fiber.New()

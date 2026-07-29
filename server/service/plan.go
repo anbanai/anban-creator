@@ -25,6 +25,7 @@ type PlanService struct {
 	repo            repository.Repository
 	logger          *zerolog.Logger
 	referenceAssets *ReferenceAssetService
+	agentProfiles   *AgentProfileRegistry
 }
 
 // NewPlanService creates a new PlanService.
@@ -38,6 +39,12 @@ func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetSe
 	}
 }
 
+func (s *PlanService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
+	if s != nil {
+		s.agentProfiles = registry
+	}
+}
+
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
 // fields use the same nil-means-default / nil-means-unchanged semantics as the
 // underlying model. Struct form keeps call sites readable as fields are added
@@ -46,6 +53,7 @@ func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetSe
 type CreatePlanParams struct {
 	UserID                string
 	ProjectID             string
+	ExecutionProfile      string
 	CronExpr              string
 	Prompt                string
 	ImageModelKey         string
@@ -79,6 +87,9 @@ type CreatePlanParams struct {
 // HasContentImage / HasTailImage control seednote image composition on spawned
 // tasks. nil falls back to the model's column defaults (content on, tail off).
 func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Plan, error) {
+	if strings.TrimSpace(p.ExecutionProfile) == "" {
+		return nil, fmt.Errorf("execution_profile is required")
+	}
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
 	}
@@ -97,6 +108,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
+	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
+	if err != nil {
+		return nil, err
+	}
+	p.ExecutionProfile = profile.ID
 	if p.ReferenceImageAssetID != "" {
 		if s.referenceAssets == nil {
 			return nil, ErrReferenceAssetUnavailable
@@ -155,6 +171,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		UserID:                   p.UserID,
 		ProjectID:                p.ProjectID,
 		Type:                     project.Platform,
+		ExecutionProfile:         strings.TrimSpace(p.ExecutionProfile),
 		CronExpr:                 p.CronExpr,
 		Prompt:                   p.Prompt,
 		Status:                   model.PlanStatusActive,
@@ -233,6 +250,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
 type UpdatePlanParams struct {
 	ID                       string
+	ExecutionProfile         string
 	CronExpr                 string
 	Prompt                   string
 	ImageModelKey            *string
@@ -281,6 +299,9 @@ func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p Updat
 }
 
 func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams) (*model.Plan, bool, error) {
+	if strings.TrimSpace(p.ExecutionProfile) == "" {
+		return nil, false, fmt.Errorf("execution_profile is required")
+	}
 	plan, err := s.repo.Plans().FindByID(ctx, p.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("find plan: %w", err)
@@ -294,6 +315,11 @@ func (s *PlanService) preparePlanUpdate(ctx context.Context, p UpdatePlanParams)
 }
 
 func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p UpdatePlanParams, scheduleChanged bool) (*model.Plan, error) {
+	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, plan.UserID, p.ExecutionProfile)
+	if err != nil {
+		return nil, err
+	}
+	plan.ExecutionProfile = profile.ID
 	plan.Prompt = p.Prompt
 	if p.ReferenceImageAssetID != nil {
 		if *p.ReferenceImageAssetID != "" {

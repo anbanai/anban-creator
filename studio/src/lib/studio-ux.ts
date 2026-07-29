@@ -1,4 +1,4 @@
-import type { BillingCatalog, Project, ProjectStats, Task, TaskType } from '@/types'
+import type { AgentExecutionProfileID, BillingCatalog, Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
 import { platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
@@ -91,15 +91,19 @@ export function taskCreationCostPreview({
   type,
   quantity,
   balance,
+  executionProfile,
 }: {
   catalog?: BillingCatalog
   type: string
   quantity: number
   balance: number
+  executionProfile?: AgentExecutionProfileID
 }): CreationCostPreview {
   const isEcommerce = type === 'ecommerce'
-  const sku = catalog?.skus.find((item) => item.charge_policy === 'task_admission' && item.operation === `task.${type}`)
-  const resolvedPrice = taskCostFor(catalog, type)
+  const sku = catalog?.skus.find((item) => item.charge_policy === 'task_admission'
+    && item.operation === `task.${type}`
+    && (executionProfile === undefined || item.execution_profile === executionProfile))
+  const resolvedPrice = taskCostFor(catalog, type, executionProfile)
   const priceAvailable = resolvedPrice !== undefined
   const baseCost = resolvedPrice ?? 0
   const listBaseCost = sku?.list_price_credits ?? baseCost

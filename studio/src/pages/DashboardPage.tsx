@@ -1,23 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import {
-  AlertTriangle,
-  Cloud,
-  Monitor,
-} from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import QueryErrorState from '@/components/QueryErrorState'
+import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { api } from '@/lib/api'
 import { hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
 import { contentTypeLabel } from '@/lib/labels'
+import { cheapestAvailableExecutionProfile, taskCostFor } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
 import { buildDashboardBlocker } from '@/lib/studio-ux'
-import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
+import type { AgentExecutionProfileID } from '@/types'
 import type { PromptAttachment } from '@/types/input-attachment'
 
 interface EntryError {
@@ -28,12 +27,12 @@ interface EntryError {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const desktopMode = isDesktop()
 
   const [prompt, setPrompt] = useState('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [entryError, setEntryError] = useState<EntryError | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -45,13 +44,6 @@ export default function DashboardPage() {
     queryKey: ['projects', 'dashboard', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
     staleTime: 60_000,
-  })
-
-  const { data: localExecutorStatus } = useQuery({
-    queryKey: ['dashboard', 'local-executor-status'],
-    queryFn: getLocalExecutorStatus,
-    enabled: desktopMode,
-    staleTime: 30_000,
   })
 
   const { data: apiKeysResponse } = useQuery({
@@ -66,11 +58,23 @@ export default function DashboardPage() {
     staleTime: 60_000,
   })
 
+  const profilesQuery = useAgentExecutionProfiles()
+  const billingCatalogQuery = useQuery({
+    queryKey: queryKeys.billing.catalog,
+    queryFn: () => api.billing.catalog(),
+    staleTime: 60_000,
+  })
+
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
-  const localExecutionReady = desktopMode && Boolean(localExecutorStatus?.available)
-  const ExecutionIcon = localExecutionReady ? Monitor : Cloud
-  const executionLabel = localExecutionReady ? '本地模式' : '云端模式'
+  const defaultExecutionProfile = cheapestAvailableExecutionProfile(
+    profilesQuery.data,
+    billingCatalogQuery.data,
+    selectedProject?.platform ?? '',
+  )
+  const executionProfilePrice = selectedProject && executionProfile
+    ? taskCostFor(billingCatalogQuery.data, selectedProject.platform, executionProfile)
+    : undefined
 
   useEffect(() => {
     if (projectsLoading) return
@@ -83,6 +87,14 @@ export default function DashboardPage() {
       setSelectedProjectId(nextProject.id)
     }
   }, [activeProjects, projectsLoading, selectedProjectId])
+
+  useEffect(() => {
+    if (!selectedProject || !defaultExecutionProfile) return
+    const selectedProfile = profilesQuery.data?.find((profile) => profile.id === executionProfile)
+    const selectionIsValid = selectedProfile?.available
+      && taskCostFor(billingCatalogQuery.data, selectedProject.platform, executionProfile || undefined) !== undefined
+    if (!selectionIsValid) setExecutionProfile(defaultExecutionProfile)
+  }, [billingCatalogQuery.data, defaultExecutionProfile, executionProfile, profilesQuery.data, selectedProject])
 
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
@@ -116,6 +128,7 @@ export default function DashboardPage() {
     modelConfigReady: modelConfig ? hasUsableModelConfig(modelConfig) : null,
   })
   const canSubmit = Boolean(selectedProjectId && selectedProject)
+    && Boolean(executionProfile)
     && !dashboardBlocker?.blocking
     && !submitMutation.isPending
     && !attachmentController.uploading
@@ -136,7 +149,7 @@ export default function DashboardPage() {
       channel: 'studio',
       project_id: selectedProject.id,
       text,
-      execution_target: localExecutionReady ? 'local' : '',
+      execution_profile: executionProfile as AgentExecutionProfileID,
       attachments: attachmentController.toInputAttachments(),
     })
   }
@@ -177,9 +190,26 @@ export default function DashboardPage() {
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
                 />
                 {selectedProject ? <ComposerMetaItem>{contentTypeLabel[selectedProject.platform] || selectedProject.platform}</ComposerMetaItem> : null}
-                <ComposerMetaItem><ExecutionIcon />{executionLabel}</ComposerMetaItem>
               </div>
             )}
+          />
+        </div>
+
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-foreground">执行配置</p>
+            {executionProfilePrice !== undefined ? (
+              <p aria-live="polite" className="text-sm tabular-nums text-muted-foreground">
+                {executionProfilePrice.toLocaleString()} 积分
+              </p>
+            ) : null}
+          </div>
+          <ExecutionProfileSelector
+            profiles={profilesQuery.data ?? []}
+            value={executionProfile}
+            onChange={setExecutionProfile}
+            loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
+            disabled={submitMutation.isPending}
           />
         </div>
 

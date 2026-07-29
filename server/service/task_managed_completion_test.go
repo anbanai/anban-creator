@@ -45,7 +45,7 @@ func newManagedCompletionFixture(t *testing.T, taskType string) *managedCompleti
 	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	logger := zerolog.New(io.Discard)
 	return &managedCompletionFixture{
-		svc:       NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil),
+		svc:       newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil),
 		repo:      repo,
 		store:     store,
 		task:      task,
@@ -257,7 +257,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 			ctx := context.Background()
 			svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 			projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: test.name, Quantity: 1,
 			})
 			if err != nil {

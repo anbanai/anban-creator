@@ -19,6 +19,7 @@ import { imageModelsApi } from './image-models'
 import { ilinkApi } from './ilink'
 import { aiEntryApi } from './ai-entry'
 import { uploadsApi } from './uploads'
+import { agentProfilesApi } from './agent-profiles'
 
 export const api = {
   auth: authApi,
@@ -42,4 +43,5 @@ export const api = {
   ilink: ilinkApi,
   aiEntry: aiEntryApi,
   uploads: uploadsApi,
+  agentProfiles: agentProfilesApi,
 }

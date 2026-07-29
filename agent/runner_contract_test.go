@@ -238,6 +238,24 @@ func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecution
 	}
 }
 
+func TestRunnerOptionsApplyFrozenReasoningControls(t *testing.T) {
+	runner := NewRunner(&Config{
+		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
+		Model: "k3", ReasoningEffort: "high", ThinkingRequired: true,
+	}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...)
+	if got.Effort == nil || *got.Effort != string(claudecode.EffortHigh) {
+		t.Fatalf("effort = %#v, want high", got.Effort)
+	}
+	if thinking := got.ExtraArgs["thinking"]; thinking == nil || *thinking != "adaptive" {
+		t.Fatalf("thinking = %#v, want adaptive", thinking)
+	}
+}
+
 func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:montage", TaskType: "montage", MaxTurns: 10,

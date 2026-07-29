@@ -460,7 +460,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{}
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetRuntimeDispatcher(dispatcher)
 	task := &model.Task{
 		ID:        uuid.NewString(),
@@ -831,6 +831,58 @@ func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article"}
 	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "returned incomplete identity") {
 		t.Fatalf("create error = %v, want incomplete runtime selection", err)
+	}
+}
+
+func TestCreateCurrentExecutionCopiesFrozenTaskAgentProfileWithoutRegistryLookup(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	task.ExecutionProfile = "maximum_quality"
+	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
+		ProfileID: "maximum_quality", Provider: "kimi", ModelID: "k3", Protocol: "anthropic",
+		ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true, DisplayName: "Kimi K3",
+	}
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatalf("update task profile: %v", err)
+	}
+
+	execution, created, err := svc.createCurrentExecution(context.Background(), task)
+	if err != nil || !created {
+		t.Fatalf("createCurrentExecution = %#v, %v, created=%v", execution, err, created)
+	}
+	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelID != "k3" || execution.Protocol != task.AgentProfileSnapshot.Protocol || execution.ContextWindow != task.AgentProfileSnapshot.ContextWindow {
+		t.Fatalf("execution profile = %#v, want frozen runtime identity %#v", execution, task.AgentProfileSnapshot)
+	}
+}
+
+func TestReplacePreStartExecutionCopiesFrozenTaskProfileInsteadOfResolvingRegistry(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	ctx := context.Background()
+	task.Status = model.TaskStatusRunning
+	task.ExecutionProfile = "balanced"
+	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
+		ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic", DisplayName: "Balanced",
+	}
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	current := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, RuntimeProfile: "article",
+		RuntimeImage: "registry/content@sha256:old", Target: "docker", Status: model.TaskExecutionCreated,
+	}
+	if err := repo.TaskExecutions().Create(ctx, current); err != nil {
+		t.Fatalf("create current execution: %v", err)
+	}
+	if won, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, current.ID); err != nil || !won {
+		t.Fatalf("set current execution: won=%v err=%v", won, err)
+	}
+	task.CurrentExecutionID = &current.ID
+
+	replacement, replaced, err := svc.replacePreStartExecution(ctx, task, current, "stale", nil)
+	if err != nil || !replaced {
+		t.Fatalf("replacePreStartExecution = %#v, replaced=%v, err=%v", replacement, replaced, err)
+	}
+	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelID != task.AgentProfileSnapshot.ModelID || replacement.Protocol != task.AgentProfileSnapshot.Protocol {
+		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
 	}
 }
 
@@ -1417,7 +1469,7 @@ func TestHandleExecutionFromPayloadWithoutDispatcherReturnsConfigurationError(t 
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, task.UserID); err == nil || !strings.Contains(err.Error(), "runtime dispatcher is not configured") {
 		t.Fatalf("HandleExecutionFromPayload error = %v, want dispatcher configuration error", err)
 	}
@@ -1454,7 +1506,7 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 	if err := rdb.Set(ctx, projectRunningCountPrefix+projectID, 1, time.Hour).Err(); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
@@ -1498,7 +1550,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesAfterTerminalPe
 	dbErr := errors.New("fail pending unavailable")
 	state := &failPendingOnceState{err: dbErr}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, baseRepo.Assets())
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); !errors.Is(err, dbErr) {
 		t.Fatalf("first error = %v, want %v", err, dbErr)
@@ -1555,7 +1607,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		WHEN NEW.type = 'task_refund' BEGIN SELECT RAISE(ABORT, 'refund insert unavailable'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err == nil || !strings.Contains(err.Error(), "refund insert unavailable") {
 		t.Fatalf("first HandleExecutionFromPayload error = %v, want refund persistence failure", err)
@@ -1618,7 +1670,7 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 		}},
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 
 	if err := svc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
@@ -1653,7 +1705,7 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1702,7 +1754,7 @@ func TestEnqueueExecutionFallbackReleasesSlotAfterPreparationPersistenceErrorFor
 	assets := &contextCapturingAssetRepository{AssetRepository: baseRepo.Assets(), contexts: assetContexts}
 	state := &failPendingOnceState{err: errors.New("database table is locked"), firstFailure: make(chan struct{})}
 	repo, tasks := newFailPendingOnceRepository(baseRepo, state, assets)
-	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("first EnqueueExecution: %v", err)
@@ -1787,7 +1839,7 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(repo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {
 		t.Fatalf("EnqueueExecution: %v", err)
@@ -1827,7 +1879,7 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	t.Cleanup(func() { _ = rdb.Close() })
 	logger := zerolog.New(io.Discard)
 	dispatcher := &dispatchTestDispatcher{started: make(chan struct{}, 1), release: release}
-	svc := NewTaskService(baseRepo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
+	svc := newTestTaskService(baseRepo, nil, nil, &logger, "", NewRedisPubSub(rdb, &logger), nil)
 	svc.SetRuntimeDispatcher(dispatcher)
 
 	if err := svc.EnqueueExecution(ctx, task, project); err != nil {

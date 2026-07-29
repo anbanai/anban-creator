@@ -363,6 +363,24 @@ func TestProjectToolSchemasIncludeMoments(t *testing.T) {
 	assertToolEnumContains("get_project_profile", "scope", "montage")
 }
 
+func TestGetProjectSchemaOnlyAcceptsProjectID(t *testing.T) {
+	handler := NewMCPHandler(nil, "test-key", nil)
+	tools := listMCPToolsForTest(t, handler)
+	for _, tool := range tools {
+		tm, ok := tool.(map[string]any)
+		if !ok || tm["name"] != "get_project" {
+			continue
+		}
+		schema, _ := tm["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if len(properties) != 1 || properties["project_id"] == nil {
+			t.Fatalf("get_project properties = %#v, want only project_id", properties)
+		}
+		return
+	}
+	t.Fatal("get_project tool not found")
+}
+
 func TestMCPFilePathSchemaDescriptionsDeclareLocality(t *testing.T) {
 	handler := NewMCPHandler(nil, "test-key", nil)
 	tools := listMCPToolsForTest(t, handler)

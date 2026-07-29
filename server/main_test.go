@@ -59,6 +59,38 @@ func TestMigrateModelsReturnsMigrationFailure(t *testing.T) {
 	}
 }
 
+func TestAgentExecutionProfileSchemaReadiness(t *testing.T) {
+	fresh, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAgentExecutionProfileSchema(fresh); err != nil {
+		t.Fatalf("fresh database readiness: %v", err)
+	}
+
+	legacy, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("CREATE TABLE tasks (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAgentExecutionProfileSchema(legacy); err == nil || !strings.Contains(err.Error(), "20260728_agent_execution_profiles.sql") {
+		t.Fatalf("legacy schema readiness = %v, want migration instruction", err)
+	}
+
+	ready, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAgentExecutionProfileSchema(ready); err != nil {
+		t.Fatalf("current schema readiness: %v", err)
+	}
+}
+
 func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	raw, err := os.ReadFile("main.go")
 	if err != nil {
@@ -71,6 +103,11 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 		t.Fatal("main.go migration startup section is missing")
 	}
 	section := src[start:end]
+	readiness := strings.Index(section, "requireAgentExecutionProfileSchema(mysqlDB)")
+	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
+	if readiness < 0 || autoMigrate < 0 || readiness >= autoMigrate {
+		t.Fatalf("schema readiness must run before AutoMigrate: readiness=%d auto_migrate=%d", readiness, autoMigrate)
+	}
 	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
 		t.Fatal("main.go must route model migration through the tested startup helper")
 	}
@@ -140,7 +177,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-27-v4"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-28-v5"); err != nil {
 			t.Fatalf("published production catalog: %v", err)
 		}
 	})
@@ -161,7 +198,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err != nil {
 			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
 		}
-		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-27-v4"} {
+		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-28-v5"} {
 			if _, err := repo.Billing().FindCatalogVersion(t.Context(), catalogID); err != nil {
 				t.Fatalf("catalog %s not preserved: %v", catalogID, err)
 			}

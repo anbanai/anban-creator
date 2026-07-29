@@ -26,11 +26,21 @@ func testClaudeRuntimeEnv() map[string]string {
 	return map[string]string{
 		"ANTHROPIC_AUTH_TOKEN":           "token",
 		"ANTHROPIC_BASE_URL":             "https://ark.cn-beijing.volces.com/api/compatible",
-		"ANTHROPIC_MODEL":                "sonnet",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "sonnet",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "sonnet",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "sonnet",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "haiku",
+		"ANTHROPIC_MODEL":                "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "doubao-seed-evolving",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "doubao-seed-evolving",
+	}
+}
+
+func testAgentRuntimeProfile() service.AgentRuntimeProfile {
+	return service.AgentRuntimeProfile{
+		ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving",
+		Protocol: "anthropic", DisplayName: "平衡型", RuntimeEnv: testClaudeRuntimeEnv(),
+		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+			"doubao-seed-evolving": {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+		},
 	}
 }
 
@@ -51,11 +61,9 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
-			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
+			"prompt": "write", "execution_profile": testAgentRuntimeProfile(), "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".anban-creator/runtime-note.txt", "text": "managed\n", "mode": 420}},
-			"model_usage_aliases": testModelUsageAliases(),
-			"runtime_env":         testClaudeRuntimeEnv(),
-			"artifact_transport":  map[string]any{"mode": "direct"},
+			"artifact_transport": map[string]any{"mode": "direct"},
 		}})
 	}))
 	defer server.Close()
@@ -91,9 +99,8 @@ func TestBootstrapCreatesRuntimeOwnedOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
-			"prompt": "write", "model": "sonnet", "max_turns": 12, "agent_flag": "anban:article",
+			"prompt": "write", "execution_profile": testAgentRuntimeProfile(), "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
-			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
 			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
@@ -120,9 +127,8 @@ func TestBootstrapCreatesLiveSlicerOutputTree(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": model.TaskTypeLiveSlicer, "project_id": "project-1",
-			"prompt": "slice", "model": "sonnet", "max_turns": 160, "agent_flag": "anban:live-slicer",
+			"prompt": "slice", "execution_profile": testAgentRuntimeProfile(), "max_turns": 160, "agent_flag": "anban:live-slicer",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
-			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
 			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
@@ -160,9 +166,8 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "montage", "project_id": "project-1",
-			"prompt": "render", "model": "sonnet", "max_turns": 40, "agent_flag": "anban:montage",
+			"prompt": "render", "execution_profile": testAgentRuntimeProfile(), "max_turns": 40, "agent_flag": "anban:montage",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": "montage-input.json", "text": "{}", "mode": 420}},
-			"model_usage_aliases": testModelUsageAliases(), "runtime_env": testClaudeRuntimeEnv(),
 			"artifact_transport": map[string]any{"mode": "stream"},
 		}})
 	}))
@@ -350,9 +355,7 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		return BootstrapResponse{
 			ExecutionToken: testExecutionToken(t, "execution-1", "task-1", "project-1"),
 			TaskID:         "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write",
-			Model: "sonnet", MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
-			ModelUsageAliases: testModelUsageAliases(),
-			RuntimeEnv:        testClaudeRuntimeEnv(),
+			ExecutionProfile: testAgentRuntimeProfile(), MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
 			ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
 		}
 	}
@@ -374,15 +377,17 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		}},
 		{"resume session without context", func(r *BootstrapResponse) { r.ResumeSessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740" }},
 		{"foreign resume context", func(r *BootstrapResponse) { r.ResumeContextPath = ".anban-creator/resume/executions/other/latest.md" }},
-		{"long model", func(r *BootstrapResponse) { r.Model = strings.Repeat("m", maxBootstrapModelBytes+1) }},
-		{"unknown runtime environment", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
-		{"empty runtime environment value", func(r *BootstrapResponse) { r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""} }},
-		{"oversized runtime environment value", func(r *BootstrapResponse) {
-			r.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
+		{"long model", func(r *BootstrapResponse) { r.ExecutionProfile.ModelID = strings.Repeat("m", maxBootstrapModelBytes+1) }},
+		{"unknown runtime environment", func(r *BootstrapResponse) { r.ExecutionProfile.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
+		{"empty runtime environment value", func(r *BootstrapResponse) {
+			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""}
 		}},
-		{"missing model usage aliases", func(r *BootstrapResponse) { r.ModelUsageAliases = nil }},
+		{"oversized runtime environment value", func(r *BootstrapResponse) {
+			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
+		}},
+		{"missing model usage aliases", func(r *BootstrapResponse) { r.ExecutionProfile.ModelUsageAliases = nil }},
 		{"invalid model usage alias", func(r *BootstrapResponse) {
-			r.ModelUsageAliases = map[string]serveragent.ModelUsageIdentity{"raw": {Provider: "", Model: "sonnet"}}
+			r.ExecutionProfile.ModelUsageAliases = map[string]serveragent.ModelUsageIdentity{"raw": {Provider: "", Model: "sonnet"}}
 		}},
 		{"Montage environment on article task", func(r *BootstrapResponse) {
 			r.Env = map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"}
@@ -409,12 +414,10 @@ func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
 		TaskType:            "montage",
 		ProjectID:           "project-1",
 		Prompt:              "make a video",
-		Model:               "sonnet",
+		ExecutionProfile:    testAgentRuntimeProfile(),
 		MaxTurns:            40,
 		AgentFlag:           "anban:montage",
 		AutoMemoryDirectory: ".claude/memory",
-		ModelUsageAliases:   testModelUsageAliases(),
-		RuntimeEnv:          testClaudeRuntimeEnv(),
 		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 		ArtifactTransport:   service.ArtifactTransport{Mode: ArtifactUploadStream},
 	}

@@ -147,6 +147,13 @@ describe('Designer billing guidance', () => {
     })
   })
 
+  it('does not expose Agent execution profiles for image operations', async () => {
+    render(createElement(DesignerPage))
+
+    await screen.findAllByText('GPT Image 2')
+    expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
+  })
+
   it('shows price and balance and disables generation when credits are insufficient', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100, promotional: 0, debt: 0, balance: 100 })
 

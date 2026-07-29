@@ -41,9 +41,9 @@ func (r planHandlerRepositoryOverride) Plans() repository.PlanRepository {
 	return r.plans
 }
 
-func newPlanHandlerUpdateTestApp(repo repository.Repository, store *projectReferenceStore) *fiber.App {
+func newPlanHandlerUpdateTestApp(t *testing.T, repo repository.Repository, store *projectReferenceStore) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	referenceAssets := service.NewReferenceAssetService(repo, store, time.Now)
 	planSvc.SetReferenceAssetService(referenceAssets)
 	h := NewPlanHandler(planSvc, &logger)
@@ -56,6 +56,42 @@ func newPlanHandlerUpdateTestApp(repo repository.Repository, store *projectRefer
 		return h.Update(c)
 	})
 	return app
+}
+
+func seedPlanHandlerUser(t *testing.T, repo repository.Repository, userID string) {
+	t.Helper()
+	if err := repo.Users().Create(t.Context(), &model.User{
+		ID:         userID,
+		Email:      userID + "@example.com",
+		Password:   "hashed",
+		InviteCode: "planupdate",
+		Tier:       model.TierFree,
+	}); err != nil {
+		t.Fatalf("create plan owner: %v", err)
+	}
+}
+
+func TestCreatePlanRejectsMissingExecutionProfile(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	h := NewPlanHandler(nil, &logger)
+	app := fiber.New()
+	app.Post("/plans", h.Create)
+
+	req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(`{"project_id":"project-id","cron_expr":"0 9 * * *"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "execution_profile is required") {
+		t.Fatalf("body = %s, want execution_profile validation error", body)
+	}
 }
 
 // TestCreatePlan_ArticleImageTogglesPersist verifies the plan handler→service→
@@ -90,7 +126,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 
 	app := fiber.New()
@@ -99,7 +135,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -172,7 +208,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
 	h.SetStore(uploadSessionStatStore(repo.UploadSessions()))
@@ -183,7 +219,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
-		"project_id": "`+projectID+`",
+		"execution_profile":"cost_effective","project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "每天剪一条发布会短片",
@@ -250,7 +286,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -260,7 +296,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	})
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
-		"project_id": "`+projectID+`",
+		"execution_profile":"cost_effective","project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "错误平台",
@@ -310,7 +346,7 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 
 	app := fiber.New()
@@ -319,7 +355,7 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
+	body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -360,7 +396,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
@@ -383,7 +419,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("create "+tt.name, func(t *testing.T) {
-			body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
+			body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -394,7 +430,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	createBody := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
+	createBody := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
 		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
 		`{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},` +
 		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
@@ -424,7 +460,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
-	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"prompt":"updated"}`))
+	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","prompt":"updated"}`))
 	omitReq.Header.Set("Content-Type", "application/json")
 	omitResp, err := app.Test(omitReq)
 	if err != nil {
@@ -443,7 +479,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("update "+tt.name, func(t *testing.T) {
-			body := `{"input_attachments":` + tt.attachments + `}`
+			body := `{"execution_profile":"cost_effective","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -458,7 +494,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"input_attachments":[]}`))
+	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","input_attachments":[]}`))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearResp, err := app.Test(clearReq)
 	if err != nil {
@@ -475,7 +511,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
 	}
 
-	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
 	replaceReq.Header.Set("Content-Type", "application/json")
 	replaceResp, err := app.Test(replaceReq)
 	if err != nil || replaceResp.StatusCode != fiber.StatusOK {
@@ -496,6 +532,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 	base := repository.New(setupTaskHandlerTestDB(t))
 	userID := uuid.NewString()
 	planID := uuid.NewString()
+	seedPlanHandlerUser(t, base, userID)
 	for _, assetID := range []string{"asset-a", "asset-b"} {
 		if err := base.Assets().Create(t.Context(), &model.Asset{
 			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeTaskReference,
@@ -527,9 +564,9 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 	}
 	repo := planHandlerRepositoryOverride{Repository: base, plans: hooked}
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
-	app := newPlanHandlerUpdateTestApp(repo, store)
+	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -557,6 +594,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 	base := repository.New(setupTaskHandlerTestDB(t))
 	userID := uuid.NewString()
 	planID := uuid.NewString()
+	seedPlanHandlerUser(t, base, userID)
 	assetIDs := []string{"asset-a", "asset-b", "asset-c", "asset-d"}
 	for _, assetID := range assetIDs {
 		if err := base.Assets().Create(t.Context(), &model.Asset{
@@ -586,9 +624,9 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 	}
 	repo := planHandlerRepositoryOverride{Repository: base, plans: hooked}
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
-	app := newPlanHandlerUpdateTestApp(repo, store)
+	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "must-not-write"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "must-not-write"})
 	if resp.StatusCode != fiber.StatusConflict {
 		t.Fatalf("status=%d want 409 body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -617,6 +655,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	base := repository.New(db)
 	userID := uuid.NewString()
 	planID := uuid.NewString()
+	seedPlanHandlerUser(t, base, userID)
 	if err := base.Plans().Create(t.Context(), &model.Plan{
 		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
 		CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
@@ -627,9 +666,9 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
-	app := newPlanHandlerUpdateTestApp(base, store)
+	app := newPlanHandlerUpdateTestApp(t, base, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}

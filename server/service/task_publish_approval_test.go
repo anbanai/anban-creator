@@ -39,7 +39,7 @@ func setupApprovalService(t *testing.T, withPublishingSvc bool) (*TaskService, r
 	if withPublishingSvc {
 		pubSvc = NewPublishingService(repo, &logger)
 	}
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, pubSvc)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, pubSvc)
 
 	userID := uuid.New().String()
 	projectID := uuid.New().String()

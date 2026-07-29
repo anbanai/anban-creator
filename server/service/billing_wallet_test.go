@@ -542,7 +542,7 @@ func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 			t.Fatal(err)
 		}
 		secondQuote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-			UserID: billingWalletUserID, Operation: "task.article", RequestFingerprint: quote.RequestFingerprint,
+			UserID: billingWalletUserID, Operation: "task.article", ExecutionProfile: "cost_effective", RequestFingerprint: quote.RequestFingerprint,
 			IdempotencyScope: "quote", IdempotencyKey: "task-identity-second-quote",
 		})
 		if err != nil {
@@ -1589,6 +1589,8 @@ func newBillingWalletFixtureWithRepository(t *testing.T, repo repository.Reposit
 func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo repository.Repository, paid, promotional, debt, operationPrice int64) *billingWalletFixture {
 	t.Helper()
 	bundle := testBillingBundle()
+	// Wallet and task-service fixtures exercise the Free-tier Agent profile.
+	bundle.Products.SKUs[0].ExecutionProfile = "cost_effective"
 	// Operation and standalone prices intentionally differ from task price.
 	bundle.Products.SKUs[1].PriceCredits = operationPrice
 	bundle.Products.SKUs[2].PriceCredits = 500
@@ -1871,8 +1873,12 @@ func (r *rejectNestedTxRepository) WithTx(context.Context, func(repository.Repos
 
 func (f *billingWalletFixture) quote(t *testing.T, userID, operation, route, identity string) *model.BillingQuote {
 	t.Helper()
+	executionProfile := ""
+	if strings.HasPrefix(operation, "task.") && operation != "task.viral_analysis" {
+		executionProfile = "cost_effective"
+	}
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-		UserID: userID, Operation: operation, Route: route, RequestFingerprint: billingFingerprint(identity),
+		UserID: userID, Operation: operation, Route: route, ExecutionProfile: executionProfile, RequestFingerprint: billingFingerprint(identity),
 		IdempotencyScope: "quote", IdempotencyKey: identity,
 	})
 	if err != nil {

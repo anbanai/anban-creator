@@ -69,6 +69,30 @@ spec:
                 secretKeyRef:
                   name: anban-agent-execution-token
                   key: token-secret
+            - name: ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: deepseek-anthropic-base-url
+                  optional: true
+            - name: ANBAN_DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: deepseek-api-key
+                  optional: true
+            - name: ANBAN_DOUBAO_AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: doubao-api-key
+                  optional: true
+            - name: ANBAN_KIMI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: kimi-api-key
+                  optional: true
             - name: ANBAN_BILLING_ADMIN_API_KEY
               valueFrom:
                 secretKeyRef:

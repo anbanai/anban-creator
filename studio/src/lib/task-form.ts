@@ -1,4 +1,4 @@
-import type { CreateTaskRequest, ExecutionTarget, Project, ReferenceImageSelection, Task } from '@/types'
+import type { AgentExecutionProfileID, CreateTaskRequest, Project, ReferenceImageSelection, Task } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
@@ -12,7 +12,6 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   has_tail_image: boolean
   article_with_cover: boolean
   article_with_content_images: boolean
-  execution_target?: ExecutionTarget
 }
 
 function cloneValue<T>(value: T): T {
@@ -37,6 +36,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
 
   return {
     project_id: project?.id ?? '',
+    execution_profile: '',
     type: defaults.type,
     topic: undefined,
     prompt: '',
@@ -59,7 +59,6 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     selling_points: '',
     language: '',
     montage_input: projectMontageInput(project),
-    execution_target: undefined,
   }
 }
 
@@ -100,6 +99,7 @@ export function switchTaskFormDefaults(
   const defaults = createTaskFormDefaults(project)
   return {
     ...defaults,
+    execution_profile: current.execution_profile,
     topic: current.topic,
     prompt: current.prompt,
     quantity: current.quantity,
@@ -110,7 +110,6 @@ export function switchTaskFormDefaults(
     goal: current.goal,
     goal_mode: current.goal_mode,
     montage_input: projectMontageInput(project, current.prompt),
-    execution_target: current.execution_target,
   }
 }
 
@@ -123,6 +122,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
 
   return {
     project_id: task.project_id,
+    execution_profile: task.execution_profile,
     type: task.type,
     topic: task.topic,
     prompt: task.prompt,
@@ -149,7 +149,6 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     montage_input: task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
       : undefined,
-    execution_target: task.execution_target,
   }
 }
 
@@ -163,12 +162,9 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     : values.skip_reference_image
       ? null
       : undefined
-  const executionTarget = values.execution_target === 'local_claimed'
-    ? 'local'
-    : values.execution_target || undefined
-
   return {
     type: values.type,
+    execution_profile: values.execution_profile as AgentExecutionProfileID,
     topic: values.topic,
     prompt,
     project_id: values.project_id,
@@ -209,6 +205,5 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     ...(values.type === 'montage'
       ? { montage_input: cloneValue(buildMontageInputForSubmit(values.prompt, values.montage_input)) }
       : {}),
-    ...(values.type !== 'montage' && executionTarget ? { execution_target: executionTarget } : {}),
   }
 }

@@ -66,7 +66,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 				}
 			}
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
-			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			h := NewTaskHandler(taskSvc, &logger)
@@ -75,7 +75,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 			h.SetReferenceAssetService(referenceSvc)
 			app := fiber.New()
 			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
-			resp := postJSON(t, app, "/tasks", `{"project_id":"`+project.ID+`","prompt":"write","reference_image":{"asset_id":"`+tt.assetID+`"}}`)
+			resp := postJSON(t, app, "/tasks", `{"execution_profile":"cost_effective","project_id":"`+project.ID+`","prompt":"write","reference_image":{"asset_id":"`+tt.assetID+`"}}`)
 			if resp.StatusCode != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
 			}
@@ -147,11 +147,11 @@ func TestPlanAndTaskReadResponsesPresentRepositoryAssets(t *testing.T) {
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	logger := zerolog.New(io.Discard)
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	planSvc.SetReferenceAssetService(referenceSvc)
 	planHandler := NewPlanHandler(planSvc, &logger)
 	planHandler.SetReferenceAssetService(referenceSvc)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	taskHandler := NewTaskHandler(taskSvc, &logger)
 	taskHandler.SetRepository(repo)
@@ -205,13 +205,13 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "cost_effective", Status: model.TaskStatusFailed, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -249,7 +249,7 @@ func TestPlanMutationSigningFailureDoesNotPersist(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	planSvc.SetReferenceAssetService(referenceSvc)
 	h := NewPlanHandler(planSvc, &logger)
@@ -260,7 +260,7 @@ func TestPlanMutationSigningFailureDoesNotPersist(t *testing.T) {
 	app.Post("/plans", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	app.Put("/plans/:id", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Update(c) })
 
-	resp := postJSON(t, app, "/plans", `{"project_id":"`+projectID+`","cron_expr":"0 9 * * *","prompt":"create","reference_image":{"asset_id":"`+asset.ID+`"}}`)
+	resp := postJSON(t, app, "/plans", `{"execution_profile":"cost_effective","project_id":"`+projectID+`","cron_expr":"0 9 * * *","prompt":"create","reference_image":{"asset_id":"`+asset.ID+`"}}`)
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("create status/body = %d/%s", resp.StatusCode, body)
@@ -274,7 +274,7 @@ func TestPlanMutationSigningFailureDoesNotPersist(t *testing.T) {
 	if err := repo.Plans().Create(ctx, baseline); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("PUT", "/plans/"+baseline.ID, strings.NewReader(`{"prompt":"after","reference_image":{"asset_id":"`+asset.ID+`"}}`))
+	req := httptest.NewRequest("PUT", "/plans/"+baseline.ID, strings.NewReader(`{"execution_profile":"cost_effective","prompt":"after","reference_image":{"asset_id":"`+asset.ID+`"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = app.Test(req)
 	if err != nil {
@@ -312,13 +312,13 @@ func TestPlanUpdateReferenceImageOmissionNullReplaceAndInvalidEmptySelection(t *
 			t.Fatal(err)
 		}
 	}
-	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.PlanStatusActive, Prompt: "before", ReferenceImageAssetID: first.ID}
+	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "cost_effective", Status: model.PlanStatusActive, Prompt: "before", ReferenceImageAssetID: first.ID}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	planSvc := service.NewPlanService(repo, &logger)
+	planSvc := newHandlerPlanService(t, repo, &logger)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	planSvc.SetReferenceAssetService(referenceSvc)
 	h := NewPlanHandler(planSvc, &logger)
@@ -347,19 +347,19 @@ func TestPlanUpdateReferenceImageOmissionNullReplaceAndInvalidEmptySelection(t *
 		}
 	}
 
-	if resp := update(`{"prompt":"omitted"}`); resp.StatusCode != fiber.StatusOK {
+	if resp := update(`{"execution_profile":"cost_effective","prompt":"omitted"}`); resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("omitted status = %d", resp.StatusCode)
 	}
 	assertID(first.ID)
-	if resp := update(`{"prompt":"cleared","reference_image":null}`); resp.StatusCode != fiber.StatusOK {
+	if resp := update(`{"execution_profile":"cost_effective","prompt":"cleared","reference_image":null}`); resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("null status = %d", resp.StatusCode)
 	}
 	assertID("")
-	if resp := update(`{"prompt":"replaced","reference_image":{"asset_id":"` + second.ID + `"}}`); resp.StatusCode != fiber.StatusOK {
+	if resp := update(`{"execution_profile":"cost_effective","prompt":"replaced","reference_image":{"asset_id":"` + second.ID + `"}}`); resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("replace status = %d", resp.StatusCode)
 	}
 	assertID(second.ID)
-	if resp := update(`{"prompt":"invalid","reference_image":{}}`); resp.StatusCode != fiber.StatusBadRequest {
+	if resp := update(`{"execution_profile":"cost_effective","prompt":"invalid","reference_image":{}}`); resp.StatusCode != fiber.StatusBadRequest {
 		t.Fatalf("empty selection status = %d", resp.StatusCode)
 	}
 	assertID(second.ID)
@@ -383,7 +383,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -392,7 +392,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	h.SetReferenceAssetService(referenceSvc)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write","execution_target":"local"}`)
+	resp := postJSON(t, app, "/tasks", `{"execution_profile":"cost_effective","project_id":"`+projectID+`","prompt":"write"}`)
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
@@ -461,7 +461,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			}
 			repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 			taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
 			h := NewTaskHandler(taskSvc, &logger)
 			h.SetRepository(repo)
@@ -469,7 +469,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			app := fiber.New()
 			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write"}`)
+			resp := postJSON(t, app, "/tasks", `{"execution_profile":"cost_effective","project_id":"`+projectID+`","prompt":"write"}`)
 			if resp.StatusCode != tt.wantStatus {
 				body, _ := io.ReadAll(resp.Body)
 				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, body, tt.wantStatus)
@@ -508,7 +508,7 @@ func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesV
 	repo := &taskHandlerRepositoryOverride{Repository: base, projects: projects}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -518,13 +518,13 @@ func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesV
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","prompt":"write","execution_target":"local"}`)
+	resp := postJSON(t, app, "/tasks", `{"execution_profile":"cost_effective","project_id":"`+projectID+`","prompt":"write"}`)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != fiber.StatusOK || !strings.Contains(string(body), `"reference_image":{"asset_id":"`+asset.ID+`"`) {
 		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
 	}
-	if projects.findCalls != 2 {
-		t.Fatalf("project lookups = %d, want preflight plus service defense", projects.findCalls)
+	if projects.findCalls != 3 {
+		t.Fatalf("project lookups = %d, want preflight, service defense, and cloud dispatch", projects.findCalls)
 	}
 	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 		t.Fatalf("signed keys = %#v", store.signedKeys)
@@ -547,13 +547,13 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -594,7 +594,7 @@ func TestResumeSigningFailureDoesNotMutateTask(t *testing.T) {
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)

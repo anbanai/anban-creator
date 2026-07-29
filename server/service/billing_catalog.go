@@ -41,6 +41,13 @@ type BillingCatalogService struct {
 	bundle   billing.Bundle
 	now      func() time.Time
 	quoteTTL time.Duration
+	profiles *AgentProfileRegistry
+}
+
+func (s *BillingCatalogService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
+	if s != nil {
+		s.profiles = registry
+	}
 }
 
 type ResolvedSKUPrice struct {
@@ -54,10 +61,23 @@ type ResolvedSKUPrice struct {
 }
 
 type QuoteRequest struct {
+	UserID               string
+	CatalogID            string
+	Operation            string
+	Route                string
+	ExecutionProfile     string
+	AgentProfileSnapshot *model.AgentProfileSnapshot
+	RequestFingerprint   string
+	IdempotencyScope     string
+	IdempotencyKey       string
+}
+
+// TaskQuoteRequest is the complete client-controlled identity for an Agent task
+// admission quote. Catalog and SKU routing remain server-owned.
+type TaskQuoteRequest struct {
 	UserID             string
-	CatalogID          string
-	Operation          string
-	Route              string
+	TaskType           string
+	ExecutionProfile   string
 	RequestFingerprint string
 	IdempotencyScope   string
 	IdempotencyKey     string
@@ -114,7 +134,7 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 		}
 		skus = append(skus, model.BillingSKU{
 			ID: uuid.NewString(), CatalogID: catalog.CatalogID, SKUID: item.ID,
-			Operation: item.Operation, PriceCredits: item.PriceCredits, Policy: item.ChargePolicy,
+			Operation: item.Operation, ExecutionProfile: item.ExecutionProfile, PriceCredits: item.PriceCredits, Policy: item.ChargePolicy,
 			Route: item.Route, Delivery: item.Delivery, Snapshot: itemSnapshot, CreatedAt: now,
 		})
 		for _, tierName := range billing.RequiredPricingTiers {
@@ -185,6 +205,47 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 	return catalog, nil
 }
 
+func (s *BillingCatalogService) ResolveSKUForExecutionProfile(ctx context.Context, catalogID, operation, executionProfile string) (*model.BillingSKU, error) {
+	var ok bool
+	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if operation, ok = canonicalBillingText(operation, 128, true); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if executionProfile, ok = canonicalBillingText(executionProfile, 40, true); !ok {
+		return nil, fmt.Errorf("%w: invalid execution profile", ErrBillingInvalid)
+	}
+	if catalogID == "" {
+		catalog, err := s.repo.Billing().FindLatestPublishedCatalog(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBillingSKUNotFound
+			}
+			return nil, err
+		}
+		catalogID = catalog.CatalogID
+	}
+	sku, err := s.repo.Billing().FindSKUByOperationAndProfile(ctx, catalogID, operation, executionProfile)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrBillingSKUNotFound
+	}
+	return sku, err
+}
+
+func (s *BillingCatalogService) ResolvePriceForExecutionProfile(ctx context.Context, userID, catalogID, operation, executionProfile string) (*ResolvedSKUPrice, error) {
+	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	tier := model.ResolveTier(user.Tier)
+	sku, err := s.ResolveSKUForExecutionProfile(ctx, catalogID, operation, executionProfile)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolvePriceForSKU(ctx, sku, tier)
+}
+
 func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error) {
 	var ok bool
 	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
@@ -230,6 +291,13 @@ func (s *BillingCatalogService) ResolvePriceForTier(ctx context.Context, catalog
 	if err != nil {
 		return nil, err
 	}
+	return s.resolvePriceForSKU(ctx, sku, tier)
+}
+
+func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *model.BillingSKU, tier model.Tier) (*ResolvedSKUPrice, error) {
+	if sku == nil || !model.ValidTiers[tier] {
+		return nil, fmt.Errorf("%w: invalid pricing identity", ErrBillingInvalid)
+	}
 	catalog, err := s.repo.Billing().FindCatalogVersion(ctx, sku.CatalogID)
 	if err != nil {
 		return nil, err
@@ -271,6 +339,9 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(req.Operation, "task.") && req.ExecutionProfile == "" && req.Operation != "task.viral_analysis" {
+		return nil, fmt.Errorf("%w: agent task quotes require an execution profile", ErrBillingInvalid)
+	}
 	if existing, err := s.repo.Billing().FindQuoteByKey(ctx, req.IdempotencyScope, req.IdempotencyKey); err == nil {
 		if quoteMatchesRequest(existing, req) {
 			return existing, nil
@@ -279,19 +350,35 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	resolved, err := s.ResolvePrice(ctx, req.UserID, req.CatalogID, req.Operation, req.Route)
+	var resolved *ResolvedSKUPrice
+	if req.ExecutionProfile != "" {
+		resolved, err = s.ResolvePriceForExecutionProfile(ctx, req.UserID, req.CatalogID, req.Operation, req.ExecutionProfile)
+	} else {
+		resolved, err = s.ResolvePrice(ctx, req.UserID, req.CatalogID, req.Operation, req.Route)
+	}
 	if err != nil {
 		return nil, err
 	}
 	sku := resolved.SKU
 	now := s.now().UTC()
+	var profileSnapshot datatypes.JSON
+	if req.AgentProfileSnapshot != nil {
+		if req.AgentProfileSnapshot.ProfileID != req.ExecutionProfile {
+			return nil, fmt.Errorf("%w: execution profile snapshot mismatch", ErrBillingInvalid)
+		}
+		profileSnapshot, err = json.Marshal(req.AgentProfileSnapshot)
+		if err != nil {
+			return nil, fmt.Errorf("%w: encode execution profile snapshot: %v", ErrBillingInvalid, err)
+		}
+	}
 	quote := &model.BillingQuote{
 		ID: uuid.NewString(), UserID: req.UserID, CatalogID: sku.CatalogID,
 		SKUID: sku.SKUID, PriceCredits: resolved.PriceCredits, PricingTier: string(resolved.PricingTier),
 		ListPriceCredits: resolved.ListPriceCredits, DiscountCredits: resolved.DiscountCredits,
 		PricingRuleID: resolved.PricingRuleID, PricingSnapshot: append(datatypes.JSON(nil), resolved.PricingSnapshot...),
-		RequestFingerprint: req.RequestFingerprint,
-		SKUSnapshot:        append(datatypes.JSON(nil), sku.Snapshot...), ExpiresAt: now.Add(s.quoteTTL), CreatedAt: now,
+		RequestFingerprint:   req.RequestFingerprint,
+		SKUSnapshot:          append(datatypes.JSON(nil), sku.Snapshot...),
+		AgentProfileSnapshot: append(datatypes.JSON(nil), profileSnapshot...), ExpiresAt: now.Add(s.quoteTTL), CreatedAt: now,
 		IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
 	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -324,6 +411,100 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	return nil, err
 }
 
+// CreateTaskQuote resolves a public Agent task against the current published
+// catalog. It deliberately does not accept catalog, operation, route, provider,
+// model, or price inputs from the caller.
+func (s *BillingCatalogService) CreateTaskQuote(ctx context.Context, req TaskQuoteRequest) (*model.BillingQuote, error) {
+	canonical, operation, err := canonicalTaskQuoteRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	quoteRequest := QuoteRequest{
+		UserID: canonical.UserID, Operation: operation, ExecutionProfile: canonical.ExecutionProfile,
+		RequestFingerprint: canonical.RequestFingerprint, IdempotencyScope: canonical.IdempotencyScope, IdempotencyKey: canonical.IdempotencyKey,
+	}
+	if existing, findErr := s.repo.Billing().FindQuoteByKey(ctx, canonical.IdempotencyScope, canonical.IdempotencyKey); findErr == nil {
+		if quoteMatchesRequest(existing, quoteRequest) {
+			return existing, nil
+		}
+		return nil, ErrBillingConflict
+	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return nil, findErr
+	}
+	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.profiles, canonical.UserID, canonical.ExecutionProfile)
+	if err != nil {
+		return nil, err
+	}
+	profileSnapshot := profile.Snapshot()
+	quoteRequest.AgentProfileSnapshot = &profileSnapshot
+	resolved, err := s.ResolvePriceForExecutionProfile(ctx, canonical.UserID, "", operation, canonical.ExecutionProfile)
+	if err != nil {
+		if errors.Is(err, ErrBillingSKUNotFound) {
+			return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingInvalid)
+		}
+		return nil, err
+	}
+	account, err := s.repo.Billing().FindAccount(ctx, canonical.UserID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrBillingLedgerInvalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	balance, err := account.DisplayBalance()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBillingLedgerInvalid, err)
+	}
+	if account.DebtCredits > 0 {
+		return nil, ErrBillingDebtOutstanding
+	}
+	if balance < resolved.PriceCredits {
+		return nil, ErrBillingInsufficientForTask
+	}
+	quote, err := s.CreateQuote(ctx, quoteRequest)
+	if errors.Is(err, ErrBillingSKUNotFound) {
+		return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingInvalid)
+	}
+	return quote, err
+}
+
+func canonicalTaskQuoteRequest(req TaskQuoteRequest) (TaskQuoteRequest, string, error) {
+	var ok bool
+	if req.UserID, ok = canonicalBillingUUID(req.UserID); !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: invalid task quote", ErrBillingInvalid)
+	}
+	if req.TaskType, ok = canonicalBillingText(req.TaskType, 20, true); !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: invalid task quote", ErrBillingInvalid)
+	}
+	operation, ok := agentTaskOperation(req.TaskType)
+	if !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: unsupported agent task type", ErrBillingInvalid)
+	}
+	if req.ExecutionProfile, ok = canonicalBillingText(req.ExecutionProfile, 40, true); !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: execution profile is required", ErrBillingInvalid)
+	}
+	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
+	if !validBillingFingerprint(req.RequestFingerprint) {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: invalid task quote", ErrBillingInvalid)
+	}
+	if req.IdempotencyScope, ok = canonicalBillingText(req.IdempotencyScope, 80, true); !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: invalid task quote", ErrBillingInvalid)
+	}
+	if req.IdempotencyKey, ok = canonicalBillingText(req.IdempotencyKey, 128, true); !ok {
+		return TaskQuoteRequest{}, "", fmt.Errorf("%w: invalid task quote", ErrBillingInvalid)
+	}
+	return req, operation, nil
+}
+
+func agentTaskOperation(taskType string) (string, bool) {
+	switch taskType {
+	case "article", "seednote", "moments", "ecommerce", "montage":
+		return "task." + taskType, true
+	default:
+		return "", false
+	}
+}
+
 func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 	var ok bool
 	if req.UserID, ok = canonicalBillingUUID(req.UserID); !ok {
@@ -337,6 +518,12 @@ func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 	}
 	if req.Route, ok = canonicalBillingText(req.Route, 128, false); !ok {
 		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.ExecutionProfile, ok = canonicalBillingText(req.ExecutionProfile, 40, false); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
+	if req.ExecutionProfile != "" && req.Route != "" {
+		return QuoteRequest{}, fmt.Errorf("%w: route and execution_profile are mutually exclusive", ErrBillingInvalid)
 	}
 	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
 	if !validBillingFingerprint(req.RequestFingerprint) {
@@ -396,7 +583,7 @@ func sameCatalogEvidence(ctx context.Context, repo repository.BillingRepository,
 	}
 	for _, sku := range persisted {
 		want, ok := expectedByID[sku.SKUID]
-		if !ok || sku.CatalogID != want.CatalogID || sku.Operation != want.Operation || sku.PriceCredits != want.PriceCredits ||
+		if !ok || sku.CatalogID != want.CatalogID || sku.Operation != want.Operation || sku.ExecutionProfile != want.ExecutionProfile || sku.PriceCredits != want.PriceCredits ||
 			sku.Policy != want.Policy || sku.Route != want.Route || sku.Delivery != want.Delivery || !sameJSONSemantic(sku.Snapshot, want.Snapshot) {
 			return false, nil
 		}
@@ -454,7 +641,14 @@ func quoteMatchesRequest(existing *model.BillingQuote, req QuoteRequest) bool {
 	if err := json.Unmarshal(existing.SKUSnapshot, &pinned); err != nil {
 		return false
 	}
-	return pinned.ID == existing.SKUID && pinned.Operation == strings.TrimSpace(req.Operation) && pinned.Route == strings.TrimSpace(req.Route)
+	if pinned.ID != existing.SKUID || pinned.Operation != strings.TrimSpace(req.Operation) || pinned.Route != strings.TrimSpace(req.Route) || pinned.ExecutionProfile != strings.TrimSpace(req.ExecutionProfile) {
+		return false
+	}
+	if req.AgentProfileSnapshot == nil {
+		return true
+	}
+	want, err := json.Marshal(req.AgentProfileSnapshot)
+	return err == nil && sameJSONSemantic(existing.AgentProfileSnapshot, want)
 }
 
 func validBillingFingerprint(value string) bool {

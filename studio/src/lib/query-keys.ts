@@ -60,6 +60,9 @@ export const queryKeys = {
   imageModels: {
     all: ['image-models'] as const,
   },
+  agentProfiles: {
+    all: ['agent', 'execution-profiles'] as const,
+  },
   templates: {
     all: ['templates'] as const,
     list: (filters?: { type?: string; category?: string; tag?: string; scope?: string }) =>

@@ -106,6 +106,7 @@ func validAttachmentURL(url string) bool {
 
 type createPlanRequest struct {
 	ProjectID          string                           `json:"project_id"`
+	ExecutionProfile   string                           `json:"execution_profile"`
 	CronExpr           string                           `json:"cron_expr"`
 	Prompt             string                           `json:"prompt"`
 	ImageModelKey      string                           `json:"image_model_key"`
@@ -127,6 +128,7 @@ type createPlanRequest struct {
 }
 
 type updatePlanRequest struct {
+	ExecutionProfile         string                           `json:"execution_profile"`
 	CronExpr                 string                           `json:"cron_expr"`
 	Prompt                   string                           `json:"prompt"`
 	ImageModelKey            *string                          `json:"image_model_key"`
@@ -155,6 +157,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
+	}
+	if strings.TrimSpace(req.ExecutionProfile) == "" {
+		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
@@ -218,6 +223,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:                   userID,
 		ProjectID:                req.ProjectID,
+		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
 		ImageModelKey:            req.ImageModelKey,
@@ -242,6 +248,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if errors.Is(err, service.ErrAgentProfileAccessDenied) {
+			return Error(c, fiber.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -335,6 +347,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	if strings.TrimSpace(req.ExecutionProfile) == "" {
+		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
+	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -409,6 +424,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 
 	updateParams := service.UpdatePlanParams{
 		ID:                       id,
+		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
 		ImageModelKey:            req.ImageModelKey,
@@ -457,6 +473,12 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrPlanUpdateConflict) {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
+		}
+		if errors.Is(err, service.ErrAgentProfileAccessDenied) {
+			return Error(c, fiber.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		if errors.Is(err, service.ErrMontageInput) {

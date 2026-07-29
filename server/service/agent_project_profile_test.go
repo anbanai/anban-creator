@@ -29,7 +29,7 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	repo := repository.New(db)
 	logger := zerolog.Nop()
 	projectSvc := NewProjectService(repo, &logger)
-	taskSvc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{})
 
 	userID := uuid.NewString()

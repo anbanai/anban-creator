@@ -44,7 +44,7 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 	}{
 		{name: "unknown field", overrides: map[string]string{"policy.yaml": validPolicyYAML + "unknown: true\n"}, want: "field unknown not found"},
 		{name: "trailing document", overrides: map[string]string{"policy.yaml": validPolicyYAML + "---\nversion: second\n"}, want: "trailing YAML document"},
-		{name: "duplicate SKU", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "skus:\n", "skus:\n  - id: task.seednote.standard.v1\n    operation: task.seednote\n    charge_policy: task_admission\n    price_credits: 5000\n    delivery: verified\n", 1)}, want: "duplicate SKU id"},
+		{name: "duplicate SKU", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "skus:\n", "skus:\n  - id: task.seednote.standard.v1\n    operation: task.seednote\n    execution_profile: balanced\n    charge_policy: task_admission\n    price_credits: 5000\n    delivery: verified\n", 1)}, want: "duplicate SKU id"},
 		{name: "duplicate program", overrides: map[string]string{"promotions.yaml": validPromotionsYAML + "  - id: referral-v1\n    trigger: invitee_first_paid_topup\n    minimum_topup_cny: \"10.00\"\n    inviter_credits: 1\n    invitee_credits: 1\n    expires_after: 24h\n    max_inviter_rewards: 1\n    can_repay_debt: false\n"}, want: "duplicate referral program id"},
 		{name: "malformed currency rate", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `"7.2.0"`, 1)}, want: "currency_rates.USD"},
 		{name: "currency rate must be string", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `7.20`, 1)}, want: "must be a quoted decimal string"},
@@ -140,6 +140,7 @@ func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
 			name: "duplicate billable identity normalizes blank route",
 			products: validProductsYAML + `  - id: task.seednote.alternate.v1
     operation: task.seednote
+    execution_profile: balanced
     charge_policy: task_admission
     price_credits: 6000
     route: "   "
@@ -150,6 +151,7 @@ func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
 		{
 			name: "accepted task operation requires route",
 			products: strings.Replace(validProductsYAML, `operation: task.seednote
+    execution_profile: balanced
     charge_policy: task_admission`, `operation: mcp.generate_image
     charge_policy: accepted_task_operation`, 1),
 			want: "route is required for accepted_task_operation",
@@ -157,6 +159,7 @@ func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
 		{
 			name: "standalone operation requires route",
 			products: strings.Replace(validProductsYAML, `operation: task.seednote
+    execution_profile: balanced
     charge_policy: task_admission`, `operation: designer.generate_image
     charge_policy: standalone_operation`, 1),
 			want: "route is required for standalone_operation",
@@ -239,11 +242,13 @@ currency: credits
 skus:
   - id: " duplicate.v1 "
     operation: task.one
+    execution_profile: balanced
     charge_policy: task_admission
     price_credits: 100
     delivery: one
   - id: duplicate.v1
     operation: task.two
+    execution_profile: balanced
     charge_policy: task_admission
     price_credits: 100
     delivery: two
@@ -509,6 +514,7 @@ currency: credits
 skus:
   - id: task.seednote.standard.v1
     operation: task.seednote
+    execution_profile: balanced
     charge_policy: task_admission
     price_credits: 5000
     delivery: verified

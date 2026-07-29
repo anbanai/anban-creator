@@ -1031,7 +1031,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ENDPOINT":                 "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
 			"ANBAN_OSS_ACCESS_KEY_ID":            "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
 			"ANBAN_OSS_ACCESS_KEY_SECRET":        "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"CLAUDE_CODE_AUTH_TOKEN":             "${CLAUDE_CODE_AUTH_TOKEN:?CLAUDE_CODE_AUTH_TOKEN is required}",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":  "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
+			"ANBAN_DEEPSEEK_API_KEY":             "${ANBAN_DEEPSEEK_API_KEY:-}",
+			"ANBAN_DOUBAO_AGENT_BASE_URL":        "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}",
+			"ANBAN_DOUBAO_AGENT_API_KEY":         "${ANBAN_DOUBAO_AGENT_API_KEY:-}",
+			"ANBAN_KIMI_API_KEY":                 "${ANBAN_KIMI_API_KEY:-}",
 			"MOONSHOT_API_KEY":                   "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
@@ -1068,7 +1072,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ENDPOINT",
 			"ANBAN_OSS_ACCESS_KEY_ID",
 			"ANBAN_OSS_ACCESS_KEY_SECRET",
-			"CLAUDE_CODE_AUTH_TOKEN",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL",
+			"ANBAN_DEEPSEEK_API_KEY",
+			"ANBAN_DOUBAO_AGENT_BASE_URL",
+			"ANBAN_DOUBAO_AGENT_API_KEY",
+			"ANBAN_KIMI_API_KEY",
 			"MOONSHOT_API_KEY",
 			"VOLCENGINE_ARK_API_KEY",
 			"WANGCAI_OPENAI_API_KEY",
@@ -1115,7 +1123,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ENDPOINT":                 "oss-cn-test.aliyuncs.com",
 			"ANBAN_OSS_ACCESS_KEY_ID":            "test-access-key-id",
 			"ANBAN_OSS_ACCESS_KEY_SECRET":        "test-access-key-secret",
-			"CLAUDE_CODE_AUTH_TOKEN":             "test-claude-auth-token",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":  "https://deepseek.example.com/anthropic",
+			"ANBAN_DEEPSEEK_API_KEY":             "test-deepseek-api-key",
+			"ANBAN_DOUBAO_AGENT_BASE_URL":        "https://ark.example.com/anthropic",
+			"ANBAN_DOUBAO_AGENT_API_KEY":         "test-doubao-api-key",
+			"ANBAN_KIMI_API_KEY":                 "test-kimi-api-key",
 			"MOONSHOT_API_KEY":                   "test-moonshot-api-key",
 		} {
 			t.Setenv(name, value)
@@ -1127,6 +1139,9 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 		if cfg.Claude.Executor != "docker" || cfg.Storage.Provider != "oss" || cfg.Storage.Endpoint != "oss-cn-test.aliyuncs.com" {
 			t.Fatalf("loaded Compose config = executor %q storage %q/%q", cfg.Claude.Executor, cfg.Storage.Provider, cfg.Storage.Endpoint)
+		}
+		if cfg.Claude.ExecutionProfiles["cost_effective"].AuthToken == "" || cfg.Claude.ExecutionProfiles["balanced"].AuthToken == "" || cfg.Claude.ExecutionProfiles["maximum_quality"].AuthToken == "" {
+			t.Fatalf("Compose environment did not configure all Agent profiles: %#v", cfg.Claude.ExecutionProfiles)
 		}
 	})
 

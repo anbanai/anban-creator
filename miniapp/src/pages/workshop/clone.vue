@@ -88,6 +88,20 @@
       <text v-if="errors.project" class="field-error">{{ errors.project }}</text>
     </view>
 
+    <view class="cp-section">
+      <text class="field-label">执行配置 <text class="field-required">*</text></text>
+      <ExecutionProfileSelector
+        v-model="selectedExecutionProfile"
+        :profiles="executionProfiles"
+        :loading="executionProfilesLoading"
+        :disabled="submitting"
+      />
+      <text v-if="resolvedPrice !== undefined" class="profile-price">
+        任务准入费 {{ resolvedPrice.toLocaleString() }} 积分
+      </text>
+      <text v-if="executionProfilesError" class="field-error">{{ executionProfilesError }}</text>
+    </view>
+
     <!-- Additional prompt (optional) -->
     <view class="cp-section">
       <text class="field-label">额外要求 <text class="field-optional">（可选）</text></text>
@@ -117,13 +131,26 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { Project, Template } from '@/types'
+import type {
+  AgentExecutionProfileCapability,
+  AgentExecutionProfileID,
+  BillingCatalog,
+  Project,
+  Template,
+} from '@/types'
+import { agentProfilesApi } from '@/api/agent-profiles'
+import { billingApi } from '@/api/billing'
 import { tasksApi } from '@/api/tasks'
+import {
+  resolveExecutionProfileSelection,
+  taskPriceForExecutionProfile,
+} from '@/utils/execution-profiles'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbBadge from '@/components/common/AbBadge.vue'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
+import ExecutionProfileSelector from '@/components/business/ExecutionProfileSelector.vue'
 
 const depthOptions = [
   {
@@ -155,6 +182,11 @@ const selectedTemplate = ref<Template | null>(null)
 const cloneDepth = ref('medium')
 const submitting = ref(false)
 const selectedProject = ref<Project | null>(null)
+const executionProfiles = ref<AgentExecutionProfileCapability[]>([])
+const executionProfilesLoading = ref(false)
+const executionProfilesError = ref('')
+const selectedExecutionProfile = ref<AgentExecutionProfileID | ''>('')
+const catalog = ref<BillingCatalog | null>(null)
 
 const form = reactive({
   project_id: '',
@@ -167,7 +199,20 @@ const canSubmit = computed(() => {
   const hasSource = sourceType.value === 'url'
     ? !!sourceUrl.value.trim()
     : !!selectedTemplate.value
-  return hasSource && !!form.project_id && !submitting.value
+  return hasSource
+    && !!form.project_id
+    && !!selectedExecutionProfile.value
+    && resolvedPrice.value !== undefined
+    && !submitting.value
+})
+
+const resolvedPrice = computed(() => {
+  if (!selectedProject.value || !selectedExecutionProfile.value) return undefined
+  return taskPriceForExecutionProfile(
+    catalog.value,
+    selectedProject.value.platform,
+    selectedExecutionProfile.value,
+  )
 })
 
 function goToTemplates() {
@@ -180,6 +225,18 @@ function goToTemplates() {
 function onProjectChange(project: Project) {
   selectedProject.value = project
   delete errors.project
+  ensureExecutionProfileSelection()
+}
+
+function ensureExecutionProfileSelection() {
+  if (!selectedProject.value) return
+  selectedExecutionProfile.value = resolveExecutionProfileSelection(
+    selectedExecutionProfile.value,
+    false,
+    executionProfiles.value,
+    catalog.value,
+    selectedProject.value.platform,
+  )
 }
 
 function validate(): boolean {
@@ -200,12 +257,19 @@ function validate(): boolean {
     return false
   }
 
+  if (!selectedExecutionProfile.value || resolvedPrice.value === undefined) {
+    uni.showToast({ title: '请选择可用的执行配置', icon: 'none' })
+    return false
+  }
+
   return true
 }
 
 async function onClone() {
   if (!validate()) return
   if (!selectedProject.value) return
+  const executionProfile = selectedExecutionProfile.value
+  if (!executionProfile) return
 
   submitting.value = true
   try {
@@ -229,6 +293,7 @@ async function onClone() {
 
     const task = await tasksApi.create({
       type: selectedProject.value.platform as any,
+      execution_profile: executionProfile,
       project_id: form.project_id,
       prompt: prompt.trim(),
     })
@@ -245,7 +310,26 @@ async function onClone() {
   }
 }
 
+async function loadExecutionConfiguration() {
+  executionProfilesLoading.value = true
+  executionProfilesError.value = ''
+  const [profilesResult, catalogResult] = await Promise.allSettled([
+    agentProfilesApi.list(),
+    billingApi.catalog(),
+  ])
+  executionProfiles.value = profilesResult.status === 'fulfilled' ? profilesResult.value : []
+  catalog.value = catalogResult.status === 'fulfilled' ? catalogResult.value : null
+  if (profilesResult.status === 'rejected') {
+    executionProfilesError.value = '执行配置加载失败，请稍后重试'
+  } else if (catalogResult.status === 'rejected') {
+    executionProfilesError.value = '价格目录加载失败，请稍后重试'
+  }
+  executionProfilesLoading.value = false
+  ensureExecutionProfileSelection()
+}
+
 onMounted(() => {
+  void loadExecutionConfiguration()
   // Check if returning from template selection with a selected template
   const eventProject = (uni as typeof uni & {
     getOpenerEventProject?: () => { on: (event: string, callback: (data: { template: Template }) => void) => void }
@@ -292,6 +376,13 @@ onMounted(() => {
   display: block;
   margin-top: $ab-space-xs;
   line-height: 1.4;
+}
+
+.profile-price {
+  display: block;
+  margin-top: $ab-space-sm;
+  color: $ab-text-secondary;
+  font-size: $ab-text-sm;
 }
 
 .cp-section {

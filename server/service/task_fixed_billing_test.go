@@ -9,6 +9,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
@@ -18,7 +19,7 @@ func newFixedTaskBillingFixture(t *testing.T, paid, debt int64) (*TaskService, *
 	f := newBillingWalletFixture(t, paid, 0, debt)
 	enqueuer := &mockEnqueuer{}
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(f.repo, enqueuer, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(f.repo, enqueuer, nil, &logger, "", nil, nil)
 	svc.SetBillingCatalogService(f.catalog)
 	svc.SetBillingWalletService(f.wallet)
 	svc.SetNASResumeEnabled(true)
@@ -30,7 +31,7 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 1_500, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "batch", Quantity: 2,
 	})
 	if err != nil {
@@ -74,7 +75,7 @@ func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testi
 			ctx := context.Background()
 			svc, f, enqueuer := newFixedTaskBillingFixture(t, tt.paid, tt.debt)
 			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: tt.name, Quantity: 1,
 			})
 			if !errors.Is(err, tt.want) || tasks != nil {
@@ -96,7 +97,7 @@ func TestTaskFixedBillingBatchAdmissionIsAtomicWhenTotalBalanceIsInsufficient(t 
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 700, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "atomic batch", Quantity: 2,
 	})
 	if !errors.Is(err, ErrBillingInsufficientForTask) || tasks != nil {
@@ -118,7 +119,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 2_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID: "plan-current-catalog", UserID: billingWalletUserID, ProjectID: projectID,
 		Type: model.PlatformArticle, Status: model.PlanStatusActive, Prompt: "scheduled",
 	}
@@ -130,6 +131,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 
 	bundle := testBillingBundle()
 	bundle.Products.CatalogID = "retail-test-v2"
+	bundle.Products.SKUs[0].ExecutionProfile = "cost_effective"
 	bundle.Products.SKUs[0].PriceCredits = 700
 	now := f.now.Add(time.Hour)
 	catalog := NewBillingCatalogService(f.repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
@@ -152,7 +154,7 @@ func TestTaskFixedBillingResumeKeepsOriginalCharge(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "first", Quantity: 1,
 	})
 	if err != nil {
@@ -224,21 +226,48 @@ func TestTaskTerminalBillingReasonIsIdenticalForLocalAndCloudEvidence(t *testing
 	}
 }
 
+// seedHistoricalManagedLocalExecution models an execution that began locally
+// before managed profiles were made cloud-only. Terminal settlement must remain
+// able to finalize this durable historical state.
+func seedHistoricalManagedLocalExecution(t *testing.T, f *billingWalletFixture, task *model.Task) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now()
+	task.Status = model.TaskStatusRunning
+	task.ExecutionTarget = model.ExecutionTargetLocalClaimed
+	task.LocalClaimDeadline = nil
+
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	execution := &profiledExecution
+	execution.ID = uuid.NewString()
+	execution.TaskID = task.ID
+	execution.Attempt = 1
+	execution.Target = model.ExecutionTargetLocalClaimed
+	execution.Status = model.TaskExecutionRunning
+	execution.Started = true
+	execution.StartedAt = &now
+	execution.RuntimeProfile = "local"
+	if err := f.repo.TaskExecutions().Create(ctx, execution); err != nil {
+		t.Fatalf("create historical local execution: %v", err)
+	}
+	task.CurrentExecutionID = &execution.ID
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("seed historical local task: %v", err)
+	}
+}
+
 func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "local failure", Quantity: 1,
-		ExecutionTarget: model.ExecutionTargetLocal,
 	})
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
 	}
 	task := tasks[0]
-	if _, err := svc.ClaimLocalTask(ctx, billingWalletUserID, `{}`); err != nil {
-		t.Fatalf("ClaimLocalTask: %v", err)
-	}
+	seedHistoricalManagedLocalExecution(t, f, task)
 	result := &agent.ExecutionResult{Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError}
 	if err := svc.CompleteLocalTask(ctx, task.ID, result); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
@@ -269,17 +298,14 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
-		ExecutionTarget: model.ExecutionTargetLocal,
 	})
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
 	}
 	task := tasks[0]
-	if _, err := svc.ClaimLocalTask(ctx, billingWalletUserID, `{}`); err != nil {
-		t.Fatalf("ClaimLocalTask: %v", err)
-	}
+	seedHistoricalManagedLocalExecution(t, f, task)
 	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
 		TaskID: task.ID, State: model.TaskFileStatePublished, Role: model.FileRoleDraft,
 		FileName: "partial.md", FilePath: "output/partial.md", FileSize: 12,

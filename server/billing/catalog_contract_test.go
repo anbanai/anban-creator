@@ -212,10 +212,12 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
 		},
 		{
 			name: "duplicate SKU ID",
-			products: products + `  - id: "task.article.standard.v1"
+			products: products + `  - id: "task.article.balanced.v1"
     operation: "task.duplicate"
+    execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1
+    tier_prices: { free: 1, pro: 1, enterprise: 1 }
     delivery: "duplicate"
 `,
 			want: "duplicate SKU id",
@@ -224,6 +226,7 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
 			name: "ambiguous billable identity",
 			products: products + `  - id: "task.article.alternate.v1"
     operation: "task.article"
+    execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1
     tier_prices: { free: 1, pro: 1, enterprise: 1 }
@@ -346,25 +349,51 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 
 func initialRetailCatalogContractError(catalog ProductCatalog) error {
 	type skuSnapshot struct {
-		operation    string
-		chargePolicy string
-		route        string
-		delivery     string
-		priceCredits int64
+		operation        string
+		executionProfile string
+		chargePolicy     string
+		route            string
+		delivery         string
+		priceCredits     int64
 	}
 	want := map[string]skuSnapshot{
-		"task.article.standard.v1":        {operation: "task.article", chargePolicy: "task_admission", priceCredits: 6000, delivery: "article_artifacts_verified"},
-		"task.seednote.standard.v1":       {operation: "task.seednote", chargePolicy: "task_admission", priceCredits: 5000, delivery: "seednote_artifacts_verified"},
-		"task.moments.standard.v1":        {operation: "task.moments", chargePolicy: "task_admission", priceCredits: 3000, delivery: "moments_artifacts_verified"},
-		"task.ecommerce.standard.v1":      {operation: "task.ecommerce", chargePolicy: "task_admission", priceCredits: 3000, delivery: "ecommerce_artifacts_verified"},
-		"task.montage.standard.v1":        {operation: "task.montage", chargePolicy: "task_admission", priceCredits: 2000, delivery: "montage_artifacts_verified"},
-		"task.viral-analysis.standard.v1": {operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200, delivery: "viral_analysis_report_verified"},
-		"image.seedream.cover.v1":         {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
-		"image.seedream.content.v1":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
-		"image.seedream.designer.v1":      {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
-		"image.gpt-image-2.designer.v1":   {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
+		"image.seedream.cover.v1":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
+		"image.seedream.content.v1":     {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
+		"image.seedream.designer.v1":    {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
+		"image.gpt-image-2.designer.v1": {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
 	}
-	if catalog.CatalogID != "retail-2026-07-27-v4" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
+	taskTypes := []struct {
+		id, operation, delivery string
+		balanced                int64
+	}{
+		{"article", "task.article", "article_artifacts_verified", 6000},
+		{"seednote", "task.seednote", "seednote_artifacts_verified", 5000},
+		{"moments", "task.moments", "moments_artifacts_verified", 3000},
+		{"ecommerce", "task.ecommerce", "ecommerce_artifacts_verified", 3000},
+		{"montage", "task.montage", "montage_artifacts_verified", 2000},
+	}
+	profiles := []struct {
+		id, suffix string
+		numerator  int64
+	}{
+		{"cost_effective", "cost-effective", 8},
+		{"balanced", "balanced", 10},
+		{"maximum_quality", "maximum-quality", 15},
+	}
+	for _, taskType := range taskTypes {
+		for _, profile := range profiles {
+			id := "task." + taskType.id + "." + profile.suffix + ".v1"
+			want[id] = skuSnapshot{
+				operation: taskType.operation, executionProfile: profile.id, chargePolicy: "task_admission",
+				priceCredits: taskType.balanced * profile.numerator / 10, delivery: taskType.delivery,
+			}
+		}
+	}
+	want["task.viral-analysis.standard.v1"] = skuSnapshot{
+		operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200,
+		delivery: "viral_analysis_report_verified",
+	}
+	if catalog.CatalogID != "retail-2026-07-28-v5" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))
@@ -374,7 +403,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 			return fmt.Errorf("unexpected SKU ID %q", sku.ID)
 		}
 		actual := skuSnapshot{
-			operation: sku.Operation, chargePolicy: sku.ChargePolicy, route: sku.Route,
+			operation: sku.Operation, executionProfile: sku.ExecutionProfile, chargePolicy: sku.ChargePolicy, route: sku.Route,
 			delivery: sku.Delivery, priceCredits: sku.PriceCredits,
 		}
 		if actual != expected {

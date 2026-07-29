@@ -30,6 +30,7 @@ function task(overrides: Partial<Task>): Task {
     started_at: '',
     completed_at: '',
     ...overrides,
+    execution_profile: overrides.execution_profile ?? 'cost_effective',
   }
 }
 
@@ -71,6 +72,7 @@ function plan(overrides: Partial<Plan>): Plan {
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
     ...overrides,
+    execution_profile: overrides.execution_profile ?? 'cost_effective',
   }
 }
 

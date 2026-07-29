@@ -1,3 +1,5 @@
+import type { AgentExecutionProfileID } from './agent-profile'
+
 export interface BillingWallet {
   paid: number
   promotional: number
@@ -56,6 +58,7 @@ export interface BillingSKU {
   route?: string
   delivery: string
   selectors?: Record<string, string>
+  execution_profile?: AgentExecutionProfileID
 }
 
 export interface BillingCatalog {

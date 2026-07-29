@@ -72,6 +72,7 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 	now := time.Now()
 	plan.UpdatedAt = now
 	updates := map[string]interface{}{
+		"execution_profile":           plan.ExecutionProfile,
 		"topic_hint":                  plan.Prompt,
 		"image_model_key":             plan.ImageModelKey,
 		"reference_image_asset_id":    plan.ReferenceImageAssetID,

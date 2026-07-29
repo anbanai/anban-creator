@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import { api } from '@/lib/api'
-import { getLocalExecutorStatus, setExecutorEnabled, startLocalExecutor, type LocalExecutorStatus } from '@/lib/tauri'
 import { createTestQueryClient } from '@/test/test-utils'
 import type { Project, Task } from '@/types'
 import { TaskFormDialog, type TaskFormDialogProps } from './TaskFormDialog'
@@ -18,44 +17,12 @@ const toastMocks = vi.hoisted(() => ({
 
 vi.mock('sonner', () => ({ toast: toastMocks }))
 
-vi.mock('@/lib/tauri', () => ({
-  getLocalExecutorStatus: vi.fn().mockResolvedValue({ available: false, running: false, state: 'unavailable' }),
-  setExecutorEnabled: vi.fn(),
-  startLocalExecutor: vi.fn(),
-}))
-
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((next) => { resolve = next })
   return { promise, resolve }
-}
-
-function executorStatus(overrides: Partial<LocalExecutorStatus> = {}): LocalExecutorStatus {
-  return {
-    state: 'needs_config',
-    available: false,
-    running: false,
-    agent_present: false,
-    node_present: false,
-    claude_present: false,
-    plugin_present: false,
-    ffmpeg_present: false,
-    claude_authenticated: false,
-    workspace_set: false,
-    workspace_valid: false,
-    workspace_writable: false,
-    api_key_set: false,
-    auth_mode: 'missing',
-    checks: [],
-    current_task_id: null,
-    last_error: null,
-    last_event_at: null,
-    workspace: '',
-    reason: '未配置',
-    ...overrides,
-  }
 }
 
 vi.mock('@/lib/direct-upload', async () => {
@@ -129,6 +96,7 @@ const fixtures = vi.hoisted(() => {
     goal_mode: true,
     goal: '必须包含三个案例',
     project_id: articleProject.id,
+    execution_profile: 'cost_effective',
     result: null,
     published: false,
     published_at: null,
@@ -160,6 +128,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.billing,
         wallet: vi.fn(),
         catalog: vi.fn(),
+      },
+      agentProfiles: {
+        ...actual.api.agentProfiles,
+        list: vi.fn(),
       },
       imageModels: {
         ...actual.api.imageModels,
@@ -194,9 +166,6 @@ function renderDialog(props: Partial<TaskFormDialogProps> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(getLocalExecutorStatus).mockResolvedValue(executorStatus())
-  vi.mocked(startLocalExecutor).mockResolvedValue(false)
-  vi.mocked(setExecutorEnabled).mockResolvedValue(false)
   vi.mocked(api.projects.list).mockResolvedValue([
     fixtures.articleProject,
     fixtures.seednoteProject,
@@ -207,11 +176,19 @@ beforeEach(() => {
     catalog_id: 'retail-test-v1',
     currency: 'credits',
     skus: [
-      { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-      { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-      { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+      { id: 'task.article.cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+      { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+      { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
+      { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+      { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+      { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
     ],
   })
+  vi.mocked(api.agentProfiles.list).mockResolvedValue([
+    { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+    { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+    { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+  ])
   vi.mocked(api.imageModels.list).mockResolvedValue({
     tier: 'pro',
     items: [
@@ -232,11 +209,51 @@ beforeEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('requires a server-backed execution profile and submits the selected exact-price profile', async () => {
+    renderDialog()
+    const dialog = await screen.findByRole('dialog')
+
+    expect(await within(dialog).findByRole('button', { name: /性价比/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByText(/4,800 × 1 =/)).toBeInTheDocument()
+    expect(within(dialog).queryByText('在本机运行')).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /平衡型/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      execution_profile: 'balanced',
+    })))
+    expect(api.tasks.create).toHaveBeenCalledWith(expect.not.objectContaining({ execution_target: expect.anything() }))
+  })
+
+  it('retains the source execution profile when cloning', async () => {
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'maximum_quality' } })
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('button', { name: /极致效果/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByText(/9,000 × 1 =/)).toBeInTheDocument()
+  })
+
+  it('blocks cloning when the retained execution profile is no longer available', async () => {
+    vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
+      { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
+    ])
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'maximum_quality' } })
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('button', { name: '克隆' })).toBeDisabled()
+    expect(within(dialog).getByText('当前执行配置不可用，请重新选择。')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+  })
+
   it('shows the authenticated tier price and savings before task creation', async () => {
     vi.mocked(api.billing.catalog).mockResolvedValueOnce({
       catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_model: 'tier_matrix_v1', pricing_tier: 'pro',
       skus: [{
-        id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission',
+        id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission',
         list_price_credits: 6000, price_credits: 5400, discount_credits: 600, pricing_tier: 'pro',
         delivery: 'article_artifacts_verified',
       }],
@@ -322,7 +339,7 @@ describe('TaskFormDialog', () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
 
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目')
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
     expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
@@ -388,49 +405,6 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
   })
 
-  it('keeps inherited local execution while project and executor requests resolve independently', async () => {
-    const projectsRequest = deferred<Project[]>()
-    const executorRequest = deferred<LocalExecutorStatus | null>()
-    vi.mocked(api.projects.list).mockReturnValueOnce(projectsRequest.promise)
-    vi.mocked(getLocalExecutorStatus).mockReturnValueOnce(executorRequest.promise)
-    renderDialog({
-      mode: 'clone',
-      sourceTask: { ...fixtures.sourceTask, execution_target: 'local' },
-      initialProjectId: undefined,
-    })
-
-    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await act(async () => projectsRequest.resolve([
-      fixtures.articleProject,
-      fixtures.seednoteProject,
-      fixtures.montageProject,
-    ]))
-    expect(await within(dialog).findByText('正在检查本地执行器，请稍候。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
-
-    await act(async () => executorRequest.resolve(executorStatus({
-      state: 'running_idle',
-      available: true,
-      running: true,
-    })))
-
-    const localExecutionLabel = await within(dialog).findByText('在本机运行')
-    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).toBeChecked()
-    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeEnabled()
-  })
-
-  it('keeps a cloud clone on cloud when the desktop executor is available', async () => {
-    vi.mocked(getLocalExecutorStatus).mockResolvedValueOnce(executorStatus({
-      state: 'running_idle',
-      available: true,
-      running: true,
-    }))
-    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
-
-    const localExecutionLabel = await screen.findByText('在本机运行')
-    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).not.toBeChecked()
-  })
-
   it('submits create mode and reports the submitted quantity', async () => {
     const { onCreated } = renderDialog()
     await screen.findByRole('dialog', { name: '新建任务' })
@@ -450,35 +424,10 @@ describe('TaskFormDialog', () => {
     expect(onCreated).toHaveBeenCalledWith(fixtures.createdTask, 3)
   })
 
-  it('waits for executor status before creating and uses the resolved default target', async () => {
-    const executorRequest = deferred<LocalExecutorStatus | null>()
-    vi.mocked(getLocalExecutorStatus).mockReturnValueOnce(executorRequest.promise)
-    renderDialog()
-
-    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
-    expect(await within(dialog).findByText('正在检查本地执行器，请稍候。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    expect(api.tasks.create).not.toHaveBeenCalled()
-
-    await act(async () => executorRequest.resolve(executorStatus({
-      state: 'running_idle',
-      available: true,
-      running: true,
-    })))
-
-    const localExecutionLabel = await within(dialog).findByText('在本机运行')
-    expect(within(localExecutionLabel.closest('label')!).getByRole('switch')).toBeChecked()
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      execution_target: 'local',
-    })))
-  })
-
   it('applies destination project defaults when a clone changes project', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
-    await screen.findByRole('dialog', { name: '克隆任务' })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await within(dialog).findByText('源模型')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
@@ -505,6 +454,7 @@ describe('TaskFormDialog', () => {
     uploadToOSSMock.mockReturnValueOnce(uploadRequest.promise)
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await within(dialog).findByText('源模型')
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['pending'], 'pending.pdf', { type: 'application/pdf' })] },
@@ -533,6 +483,7 @@ describe('TaskFormDialog', () => {
   it('rejects new non-image attachments after switching to a Seednote project', async () => {
     renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, input_attachments: [] }, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await within(dialog).findByText('源模型')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
@@ -549,6 +500,7 @@ describe('TaskFormDialog', () => {
     uploadToOSSMock.mockRejectedValueOnce(new Error('upload failed'))
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await within(dialog).findByText('源模型')
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['failed'], 'failed.pdf', { type: 'application/pdf' })] },
@@ -581,39 +533,25 @@ describe('TaskFormDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
-  it('fences every close path during local startup and the clone request', async () => {
-    const startRequest = deferred<boolean>()
+  it('fences every close path during the clone request', async () => {
     const cloneRequest = deferred<Task>()
-    vi.mocked(getLocalExecutorStatus).mockResolvedValueOnce(executorStatus({
-      state: 'ready_stopped',
-      available: true,
-      running: false,
-    }))
-    vi.mocked(startLocalExecutor).mockReturnValueOnce(startRequest.promise)
-    vi.mocked(setExecutorEnabled).mockResolvedValueOnce(true)
     vi.mocked(api.tasks.clone).mockReturnValueOnce(cloneRequest.promise)
     const { onOpenChange, onCreated } = renderDialog({
       mode: 'clone',
-      sourceTask: { ...fixtures.sourceTask, execution_target: 'local' },
+      sourceTask: fixtures.sourceTask,
       initialProjectId: undefined,
     })
 
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
-    await within(dialog).findByText('在本机运行')
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
 
-    await waitFor(() => expect(startLocalExecutor).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledOnce())
     expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
     expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled()
     fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
     expect(onOpenChange).not.toHaveBeenCalled()
-
-    await act(async () => startRequest.resolve(true))
-    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledOnce())
-    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
-    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled()
 
     await act(async () => cloneRequest.resolve(fixtures.createdTask))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(fixtures.createdTask, 1))
@@ -648,7 +586,8 @@ describe('TaskFormDialog', () => {
 
   it('shows destination Montage defaults and removes incompatible article controls', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
-    await screen.findByRole('dialog', { name: '克隆任务' })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    await within(dialog).findByText('源模型')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '剪辑项目' }))
 

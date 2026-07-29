@@ -145,66 +145,74 @@ func newLocalMontageTask(t *testing.T, repo repository.Repository, userID, proje
 	return task
 }
 
-// TestClaimLocalTask_HappyPath verifies a pending local-target task is claimed
-// atomically (status→running, target→local_claimed) and its config is returned
-// with the agent argv inputs resolved.
-func TestClaimLocalTask_HappyPath(t *testing.T) {
+// TestClaimLocalTaskAllowsLegacyUnprofiledTask preserves completion support for
+// tasks created before managed execution profiles were introduced.
+func TestClaimLocalTaskAllowsLegacyUnprofiledTask(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	svc.SetExecutorDefaults("claude-test-model", nil)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
 	deadline := time.Now().Add(LocalClaimWindow)
 	task := newLocalSeedTask(t, repo, userID, projectID, &deadline)
-
 	cfg, err := svc.ClaimLocalTask(ctx, userID, `{"hostname":"mbp","version":"0.1"}`)
 	if err != nil {
 		t.Fatalf("ClaimLocalTask: %v", err)
 	}
-	if cfg == nil {
-		t.Fatalf("expected config, got nil")
-	}
-	if cfg.TaskID != task.ID {
-		t.Fatalf("cfg.TaskID = %q, want %q", cfg.TaskID, task.ID)
-	}
-	if cfg.ProjectID != projectID {
-		t.Fatalf("cfg.ProjectID = %q, want %q", cfg.ProjectID, projectID)
-	}
-	if cfg.TaskType != model.PlatformSeednote {
-		t.Fatalf("cfg.TaskType = %q", cfg.TaskType)
-	}
-	if cfg.Model != "claude-test-model" {
-		t.Fatalf("cfg.Model = %q, want claude-test-model", cfg.Model)
-	}
-	if cfg.MaxTurns <= 0 {
-		t.Fatalf("cfg.MaxTurns = %d, want > 0", cfg.MaxTurns)
-	}
-	if cfg.AgentFlag == "" {
-		t.Fatalf("cfg.AgentFlag empty, expected anban:<agent>")
-	}
-	if cfg.Topic != task.Prompt {
-		t.Fatalf("cfg.Topic = %q, want %q", cfg.Topic, task.Prompt)
+	if cfg == nil || cfg.TaskID != task.ID {
+		t.Fatalf("ClaimLocalTask config = %#v, want task %q", cfg, task.ID)
 	}
 
-	// Task must now be running + local_claimed so cloud Asynq never picks it up.
 	got, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if got.Status != model.TaskStatusRunning {
-		t.Fatalf("status = %q, want running", got.Status)
+	if got.Status != model.TaskStatusRunning || got.ExecutionTarget != model.ExecutionTargetLocalClaimed || got.CurrentExecutionID == nil {
+		t.Fatalf("claimed task = %#v", got)
 	}
-	if got.ExecutionTarget != model.ExecutionTargetLocalClaimed {
-		t.Fatalf("execution_target = %q, want local_claimed", got.ExecutionTarget)
+}
+
+// TestClaimLocalTaskRejectsManagedProfile verifies that migrated managed tasks
+// cannot be claimed by a desktop executor.
+func TestClaimLocalTaskRejectsManagedProfile(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetExecutorMaxTurns(nil)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+
+	deadline := time.Now().Add(LocalClaimWindow)
+	task := newLocalSeedTask(t, repo, userID, projectID, &deadline)
+	task.ExecutionProfile = "cost_effective"
+	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
+		ProfileID: "cost_effective", Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic", DisplayName: "Cost effective",
 	}
-	// ExecutorInfo blob recorded for diagnostics (non-null).
-	raw, err := got.ExecutorInfo.MarshalJSON()
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task profile: %v", err)
+	}
+
+	cfg, err := svc.ClaimLocalTask(ctx, userID, `{"hostname":"mbp","version":"0.1"}`)
+	if !errors.Is(err, ErrManagedProfileLocalExecutionUnsupported) {
+		t.Fatalf("ClaimLocalTask error = %v, want ErrManagedProfileLocalExecutionUnsupported", err)
+	}
+	if cfg != nil {
+		t.Fatalf("ClaimLocalTask config = %#v, want nil", cfg)
+	}
+
+	// The failed claim must roll back the local claim CAS rather than leave a
+	// desktop execution record or an incomplete local config.
+	got, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
-		t.Fatalf("marshal executor info: %v", err)
+		t.Fatalf("FindByID: %v", err)
 	}
-	if string(raw) == "null" || string(raw) == "" {
-		t.Fatalf("executor_info not recorded, got %s", string(raw))
+	if got.Status != model.TaskStatusPending {
+		t.Fatalf("status = %q, want pending", got.Status)
+	}
+	if got.ExecutionTarget != model.ExecutionTargetLocal {
+		t.Fatalf("execution_target = %q, want local", got.ExecutionTarget)
+	}
+	if got.CurrentExecutionID != nil {
+		t.Fatalf("current_execution_id = %q, want nil", *got.CurrentExecutionID)
 	}
 }
 

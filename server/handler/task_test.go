@@ -32,6 +32,33 @@ type noopTaskEnqueuer struct{}
 
 type availableRuntimeDispatcher struct{}
 
+func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
+	t.Helper()
+	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
+		ID: "cost_effective", DisplayName: "Cost effective", Provider: "deepseek", ModelID: "deepseek-v4-pro",
+		Protocol: "anthropic", BaseURL: "https://deepseek.example.com", AuthToken: "test-token",
+		MinTier: model.TierFree, Available: true,
+	}})
+	if err != nil {
+		t.Fatalf("NewAgentProfileRegistry: %v", err)
+	}
+	return registry
+}
+
+func newHandlerTaskService(t *testing.T, repo repository.Repository, enqueuer service.TaskEnqueuer, store storage.Provider, logger *zerolog.Logger, taskLogDir string, pubsub *service.RedisPubSub, publishing *service.PublishingService) *service.TaskService {
+	t.Helper()
+	svc := service.NewTaskService(repo, enqueuer, store, logger, taskLogDir, pubsub, publishing)
+	svc.SetAgentProfileRegistry(handlerTestAgentProfileRegistry(t))
+	return svc
+}
+
+func newHandlerPlanService(t *testing.T, repo repository.Repository, logger *zerolog.Logger) *service.PlanService {
+	t.Helper()
+	svc := service.NewPlanService(repo, logger)
+	svc.SetAgentProfileRegistry(handlerTestAgentProfileRegistry(t))
+	return svc
+}
+
 func (availableRuntimeDispatcher) Scope() string { return "docker" }
 
 func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
@@ -109,6 +136,27 @@ func postJSON(t *testing.T, app *fiber.App, path, body string) *http.Response {
 	return resp
 }
 
+func TestCreateTaskRejectsMissingExecutionProfile(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	handler := NewTaskHandler(nil, &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.NewString())
+		return handler.Create(c)
+	})
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"project-id","prompt":"write an article"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "execution_profile is required") {
+		t.Fatalf("body = %s, want execution_profile validation error", body)
+	}
+}
+
 func decodeEnvelopeRawData(t *testing.T, resp *http.Response) map[string]json.RawMessage {
 	t.Helper()
 	var env struct {
@@ -177,7 +225,7 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, nil, store, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files/zip", func(c fiber.Ctx) error {
@@ -255,7 +303,7 @@ func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 		t.Fatalf("create task file: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, nil, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, nil, store, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
@@ -310,7 +358,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, &logger, "", nil, nil), &logger)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -347,7 +395,7 @@ func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	h := NewTaskHandler(service.NewTaskService(repo, nil, nil, &logger, "", nil, nil), &logger)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
 	app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -410,7 +458,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -431,7 +479,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := `{"project_id":"` + projectID + `","prompt":"` + tt.prompt + `"}`
+			body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","prompt":"` + tt.prompt + `"}`
 			req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
@@ -481,7 +529,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetImagePresets(presets)
 	h.SetRepository(repo)
@@ -499,27 +547,27 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}{
 		{
 			name:       "free tier + free preset accepted",
-			body:       `{"project_id":"` + projectID + `","image_model_key":"volcengine-standard"}`,
+			body:       `{"execution_profile":"cost_effective","project_id":"` + projectID + `","image_model_key":"volcengine-standard"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + empty key accepted",
-			body:       `{"project_id":"` + projectID + `"}`,
+			body:       `{"execution_profile":"cost_effective","project_id":"` + projectID + `"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + pro preset rejected",
-			body:       `{"project_id":"` + projectID + `","image_model_key":"gemini-pro"}`,
+			body:       `{"execution_profile":"cost_effective","project_id":"` + projectID + `","image_model_key":"gemini-pro"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + custom rejected",
-			body:       `{"project_id":"` + projectID + `","image_model_key":"custom"}`,
+			body:       `{"execution_profile":"cost_effective","project_id":"` + projectID + `","image_model_key":"custom"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + unknown key rejected",
-			body:       `{"project_id":"` + projectID + `","image_model_key":"made-up"}`,
+			body:       `{"execution_profile":"cost_effective","project_id":"` + projectID + `","image_model_key":"made-up"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 	}
@@ -573,7 +621,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()
@@ -582,7 +630,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"project_id":"` + projectID + `","prompt":"文章开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","prompt":"文章开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
 	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -639,7 +687,7 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
@@ -649,7 +697,7 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	})
 
 	resp := postJSON(t, app, "/tasks", `{
-		"project_id": "`+projectID+`",
+		"execution_profile":"cost_effective","project_id": "`+projectID+`",
 		"quantity": 3,
 		"montage_input": {
 			"brief": "做一条新品发布短片",
@@ -695,7 +743,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error {
@@ -704,7 +752,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	})
 
 	resp := postJSON(t, app, "/tasks", `{
-		"project_id": "`+projectID+`",
+		"execution_profile":"cost_effective","project_id": "`+projectID+`",
 		"quantity": 3,
 		"selected_modules": {"main_images": 1},
 		"product_photos": ["https://cdn.example.com/cup.png"]
@@ -751,18 +799,19 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 	taskID := uuid.New().String()
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
-		Prompt:    "clone this completed task",
+		ID:               taskID,
+		UserID:           userID,
+		ProjectID:        projectID,
+		Type:             model.PlatformArticle,
+		ExecutionProfile: "cost_effective",
+		Status:           model.TaskStatusCompleted,
+		Prompt:           "clone this completed task",
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 
@@ -823,7 +872,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 			t.Fatalf("create project: %v", err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformSeednote, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
 	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source task: %v", err)
@@ -835,7 +884,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -847,7 +896,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
 	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{
-		"project_id":"`+destinationProject.ID+`",
+		"execution_profile":"cost_effective","project_id":"`+destinationProject.ID+`",
 		"quantity":2,
 		"prompt":"edited full clone prompt",
 		"image_ratio":"1:1",
@@ -861,8 +910,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		"has_content_image":false,
 		"has_tail_image":true,
 		"article_with_cover":false,
-		"article_with_content_images":false,
-		"execution_target":"local"
+			"article_with_content_images":false
 	}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
@@ -897,7 +945,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
 			t.Fatalf("goal/image overrides = %#v", task)
 		}
-		if task.ExecutionTarget != model.ExecutionTargetLocal || task.LocalClaimDeadline == nil {
+		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
 		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
@@ -940,7 +988,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 			t.Fatalf("create project: %v", err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
 	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -948,7 +996,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -965,7 +1013,7 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 		t.Fatalf("effective source reference = %#v, %v", view, err)
 	}
 	cloneBody := func(assetID string) string {
-		return `{"project_id":"` + destinationProject.ID + `","quantity":1,"prompt":"editable clone","reference_image":{"asset_id":"` + assetID + `"}}`
+		return `{"execution_profile":"cost_effective","project_id":"` + destinationProject.ID + `","quantity":1,"prompt":"editable clone","reference_image":{"asset_id":"` + assetID + `"}}`
 	}
 	taskCount := func() int {
 		tasks, err := repo.Tasks().FindByUserID(ctx, userID, "", "", 0, 20)
@@ -1109,6 +1157,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 		UserID:                userID,
 		ProjectID:             sourceProject.ID,
 		Type:                  sourceProject.Platform,
+		ExecutionProfile:      "cost_effective",
 		Status:                model.TaskStatusCompleted,
 		Prompt:                "AI entry source",
 		ReferenceImageAssetID: trusted.ID,
@@ -1117,7 +1166,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	snapshotOnlySource := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+	snapshotOnlySource := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted}
 	snapshotOnlySource.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: unrelated.ID})
 	if err := repo.Tasks().Create(ctx, snapshotOnlySource); err != nil {
 		t.Fatalf("create snapshot-only source: %v", err)
@@ -1125,7 +1174,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1141,7 +1190,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 		t.Fatalf("source reference view = %#v, %v", view, err)
 	}
 	cloneBody := func(assetID string) string {
-		return `{"project_id":"` + destinationProject.ID + `","quantity":1,"reference_image":{"asset_id":"` + assetID + `"}}`
+		return `{"execution_profile":"cost_effective","project_id":"` + destinationProject.ID + `","quantity":1,"reference_image":{"asset_id":"` + assetID + `"}}`
 	}
 	taskCount := func() int64 {
 		count, err := repo.Tasks().CountByUserID(ctx, userID, "", "")
@@ -1283,12 +1332,12 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 			if tt.platform == model.PlatformMontage {
 				taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
 			}
@@ -1297,7 +1346,7 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 			app := fiber.New()
 			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
-			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"project_id":"`+destinationProject.ID+`","quantity":2,`+tt.typeFields+`}`)
+			resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"execution_profile":"cost_effective","project_id":"`+destinationProject.ID+`","quantity":2,`+tt.typeFields+`}`)
 			defer resp.Body.Close()
 			if resp.StatusCode != fiber.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
@@ -1368,12 +1417,13 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 			t.Fatal(err)
 		}
 	}
-	rootTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: rootProject.Platform, Status: model.TaskStatusCompleted}
+	rootTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: rootProject.Platform, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted}
 	source := &model.Task{
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            sourceProject.ID,
 		Type:                 sourceProject.Platform,
+		ExecutionProfile:     "cost_effective",
 		Status:               model.TaskStatusCompleted,
 		InputSourceTaskID:    rootTask.ID,
 		InputSourceProjectID: rootProject.ID,
@@ -1384,7 +1434,7 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 		}
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	if destinationPlatform == model.PlatformMontage {
 		taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
 	}
@@ -1418,31 +1468,20 @@ func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixt
 	if err := fixture.repo.Tasks().Update(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.repo.TaskExecutions().Create(t.Context(), &model.TaskExecution{
-		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionStarting,
-		RuntimeScope: "anban", RuntimeWorkload: "job-1", RuntimeInstanceID: "pod-uid-1",
-	}); err != nil {
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, task.ID, 1
+	profiledExecution.Target, profiledExecution.Status = "kubernetes", model.TaskExecutionStarting
+	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload, profiledExecution.RuntimeInstanceID = "anban", "job-1", "pod-uid-1"
+	if err := fixture.repo.TaskExecutions().Create(t.Context(), &profiledExecution); err != nil {
 		t.Fatal(err)
 	}
 	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeEnv := map[string]string{
-		"ANTHROPIC_AUTH_TOKEN":           "test-token",
-		"ANTHROPIC_BASE_URL":             "https://anthropic.example.com",
-		"ANTHROPIC_MODEL":                "claude-test",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-test",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-test",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-test",
-	}
 	bootstrap := service.NewAgentBootstrapService(fixture.repo, tokens, service.AgentBootstrapConfig{
-		Model: "claude-test", TokenTTL: time.Hour, SignedURLTTL: 60, Store: fixture.store,
-		RuntimeEnv: runtimeEnv,
-		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
-			"claude-test": {Provider: "anthropic", Model: "claude-test"},
-		},
+		TokenTTL: time.Hour, SignedURLTTL: 60, Store: fixture.store,
+		Registry: handlerTestAgentProfileRegistry(t),
 	}, zerolog.Nop())
 	response, err := bootstrap.Bootstrap(t.Context(), &serveragent.WorkloadIdentity{
 		Target: "kubernetes", RuntimeIdentity: model.RuntimeIdentity{Scope: "anban", Workload: "job-1", InstanceID: "pod-uid-1"},
@@ -1481,6 +1520,7 @@ func cloneSourceAttachmentAPIShape(t *testing.T, fixture *cloneSourceReuseFixtur
 func cloneSourceAttachmentRequest(t *testing.T, projectID string, attachment map[string]any) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
+		"execution_profile": "cost_effective",
 		"project_id":        projectID,
 		"quantity":          1,
 		"input_attachments": []any{attachment},
@@ -1517,11 +1557,11 @@ func cloneSourceTaskURL(userID, projectID, taskID, fileName string) string {
 func cloneSourceReuseRequest(platform, projectID, rawURL string) string {
 	switch platform {
 	case model.PlatformEcommerce:
-		return `{"project_id":"` + projectID + `","quantity":1,"product_photos":["` + rawURL + `"]}`
+		return `{"execution_profile":"cost_effective","project_id":"` + projectID + `","quantity":1,"product_photos":["` + rawURL + `"]}`
 	case model.PlatformMontage:
-		return `{"project_id":"` + projectID + `","quantity":1,"montage_input":{"brief":"reuse source","source_assets":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","mime_type":"image/png"}]}}`
+		return `{"execution_profile":"cost_effective","project_id":"` + projectID + `","quantity":1,"montage_input":{"brief":"reuse source","source_assets":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","mime_type":"image/png"}]}}`
 	default:
-		return `{"project_id":"` + projectID + `","quantity":1,"input_attachments":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","content_type":"image/png"}]}`
+		return `{"execution_profile":"cost_effective","project_id":"` + projectID + `","quantity":1,"input_attachments":[{"type":"image","url":"` + rawURL + `","file_name":"source.png","content_type":"image/png"}]}`
 	}
 }
 
@@ -1782,7 +1822,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 				if err := repo.Projects().Create(t.Context(), destination); err != nil {
 					t.Fatal(err)
 				}
-				return `{"project_id":"` + destination.ID + `","quantity":1}`
+				return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1}`
 			},
 			wantStatus: fiber.StatusForbidden,
 		},
@@ -1793,7 +1833,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 				if err := repo.Projects().Create(t.Context(), destination); err != nil {
 					t.Fatal(err)
 				}
-				return `{"project_id":"` + destination.ID + `","quantity":1}`
+				return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1}`
 			},
 			wantStatus: fiber.StatusBadRequest,
 		},
@@ -1801,31 +1841,31 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":0}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":0}`
 		}, wantStatus: fiber.StatusBadRequest},
 		{name: "quantity above five", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":6}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":6}`
 		}, wantStatus: fiber.StatusBadRequest},
 		{name: "unavailable model", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":1,"image_model_key":"unknown"}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1,"image_model_key":"unknown"}`
 		}, wantStatus: fiber.StatusForbidden},
 		{name: "invalid goal", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":1,"goal_mode":true,"goal":"  "}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1,"goal_mode":true,"goal":"  "}`
 		}, wantStatus: fiber.StatusBadRequest},
 		{name: "unsafe attachment", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":1,"input_attachments":[{"type":"image","url":"file:///etc/passwd","file_name":"passwd.png","content_type":"image/png"}]}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1,"input_attachments":[{"type":"image","url":"file:///etc/passwd","file_name":"passwd.png","content_type":"image/png"}]}`
 		}, wantStatus: fiber.StatusBadRequest},
 		{name: "inaccessible reference", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
@@ -1835,7 +1875,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Assets().Create(t.Context(), asset); err != nil {
 				t.Fatal(err)
 			}
-			return `{"project_id":"` + destination.ID + `","quantity":1,"reference_image":{"asset_id":"` + asset.ID + `"}}`
+			return `{"execution_profile":"cost_effective","project_id":"` + destination.ID + `","quantity":1,"reference_image":{"asset_id":"` + asset.ID + `"}}`
 		}, wantStatus: fiber.StatusForbidden},
 	}
 
@@ -1851,7 +1891,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Projects().Create(t.Context(), sourceProject); err != nil {
 				t.Fatal(err)
 			}
-			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, Status: model.TaskStatusCompleted}
+			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
@@ -1860,7 +1900,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
 			logger := zerolog.New(io.Discard)
-			taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 			referenceSvc := service.NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			h := NewTaskHandler(taskSvc, &logger)
@@ -1903,7 +1943,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 			t.Fatal(err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformArticle, ExecutionProfile: "cost_effective", Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1919,7 +1959,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 			CatalogID: "clone-insufficient-v1",
 			Currency:  "credits",
 			SKUs: []billing.SKUConfig{{
-				ID: "task.article.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
+				ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "cost_effective", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
 			}},
 		},
 	}
@@ -1932,7 +1972,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 		t.Fatalf("create empty wallet: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetBillingCatalogService(catalog)
 	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, &bundle, service.BillingWalletOptions{Now: func() time.Time { return now }}))
 	h := NewTaskHandler(taskSvc, &logger)
@@ -1940,7 +1980,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
-	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"project_id":"`+destinationProject.ID+`","quantity":1,"prompt":"new task"}`)
+	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"execution_profile":"cost_effective","project_id":"`+destinationProject.ID+`","quantity":1,"prompt":"new task"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusPaymentRequired {
 		body, _ := io.ReadAll(resp.Body)
@@ -2003,7 +2043,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	store.data = map[string][]byte{pendingKey: []byte("# notes")}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2074,7 +2114,7 @@ func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2120,7 +2160,7 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2189,7 +2229,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	taskSvc.SetNASResumeEnabled(true)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
@@ -2280,7 +2320,7 @@ func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	h := NewTaskHandler(service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil), &logger)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil), &logger)
 	h.SetRepository(repo)
 	app := fiber.New()
 	app.Get("/tasks", func(c fiber.Ctx) error {
@@ -2383,7 +2423,7 @@ func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Reposi
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 	handler.SetRepository(repo)
 	app := fiber.New()
@@ -2397,7 +2437,7 @@ func setupSeednoteTaskCreateHandler(t *testing.T) (*fiber.App, repository.Reposi
 func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 	app, repo, ctx, _, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
-		"project_id":"`+projectID+`",
+		"execution_profile":"cost_effective","project_id":"`+projectID+`",
 		"prompt":"生成新品种草图文",
 		"input_attachments":[{
 			"type":"image",
@@ -2433,7 +2473,7 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
-		"project_id":"`+projectID+`",
+		"execution_profile":"cost_effective","project_id":"`+projectID+`",
 		"prompt":"生成新品种草图文",
 		"input_attachments":[{
 			"type":"video",

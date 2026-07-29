@@ -8,7 +8,7 @@ import { render } from '@/test/test-utils'
 const navigateMock = vi.fn()
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
-const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
+const { articleProject, seednoteProject, ecommerceProject, executionProfiles, billingCatalog } = vi.hoisted(() => {
   const articleProject = {
     id: 'project-1',
     user_id: 'user-1',
@@ -45,6 +45,34 @@ const { articleProject, seednoteProject, ecommerceProject } = vi.hoisted(() => {
       platform: 'ecommerce',
       name: '电商项目',
       config: {},
+    } as const,
+    executionProfiles: [
+      {
+        id: 'cost_effective',
+        display_name: '性价比',
+        model_name: 'DeepSeek 4 Pro',
+        model_id: 'deepseek-v4-pro',
+        description: '适合日常创作和批量任务',
+        min_tier: 'free',
+        available: true,
+      },
+      {
+        id: 'balanced',
+        display_name: '平衡型',
+        model_name: '豆包 Seed Evolving',
+        model_id: 'doubao-seed-evolving',
+        description: '兼顾质量与成本',
+        min_tier: 'pro',
+        available: true,
+      },
+    ] as const,
+    billingCatalog: {
+      catalog_id: 'catalog-1',
+      currency: 'credits',
+      skus: [
+        { id: 'article-cost', operation: 'task.article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'cost_effective', delivery: 'task' },
+        { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
+      ],
     } as const,
   }
 })
@@ -116,6 +144,11 @@ vi.mock('@/lib/api', async () => {
       billing: {
         ...actual.api.billing,
         wallet: vi.fn().mockResolvedValue({ paid: 800, promotional: 0, debt: 0, balance: 800 }),
+        catalog: vi.fn().mockResolvedValue(billingCatalog),
+      },
+      agentProfiles: {
+        ...actual.api.agentProfiles,
+        list: vi.fn().mockResolvedValue(executionProfiles),
       },
       plans: {
         ...actual.api.plans,
@@ -158,6 +191,28 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
     await screen.findByRole('heading', { name: '首页' })
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
+  })
+
+  it('defaults to the cheapest available profile and submits the selected profile', async () => {
+    render(<DashboardPage />)
+
+    expect(await screen.findByRole('group', { name: 'Agent 执行配置' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /性价比，DeepSeek 4 Pro/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('4,000 积分')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /平衡型，豆包 Seed Evolving/ }))
+    expect(await screen.findByText('6,000 积分')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '写一篇新品介绍' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
+      channel: 'studio',
+      project_id: 'project-1',
+      text: '写一篇新品介绍',
+      execution_profile: 'balanced',
+      attachments: [],
+    }))
   })
 
   it('sends first-time users to project creation from the AI entry', async () => {
@@ -222,7 +277,7 @@ describe('DashboardPage AI entry', () => {
       channel: 'studio',
       project_id: 'project-1',
       text: '帮我写一篇新品发布公众号文章',
-      execution_target: 'local',
+      execution_profile: 'cost_effective',
       attachments: files.map((file, index) => ({
         type: (['image', 'audio', 'video', 'document', 'text'] as const)[index],
         upload_id: `upload-${file.name}`,

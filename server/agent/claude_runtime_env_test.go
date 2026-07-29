@@ -1,42 +1,9 @@
 package agent
 
 import (
-	"reflect"
 	"strings"
 	"testing"
-
-	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
-
-func TestClaudeRuntimeEnvAndAliasesAreIdenticalForManagedRuntimeAndBootstrap(t *testing.T) {
-	claude := srvconfig.ClaudeConfig{
-		Provider:  srvconfig.ClaudeProviderVolcengineArk,
-		BaseURL:   srvconfig.ClaudeArkCompatibleBaseURL,
-		AuthToken: "runtime-secret",
-		Models: srvconfig.ClaudeModelsConfig{
-			Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving",
-			Sonnet: "doubao-seed-2-1-pro-260628", Haiku: "doubao-seed-2-1-turbo-260628",
-		},
-		UsageAliases: map[string]string{"doubao-seed-evolving-latest-version": "doubao-seed-evolving"},
-		Env: map[string]string{
-			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
-			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "1000000",
-		},
-	}
-	runtimeEnv := claude.RuntimeEnv()
-	aliases := claude.RuntimeModelUsageAliases()
-	managedEnv := ClaudeRuntimeEnv(runtimeEnv)
-	bootstrapEnv := ClaudeRuntimeEnv(runtimeEnv)
-	if !reflect.DeepEqual(managedEnv, bootstrapEnv) {
-		t.Fatalf("runtime env mismatch: managed=%#v bootstrap=%#v", managedEnv, bootstrapEnv)
-	}
-	managedAliases := cloneModelUsageAliases(aliases)
-	bootstrapAliases := cloneModelUsageAliases(aliases)
-	if !reflect.DeepEqual(managedAliases, bootstrapAliases) {
-		t.Fatalf("model usage aliases mismatch: managed=%#v bootstrap=%#v", managedAliases, bootstrapAliases)
-	}
-}
 
 func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
 	source := map[string]string{

@@ -20,12 +20,13 @@ const (
 )
 
 type AIEntrySubmitRequest struct {
-	UserID          string                  `json:"-"`
-	Channel         string                  `json:"channel"`
-	ProjectID       string                  `json:"project_id"`
-	Text            string                  `json:"text"`
-	Attachments     []model.EntryAttachment `json:"attachments,omitempty"`
-	ExecutionTarget string                  `json:"execution_target,omitempty"`
+	UserID           string                  `json:"-"`
+	Channel          string                  `json:"channel"`
+	ProjectID        string                  `json:"project_id"`
+	ExecutionProfile string                  `json:"execution_profile"`
+	Text             string                  `json:"text"`
+	Attachments      []model.EntryAttachment `json:"attachments,omitempty"`
+	ExecutionTarget  string                  `json:"execution_target,omitempty"`
 }
 
 type AIEntrySubmitResult struct {
@@ -96,12 +97,16 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	req.Text = strings.TrimSpace(req.Text)
 	if req.UserID == "" {
 		return aiEntryError("用户未登录。"), nil
 	}
 	if req.ProjectID == "" {
 		return aiEntryNeedsConfiguration("请选择一个项目后再创建任务。", "/projects"), nil
+	}
+	if req.ExecutionProfile == "" {
+		return aiEntryNeedsConfiguration("请选择执行模型后再创建任务。", "/"), nil
 	}
 	project, err := s.repo.Projects().FindByID(ctx, req.ProjectID)
 	if err != nil {
@@ -134,6 +139,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	params := CreateManualParams{
 		UserID:           req.UserID,
 		ProjectID:        req.ProjectID,
+		ExecutionProfile: req.ExecutionProfile,
 		Prompt:           prompt,
 		Quantity:         1,
 		ImageRatio:       normalizeAIEntryImageRatio(intent.ImageRatio),

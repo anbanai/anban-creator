@@ -337,17 +337,17 @@ montage:
   execution_targets: ["cloud"]
   default_execution_target: "cloud"
 claude:
-  provider: "volcengine_ark"
-  base_url: "https://ark.cn-beijing.volces.com/api/compatible"
-  auth_token: "${CLAUDE_CODE_AUTH_TOKEN}"
-  models:
-    default: "doubao-seed-evolving"
-    opus: "doubao-seed-evolving"
-    fable: "doubao-seed-evolving"
-    sonnet: "doubao-seed-2-1-pro-260628"
-    haiku: "doubao-seed-2-1-turbo-260628"
-  model_usage_aliases:
-    doubao-seed-evolving-latest-version: "doubao-seed-evolving"
+  execution_profiles:
+    cost_effective:
+      display_name: "性价比"
+      model_name: "DeepSeek 4 Pro"
+      description: "低成本高效率"
+      provider: "deepseek"
+      model_id: "deepseek-v4-pro"
+      protocol: "anthropic"
+      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
+      auth_token: "${ANBAN_DEEPSEEK_API_KEY}"
+      min_tier: "free"
   executor: docker
   runtime_images:
     article: "creator-agent-article:latest"
@@ -414,7 +414,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      CLAUDE_CODE_AUTH_TOKEN:
+      ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:
+      ANBAN_DEEPSEEK_API_KEY:
       ANBAN_RUNTIME_SMOKE_NETWORK: "$SMOKE_NETWORK"
     ports:
       - "127.0.0.1::8080"
@@ -443,7 +444,8 @@ runtime_smoke_main() {
     printf 'SKIP: Docker CLI is not installed\n'
     return 0
   fi
-  [[ -n "${CLAUDE_CODE_AUTH_TOKEN:-}" ]] || fail "missing required configuration: CLAUDE_CODE_AUTH_TOKEN"
+  [[ -n "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL"
+  [[ -n "${ANBAN_DEEPSEEK_API_KEY:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_API_KEY"
   local command_name deadline registration catalog top_up_body top_up
   for command_name in curl git jq mktemp; do
     require_command "$command_name"

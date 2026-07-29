@@ -8,7 +8,9 @@ describe('montage UX contracts', () => {
     expect(pageSource).toContain('TaskFormDialog')
     expect(dialogSource).toContain('montage_input')
     expect(dialogSource).toContain('MontageCreationPanel')
-    expect(dialogSource).toContain("values.type !== 'montage' && runThisTaskLocally")
+    expect(dialogSource).toContain('ExecutionProfileSelector')
+    expect(dialogSource).not.toContain('runThisTaskLocally')
+    expect(dialogSource).not.toContain('execution_target')
     expect(dialogSource).not.toContain('MontageExecutionTarget')
   })
 

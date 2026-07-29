@@ -1,4 +1,5 @@
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 
 export type TaskType = 'seednote' | 'article' | 'ecommerce'
 
@@ -18,6 +19,8 @@ export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cance
 export interface Task {
   id: string
   type: TaskType
+  execution_profile: AgentExecutionProfileID
+  agent_profile_snapshot: AgentProfileSnapshot
   title?: string
   topic?: string
   prompt: string
@@ -84,6 +87,7 @@ export interface TaskFile {
 
 export interface CreateTaskRequest {
   type: TaskType
+  execution_profile: AgentExecutionProfileID
   topic?: string
   prompt?: string
   project_id: string

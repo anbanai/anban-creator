@@ -148,6 +148,8 @@ type Task struct {
 	BillingPricingTier    string                                `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
 	BillingChargeID       *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
 	BillingPriceCredits   int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
+	ExecutionProfile      string                                `gorm:"type:varchar(40);not null;index:idx_tasks_execution_profile" json:"execution_profile"`
+	AgentProfileSnapshot  AgentProfileSnapshot                  `gorm:"type:json;serializer:json;not null" json:"agent_profile_snapshot"`
 	BillingTerminalReason string                                `gorm:"type:varchar(64);index" json:"billing_terminal_reason,omitempty"`
 	InputTokens           *int64                                `json:"-"`
 	OutputTokens          *int64                                `json:"-"`

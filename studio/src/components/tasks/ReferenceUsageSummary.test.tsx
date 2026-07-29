@@ -54,6 +54,7 @@ const seednoteTask: Task = {
   input_attachments: [],
   plan_id: null,
   project_id: 'project-1',
+  execution_profile: 'cost_effective',
   result: null,
   published: false,
   published_at: null,

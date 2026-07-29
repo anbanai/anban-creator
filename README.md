@@ -136,21 +136,30 @@ Important sections:
 Docker Compose loads the root `.env` into the Server container and rejects a
 startup with any required value missing. Populate all required entries from
 `.env.example`: `ANBAN_BILLING_ADMIN_API_KEY`, a 32-byte or longer
-`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`,
-`CLAUDE_CODE_AUTH_TOKEN`, `ANBAN_OSS_ENDPOINT`, `ANBAN_OSS_ACCESS_KEY_ID`, and
-`ANBAN_OSS_ACCESS_KEY_SECRET`, plus `MOONSHOT_API_KEY` for the configured writing
+`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`, `ANBAN_OSS_ENDPOINT`,
+`ANBAN_OSS_ACCESS_KEY_ID`, and `ANBAN_OSS_ACCESS_KEY_SECRET`, plus
+`MOONSHOT_API_KEY` for the configured writing
 and understanding routes. The checked-in image routes also require
 `VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Add any other provider and
 integration variables referenced by `server/config.yaml` directly to `.env`;
 the relevant optional feature remains unavailable until its credentials are
 configured.
 
+Agent profile credentials are independently optional at Server startup. Set
+`ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL` plus `ANBAN_DEEPSEEK_API_KEY`,
+`ANBAN_DOUBAO_AGENT_API_KEY`, and `ANBAN_KIMI_API_KEY` to enable their
+respective profiles; an incomplete profile is listed as unavailable and is
+never replaced by another model automatically.
+
 Kubernetes reads the billing and execution-token values from Secret
 `anban-billing-admin-api-key`, key `api-key`, and Secret
 `anban-agent-execution-token`, key `token-secret`, respectively. Configure the
-remaining `server/config.yaml` environment references through the deployment's
-Secret/config injection. Do not put credentials directly in manifests or config
-files.
+Agent profile variables through optional Secret `anban-agent-profile-providers`
+using keys `deepseek-anthropic-base-url`, `deepseek-api-key`, `doubao-api-key`,
+and `kimi-api-key`. A missing key keeps only that profile unavailable. Configure
+the remaining `server/config.yaml` environment references through the
+deployment's Secret/config injection. Do not put credentials directly in
+manifests or config files.
 
 Users can configure per-account platform credentials and per-user model settings from Studio.
 

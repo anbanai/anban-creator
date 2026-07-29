@@ -108,6 +108,10 @@ vi.mock('@/lib/api', async () => {
         wallet: vi.fn(),
         catalog: vi.fn(),
       },
+      agentProfiles: {
+        ...actual.api.agentProfiles,
+        list: vi.fn(),
+      },
       imageModels: {
         ...actual.api.imageModels,
         list: vi.fn(),
@@ -223,6 +227,11 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.projects.list).mockResolvedValue(mockProjects)
     vi.mocked(api.billing.wallet).mockResolvedValue(mockBillingWallet)
     vi.mocked(api.billing.catalog).mockResolvedValue(mockBillingCatalog)
+    vi.mocked(api.agentProfiles.list).mockResolvedValue([
+      { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+    ])
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
       items: [
@@ -397,7 +406,9 @@ describe('TaskDetailPage', () => {
     const view = renderWithCachedTasks(taskA, taskB)
 
     const taskADialog = await openCloneDialog()
-    expect(within(taskADialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 A 的原始要求')
+    await waitFor(() => {
+      expect(within(taskADialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 A 的原始要求')
+    })
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
@@ -408,7 +419,9 @@ describe('TaskDetailPage', () => {
     })
 
     const taskBDialog = await openCloneDialog()
-    expect(within(taskBDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 B 的原始要求')
+    await waitFor(() => {
+      expect(within(taskBDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 B 的原始要求')
+    })
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 

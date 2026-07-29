@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { ExecutionTarget, Task } from '@/types'
+import type { AgentExecutionProfileID, Task } from '@/types'
 import type {
   InputAttachment,
   InputAttachmentType,
@@ -15,7 +15,7 @@ export interface AIEntrySubmitRequest {
   project_id: string
   text: string
   attachments?: AIEntryAttachment[]
-  execution_target?: ExecutionTarget
+  execution_profile: AgentExecutionProfileID
 }
 
 export interface AIEntrySubmitResult {

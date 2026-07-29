@@ -20,6 +20,11 @@ type Config struct {
 	Goal                     string
 	Workspace                string
 	Model                    string
+	Provider                 string
+	Protocol                 string
+	ContextWindow            int
+	ReasoningEffort          string
+	ThinkingRequired         bool
 	AgentFlag                string
 	AutoMemoryDirectory      string
 	MaxTurns                 int

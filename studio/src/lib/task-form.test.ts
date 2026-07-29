@@ -39,6 +39,7 @@ function task(overrides: Partial<Task> = {}): Task {
     prompt: 'Original prompt',
     status: 'completed',
     project_id: 'project-1',
+    execution_profile: 'cost_effective',
     published: false,
     published_at: null,
     billing_price_credits: 0,
@@ -50,6 +51,20 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task form mapping', () => {
+  it('requires an execution profile in defaults and request payloads', () => {
+    const values = createTaskFormDefaults(project())
+    expect(values.execution_profile).toBe('')
+
+    values.execution_profile = 'balanced'
+    expect(taskFormValuesToRequest(values)).toMatchObject({ execution_profile: 'balanced' })
+  })
+
+  it('preserves the source execution profile when cloning', () => {
+    const defaults = cloneTaskFormDefaults(task({ execution_profile: 'maximum_quality' }))
+    expect(defaults.execution_profile).toBe('maximum_quality')
+    expect(taskFormValuesToRequest(defaults).execution_profile).toBe('maximum_quality')
+  })
+
   it('creates complete defaults from the selected project without sharing project config objects', () => {
     const source = project({
       id: 'ecommerce-project',
@@ -391,7 +406,6 @@ describe('task form mapping', () => {
       image_ratio: '16:9',
       image_model_key: `${type}-model`,
       skip_reference_image: false,
-      execution_target: 'local',
       watermark: false,
       goal: 'Publish-ready',
       goal_mode: false,
@@ -439,7 +453,7 @@ describe('task form mapping', () => {
       image_ratio: '16:9',
       image_model_key: `${type}-model`,
       skip_reference_image: false,
-      execution_target: 'local',
+      execution_profile: 'cost_effective',
       watermark: false,
       goal: 'Publish-ready',
       goal_mode: false,
@@ -550,7 +564,6 @@ describe('task form mapping', () => {
         selling_points: 'stale',
         language: 'en',
         montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
-        execution_target: 'local_claimed' as const,
       },
       expected: {
         prompt: 'Seednote prompt',
@@ -558,7 +571,6 @@ describe('task form mapping', () => {
         goal: 'publish ready',
         has_content_image: false,
         has_tail_image: false,
-        execution_target: 'local',
       },
       omitted: ['article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'montage_input'],
     },
@@ -576,14 +588,12 @@ describe('task form mapping', () => {
         product_photos: ['oss://stale.png'],
         selected_modules: { stale: 1 },
         montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
-        execution_target: 'cloud' as const,
       },
       expected: {
         prompt: undefined,
         goal_mode: false,
         article_with_cover: false,
         article_with_content_images: false,
-        execution_target: 'cloud',
       },
       omitted: ['goal', 'has_content_image', 'has_tail_image', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'montage_input'],
     },
@@ -604,7 +614,6 @@ describe('task form mapping', () => {
         selling_points: '  Light and portable  ',
         language: 'zh-CN',
         montage_input: { brief: 'stale', source_assets: [], delivery_targets: [] },
-        execution_target: 'local' as const,
       },
       expected: {
         prompt: 'Product launch',
@@ -613,7 +622,6 @@ describe('task form mapping', () => {
         target_platform: 'tmall',
         selling_points: 'Light and portable',
         language: 'zh-CN',
-        execution_target: 'local',
       },
       omitted: ['goal', 'goal_mode', 'has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'montage_input'],
     },
@@ -637,7 +645,6 @@ describe('task form mapping', () => {
           preferences: { aspect_ratio: '9:16', duration_seconds: 30, style: '  clean  ', music_prompt: '  upbeat  ' },
           delivery_targets: ['douyin'],
         },
-        execution_target: 'local_claimed' as const,
       },
       expected: {
         prompt: 'Launch video',
@@ -657,6 +664,7 @@ describe('task form mapping', () => {
     const formValues: TaskFormDefaults = {
       ...createTaskFormDefaults(project({ id: `${values.type}-project`, platform: values.type as Project['platform'] })),
       ...(values as unknown as Partial<TaskFormDefaults>),
+      execution_profile: 'cost_effective',
       quantity: 1,
       image_ratio: '',
       image_model_key: '',

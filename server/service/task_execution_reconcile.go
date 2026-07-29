@@ -217,15 +217,15 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 		if !won {
 			return errPreStartReplacementContended
 		}
-		replacement = &model.TaskExecution{
-			ID:             uuid.NewString(),
-			TaskID:         task.ID,
-			Attempt:        current.Attempt + 1,
-			RuntimeProfile: current.RuntimeProfile,
-			RuntimeImage:   current.RuntimeImage,
-			Target:         target,
-			Status:         model.TaskExecutionCreated,
-		}
+		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot)
+		replacement = &profiledExecution
+		replacement.ID = uuid.NewString()
+		replacement.TaskID = task.ID
+		replacement.Attempt = current.Attempt + 1
+		replacement.RuntimeProfile = current.RuntimeProfile
+		replacement.RuntimeImage = current.RuntimeImage
+		replacement.Target = target
+		replacement.Status = model.TaskExecutionCreated
 		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {
 			return err
 		}

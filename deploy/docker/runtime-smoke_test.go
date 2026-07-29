@@ -65,16 +65,16 @@ func TestRuntimeSmokeDockerAbsenceIsTheOnlySuccessfulSkip(t *testing.T) {
 		cmd.Dir = repoRoot
 		env := make([]string, 0, len(os.Environ())+2)
 		for _, item := range os.Environ() {
-			if !strings.HasPrefix(item, "PATH=") && !strings.HasPrefix(item, "CLAUDE_CODE_AUTH_TOKEN=") {
+			if !strings.HasPrefix(item, "PATH=") && !strings.HasPrefix(item, "ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL=") && !strings.HasPrefix(item, "ANBAN_DEEPSEEK_API_KEY=") {
 				env = append(env, item)
 			}
 		}
-		cmd.Env = append(env, "PATH="+binDir+":"+os.Getenv("PATH"), "CLAUDE_CODE_AUTH_TOKEN=")
+		cmd.Env = append(env, "PATH="+binDir+":"+os.Getenv("PATH"), "ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL=", "ANBAN_DEEPSEEK_API_KEY=")
 		output, err := cmd.CombinedOutput()
 		if err == nil {
 			t.Fatalf("missing runtime config unexpectedly succeeded: %s", output)
 		}
-		if strings.Contains(string(output), "SKIP") || !strings.Contains(string(output), "CLAUDE_CODE_AUTH_TOKEN") {
+		if strings.Contains(string(output), "SKIP") || !strings.Contains(string(output), "ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL") {
 			t.Fatalf("missing runtime config output = %q, want explicit non-skip failure", output)
 		}
 	})
@@ -102,10 +102,30 @@ func TestRuntimeSmokeGeneratedServerConfigIsValid(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_CODE_AUTH_TOKEN", "runtime-smoke-provider-token")
+	t.Setenv("ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL", "https://deepseek.example.com/anthropic")
+	t.Setenv("ANBAN_DEEPSEEK_API_KEY", "runtime-smoke-provider-token")
 	t.Setenv("ANBAN_RUNTIME_SMOKE_NETWORK", "runtime-smoke-network")
 	if _, err := serverconfig.NewConfig(configPath); err != nil {
 		t.Fatalf("generated runtime smoke server config is invalid: %v", err)
+	}
+}
+
+func TestRuntimeSmokeUsesCanonicalDeepSeekProfileEnvironment(t *testing.T) {
+	repoRoot := runtimeSmokeRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "runtime-smoke.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, required := range []string{"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL", "ANBAN_DEEPSEEK_API_KEY"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("runtime smoke missing canonical profile environment %q", required)
+		}
+	}
+	for _, forbidden := range []string{"ANBAN_DEEPSEEK_AGENT_BASE_URL", "ANBAN_DEEPSEEK_AGENT_API_KEY", "CLAUDE_CODE_AUTH_TOKEN"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("runtime smoke contains obsolete profile environment %q", forbidden)
+		}
 	}
 }
 

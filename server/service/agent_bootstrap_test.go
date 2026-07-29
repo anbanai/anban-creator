@@ -32,22 +32,40 @@ type bootstrapSecurityStore struct {
 	signedExpiries []time.Time
 }
 
-func bootstrapTestRuntimeEnv() map[string]string {
-	return map[string]string{
-		"ANTHROPIC_AUTH_TOKEN":           "test-token",
-		"ANTHROPIC_BASE_URL":             "https://anthropic.example.com",
-		"ANTHROPIC_MODEL":                "claude-test",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-test",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-test",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-test",
+func bootstrapTestProfile(t *testing.T) (AgentExecutionProfile, *AgentProfileRegistry) {
+	t.Helper()
+	profile := AgentExecutionProfile{
+		ID: "cost_effective", DisplayName: "Cost effective", ModelName: "Test model",
+		Provider: "deepseek", ModelID: "claude-test", Protocol: "anthropic",
+		BaseURL: "https://anthropic.example.com", AuthToken: "test-token",
+		MinTier: model.TierFree, Available: true,
 	}
+	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile})
+	if err != nil {
+		t.Fatalf("NewAgentProfileRegistry: %v", err)
+	}
+	return profile, registry
 }
 
-func bootstrapTestModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
-	return map[string]serveragent.ModelUsageIdentity{
-		"claude-test": {Provider: "anthropic", Model: "claude-test"},
-	}
+func applyBootstrapTestProfile(t *testing.T, svc *AgentBootstrapService, task *model.Task, execution *model.TaskExecution) {
+	t.Helper()
+	profile, registry := bootstrapTestProfile(t)
+	snapshot := profile.Snapshot()
+	svc.cfg.Registry = registry
+	task.ExecutionProfile = profile.ID
+	task.AgentProfileSnapshot = snapshot
+	profiled := model.NewTaskExecutionAgentProfile(snapshot)
+	execution.Provider = profiled.Provider
+	execution.ModelID = profiled.ModelID
+	execution.Protocol = profiled.Protocol
+	execution.ReasoningEffort = profiled.ReasoningEffort
+	execution.ContextWindow = profiled.ContextWindow
+}
+
+func buildBootstrapTestResponse(t *testing.T, svc *AgentBootstrapService, ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, deadline time.Time) (*AgentBootstrapResponse, error) {
+	t.Helper()
+	applyBootstrapTestProfile(t, svc, task, execution)
+	return svc.buildResponse(ctx, execution, task, project, deadline)
 }
 
 func (s *bootstrapSecurityStore) DownloadURL(_ context.Context, key string, ttl int) (string, error) {
@@ -109,9 +127,9 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: asset.ID}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: time.Hour, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
 
-	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	response, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("buildResponse: %v", err)
 	}
@@ -146,15 +164,9 @@ func TestBootstrapDoesNotMaterializeLegacyTaskContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, SkipReferenceImage: true}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
-		Model:             "claude-test",
-		Store:             &signFakeStore{},
-		TokenTTL:          time.Hour,
-		RuntimeEnv:        bootstrapTestRuntimeEnv(),
-		ModelUsageAliases: bootstrapTestModelUsageAliases(),
-	}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: &signFakeStore{}, TokenTTL: time.Hour}, zerolog.Nop())
 
-	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("buildResponse: %v", err)
 	}
@@ -184,7 +196,7 @@ func TestBootstrapRejectsReferenceAssetOwnershipAndPurpose(t *testing.T) {
 			}
 			task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: asset.ID}
 			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
-			if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour)); err == nil {
+			if _, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour)); err == nil {
 				t.Fatal("invalid reference asset was accepted")
 			}
 			if len(store.signedKeys) != 0 {
@@ -204,9 +216,9 @@ func TestBootstrapSignsInheritedProjectReferenceAsset(t *testing.T) {
 	}
 	task := &model.Task{ID: "task-1", UserID: asset.UserID, ProjectID: "project-1", Type: model.PlatformSeednote}
 	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: task.Type, ReferenceImageAssetID: asset.ID})
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: time.Hour, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
 
-	response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +245,7 @@ func TestBootstrapPreservesReferenceRepositoryFailureBeforeSigning(t *testing.T)
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote, ReferenceImageAssetID: "asset-1"}
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
 
-	_, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	_, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 	if !errors.Is(err, ErrReferenceAssetUnavailable) || !errors.Is(err, rootCause) {
 		t.Fatalf("buildResponse error = %v, want unavailable and root cause", err)
 	}
@@ -251,7 +263,7 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	}
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, SignedURLTTL: 600, Store: store}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	prefix := "uploads/users/user-1/projects/project-1/tasks/task-1"
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformEcommerce, Prompt: "topic", ReferenceImageAssetID: "asset-bootstrap"}
@@ -263,7 +275,7 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 	})
 	task.SetEcommerce(model.EcommerceConfig{ProductPhotos: []string{"https://bucket.oss-cn-x.aliyuncs.com/" + prefix + "/inputs/product.png"}})
 	const resumeSessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740"
-	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1", ResumeSessionID: resumeSessionID}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline)
+	response, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1", ResumeSessionID: resumeSessionID}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +300,7 @@ func TestBootstrapBoundsEverySignedDownloadToCredentialDeadline(t *testing.T) {
 
 	before := len(store.signedKeys)
 	svc.now = func() time.Time { return jobDeadline.Add(-500 * time.Millisecond) }
-	if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
+	if _, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
 		t.Fatal("bootstrap accepted a deadline with no positive whole-second signing lifetime")
 	}
 	if len(store.signedKeys) != before {
@@ -311,7 +323,7 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 		return sampled
 	}
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "topic", SkipReferenceImage: true}
-	if _, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
+	if _, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
 		t.Fatal("text-only bootstrap issued a token without a positive whole-second lifetime")
 	}
 }
@@ -348,19 +360,23 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		{Role: model.EntryAttachmentRoleResumeFile, URL: "https://bucket.oss-cn-x.aliyuncs.com/" + taskPrefix + "/resume/run/attachments/foo.pdf", Key: taskPrefix + "/resume/run/attachments/foo.pdf", FileName: "foo.pdf"},
 	})
 	task.CurrentExecutionID = &executionID
+	profile, registry := bootstrapTestProfile(t)
+	task.ExecutionProfile = profile.ID
+	task.AgentProfileSnapshot = profile.Snapshot()
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	resumeSessionID := uuid.NewString()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, ResumeSessionID: resumeSessionID, Target: "docker", Status: model.TaskExecutionStarting, RuntimeScope: "docker", RuntimeWorkload: "exec-1"}); err != nil {
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, taskID, 1
+	profiledExecution.ResumeSessionID, profiledExecution.Target, profiledExecution.Status = resumeSessionID, "docker", model.TaskExecutionStarting
+	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "docker", "exec-1"
+	if err := repo.TaskExecutions().Create(ctx, &profiledExecution); err != nil {
 		t.Fatal(err)
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	runtimeEnv := bootstrapTestRuntimeEnv()
-	runtimeEnv["ANTHROPIC_AUTH_TOKEN"] = "bootstrap-secret"
-	runtimeEnv["PATH"] = "/untrusted/bin"
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, RuntimeEnv: runtimeEnv, ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, Registry: registry}, zerolog.Nop())
 	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -370,8 +386,8 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "bootstrap-secret" || first.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.RuntimeEnv["ANTHROPIC_MODEL"] != "claude-test" || len(first.RuntimeEnv) != 7 {
-		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.RuntimeEnv)
+	if first.ExecutionProfile.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.RuntimeEnv["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.RuntimeEnv) != 7 {
+		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.ExecutionProfile.RuntimeEnv)
 	}
 	if len(first.Files) < 2 {
 		t.Fatalf("files = %#v", first.Files)
@@ -436,7 +452,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if _, err := svc.Bootstrap(ctx, &crossProvider); err == nil {
 		t.Fatal("cross-provider workload with identical runtime identity accepted")
 	}
-	taskSvc := NewTaskService(repo, nil, nil, nil, "", nil, nil)
+	taskSvc := newTestTaskService(repo, nil, nil, nil, "", nil, nil)
 	if err := taskSvc.ValidateAgentExecutionAccess(ctx, userID, projectID, taskID, executionID); err != nil {
 		t.Fatalf("current execution rejected: %v", err)
 	}
@@ -673,15 +689,21 @@ func (r *bootstrapRaceExecutions) UpdateHeartbeat(context.Context, string, time.
 func newBootstrapRaceFixture(t *testing.T) (*AgentBootstrapService, *bootstrapRaceState, *serveragent.WorkloadIdentity) {
 	t.Helper()
 	executionID := "execution-1"
+	profile, registry := bootstrapTestProfile(t)
+	snapshot := profile.Snapshot()
+	profiledExecution := model.NewTaskExecutionAgentProfile(snapshot)
+	profiledExecution.ID, profiledExecution.TaskID = executionID, "task-1"
+	profiledExecution.Target, profiledExecution.Status = "docker", model.TaskExecutionStarting
+	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "daemon-a", "exec-1"
 	state := &bootstrapRaceState{
-		execution: model.TaskExecution{ID: executionID, TaskID: "task-1", Target: "docker", Status: model.TaskExecutionStarting, RuntimeScope: "daemon-a", RuntimeWorkload: "exec-1"},
-		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
+		execution: profiledExecution,
+		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
 		project:   model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "project", Status: model.ProjectStatusActive},
 		user:      model.User{ID: "user-1"},
 	}
 	repo := &bootstrapRaceRepository{state: state}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", TokenTTL: time.Minute, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Minute, Registry: registry}, zerolog.Nop())
 	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "daemon-a", Workload: "exec-1", InstanceID: "container-a"}, ExecutionID: executionID, TaskID: "task-1", ProjectID: "project-1", UserID: "user-1", Deadline: time.Now().Add(time.Minute)}
 	return svc, state, identity
 }
@@ -865,7 +887,7 @@ func TestBuildResponseSignsKeyFirstReferenceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Model: "claude-test", Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60, RuntimeEnv: bootstrapTestRuntimeEnv(), ModelUsageAliases: bootstrapTestModelUsageAliases()}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
 	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning}
 	key := "assets/users/user-1/reference-upload/reference.png"
@@ -874,7 +896,7 @@ func TestBuildResponseSignsKeyFirstReferenceImage(t *testing.T) {
 	task.SetInputAttachments([]model.EntryAttachment{attachment})
 	createBootstrapAsset(t, repo, attachment.UploadID, task.UserID, DirectUploadPurposeAIEntryAttachment, attachment.FileName, 1)
 
-	response, err := svc.buildResponse(context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, now.Add(time.Hour))
+	response, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("build response: %v", err)
 	}

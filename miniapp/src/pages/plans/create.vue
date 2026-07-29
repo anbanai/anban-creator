@@ -33,6 +33,20 @@
         </view>
       </view>
 
+      <view class="form-section">
+        <text class="form-section__label">执行配置 <text class="form-section__required">*</text></text>
+        <ExecutionProfileSelector
+          v-model="form.executionProfile"
+          :profiles="executionProfiles"
+          :loading="executionProfilesLoading"
+          :disabled="submitting"
+        />
+        <text v-if="resolvedPlanPrice !== undefined" class="form-section__hint">
+          每次任务准入费 {{ resolvedPlanPrice.toLocaleString() }} 积分
+        </text>
+        <text v-if="executionProfilesError" class="form-section__error">{{ executionProfilesError }}</text>
+      </view>
+
       <!-- Schedule frequency -->
       <view class="form-section">
         <text class="form-section__label">执行频率 <text class="form-section__required">*</text></text>
@@ -257,7 +271,7 @@
       <AbButton
         type="primary"
         block
-        :disabled="referenceUploading"
+        :disabled="!canSubmit"
         :loading="submitting"
         @click="handleSubmit"
       >
@@ -270,12 +284,26 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { agentProfilesApi } from '@/api/agent-profiles'
+import { billingApi } from '@/api/billing'
 import { plansApi } from '@/api/plans'
 import { projectsApi } from '@/api/projects'
 import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { contentTypeLabel } from '@/utils/labels'
-import type { Project, Template, ResourceEntry, ReferenceImageSelection } from '@/types'
+import {
+  resolveExecutionProfileSelection,
+  taskPriceForExecutionProfile,
+} from '@/utils/execution-profiles'
+import type {
+  AgentExecutionProfileCapability,
+  AgentExecutionProfileID,
+  BillingCatalog,
+  Project,
+  Template,
+  ResourceEntry,
+  ReferenceImageSelection,
+} from '@/types'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
 import ImageModelSelector from '@/components/business/ImageModelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
@@ -285,12 +313,14 @@ import AbInput from '@/components/common/AbInput.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
+import ExecutionProfileSelector from '@/components/business/ExecutionProfileSelector.vue'
 
 // --- Form state ---
 // Mirrors studio planSchema (plan Zod schema). Fields use camelCase internally
 // and are mapped to snake_case on submit (CreatePlanRequest payload).
 const form = reactive({
   projectId: '',
+  executionProfile: '' as AgentExecutionProfileID | '',
   cronExpr: '0 9 * * 1,3,5',
   prompt: '',
   weekdays: [] as number[],
@@ -328,6 +358,10 @@ const editingId = ref<string | null>(null)
 const isEditing = computed(() => !!editingId.value)
 const referenceUploading = ref(false)
 const referencePreviewUrl = ref('')
+const executionProfiles = ref<AgentExecutionProfileCapability[]>([])
+const executionProfilesLoading = ref(false)
+const executionProfilesError = ref('')
+const catalog = ref<BillingCatalog | null>(null)
 
 const selectedProject = ref<Project | null>(null)
 // Platform-dependent resources, loaded on project change.
@@ -371,6 +405,26 @@ const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
 // Plans only support seednote / article (matches studio's planSchema enum).
 const planUnsupported = computed(() => !!selectedProject.value && !isArticle.value && !isSeednote.value)
+const resolvedPlanPrice = computed(() => {
+  if (!selectedProject.value || !form.executionProfile) return undefined
+  return taskPriceForExecutionProfile(
+    catalog.value,
+    selectedProject.value.platform,
+    form.executionProfile,
+  )
+})
+const selectedExecutionProfileAvailable = computed(() => {
+  return executionProfiles.value.some((profile) =>
+    profile.id === form.executionProfile && profile.available,
+  )
+})
+const canSubmit = computed(() => {
+  if (!form.projectId || !selectedProject.value || planUnsupported.value) return false
+  if (!form.cronExpr.trim() || (form.goalMode && !form.goal.trim())) return false
+  if (!form.executionProfile || !selectedExecutionProfileAvailable.value) return false
+  if (resolvedPlanPrice.value === undefined) return false
+  return !submitting.value && !referenceUploading.value && !executionProfilesLoading.value
+})
 
 const selectedTemplateName = computed(() => {
   const t = platformTemplates.value.find((x) => x.id === form.templateId)
@@ -434,7 +488,19 @@ function onProjectChange(project: Project) {
   selectedProject.value = project
   form.projectId = project.id
   errors.projectId = ''
+  ensureExecutionProfileSelection()
   loadPlatformResources()
+}
+
+function ensureExecutionProfileSelection() {
+  if (!selectedProject.value) return
+  form.executionProfile = resolveExecutionProfileSelection(
+    form.executionProfile,
+    isEditing.value,
+    executionProfiles.value,
+    catalog.value,
+    selectedProject.value.platform,
+  )
 }
 
 // Loads templates + themes for the selected platform. Mirrors task-create.
@@ -537,15 +603,26 @@ function validate(): boolean {
     return false
   }
 
+  if (
+    !form.executionProfile
+    || !selectedExecutionProfileAvailable.value
+    || resolvedPlanPrice.value === undefined
+  ) {
+    uni.showToast({ title: '请选择可用的执行配置', icon: 'none' })
+    return false
+  }
+
   return true
 }
 
 // --- Submit ---
 // Builds a full CreatePlanRequest mirroring studio's onSubmit.
 async function handleSubmit() {
-  if (submitting.value || referenceUploading.value) return
+  if (!canSubmit.value || referenceUploading.value) return
   if (!validate()) return
   if (!selectedProject.value) return
+  const executionProfile = form.executionProfile
+  if (!executionProfile) return
 
   submitting.value = true
   try {
@@ -554,6 +631,7 @@ async function handleSubmit() {
 
     const payload = {
       type: plat,
+      execution_profile: executionProfile,
       cron_expr: cronExpr,
       prompt: form.prompt.trim() || undefined,
       project_id: form.projectId,
@@ -603,6 +681,7 @@ async function loadPlan(planId: string) {
   try {
     const plan = await plansApi.get(planId)
     form.projectId = plan.project_id || ''
+    form.executionProfile = plan.execution_profile
     form.cronExpr = plan.cron_expr || '0 9 * * 1,3,5'
     form.prompt = plan.prompt || ''
     form.imageModelKey = plan.image_model_key || ''
@@ -665,8 +744,27 @@ async function loadPlan(planId: string) {
   }
 }
 
+async function loadExecutionConfiguration() {
+  executionProfilesLoading.value = true
+  executionProfilesError.value = ''
+  const [profilesResult, catalogResult] = await Promise.allSettled([
+    agentProfilesApi.list(),
+    billingApi.catalog(),
+  ])
+  executionProfiles.value = profilesResult.status === 'fulfilled' ? profilesResult.value : []
+  catalog.value = catalogResult.status === 'fulfilled' ? catalogResult.value : null
+  if (profilesResult.status === 'rejected') {
+    executionProfilesError.value = '执行配置加载失败，请稍后重试'
+  } else if (catalogResult.status === 'rejected') {
+    executionProfilesError.value = '价格目录加载失败，请稍后重试'
+  }
+  executionProfilesLoading.value = false
+  ensureExecutionProfileSelection()
+}
+
 // --- Page lifecycle ---
 onLoad((query) => {
+  void loadExecutionConfiguration()
   if (query?.id) {
     editingId.value = query.id
     loadPlan(query.id)

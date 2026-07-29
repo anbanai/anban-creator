@@ -379,17 +379,17 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if parent != nil {
 			parentExecutionID = parent.ID
 		}
-		execution = &model.TaskExecution{
-			ID:                uuid.NewString(),
-			TaskID:            task.ID,
-			Attempt:           attempt,
-			ParentExecutionID: parentExecutionID,
-			ResumeSessionID:   resumeSessionID,
-			RuntimeProfile:    runtime.Profile,
-			RuntimeImage:      runtime.Image,
-			Target:            target,
-			Status:            model.TaskExecutionCreated,
-		}
+		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+		execution = &profiledExecution
+		execution.ID = uuid.NewString()
+		execution.TaskID = task.ID
+		execution.Attempt = attempt
+		execution.ParentExecutionID = parentExecutionID
+		execution.ResumeSessionID = resumeSessionID
+		execution.RuntimeProfile = runtime.Profile
+		execution.RuntimeImage = runtime.Image
+		execution.Target = target
+		execution.Status = model.TaskExecutionCreated
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
 		}

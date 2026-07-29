@@ -61,6 +61,7 @@ type BillingRepository interface {
 	ListSKUsByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKU, error)
 	FindSKU(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error)
 	FindSKUByOperation(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error)
+	FindSKUByOperationAndProfile(ctx context.Context, catalogID, operation, executionProfile string) (*model.BillingSKU, error)
 	CreateSKUTierPrices(ctx context.Context, prices []model.BillingSKUTierPrice) error
 	ListSKUTierPricesByCatalog(ctx context.Context, catalogID string) ([]model.BillingSKUTierPrice, error)
 	FindSKUTierPrice(ctx context.Context, catalogID, skuID string, tier model.Tier) (*model.BillingSKUTierPrice, error)
@@ -381,7 +382,18 @@ func (r *billingRepository) FindSKU(ctx context.Context, catalogID, skuID string
 func (r *billingRepository) FindSKUByOperation(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error) {
 	var sku model.BillingSKU
 	err := r.db.WithContext(ctx).
-		Where("catalog_id = ? AND operation = ? AND route = ?", catalogID, operation, route).
+		Where("catalog_id = ? AND operation = ? AND route = ? AND execution_profile = ''", catalogID, operation, route).
+		First(&sku).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sku, nil
+}
+
+func (r *billingRepository) FindSKUByOperationAndProfile(ctx context.Context, catalogID, operation, executionProfile string) (*model.BillingSKU, error) {
+	var sku model.BillingSKU
+	err := r.db.WithContext(ctx).
+		Where("catalog_id = ? AND operation = ? AND execution_profile = ?", catalogID, operation, executionProfile).
 		First(&sku).Error
 	if err != nil {
 		return nil, err

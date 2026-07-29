@@ -1,6 +1,7 @@
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { AgentExecutionProfileID } from './agent-profile'
 
 export type PlanType = 'seednote' | 'article' | 'montage'
 export type PlanStatus = 'active' | 'paused' | 'completed'
@@ -16,6 +17,7 @@ export interface Plan {
   status: PlanStatus
   next_run_at: string
   project_id: string
+  execution_profile: AgentExecutionProfileID
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
@@ -36,6 +38,7 @@ export interface Plan {
 
 export interface CreatePlanRequest {
   type: PlanType
+  execution_profile: AgentExecutionProfileID
   cron_expr: string
   prompt?: string
   project_id?: string
@@ -57,6 +60,7 @@ export interface CreatePlanRequest {
 }
 
 export interface UpdatePlanRequest {
+  execution_profile: AgentExecutionProfileID
   cron_expr?: string
   prompt?: string
   image_model_key?: string

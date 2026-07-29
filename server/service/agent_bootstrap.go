@@ -41,27 +41,37 @@ type ArtifactTransport struct {
 	Mode string `json:"mode"`
 }
 
+type AgentRuntimeProfile struct {
+	ProfileID         string                                    `json:"profile_id"`
+	Provider          string                                    `json:"provider"`
+	ModelID           string                                    `json:"model_id"`
+	Protocol          string                                    `json:"protocol"`
+	ContextWindow     int                                       `json:"context_window"`
+	ReasoningEffort   string                                    `json:"reasoning_effort,omitempty"`
+	ThinkingRequired  bool                                      `json:"thinking_required"`
+	DisplayName       string                                    `json:"display_name"`
+	RuntimeEnv        map[string]string                         `json:"runtime_env"`
+	ModelUsageAliases map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
+}
+
 type AgentBootstrapResponse struct {
-	ExecutionToken      string                                    `json:"execution_token"`
-	TaskID              string                                    `json:"task_id"`
-	TaskType            string                                    `json:"task_type"`
-	ProjectID           string                                    `json:"project_id"`
-	Prompt              string                                    `json:"prompt"`
-	Model               string                                    `json:"model"`
-	MaxTurns            int                                       `json:"max_turns"`
-	AgentFlag           string                                    `json:"agent_flag"`
-	AutoMemoryDirectory string                                    `json:"auto_memory_directory"`
-	ResumeSessionID     string                                    `json:"resume_session_id,omitempty"`
-	ResumeContextPath   string                                    `json:"resume_context_path,omitempty"`
-	RuntimeEnv          map[string]string                         `json:"runtime_env,omitempty"`
-	ModelUsageAliases   map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
-	Env                 map[string]string                         `json:"env,omitempty"`
-	Files               []BootstrapFile                           `json:"files"`
-	ArtifactTransport   ArtifactTransport                         `json:"artifact_transport"`
+	ExecutionToken      string              `json:"execution_token"`
+	TaskID              string              `json:"task_id"`
+	TaskType            string              `json:"task_type"`
+	ProjectID           string              `json:"project_id"`
+	Prompt              string              `json:"prompt"`
+	ExecutionProfile    AgentRuntimeProfile `json:"execution_profile"`
+	MaxTurns            int                 `json:"max_turns"`
+	AgentFlag           string              `json:"agent_flag"`
+	AutoMemoryDirectory string              `json:"auto_memory_directory"`
+	ResumeSessionID     string              `json:"resume_session_id,omitempty"`
+	ResumeContextPath   string              `json:"resume_context_path,omitempty"`
+	Env                 map[string]string   `json:"env,omitempty"`
+	Files               []BootstrapFile     `json:"files"`
+	ArtifactTransport   ArtifactTransport   `json:"artifact_transport"`
 }
 
 type AgentBootstrapConfig struct {
-	Model                   string
 	MaxTurns                map[string]int
 	TokenTTL                time.Duration
 	ActiveDeadline          time.Duration
@@ -71,8 +81,8 @@ type AgentBootstrapConfig struct {
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 	MontageEnv              map[string]string
-	RuntimeEnv              map[string]string
-	ModelUsageAliases       map[string]serveragent.ModelUsageIdentity
+	Registry                *AgentProfileRegistry
+	RuntimeControls         map[string]string
 }
 
 type AgentBootstrapService struct {
@@ -315,18 +325,61 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			break
 		}
 	}
-	runtimeEnv := serveragent.ClaudeRuntimeEnv(s.cfg.RuntimeEnv)
+	profile, err := s.resolveExecutionProfile(execution, task)
+	if err != nil {
+		return nil, err
+	}
+	configuredRuntimeEnv := profile.RuntimeEnv()
+	for key, value := range s.cfg.RuntimeControls {
+		if strings.HasPrefix(key, "CLAUDE_CODE_") {
+			configuredRuntimeEnv[key] = value
+		}
+	}
+	runtimeEnv := serveragent.ClaudeRuntimeEnv(configuredRuntimeEnv)
 	if err := serveragent.ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
 		return nil, fmt.Errorf("build Claude runtime environment: %w", err)
 	}
-	aliases := cloneBootstrapModelUsageAliases(s.cfg.ModelUsageAliases)
-	if len(aliases) == 0 {
-		return nil, fmt.Errorf("%w: Claude model usage aliases are required", ErrAgentBootstrapUnavailable)
+	aliases := map[string]serveragent.ModelUsageIdentity{
+		profile.ModelID: {Provider: profile.Provider, Model: profile.ModelID},
+	}
+	for raw, target := range profile.ModelUsageAliases {
+		aliases[raw] = serveragent.ModelUsageIdentity{Provider: profile.Provider, Model: target}
 	}
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
-	return &AgentBootstrapResponse{ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt, Model: s.cfg.Model, MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task), AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases, Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()}}, nil
+	return &AgentBootstrapResponse{
+		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt,
+		ExecutionProfile: AgentRuntimeProfile{
+			ProfileID: profile.ID, Provider: profile.Provider, ModelID: profile.ModelID, Protocol: profile.Protocol,
+			ContextWindow: profile.ContextWindow, ReasoningEffort: profile.ReasoningEffort,
+			ThinkingRequired: profile.ThinkingRequired, DisplayName: profile.DisplayName,
+			RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases,
+		},
+		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
+		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
+		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
+	}, nil
+}
+
+func (s *AgentBootstrapService) resolveExecutionProfile(execution *model.TaskExecution, task *model.Task) (AgentExecutionProfile, error) {
+	if s == nil || s.cfg.Registry == nil {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: agent profile registry is required", ErrAgentBootstrapUnavailable)
+	}
+	if execution == nil || task == nil {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: task execution profile is required", ErrAgentBootstrapConflict)
+	}
+	snapshot := task.AgentProfileSnapshot
+	if execution.Provider != snapshot.Provider || execution.ModelID != snapshot.ModelID ||
+		execution.Protocol != snapshot.Protocol || execution.ReasoningEffort != snapshot.ReasoningEffort ||
+		execution.ContextWindow != snapshot.ContextWindow {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: execution profile identity does not match task snapshot", ErrAgentBootstrapConflict)
+	}
+	profile, err := s.cfg.Registry.ResolveRuntime(task.ExecutionProfile, snapshot)
+	if err != nil {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %v", ErrAgentBootstrapUnavailable, err)
+	}
+	return profile, nil
 }
 
 func (s *AgentBootstrapService) artifactTransportMode() string {
@@ -334,17 +387,6 @@ func (s *AgentBootstrapService) artifactTransportMode() string {
 		return ArtifactTransportDirect
 	}
 	return ArtifactTransportStream
-}
-
-func cloneBootstrapModelUsageAliases(source map[string]serveragent.ModelUsageIdentity) map[string]serveragent.ModelUsageIdentity {
-	if len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]serveragent.ModelUsageIdentity, len(source))
-	for raw, identity := range source {
-		result[raw] = identity
-	}
-	return result
 }
 
 func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, asset *model.Asset, credentialDeadline time.Time) (string, error) {

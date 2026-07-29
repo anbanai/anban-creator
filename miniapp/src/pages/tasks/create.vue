@@ -341,6 +341,18 @@
       </view>
     </view>
 
+    <!-- Agent execution profile -->
+    <view class="task-create__section">
+      <text class="field-label">执行配置 <text class="field-required">*</text></text>
+      <ExecutionProfileSelector
+        v-model="form.execution_profile"
+        :profiles="executionProfiles"
+        :loading="executionProfilesLoading"
+        :disabled="submitting"
+      />
+      <text v-if="executionProfilesError" class="field-error">{{ executionProfilesError }}</text>
+    </view>
+
     <!-- Credit info -->
     <view class="task-create__section">
       <view class="credit-info">
@@ -382,12 +394,25 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import type { BillingCatalog, Project, Template, ResourceEntry, ReferenceImageSelection } from '@/types'
+import type {
+  AgentExecutionProfileCapability,
+  AgentExecutionProfileID,
+  BillingCatalog,
+  Project,
+  Template,
+  ResourceEntry,
+  ReferenceImageSelection,
+} from '@/types'
+import { agentProfilesApi } from '@/api/agent-profiles'
 import { tasksApi } from '@/api/tasks'
 import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { billingApi } from '@/api/billing'
 import { projectsApi } from '@/api/projects'
+import {
+  resolveExecutionProfileSelection,
+  taskPriceForExecutionProfile,
+} from '@/utils/execution-profiles'
 import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
 import {
   contentTypeLabel,
@@ -402,6 +427,7 @@ import AbTextarea from '@/components/common/AbTextarea.vue'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
 import ImageModelSelector from '@/components/business/ImageModelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
+import ExecutionProfileSelector from '@/components/business/ExecutionProfileSelector.vue'
 
 const inspirations = [
   '写一篇关于春季护肤的笔记，风格温暖自然',
@@ -416,6 +442,10 @@ const selectedProject = ref<Project | null>(null)
 const balance = ref(0)
 const debt = ref(0)
 const catalog = ref<BillingCatalog | null>(null)
+const executionProfiles = ref<AgentExecutionProfileCapability[]>([])
+const executionProfilesLoading = ref(false)
+const executionProfilesError = ref('')
+const executionProfilePrefilled = ref(false)
 const submitting = ref(false)
 const inspirationIndex = ref(0)
 const requestedType = ref('')
@@ -432,6 +462,7 @@ const hasImageModels = ref(true)
 
 const form = reactive({
   project_id: '',
+  execution_profile: '' as AgentExecutionProfileID | '',
   prompt: '',
   quantity: 1,
   image_ratio: '3:4',
@@ -567,12 +598,20 @@ const selectedThemeName = computed(() => {
 })
 
 const resolvedTaskPrice = computed(() => {
-  if (!selectedProject.value) return undefined
-  const operation = `task.${selectedProject.value.platform}`
-  return catalog.value?.skus.find((sku) => sku.operation === operation && sku.charge_policy === 'task_admission')?.price_credits
+  if (!selectedProject.value || !form.execution_profile) return undefined
+  return taskPriceForExecutionProfile(
+    catalog.value,
+    selectedProject.value.platform,
+    form.execution_profile,
+  )
 })
 
 const priceAvailable = computed(() => resolvedTaskPrice.value !== undefined)
+const selectedExecutionProfileAvailable = computed(() => {
+  return executionProfiles.value.some((profile) =>
+    profile.id === form.execution_profile && profile.available,
+  )
+})
 
 const estimatedCost = computed(() => {
   const costPerTask = resolvedTaskPrice.value ?? 0
@@ -583,7 +622,8 @@ const estimatedCost = computed(() => {
 const creationCost = computed(() => estimatedCost.value)
 
 const canSubmit = computed(() => {
-  if (!form.project_id || !form.prompt.trim()) return false
+  if (!form.project_id || !form.prompt.trim() || !form.execution_profile) return false
+  if (!selectedExecutionProfileAvailable.value) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
   if (!priceAvailable.value || debt.value > 0 || balance.value < creationCost.value) return false
   return !submitting.value && !referenceUploading.value
@@ -606,7 +646,19 @@ function onProjectChange(project: Project) {
   }
 
   delete errors.project
+  ensureExecutionProfileSelection()
   loadPlatformResources()
+}
+
+function ensureExecutionProfileSelection() {
+  if (!selectedProject.value) return
+  form.execution_profile = resolveExecutionProfileSelection(
+    form.execution_profile,
+    executionProfilePrefilled.value,
+    executionProfiles.value,
+    catalog.value,
+    selectedProject.value.platform,
+  )
 }
 
 async function applyProjectById(projectId: string) {
@@ -764,6 +816,10 @@ function validate(): boolean {
     errors.prompt = '请输入创作要求'
     return false
   }
+  if (!form.execution_profile) {
+    uni.showToast({ title: '请选择可用的执行配置', icon: 'none' })
+    return false
+  }
   if (billableGoalMode.value && !form.goal.trim()) {
     errors.goal = '强目标模式需填写成功目标'
     return false
@@ -799,11 +855,14 @@ async function onSubmit() {
   if (!canSubmit.value || referenceUploading.value) return
   if (!validate()) return
   if (!selectedProject.value) return
+  const executionProfile = form.execution_profile
+  if (!executionProfile) return
 
   submitting.value = true
   try {
     const task = await tasksApi.create({
       type: selectedProject.value.platform as any,
+      execution_profile: executionProfile,
       project_id: form.project_id,
       prompt: form.prompt.trim(),
       quantity: isEcommerce.value ? undefined : form.quantity,
@@ -859,12 +918,22 @@ async function loadBalance() {
   }
 }
 
-async function loadPricing() {
-  try {
-    catalog.value = await billingApi.catalog()
-  } catch {
-    catalog.value = null
+async function loadExecutionConfiguration() {
+  executionProfilesLoading.value = true
+  executionProfilesError.value = ''
+  const [profilesResult, catalogResult] = await Promise.allSettled([
+    agentProfilesApi.list(),
+    billingApi.catalog(),
+  ])
+  executionProfiles.value = profilesResult.status === 'fulfilled' ? profilesResult.value : []
+  catalog.value = catalogResult.status === 'fulfilled' ? catalogResult.value : null
+  if (profilesResult.status === 'rejected') {
+    executionProfilesError.value = '执行配置加载失败，请稍后重试'
+  } else if (catalogResult.status === 'rejected') {
+    executionProfilesError.value = '价格目录加载失败，请稍后重试'
   }
+  executionProfilesLoading.value = false
+  ensureExecutionProfileSelection()
 }
 
 function safeDecodeQuery(value: string): string {
@@ -876,6 +945,10 @@ function safeDecodeQuery(value: string): string {
 }
 
 onLoad((query) => {
+  if (query?.execution_profile) {
+    form.execution_profile = String(query.execution_profile) as AgentExecutionProfileID
+    executionProfilePrefilled.value = true
+  }
   if (query?.type) {
     requestedType.value = String(query.type)
   }
@@ -896,7 +969,7 @@ onShow(() => {
 
 onMounted(() => {
   loadBalance()
-  loadPricing()
+  loadExecutionConfiguration()
 })
 </script>
 

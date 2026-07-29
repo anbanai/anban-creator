@@ -114,7 +114,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskSvc := NewTaskService(repo, nil, store, &logger, "", nil, nil)
+	taskSvc := newTestTaskService(repo, nil, store, &logger, "", nil, nil)
 	bundle := &serverbilling.Bundle{Products: serverbilling.ProductCatalog{
 		CatalogID: "retail-task-image-v1", Currency: "credits",
 		SKUs: []serverbilling.SKUConfig{

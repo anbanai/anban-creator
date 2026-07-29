@@ -35,6 +35,7 @@ const articleTask: Task = {
   status: 'completed',
   plan_id: null,
   project_id: project.id,
+  execution_profile: 'cost_effective',
   project_snapshot: {
     project_name: '创建时项目名称',
     platform: 'article',

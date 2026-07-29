@@ -140,6 +140,7 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 
 type createTaskRequest struct {
 	ProjectID          string                           `json:"project_id"`
+	ExecutionProfile   string                           `json:"execution_profile"`
 	Prompt             string                           `json:"prompt"`
 	Quantity           int                              `json:"quantity"`
 	ImageRatio         string                           `json:"image_ratio"`
@@ -451,6 +452,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if req.ProjectID == "" {
 		return nil, Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
+	if strings.TrimSpace(req.ExecutionProfile) == "" {
+		return nil, Error(c, fiber.StatusBadRequest, "execution_profile is required")
+	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return nil, Error(c, fiber.StatusBadRequest, "montage task requires brief")
 	}
@@ -587,6 +591,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		params: service.CreateManualParams{
 			UserID:                   userID,
 			ProjectID:                req.ProjectID,
+			ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 			Prompt:                   prompt,
 			Quantity:                 quantity,
 			ImageRatio:               req.ImageRatio,
@@ -612,6 +617,15 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string, err error, logMessage, fallbackMessage string) error {
 	if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrProjectOwnedByUser) || errors.Is(err, service.ErrTaskCreationProjectInactive) {
 		return respondTaskCreationProjectError(c, h.logger, err)
+	}
+	if errors.Is(err, service.ErrAgentProfileAccessDenied) {
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+	if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, service.ErrManagedProfileLocalExecutionUnsupported) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if isReferenceAssetError(err) {
 		return respondReferenceAssetError(c, h.logger, err)
@@ -914,6 +928,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		}
 		creationReq := createTaskRequest{
 			ProjectID:                req.ProjectID,
+			ExecutionProfile:         task.ExecutionProfile,
 			Prompt:                   prompt,
 			Quantity:                 req.Quantity,
 			ImageRatio:               req.ImageRatio,

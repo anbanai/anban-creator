@@ -15,6 +15,11 @@ const goalSchema = z.string().refine(
   `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
+const executionProfileSchema = z
+  .enum(['cost_effective', 'balanced', 'maximum_quality'])
+  .or(z.literal(''))
+  .refine((value): boolean => value !== '', '请选择执行配置')
+
 const referenceImageSelectionSchema = z.union([
   z.object({
     asset_id: z.string().uuid(),
@@ -87,6 +92,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
+  execution_profile: executionProfileSchema,
   type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "montage"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
@@ -187,6 +193,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   project_id: z.string().optional(),
+  execution_profile: executionProfileSchema,
   type: z.enum(["seednote", "article", "montage"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),

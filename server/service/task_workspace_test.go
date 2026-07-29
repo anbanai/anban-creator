@@ -29,7 +29,7 @@ func TestTaskDeleteRemovesDeterministicWorkspacePVC(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	workspace := &taskWorkspaceLifecycleFake{}
 	svc.SetTaskWorkspaceLifecycle(workspace)
 	ctx := context.Background()
@@ -49,7 +49,7 @@ func TestTaskDeleteSurfacesWorkspaceIdentityMismatch(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	svc.SetTaskWorkspaceLifecycle(&taskWorkspaceLifecycleFake{err: errors.New("PVC identity mismatch")})
 	ctx := context.Background()
 	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusFailed}

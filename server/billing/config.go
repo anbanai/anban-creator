@@ -84,13 +84,23 @@ type ProductCatalog struct {
 }
 
 type SKUConfig struct {
-	ID           string           `yaml:"id" json:"id"`
-	Operation    string           `yaml:"operation" json:"operation"`
-	ChargePolicy string           `yaml:"charge_policy" json:"charge_policy"`
-	PriceCredits int64            `yaml:"price_credits" json:"price_credits"`
-	TierPrices   map[string]int64 `yaml:"tier_prices" json:"tier_prices,omitempty"`
-	Route        string           `yaml:"route" json:"route,omitempty"`
-	Delivery     string           `yaml:"delivery" json:"delivery"`
+	ID               string           `yaml:"id" json:"id"`
+	Operation        string           `yaml:"operation" json:"operation"`
+	ExecutionProfile string           `yaml:"execution_profile" json:"execution_profile,omitempty"`
+	ChargePolicy     string           `yaml:"charge_policy" json:"charge_policy"`
+	PriceCredits     int64            `yaml:"price_credits" json:"price_credits"`
+	TierPrices       map[string]int64 `yaml:"tier_prices" json:"tier_prices,omitempty"`
+	Route            string           `yaml:"route" json:"route,omitempty"`
+	Delivery         string           `yaml:"delivery" json:"delivery"`
+}
+
+func (c ProductCatalog) FindSKUByExecutionProfile(operation, profile string) (SKUConfig, bool) {
+	for _, sku := range c.SKUs {
+		if sku.Operation == operation && sku.ExecutionProfile == profile {
+			return sku, true
+		}
+	}
+	return SKUConfig{}, false
 }
 
 const (
@@ -338,9 +348,10 @@ func validateBundle(bundle *Bundle) error {
 	}
 	seenSKUs := make(map[string]struct{}, len(bundle.Products.SKUs))
 	type billableIdentity struct {
-		operation    string
-		chargePolicy string
-		route        string
+		operation        string
+		chargePolicy     string
+		route            string
+		executionProfile string
 	}
 	seenBillableIdentities := make(map[billableIdentity]string, len(bundle.Products.SKUs))
 	for index, sku := range bundle.Products.SKUs {
@@ -348,6 +359,7 @@ func validateBundle(bundle *Bundle) error {
 		sku.ID = strings.TrimSpace(sku.ID)
 		sku.Operation = strings.TrimSpace(sku.Operation)
 		sku.ChargePolicy = strings.TrimSpace(sku.ChargePolicy)
+		sku.ExecutionProfile = strings.TrimSpace(sku.ExecutionProfile)
 		sku.Route = strings.TrimSpace(sku.Route)
 		sku.Delivery = strings.TrimSpace(sku.Delivery)
 		bundle.Products.SKUs[index] = sku
@@ -389,7 +401,16 @@ func validateBundle(bundle *Bundle) error {
 		}
 		switch sku.ChargePolicy {
 		case "task_admission":
+			if sku.ExecutionProfile != "" && sku.ExecutionProfile != "cost_effective" && sku.ExecutionProfile != "balanced" && sku.ExecutionProfile != "maximum_quality" {
+				return configError("products.yaml", field+".execution_profile", errors.New("must be cost_effective, balanced, or maximum_quality"))
+			}
+			if sku.Route != "" {
+				return configError("products.yaml", field+".route", errors.New("must be empty for task_admission"))
+			}
 		case "accepted_task_operation", "standalone_operation":
+			if sku.ExecutionProfile != "" {
+				return configError("products.yaml", field+".execution_profile", errors.New("must be empty for operation SKUs"))
+			}
 			if sku.Route == "" {
 				return configError("products.yaml", field+".route", fmt.Errorf("route is required for %s", sku.ChargePolicy))
 			}
@@ -397,9 +418,10 @@ func validateBundle(bundle *Bundle) error {
 			return configError("products.yaml", field+".charge_policy", fmt.Errorf("unsupported value %q", sku.ChargePolicy))
 		}
 		identity := billableIdentity{
-			operation:    sku.Operation,
-			chargePolicy: sku.ChargePolicy,
-			route:        sku.Route,
+			operation:        sku.Operation,
+			chargePolicy:     sku.ChargePolicy,
+			route:            sku.Route,
+			executionProfile: sku.ExecutionProfile,
 		}
 		if existingID, exists := seenBillableIdentities[identity]; exists {
 			return configError("products.yaml", field, fmt.Errorf("SKU %q duplicates billable identity of %q", sku.ID, existingID))

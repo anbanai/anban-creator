@@ -42,9 +42,13 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		req.Channel = "studio"
 	}
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	req.Text = strings.TrimSpace(req.Text)
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
+	}
+	if req.ExecutionProfile == "" {
+		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
 	if utf8.RuneCountInString(req.Text) > maxTaskPromptCharacters {
 		return Error(c, fiber.StatusBadRequest, "text must not exceed 5120 characters")

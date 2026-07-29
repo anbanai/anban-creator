@@ -83,4 +83,30 @@ describe('designer API normalization', () => {
     expect(post).toHaveBeenNthCalledWith(4, '/designer/upload-reference-from-url', expect.any(Object), { signal: controller.signal })
     expect(get).toHaveBeenCalledWith('/designer/generations/generation-1', { signal: controller.signal })
   })
+
+  it('keeps Agent execution profiles out of quote and generation requests', async () => {
+    const post = vi.spyOn(http, 'post')
+      .mockResolvedValueOnce({
+        data: {
+          code: 0,
+          msg: 'success',
+          data: { quote_id: 'quote-1', request_fingerprint: 'fingerprint-1' },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          code: 0,
+          msg: 'success',
+          data: { generation_id: 'generation-1', status: 'generating', price_credits: 500 },
+        },
+      })
+    const { designerApi } = await import('./designer')
+
+    await designerApi.generate({ project_id: 'default', prompt: 'test', provider: 'openai' })
+
+    const quoteRequest = post.mock.calls[0]?.[1]
+    const generateRequest = post.mock.calls[1]?.[1]
+    expect(quoteRequest).not.toHaveProperty('execution_profile')
+    expect(generateRequest).not.toHaveProperty('execution_profile')
+  })
 })

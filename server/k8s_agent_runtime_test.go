@@ -42,8 +42,9 @@ type deploymentDoc struct {
 						Value     string `yaml:"value"`
 						ValueFrom *struct {
 							SecretKeyRef struct {
-								Name string `yaml:"name"`
-								Key  string `yaml:"key"`
+								Name     string `yaml:"name"`
+								Key      string `yaml:"key"`
+								Optional bool   `yaml:"optional"`
 							} `yaml:"secretKeyRef"`
 						} `yaml:"valueFrom"`
 					} `yaml:"env"`
@@ -206,6 +207,14 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_AGENT_EXECUTION_TOKEN_SECRET", "anban-agent-execution-token", "token-secret")
+	for envName, secretKey := range map[string]string{
+		"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL": "deepseek-anthropic-base-url",
+		"ANBAN_DEEPSEEK_API_KEY":            "deepseek-api-key",
+		"ANBAN_DOUBAO_AGENT_API_KEY":        "doubao-api-key",
+		"ANBAN_KIMI_API_KEY":                "kimi-api-key",
+	} {
+		assertOptionalDeploymentSecretEnv(t, deployment, envName, "anban-agent-profile-providers", secretKey)
+	}
 	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
 	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})
 
@@ -272,6 +281,23 @@ func assertDeploymentSecretEnv(t *testing.T, doc deploymentDoc, envName, secretN
 		return
 	}
 	t.Fatalf("server deployment missing secret env %s", envName)
+}
+
+func assertOptionalDeploymentSecretEnv(t *testing.T, doc deploymentDoc, envName, secretName, secretKey string) {
+	t.Helper()
+	if len(doc.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("server deployment containers = %d, want 1", len(doc.Spec.Template.Spec.Containers))
+	}
+	for _, env := range doc.Spec.Template.Spec.Containers[0].Env {
+		if env.Name != envName {
+			continue
+		}
+		if env.Value != "" || env.ValueFrom == nil || env.ValueFrom.SecretKeyRef.Name != secretName || env.ValueFrom.SecretKeyRef.Key != secretKey || !env.ValueFrom.SecretKeyRef.Optional {
+			t.Fatalf("server env %s = %+v, want optional secret %s key %s", envName, env, secretName, secretKey)
+		}
+		return
+	}
+	t.Fatalf("server deployment missing optional secret env %s", envName)
 }
 
 func roleAllows(doc k8sManifestDoc, resource string, verbs ...string) bool {

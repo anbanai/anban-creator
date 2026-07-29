@@ -261,11 +261,12 @@ func registerPlanTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"cron_expr":  map[string]any{"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9am)"},
-				"prompt":     map[string]any{"type": "string", "description": "Optional prompt/instructions for auto-generated content"},
+				"project_id":        map[string]any{"type": "string", "description": "Project ID"},
+				"execution_profile": map[string]any{"type": "string", "description": "Execution profile ID"},
+				"cron_expr":         map[string]any{"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9am)"},
+				"prompt":            map[string]any{"type": "string", "description": "Optional prompt/instructions for auto-generated content"},
 			},
-			"required": []any{"project_id", "cron_expr"},
+			"required": []any{"project_id", "cron_expr", "execution_profile"},
 		},
 	}, planCreateHandler)
 }
@@ -478,16 +479,18 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	projectID, _ := args["project_id"].(string)
 	cronExpr, _ := args["cron_expr"].(string)
 	prompt, _ := args["prompt"].(string)
+	executionProfile, _ := args["execution_profile"].(string)
 
-	if projectID == "" || cronExpr == "" {
-		return errorResult("project_id and cron_expr are required"), nil
+	if projectID == "" || cronExpr == "" || strings.TrimSpace(executionProfile) == "" {
+		return errorResult("project_id, cron_expr and execution_profile are required"), nil
 	}
 
 	plan, err := svcs.PlanSvc.Create(context.Background(), service.CreatePlanParams{
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  cronExpr,
-		Prompt:    prompt,
+		UserID:           userID,
+		ProjectID:        projectID,
+		ExecutionProfile: strings.TrimSpace(executionProfile),
+		CronExpr:         cronExpr,
+		Prompt:           prompt,
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil

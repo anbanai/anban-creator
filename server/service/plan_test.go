@@ -104,12 +104,29 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPlanService(repo, &logger)
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatalf("NewAgentProfileRegistry: %v", err)
+	}
+	svc.SetAgentProfileRegistry(registry)
 	return svc, repo
+}
+
+func newTestPlanService(t *testing.T, repo repository.Repository) *PlanService {
+	t.Helper()
+	svc := NewPlanService(repo, nil)
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatalf("NewAgentProfileRegistry: %v", err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	return svc
 }
 
 // createTestProject creates a test project for the given user and returns its ID.
 func createTestProject(t *testing.T, repo repository.Repository, userID, platform string) string {
 	t.Helper()
+	ensureTestUser(t, repo, userID)
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
@@ -121,6 +138,91 @@ func createTestProject(t *testing.T, repo repository.Repository, userID, platfor
 		t.Fatalf("create test project: %v", err)
 	}
 	return ch.ID
+}
+
+func ensureTestUser(t *testing.T, repo repository.Repository, userID string) {
+	t.Helper()
+	if _, err := repo.Users().FindByID(context.Background(), userID); errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := repo.Users().Create(context.Background(), &model.User{
+			ID: userID, Email: uuid.NewString() + "@test.local", Password: "fixture", InviteCode: strings.ReplaceAll(uuid.NewString(), "-", "")[:16], Tier: model.TierFree,
+		}); err != nil {
+			t.Fatalf("create test user: %v", err)
+		}
+	} else if err != nil {
+		t.Fatalf("find test user: %v", err)
+	}
+}
+
+func TestPlanServiceRequiresExecutionProfileOnCreateAndUpdate(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	if _, err := svc.Create(ctx, CreatePlanParams{
+		UserID: userID, ProjectID: projectID, CronExpr: "0 9 * * *", Prompt: "topic",
+	}); err == nil || !strings.Contains(err.Error(), "execution_profile is required") {
+		t.Fatalf("Create error = %v, want execution_profile is required", err)
+	}
+
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ExecutionProfile: "cost_effective", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
+	}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatalf("create plan fixture: %v", err)
+	}
+	if _, err := svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "updated"}); err == nil || !strings.Contains(err.Error(), "execution_profile is required") {
+		t.Fatalf("Update error = %v, want execution_profile is required", err)
+	}
+}
+
+func TestPlanServiceValidatesProfileTierAndPersistsSelection(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	injector, ok := any(svc).(interface {
+		SetAgentProfileRegistry(*AgentProfileRegistry)
+	})
+	if !ok {
+		t.Fatal("PlanService does not expose AgentProfileRegistry injection")
+	}
+	injector.SetAgentProfileRegistry(registry)
+
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "balanced",
+		CronExpr: "0 9 * * *", Prompt: "topic",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if plan.ExecutionProfile != "balanced" {
+		t.Fatalf("created profile = %q", plan.ExecutionProfile)
+	}
+
+	if _, err := svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID, ExecutionProfile: "maximum_quality", Prompt: plan.Prompt,
+	}); !errors.Is(err, ErrAgentProfileAccessDenied) {
+		t.Fatalf("enterprise update error = %v, want ErrAgentProfileAccessDenied", err)
+	}
+	updated, err := svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID, ExecutionProfile: "cost_effective", Prompt: plan.Prompt,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	stored, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil || updated.ExecutionProfile != "cost_effective" || stored.ExecutionProfile != "cost_effective" {
+		t.Fatalf("updated=%#v stored=%#v err=%v", updated, stored, err)
+	}
 }
 
 func createTestWechatProject(t *testing.T, repo repository.Repository, userID string) string {
@@ -201,7 +303,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, CreatePlanParams{
+			plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 				UserID:    "user-1",
 				ProjectID: tt.projectID,
 				CronExpr:  tt.cronExpr,
@@ -244,7 +346,7 @@ func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	userID := "user-om-plan"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
@@ -278,7 +380,7 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	userID := "user-om-plan-update"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
@@ -291,7 +393,7 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 		t.Fatalf("Create montage plan: %v", err)
 	}
 
-	updated, err := svc.Update(ctx, UpdatePlanParams{
+	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID: plan.ID,
 		MontageInput: &model.MontageInput{
 			Brief:       "更新后的短片",
@@ -313,7 +415,7 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 
-	updated, err = svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "只改提示"})
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective", ID: plan.ID, Prompt: "只改提示"})
 	if err != nil {
 		t.Fatalf("Update without montage input: %v", err)
 	}
@@ -329,7 +431,7 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	userID := "user-om-plan-reject"
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
-	_, err := svc.Create(ctx, CreatePlanParams{
+	_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
@@ -341,7 +443,7 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 		t.Fatalf("Create error = %v, want montage input rejection", err)
 	}
 
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		CronExpr:  "0 10 * * *",
@@ -350,7 +452,7 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create article plan: %v", err)
 	}
-	_, err = svc.Update(ctx, UpdatePlanParams{
+	_, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID: plan.ID,
 		MontageInput: &model.MontageInput{
 			Brief: "错误平台更新",
@@ -367,7 +469,7 @@ func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 
 	skipRef := true
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:             "user-1",
 		ProjectID:          chID,
 		CronExpr:           "0 9 * * *",
@@ -388,7 +490,7 @@ func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 	chID := createTestProject(t, repo, "user-1", model.PlatformArticle)
 
 	cover, content := false, false
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:                   "user-1",
 		ProjectID:                chID,
 		CronExpr:                 "0 9 * * *",
@@ -407,7 +509,7 @@ func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 	}
 
 	// Default (nil flags) → both true (legacy "always generate" behavior).
-	planDefault, err := svc.Create(ctx, CreatePlanParams{
+	planDefault, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 10 * * *",
@@ -430,7 +532,7 @@ func TestPlanService_GetByID(t *testing.T) {
 
 	// Create a test project and plan.
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -470,7 +572,7 @@ func TestPlanService_CreateRejectsUnsupportedPlanPlatforms(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			projectID := createTestProject(t, repo, "user-unsupported-plan-"+tt.name, tt.platform)
 
-			_, err := svc.Create(ctx, CreatePlanParams{
+			_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 				UserID:    "user-unsupported-plan-" + tt.name,
 				ProjectID: projectID,
 				CronExpr:  "0 9 * * *",
@@ -494,7 +596,7 @@ func TestPlanService_List(t *testing.T) {
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, CreatePlanParams{
+		_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 			UserID:    "user-1",
 			ProjectID: chID,
 			CronExpr:  "0 9 * * *",
@@ -506,7 +608,7 @@ func TestPlanService_List(t *testing.T) {
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, CreatePlanParams{
+	_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-2",
 		ProjectID: chID2,
 		CronExpr:  "0 10 * * *",
@@ -552,7 +654,7 @@ func TestPlanService_Update(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -563,7 +665,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update title only.
-	updated, err := svc.Update(ctx, UpdatePlanParams{
+	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:     created.ID,
 		Prompt: "new hint",
 	})
@@ -579,7 +681,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with new cron expression.
-	updated, err = svc.Update(ctx, UpdatePlanParams{
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:       created.ID,
 		CronExpr: "0 18 * * *",
 		Prompt:   "new hint",
@@ -595,7 +697,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with invalid cron.
-	_, err = svc.Update(ctx, UpdatePlanParams{
+	_, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:       created.ID,
 		CronExpr: "bad cron",
 		Prompt:   "hint",
@@ -610,7 +712,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -624,7 +726,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef := true
-	updated, err := svc.Update(ctx, UpdatePlanParams{
+	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:                 created.ID,
 		Prompt:             "new hint",
 		SkipReferenceImage: &skipRef,
@@ -636,7 +738,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 		t.Fatal("expected skip_reference_image to update to true")
 	}
 
-	updated, err = svc.Update(ctx, UpdatePlanParams{
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:     created.ID,
 		Prompt: "unchanged hint",
 	})
@@ -648,7 +750,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef = false
-	updated, err = svc.Update(ctx, UpdatePlanParams{
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:                 created.ID,
 		Prompt:             "final hint",
 		SkipReferenceImage: &skipRef,
@@ -669,7 +771,7 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	initialRef := "asset-initial"
 	seedReferenceAsset(t, repo, referenceAssetFixture(initialRef, "user-1", DirectUploadPurposeTaskReference))
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:                "user-1",
 		ProjectID:             chID,
 		CronExpr:              "0 9 * * *",
@@ -685,7 +787,7 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 
 	// nil = leave unchanged (this is the regression fix: editing a plan without
 	// resending reference_image_url must preserve the existing value).
-	updated, err := svc.Update(ctx, UpdatePlanParams{
+	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:     created.ID,
 		Prompt: "hint",
 	})
@@ -698,7 +800,7 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 
 	// &"" = clear.
 	emptyRef := ""
-	updated, err = svc.Update(ctx, UpdatePlanParams{
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:                    created.ID,
 		Prompt:                "hint",
 		ReferenceImageAssetID: &emptyRef,
@@ -713,7 +815,7 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	// &"new" = set.
 	newRef := "asset-new"
 	seedReferenceAsset(t, repo, referenceAssetFixture(newRef, "user-1", DirectUploadPurposeTaskReference))
-	updated, err = svc.Update(ctx, UpdatePlanParams{
+	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:                    created.ID,
 		Prompt:                "hint",
 		ReferenceImageAssetID: &newRef,
@@ -742,9 +844,9 @@ func TestPlanServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t
 		Repository: base,
 		plans:      rejectingPlanCASRepository{PlanRepository: base.Plans()},
 	}
-	svc := NewPlanService(repo, nil)
+	svc := newTestPlanService(t, repo)
 
-	_, err := svc.UpdateIfReferenceImageAssetID(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "after"}, "asset-a")
+	_, err := svc.UpdateIfReferenceImageAssetID(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective", ID: plan.ID, Prompt: "after"}, "asset-a")
 	if !errors.Is(err, ErrPlanUpdateConflict) {
 		t.Fatalf("error = %v, want ErrPlanUpdateConflict", err)
 	}
@@ -793,9 +895,9 @@ func TestPlanServiceUpdatesDoNotOverwriteSchedulerNextRun(t *testing.T) {
 				}
 			}
 			repo := planCASRepositoryOverride{Repository: base, plans: hookedPlans}
-			svc := NewPlanService(repo, nil)
+			svc := newTestPlanService(t, repo)
 			svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
-			params := UpdatePlanParams{ID: plan.ID, Prompt: "after", ReferenceImageAssetID: tt.desiredRef}
+			params := UpdatePlanParams{ExecutionProfile: "cost_effective", ID: plan.ID, Prompt: "after", ReferenceImageAssetID: tt.desiredRef}
 			var err error
 			if tt.useCAS {
 				_, err = svc.UpdateIfReferenceImageAssetID(ctx, params, "asset-a")
@@ -832,7 +934,7 @@ func TestPlanServiceExplicitCronChangeUpdatesSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, err := svc.Update(ctx, UpdatePlanParams{ID: plan.ID, Prompt: "after", CronExpr: "0 */2 * * *"})
+	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective", ID: plan.ID, Prompt: "after", CronExpr: "0 */2 * * *"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,7 +990,7 @@ func TestPlanServicePauseResumeDoNotOverwriteConcurrentEditableFields(t *testing
 				}
 			}
 			repo := planCASRepositoryOverride{Repository: base, plans: hookedPlans}
-			svc := NewPlanService(repo, nil)
+			svc := newTestPlanService(t, repo)
 			if err := tt.apply(svc, ctx, plan.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -918,7 +1020,7 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -966,7 +1068,7 @@ func TestPlanService_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{
+	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -1071,7 +1173,7 @@ func createSeednotePlanWithInputAttachments(t *testing.T, svc *PlanService, repo
 		t.Fatalf("create user: %v", err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective",
 		UserID:           userID,
 		ProjectID:        projectID,
 		CronExpr:         "0 9 * * *",
@@ -1114,7 +1216,7 @@ func TestUpdatePlanInputAttachmentsOmittedRetainsExisting(t *testing.T) {
 		Type: "image", URL: "https://cdn.example.com/original.png", Instruction: "原始说明",
 	}})
 
-	updated, err := svc.Update(context.Background(), UpdatePlanParams{ID: plan.ID})
+	updated, err := svc.Update(context.Background(), UpdatePlanParams{ExecutionProfile: "cost_effective", ID: plan.ID})
 	if err != nil {
 		t.Fatalf("Update plan: %v", err)
 	}
@@ -1131,7 +1233,7 @@ func TestUpdatePlanInputAttachmentsEmptyClears(t *testing.T) {
 	}})
 	empty := []model.EntryAttachment{}
 
-	updated, err := svc.Update(context.Background(), UpdatePlanParams{
+	updated, err := svc.Update(context.Background(), UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:               plan.ID,
 		InputAttachments: &empty,
 	})
@@ -1153,7 +1255,7 @@ func TestUpdatePlanInputAttachmentsNonEmptyReplaces(t *testing.T) {
 		Type: "image", URL: "https://cdn.example.com/replacement.png", Instruction: "替换说明",
 	}}
 
-	if _, err := svc.Update(ctx, UpdatePlanParams{
+	if _, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "cost_effective",
 		ID:               plan.ID,
 		InputAttachments: &replacement,
 	}); err != nil {

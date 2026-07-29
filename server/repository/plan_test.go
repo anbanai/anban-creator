@@ -107,7 +107,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	schedulerNext := oldNext.Add(time.Hour)
 	plan := &model.Plan{
 		ID: "plan-editable", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle,
-		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
+		ExecutionProfile: "cost_effective", Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 		NextRunAt: &oldNext, CreatedAt: createdAt,
 	}
 	if err := repo.Plans().Create(t.Context(), plan); err != nil {
@@ -127,6 +127,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	stale.Type = model.PlatformSeednote
 	stale.Status = model.PlanStatusPaused
 	stale.CreatedAt = createdAt.Add(time.Hour)
+	stale.ExecutionProfile = "balanced"
 	stale.Prompt = "after"
 	if err := repo.Plans().UpdateEditable(t.Context(), stale, false); err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Prompt != "after" || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.PlatformArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
+	if got.ExecutionProfile != "balanced" || got.Prompt != "after" || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.PlatformArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
 		t.Fatalf("editable update changed protected fields: %#v", got)
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.Equal(schedulerNext) || got.CronExpr != "0 * * * *" {

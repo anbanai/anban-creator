@@ -83,10 +83,11 @@ func (s *IlinkConversationService) handleAIEntryCreate(ctx context.Context, bind
 		return s.handleCreate(ctx, binding, text)
 	}
 	result, err := s.aiEntry.Submit(ctx, AIEntrySubmitRequest{
-		UserID:    binding.UserID,
-		ProjectID: binding.DefaultProjectID,
-		Channel:   "ilink",
-		Text:      text,
+		UserID:           binding.UserID,
+		ProjectID:        binding.DefaultProjectID,
+		ExecutionProfile: "cost_effective",
+		Channel:          "ilink",
+		Text:             text,
 	})
 	if err != nil {
 		return "创建任务失败：" + cleanErr(err.Error())
@@ -138,10 +139,11 @@ func (s *IlinkConversationService) handleCreate(ctx context.Context, binding *mo
 		return "任务服务暂不可用，请稍后再试。"
 	}
 	tasks, err := s.taskSvc.CreateManual(ctx, CreateManualParams{
-		UserID:    binding.UserID,
-		ProjectID: binding.DefaultProjectID,
-		Prompt:    prompt,
-		Quantity:  1,
+		UserID:           binding.UserID,
+		ProjectID:        binding.DefaultProjectID,
+		ExecutionProfile: "cost_effective",
+		Prompt:           prompt,
+		Quantity:         1,
 	})
 	if err != nil {
 		return "创建任务失败：" + cleanErr(err.Error())

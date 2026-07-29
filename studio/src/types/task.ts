@@ -1,6 +1,7 @@
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 
 export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'montage'
 
@@ -74,6 +75,8 @@ export interface Task {
   error_message?: string
   plan_id?: string | null
   project_id: string
+  execution_profile: AgentExecutionProfileID
+  agent_profile_snapshot?: AgentProfileSnapshot
   result?: string | null
   published: boolean
   published_at: string | null
@@ -197,6 +200,7 @@ export interface TaskFile {
 
 export interface CreateTaskRequest {
   type: TaskType
+  execution_profile: AgentExecutionProfileID
   topic?: string
   prompt?: string
   project_id: string
@@ -225,10 +229,6 @@ export interface CreateTaskRequest {
   selling_points?: string
   language?: string
   montage_input?: MontageInput
-  // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
-  // local executor and run on the user's machine (enables ffmpeg/local-shell).
-  // The desktop sets this when a local executor is available; web always omits.
-  execution_target?: ExecutionTarget
 }
 
 // Cloning creates another task through the same complete creation contract.

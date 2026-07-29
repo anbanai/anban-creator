@@ -586,32 +586,36 @@ func (c TingWuConfig) Complete() bool {
 		strings.TrimSpace(c.AccessSecret) != ""
 }
 
-// ClaudeConfig owns the direct provider contract for every Claude runtime.
+// ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	Provider             string             `yaml:"provider" json:"provider"`
-	BaseURL              string             `yaml:"base_url" json:"base_url"`
-	AuthToken            string             `yaml:"auth_token" json:"-"`
-	Models               ClaudeModelsConfig `yaml:"models" json:"models"`
-	UsageAliases         map[string]string  `yaml:"model_usage_aliases" json:"model_usage_aliases"`
-	Executor             string             `yaml:"executor"` // "docker" or "kubernetes"
-	RuntimeImages        RuntimeImages      `yaml:"runtime_images"`
-	ExecutionTokenSecret string             `yaml:"execution_token_secret" json:"-"`
-	Env                  map[string]string  `yaml:"env"`
-	PluginDir            string             `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox              bool               `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker               DockerConfig       `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes           KubernetesConfig   `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns             map[string]int     `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir           string             `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL       string             `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
+	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
+	Env                  map[string]string                       `yaml:"env"`
+	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes           KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns             map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir           string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
-type ClaudeModelsConfig struct {
-	Default string `yaml:"default" json:"default"`
-	Opus    string `yaml:"opus" json:"opus"`
-	Fable   string `yaml:"fable" json:"fable"`
-	Sonnet  string `yaml:"sonnet" json:"sonnet"`
-	Haiku   string `yaml:"haiku" json:"haiku"`
+type ClaudeExecutionProfileConfig struct {
+	DisplayName       string            `yaml:"display_name" json:"display_name"`
+	ModelName         string            `yaml:"model_name" json:"model_name"`
+	Description       string            `yaml:"description" json:"description"`
+	Provider          string            `yaml:"provider" json:"provider"`
+	ModelID           string            `yaml:"model_id" json:"model_id"`
+	Protocol          string            `yaml:"protocol" json:"protocol"`
+	BaseURL           string            `yaml:"base_url" json:"base_url"`
+	AuthToken         string            `yaml:"auth_token" json:"-"`
+	ModelUsageAliases map[string]string `yaml:"model_usage_aliases" json:"model_usage_aliases,omitempty"`
+	MinTier           model.Tier        `yaml:"min_tier" json:"min_tier"`
+	ContextWindow     int               `yaml:"context_window" json:"context_window,omitempty"`
+	ReasoningEffort   string            `yaml:"reasoning_effort" json:"reasoning_effort,omitempty"`
+	ThinkingRequired  bool              `yaml:"thinking_required" json:"thinking_required,omitempty"`
 }
 
 var claudeControlEnvKeys = map[string]bool{
@@ -620,15 +624,9 @@ var claudeControlEnvKeys = map[string]bool{
 	"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          true,
 }
 
-const (
-	ClaudeProviderVolcengineArk = "volcengine_ark"
-	ClaudeArkCompatibleBaseURL  = "https://ark.cn-beijing.volces.com/api/compatible"
-)
-
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"provider": true, "base_url": true, "auth_token": true, "models": true,
-		"model_usage_aliases": true, "executor": true, "runtime_images": true,
+		"execution_profiles": true, "executor": true, "runtime_images": true,
 		"execution_token_secret": true, "env": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -639,8 +637,8 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	for i := 0; i < len(value.Content); i += 2 {
 		key := value.Content[i].Value
 		if !known[key] {
-			if key == "model" {
-				return fmt.Errorf("claude.model is not supported; use claude.models.default")
+			if key == "model" || key == "provider" || key == "base_url" || key == "auth_token" || key == "models" || key == "model_usage_aliases" {
+				return fmt.Errorf("claude.%s is not supported; configure provider runtime under claude.execution_profiles", key)
 			}
 			return fmt.Errorf("unknown claude config field %q", key)
 		}
@@ -649,110 +647,19 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	return value.Decode((*plain)(c))
 }
 
-func (c *ClaudeModelsConfig) UnmarshalYAML(value *yaml.Node) error {
-	known := map[string]bool{"default": true, "opus": true, "fable": true, "sonnet": true, "haiku": true}
-	if value.Kind != yaml.MappingNode {
-		return fmt.Errorf("claude.models must be a mapping")
-	}
-	for i := 0; i < len(value.Content); i += 2 {
-		if key := value.Content[i].Value; !known[key] {
-			return fmt.Errorf("unknown claude.models field %q", key)
-		}
-	}
-	type plain ClaudeModelsConfig
-	return value.Decode((*plain)(c))
-}
-
 func (c ClaudeConfig) String() string {
-	return fmt.Sprintf("ClaudeConfig{Provider:%q BaseURL:%q AuthToken:[REDACTED] Models:%v Executor:%q}", c.Provider, c.BaseURL, c.Models, c.Executor)
+	return fmt.Sprintf("ClaudeConfig{ExecutionProfiles:%d Executor:%q}", len(c.ExecutionProfiles), c.Executor)
 }
 
 func (c ClaudeConfig) GoString() string {
 	return c.String()
 }
 
-func (c ClaudeConfig) RuntimeEnv() map[string]string {
-	result := map[string]string{
-		"ANTHROPIC_BASE_URL":             c.BaseURL,
-		"ANTHROPIC_AUTH_TOKEN":           c.AuthToken,
-		"ANTHROPIC_MODEL":                c.Models.Default,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   c.Models.Opus,
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  c.Models.Fable,
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": c.Models.Sonnet,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  c.Models.Haiku,
-	}
-	for key, value := range c.Env {
-		result[key] = value
-	}
-	return result
-}
-
-func (c ClaudeConfig) RuntimeModelUsageAliases() map[string]model.ModelUsageIdentity {
-	result := make(map[string]model.ModelUsageIdentity)
-	for _, canonical := range []string{c.Models.Default, c.Models.Opus, c.Models.Fable, c.Models.Sonnet, c.Models.Haiku} {
-		if canonical != "" {
-			result[canonical] = model.ModelUsageIdentity{Provider: c.Provider, Model: canonical}
-		}
-	}
-	for raw, canonical := range c.UsageAliases {
-		result[raw] = model.ModelUsageIdentity{Provider: c.Provider, Model: canonical}
-	}
-	return result
-}
-
 func (c ClaudeConfig) Validate() error {
 	var errs []string
-	required := []struct{ path, value string }{
-		{"claude.provider", c.Provider}, {"claude.base_url", c.BaseURL}, {"claude.auth_token", c.AuthToken},
-		{"claude.models.default", c.Models.Default}, {"claude.models.opus", c.Models.Opus},
-		{"claude.models.fable", c.Models.Fable}, {"claude.models.sonnet", c.Models.Sonnet}, {"claude.models.haiku", c.Models.Haiku},
-	}
-	configuredModels := make(map[string]bool)
-	for _, item := range required {
-		if strings.TrimSpace(item.value) == "" {
-			errs = append(errs, item.path+" is required")
-			continue
-		}
-		if strings.TrimSpace(item.value) != item.value || strings.ContainsRune(item.value, '\x00') {
-			errs = append(errs, item.path+" must not contain surrounding whitespace or NUL")
-		}
-		if strings.Contains(item.value, "[1M]") {
-			errs = append(errs, item.path+" must not contain [1M]")
-		}
-		if strings.HasPrefix(item.path, "claude.models.") {
-			configuredModels[item.value] = true
-		}
-	}
-	roleModels := []struct{ role, value, expected string }{
-		{"default", c.Models.Default, "doubao-seed-evolving"},
-		{"opus", c.Models.Opus, "doubao-seed-evolving"},
-		{"fable", c.Models.Fable, "doubao-seed-evolving"},
-		{"sonnet", c.Models.Sonnet, "doubao-seed-2-1-pro-260628"},
-		{"haiku", c.Models.Haiku, "doubao-seed-2-1-turbo-260628"},
-	}
-	for _, role := range roleModels {
-		if role.value != "" && role.value != role.expected {
-			errs = append(errs, "claude.models."+role.role+" must be "+role.expected)
-		}
-	}
-	if err := model.ValidateModelUsageAliases(c.RuntimeModelUsageAliases()); err != nil {
-		errs = append(errs, "claude.model_usage_aliases: "+err.Error())
-	}
-	if c.UsageAliases["doubao-seed-evolving-latest-version"] != "doubao-seed-evolving" {
-		errs = append(errs, "claude.model_usage_aliases.doubao-seed-evolving-latest-version is required and must target doubao-seed-evolving")
-	}
-	if c.Provider != "" && c.Provider != ClaudeProviderVolcengineArk {
-		errs = append(errs, "claude.provider must be volcengine_ark")
-	}
-	if parsed, err := url.Parse(c.BaseURL); err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		errs = append(errs, "claude.base_url must be a direct HTTPS provider URL")
-	}
-	if c.BaseURL != "" && c.BaseURL != ClaudeArkCompatibleBaseURL {
-		errs = append(errs, "claude.base_url must be "+ClaudeArkCompatibleBaseURL)
-	}
 	for key, value := range c.Env {
 		if strings.HasPrefix(key, "ANTHROPIC_") {
-			errs = append(errs, "claude.env."+key+" duplicates typed Claude provider configuration")
+			errs = append(errs, "claude.env."+key+" must be configured by claude.execution_profiles")
 			continue
 		}
 		if !claudeControlEnvKeys[key] {
@@ -760,17 +667,6 @@ func (c ClaudeConfig) Validate() error {
 		}
 		if value == "" || strings.TrimSpace(value) != value || strings.ContainsRune(value, '\x00') {
 			errs = append(errs, "claude.env."+key+" has an invalid value")
-		}
-	}
-	for raw, canonical := range c.UsageAliases {
-		if strings.Contains(raw, "[1M]") || strings.Contains(canonical, "[1M]") {
-			errs = append(errs, "claude.model_usage_aliases must not contain [1M]")
-		}
-		if !configuredModels[canonical] {
-			errs = append(errs, "claude.model_usage_aliases."+raw+" must target a configured Claude model")
-		}
-		if configuredModels[raw] && raw != canonical {
-			errs = append(errs, "claude.model_usage_aliases."+raw+" must not remap a canonical Claude model")
 		}
 	}
 	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage}

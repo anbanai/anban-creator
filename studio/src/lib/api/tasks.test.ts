@@ -95,6 +95,7 @@ describe('tasksApi', () => {
     const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-clone', status: 'pending' } } } as any)
     const request: CreateTaskRequest = {
       type: 'montage',
+      execution_profile: 'balanced',
       project_id: 'project-1',
       prompt: '',
       quantity: 1,
@@ -121,7 +122,6 @@ describe('tasksApi', () => {
         delivery_targets: [],
         advanced: { render: { fps: 30 } },
       },
-      execution_target: 'local',
     }
 
     await tasksApi.clone('task-1', request)

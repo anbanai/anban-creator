@@ -209,3 +209,59 @@ func TestCloneInputSourceProjectMigration(t *testing.T) {
 	}
 	t.Fatal("task schema missing idx_tasks_input_source_project_id")
 }
+
+func TestAgentExecutionProfilesMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260728_agent_execution_profiles.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"ALTER TABLE `tasks`",
+		"ADD COLUMN `execution_profile` varchar(40) NULL",
+		"ADD COLUMN `agent_profile_snapshot` json NULL",
+		"UPDATE `tasks`",
+		"SET `execution_profile` = 'balanced'",
+		"'model_id', 'doubao-seed-evolving'",
+		"MODIFY COLUMN `execution_profile` varchar(40) NOT NULL",
+		"MODIFY COLUMN `agent_profile_snapshot` json NOT NULL",
+		"ALTER TABLE `plans`",
+		"UPDATE `plans` SET `execution_profile` = 'balanced'",
+		"ALTER TABLE `task_executions`",
+		"ADD COLUMN `provider` varchar(80) NULL",
+		"ADD COLUMN `model_id` varchar(128) NULL",
+		"ADD COLUMN `protocol` varchar(32) NULL",
+		"ADD COLUMN `reasoning_effort` varchar(20) NULL",
+		"ADD COLUMN `context_window` int NULL",
+		"UPDATE `task_executions` AS `execution`",
+		"INNER JOIN `tasks` AS `task` ON `task`.`id` = `execution`.`task_id`",
+		"MODIFY COLUMN `provider` varchar(80) NOT NULL",
+		"MODIFY COLUMN `model_id` varchar(128) NOT NULL",
+		"MODIFY COLUMN `protocol` varchar(32) NOT NULL",
+		"MODIFY COLUMN `reasoning_effort` varchar(20) NOT NULL",
+		"MODIFY COLUMN `context_window` int NOT NULL",
+		"ADD INDEX `idx_task_executions_provider_model` (`provider`, `model_id`)",
+		"ALTER TABLE `billing_skus`",
+		"ADD COLUMN `execution_profile` varchar(40) NOT NULL DEFAULT ''",
+		"ADD INDEX `idx_billing_skus_execution_profile` (`execution_profile`)",
+		"ADD INDEX `idx_billing_skus_catalog_operation_profile` (`catalog_id`, `operation`, `execution_profile`)",
+		"ALTER TABLE `billing_quotes`",
+		"ADD COLUMN `agent_profile_snapshot` json NULL",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("agent execution profiles migration missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"DEFAULT 'cost_effective'",
+		"DEFAULT 'balanced'",
+		"ADD COLUMN `provider` varchar(80) NOT NULL",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("agent execution profiles migration contains premature/default compatibility fragment %q", forbidden)
+		}
+	}
+	if strings.Index(sql, "UPDATE `tasks`") > strings.Index(sql, "MODIFY COLUMN `execution_profile` varchar(40) NOT NULL") {
+		t.Fatal("tasks are constrained before balanced backfill")
+	}
+}

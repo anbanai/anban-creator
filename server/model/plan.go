@@ -13,15 +13,16 @@ import (
 // tasks. Project/account style config is snapshotted from the project when the
 // task is created; plans no longer override visual/writer/author/theme.
 type Plan struct {
-	ID          string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID   string `gorm:"type:char(36);index" json:"project_id"`
-	Type        string `gorm:"type:varchar(20);not null" json:"type"` // seednote, article, ecommerce
-	Title       string `gorm:"type:varchar(200)" json:"title"`
-	Description string `gorm:"type:text" json:"description"`
-	CronExpr    string `gorm:"type:varchar(100)" json:"cron_expr"`
-	Prompt      string `gorm:"column:topic_hint;type:text" json:"prompt"`
-	Status      string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
+	ID               string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID           string `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID        string `gorm:"type:char(36);index" json:"project_id"`
+	Type             string `gorm:"type:varchar(20);not null" json:"type"` // seednote, article, ecommerce
+	ExecutionProfile string `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
+	Title            string `gorm:"type:varchar(200)" json:"title"`
+	Description      string `gorm:"type:text" json:"description"`
+	CronExpr         string `gorm:"type:varchar(100)" json:"cron_expr"`
+	Prompt           string `gorm:"column:topic_hint;type:text" json:"prompt"`
+	Status           string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	// ImageModelKey / ReferenceImageAssetID are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
 	// "what to produce" params, not style/author/theme dimensions.

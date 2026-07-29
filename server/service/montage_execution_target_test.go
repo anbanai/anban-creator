@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -116,7 +117,7 @@ func TestTaskServiceCreateManualMontageRejectsWhenDisabled(t *testing.T) {
 	userID := "user-om-disabled"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{
@@ -140,7 +141,7 @@ func TestTaskServiceCreateManualMontageRejectsWhenCloudRuntimeMissing(t *testing
 	userID := "user-montage-no-cloud"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{
@@ -152,7 +153,7 @@ func TestTaskServiceCreateManualMontageRejectsWhenCloudRuntimeMissing(t *testing
 	}
 }
 
-func TestTaskServiceCreateManualMontageUsesConfiguredLocalTarget(t *testing.T) {
+func TestTaskServiceCreateManualMontageRejectsConfiguredLocalTarget(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	cfg := srvconfig.MontageConfig{Enabled: true}
 	cfg.ApplyDefaults()
@@ -163,23 +164,14 @@ func TestTaskServiceCreateManualMontageUsesConfiguredLocalTarget(t *testing.T) {
 	userID := "user-om-local"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{
 			Brief: "本机执行短片",
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateManual error = %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
-	}
-	if tasks[0].ExecutionTarget != model.ExecutionTargetLocal {
-		t.Fatalf("execution_target = %q, want local", tasks[0].ExecutionTarget)
-	}
-	if tasks[0].LocalClaimDeadline == nil {
-		t.Fatal("LocalClaimDeadline = nil, want local claim deadline")
+	if !errors.Is(err, ErrManagedProfileLocalExecutionUnsupported) {
+		t.Fatalf("CreateManual error = %v, want managed profile local rejection", err)
 	}
 }

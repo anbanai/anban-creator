@@ -1,4 +1,5 @@
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { AgentExecutionProfileID } from './agent-profile'
 
 export type PlanType = 'seednote' | 'article'
 export type PlanStatus = 'active' | 'paused' | 'completed'
@@ -6,6 +7,7 @@ export type PlanStatus = 'active' | 'paused' | 'completed'
 export interface Plan {
   id: string
   type: PlanType
+  execution_profile: AgentExecutionProfileID
   title: string
   description: string
   cron_expr: string
@@ -43,6 +45,7 @@ export interface Plan {
 
 export interface CreatePlanRequest {
   type: PlanType
+  execution_profile: AgentExecutionProfileID
   cron_expr: string
   prompt?: string
   project_id?: string
@@ -70,6 +73,7 @@ export interface CreatePlanRequest {
 }
 
 export interface UpdatePlanRequest {
+  execution_profile: AgentExecutionProfileID
   type?: PlanType
   cron_expr?: string
   prompt?: string

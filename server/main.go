@@ -87,6 +87,10 @@ func main() {
 	if err := config.ValidateImagePresets(cfg.ImagePresets); err != nil {
 		log.Fatal().Err(err).Msg("invalid image_presets configuration")
 	}
+	agentProfiles, err := service.NewAgentProfileRegistryFromConfig(cfg.Claude.ExecutionProfiles)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid agent execution profile configuration")
+	}
 
 	// 4. Connect MySQL.
 	mysqlDB := connectMySQL(context.Background(), cfg, log)
@@ -96,6 +100,9 @@ func main() {
 
 	// 6. Auto-migrate models.
 	if mysqlDB != nil {
+		if err := requireAgentExecutionProfileSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for Agent execution profiles")
+		}
 		if err := migrateModels(mysqlDB, model.AutoMigrate); err != nil {
 			log.Fatal().Err(err).Msg("failed to auto-migrate models")
 		} else {
@@ -133,6 +140,9 @@ func main() {
 	fixedBilling, err := buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize fixed-SKU billing runtime")
+	}
+	if fixedBilling != nil && fixedBilling.Catalog != nil {
+		fixedBilling.Catalog.SetAgentProfileRegistry(agentProfiles)
 	}
 
 	// 7.1 Create storage provider.
@@ -284,7 +294,6 @@ func main() {
 	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes)
 	activeDeadline := reconcilerConfig.ActiveDeadline
 	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
-		Model:                   cfg.Claude.Models.Default,
 		MaxTurns:                cfg.Claude.MaxTurns,
 		TokenTTL:                activeDeadline,
 		ActiveDeadline:          activeDeadline,
@@ -294,8 +303,8 @@ func main() {
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
-		RuntimeEnv:              cfg.Claude.RuntimeEnv(),
-		ModelUsageAliases:       cfg.Claude.RuntimeModelUsageAliases(),
+		Registry:                agentProfiles,
+		RuntimeControls:         cfg.Claude.Env,
 	}, *log)
 
 	// 13. Create services.
@@ -332,15 +341,15 @@ func main() {
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
+		planSvc.SetAgentProfileRegistry(agentProfiles)
 		taskSvc.SetReferenceAssetService(referenceAssetSvc)
+		taskSvc.SetAgentProfileRegistry(agentProfiles)
 		taskSvc.SetProviderCostService(fixedBilling.Cost)
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
-		// Standalone desktop Agent claims use the same model and max-turn defaults
-		// as managed workloads.
-		taskSvc.SetExecutorDefaults(cfg.Claude.Models.Default, cfg.Claude.MaxTurns)
+		taskSvc.SetExecutorMaxTurns(cfg.Claude.MaxTurns)
 		taskSvc.SetRuntimeDispatcher(runtimeDispatcher)
 		workspaceLifecycle, ok := runtimeDispatcher.(service.TaskWorkspaceLifecycle)
 		if !ok {
@@ -384,9 +393,6 @@ func main() {
 		llmBaseURL := cfg.Writing.BaseURL
 		llmAPIKey := cfg.Writing.Key
 		llmModel := cfg.Writing.Model
-		if llmModel == "" {
-			llmModel = cfg.Claude.Models.Default
-		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)
 			if strings.Contains(llmBaseURL, "/anthropic") {
@@ -465,6 +471,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var agentHandler *handler.AgentHandler
+	var agentProfileHandler *handler.AgentProfileHandler
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
 	var apiKeyHandler *handler.APIKeyHandler
@@ -525,6 +532,7 @@ func main() {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
+		agentProfileHandler = handler.NewAgentProfileHandler(repo, agentProfiles, log)
 		agentHandler.SetAdminAPIKey(cfg.BillingRuntime.AdminAPIKey)
 		agentHandler.SetExecutionTokenService(executionTokens)
 		agentHandler.SetBootstrap(workloadVerifier, bootstrapSvc)
@@ -761,6 +769,7 @@ func main() {
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
+		AgentProfileHandler:      agentProfileHandler,
 		BillingHandler:           fixedBilling.Handler,
 		BillingAdminHandler:      fixedBilling.AdminHandler,
 		TimelineHandler:          timelineHandler,
@@ -905,6 +914,33 @@ func main() {
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
 	}
+}
+
+func requireAgentExecutionProfileSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.Task{}) {
+		return nil
+	}
+	required := []struct {
+		model  any
+		column string
+	}{
+		{&model.Task{}, "ExecutionProfile"},
+		{&model.Task{}, "AgentProfileSnapshot"},
+		{&model.Plan{}, "ExecutionProfile"},
+		{&model.TaskExecution{}, "Provider"},
+		{&model.TaskExecution{}, "ModelID"},
+		{&model.TaskExecution{}, "Protocol"},
+		{&model.TaskExecution{}, "ReasoningEffort"},
+		{&model.TaskExecution{}, "ContextWindow"},
+		{&model.BillingSKU{}, "ExecutionProfile"},
+		{&model.BillingQuote{}, "AgentProfileSnapshot"},
+	}
+	for _, item := range required {
+		if !db.Migrator().HasTable(item.model) || !db.Migrator().HasColumn(item.model, item.column) {
+			return fmt.Errorf("existing database requires server/migrations/20260728_agent_execution_profiles.sql before startup (missing %T.%s)", item.model, item.column)
+		}
+	}
+	return nil
 }
 
 func managedRuntimeProjectConcurrencyCap(executor string) int {

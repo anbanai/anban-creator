@@ -24,17 +24,6 @@ jwt:
   access_expiry: 24h
   refresh_expiry: 168h
 claude:
-  provider: volcengine_ark
-  base_url: https://ark.cn-beijing.volces.com/api/compatible
-  auth_token: test-auth-token
-  models:
-    default: doubao-seed-evolving
-    opus: doubao-seed-evolving
-    fable: doubao-seed-evolving
-    sonnet: doubao-seed-2-1-pro-260628
-    haiku: doubao-seed-2-1-turbo-260628
-  model_usage_aliases:
-    doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
@@ -82,17 +71,6 @@ jwt:
   access_expiry: 24h
   refresh_expiry: 168h
 claude:
-  provider: volcengine_ark
-  base_url: https://ark.cn-beijing.volces.com/api/compatible
-  auth_token: test-auth-token
-  models:
-    default: doubao-seed-evolving
-    opus: doubao-seed-evolving
-    fable: doubao-seed-evolving
-    sonnet: doubao-seed-2-1-pro-260628
-    haiku: doubao-seed-2-1-turbo-260628
-  model_usage_aliases:
-    doubao-seed-evolving-latest-version: doubao-seed-evolving
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:

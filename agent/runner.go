@@ -235,6 +235,11 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	if err := materializeHomeTemplateFromEnvironment(); err != nil {
 		return nil, fmt.Errorf("materialize runtime home template: %w", err)
 	}
+	extraArgs := map[string]*string{"agent": &r.cfg.AgentFlag}
+	if r.cfg.ThinkingRequired {
+		thinking := "adaptive"
+		extraArgs["thinking"] = &thinking
+	}
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)),
@@ -244,9 +249,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		// by Claude Code as project memory.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
 		serveragent.WithManagedAgentRuntimePolicy(),
-		claudecode.WithExtraArgs(map[string]*string{
-			"agent": &r.cfg.AgentFlag,
-		}),
+		claudecode.WithExtraArgs(extraArgs),
 		claudecode.WithStderrCallback(func(line string) {
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),
@@ -289,6 +292,9 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		if r.reporter != nil {
 			_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
 		}
+	}
+	if r.cfg.ReasoningEffort != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithEffort(claudecode.EffortLevel(r.cfg.ReasoningEffort)))
 	}
 	if r.cfg.AutoMemoryDirectory != "" {
 		settings, err := serveragent.BuildAutoMemorySettingsJSON(r.cfg.AutoMemoryDirectory)

@@ -209,16 +209,17 @@ func (BillingCatalogVersion) TableName() string { return "billing_catalog_versio
 
 // BillingSKU is one immutable SKU row within a published catalog.
 type BillingSKU struct {
-	ID           string         `gorm:"type:char(36);primaryKey" json:"id"`
-	CatalogID    string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_sku_catalog_sku,priority:1;not null" json:"catalog_id"`
-	SKUID        string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_sku_catalog_sku,priority:2;not null" json:"sku_id"`
-	Operation    string         `gorm:"type:varchar(128);index;not null" json:"operation"`
-	PriceCredits int64          `gorm:"not null;check:chk_billing_sku_price,price_credits >= 0" json:"price_credits"`
-	Policy       string         `gorm:"type:varchar(40);index;not null" json:"policy"`
-	Route        string         `gorm:"type:varchar(128);index" json:"route,omitempty"`
-	Delivery     string         `gorm:"type:varchar(128);not null" json:"delivery"`
-	Snapshot     datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
-	CreatedAt    time.Time      `json:"created_at"`
+	ID               string         `gorm:"type:char(36);primaryKey" json:"id"`
+	CatalogID        string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_sku_catalog_sku,priority:1;index:idx_billing_skus_catalog_operation_profile,priority:1;not null" json:"catalog_id"`
+	SKUID            string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_sku_catalog_sku,priority:2;not null" json:"sku_id"`
+	Operation        string         `gorm:"type:varchar(128);index;index:idx_billing_skus_catalog_operation_profile,priority:2;not null" json:"operation"`
+	ExecutionProfile string         `gorm:"column:execution_profile;type:varchar(40);not null;default:'';index:idx_billing_skus_execution_profile;index:idx_billing_skus_catalog_operation_profile,priority:3" json:"execution_profile,omitempty"`
+	PriceCredits     int64          `gorm:"not null;check:chk_billing_sku_price,price_credits >= 0" json:"price_credits"`
+	Policy           string         `gorm:"type:varchar(40);index;not null" json:"policy"`
+	Route            string         `gorm:"type:varchar(128);index" json:"route,omitempty"`
+	Delivery         string         `gorm:"type:varchar(128);not null" json:"delivery"`
+	Snapshot         datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
+	CreatedAt        time.Time      `json:"created_at"`
 }
 
 func (BillingSKU) TableName() string { return "billing_skus" }
@@ -239,25 +240,26 @@ func (BillingSKUTierPrice) TableName() string { return "billing_sku_tier_prices"
 
 // BillingQuote pins a fixed SKU price for one idempotent client request.
 type BillingQuote struct {
-	ID                 string         `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID             string         `gorm:"type:char(36);index;not null" json:"user_id"`
-	CatalogID          string         `gorm:"type:varchar(128);index;not null" json:"catalog_id"`
-	SKUID              string         `gorm:"type:varchar(128);index;not null" json:"sku_id"`
-	PriceCredits       int64          `gorm:"not null;check:chk_billing_quote_price,price_credits >= 0" json:"price_credits"`
-	PricingTier        string         `gorm:"type:varchar(20);index" json:"pricing_tier,omitempty"`
-	ListPriceCredits   int64          `gorm:"not null;default:0" json:"list_price_credits"`
-	DiscountCredits    int64          `gorm:"not null;default:0" json:"discount_credits"`
-	PricingRuleID      string         `gorm:"type:varchar(128)" json:"pricing_rule_id,omitempty"`
-	PricingSnapshot    datatypes.JSON `gorm:"type:json" json:"pricing_snapshot,omitempty"`
-	RequestFingerprint string         `gorm:"type:char(64);not null" json:"request_fingerprint"`
-	SKUSnapshot        datatypes.JSON `gorm:"type:json;not null" json:"sku_snapshot"`
-	ExpiresAt          time.Time      `gorm:"index;not null" json:"expires_at"`
-	CreatedAt          time.Time      `json:"created_at"`
-	ConsumedAt         *time.Time     `json:"consumed_at,omitempty"`
-	ResourceType       string         `gorm:"type:varchar(40);index:idx_billing_quote_resource,priority:1" json:"resource_type,omitempty"`
-	ResourceID         string         `gorm:"type:varchar(128);index:idx_billing_quote_resource,priority:2" json:"resource_id,omitempty"`
-	IdempotencyScope   string         `gorm:"type:varchar(80);uniqueIndex:idx_billing_quote_idempotency,priority:1;not null" json:"idempotency_scope"`
-	IdempotencyKey     string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_quote_idempotency,priority:2;not null" json:"idempotency_key"`
+	ID                   string         `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID               string         `gorm:"type:char(36);index;not null" json:"user_id"`
+	CatalogID            string         `gorm:"type:varchar(128);index;not null" json:"catalog_id"`
+	SKUID                string         `gorm:"type:varchar(128);index;not null" json:"sku_id"`
+	PriceCredits         int64          `gorm:"not null;check:chk_billing_quote_price,price_credits >= 0" json:"price_credits"`
+	PricingTier          string         `gorm:"type:varchar(20);index" json:"pricing_tier,omitempty"`
+	ListPriceCredits     int64          `gorm:"not null;default:0" json:"list_price_credits"`
+	DiscountCredits      int64          `gorm:"not null;default:0" json:"discount_credits"`
+	PricingRuleID        string         `gorm:"type:varchar(128)" json:"pricing_rule_id,omitempty"`
+	PricingSnapshot      datatypes.JSON `gorm:"type:json" json:"pricing_snapshot,omitempty"`
+	RequestFingerprint   string         `gorm:"type:char(64);not null" json:"request_fingerprint"`
+	SKUSnapshot          datatypes.JSON `gorm:"type:json;not null" json:"sku_snapshot"`
+	AgentProfileSnapshot datatypes.JSON `gorm:"type:json" json:"agent_profile_snapshot,omitempty"`
+	ExpiresAt            time.Time      `gorm:"index;not null" json:"expires_at"`
+	CreatedAt            time.Time      `json:"created_at"`
+	ConsumedAt           *time.Time     `json:"consumed_at,omitempty"`
+	ResourceType         string         `gorm:"type:varchar(40);index:idx_billing_quote_resource,priority:1" json:"resource_type,omitempty"`
+	ResourceID           string         `gorm:"type:varchar(128);index:idx_billing_quote_resource,priority:2" json:"resource_id,omitempty"`
+	IdempotencyScope     string         `gorm:"type:varchar(80);uniqueIndex:idx_billing_quote_idempotency,priority:1;not null" json:"idempotency_scope"`
+	IdempotencyKey       string         `gorm:"type:varchar(128);uniqueIndex:idx_billing_quote_idempotency,priority:2;not null" json:"idempotency_key"`
 }
 
 func (BillingQuote) TableName() string { return "billing_quotes" }

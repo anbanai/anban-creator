@@ -288,20 +288,22 @@ func TestAgentBootstrapArtifactTransportFollowsStorageProvider(t *testing.T) {
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
 			repo := openBootstrapTestRepository(t)
+			profile, profiles := bootstrapTestProfile(t)
 			tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 			if err != nil {
 				t.Fatal(err)
 			}
 			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
-				Model: "claude-test", Store: &streamArtifactStorage{name: tc.provider},
-				TokenTTL: time.Hour, RuntimeEnv: bootstrapTestRuntimeEnv(),
-				ModelUsageAliases: bootstrapTestModelUsageAliases(),
+				Store: &streamArtifactStorage{name: tc.provider}, TokenTTL: time.Hour, Registry: profiles,
 			}, zerolog.Nop())
 			task := &model.Task{
 				ID: "task-1", UserID: "user-1", ProjectID: "project-1",
 				Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning,
+				ExecutionProfile: profile.ID, AgentProfileSnapshot: profile.Snapshot(),
 			}
-			response, err := svc.buildResponse(t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+			execution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+			execution.ID = "execution-1"
+			response, err := svc.buildResponse(t.Context(), &execution, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}

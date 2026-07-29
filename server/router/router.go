@@ -42,6 +42,7 @@ type Services struct {
 	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
+	AgentProfileHandler      *handler.AgentProfileHandler
 	BillingHandler           *handler.BillingHandler
 	BillingAdminHandler      *handler.BillingAdminHandler
 	ProjectHandler           *handler.ProjectHandler
@@ -177,7 +178,6 @@ func NewRouter(svc *Services) *fiber.App {
 		authPublic.Post("/scanned", svc.AuthHandler.NotifyScanned)
 		authPublic.Post("/qr-callback", svc.AuthHandler.QRLoginCallback)
 	}
-
 	// ---------------------------------------------------------------------------
 	// Agent communication endpoints (API key auth, no JWT required).
 	// Registered before the JWT-protected group to avoid prefix-matching conflicts.
@@ -227,7 +227,7 @@ func NewRouter(svc *Services) *fiber.App {
 		billingAPI.Get("/wallet", svc.BillingHandler.Wallet)
 		billingAPI.Get("/catalog", svc.BillingHandler.Catalog)
 		billingAPI.Get("/transactions", svc.BillingHandler.Transactions)
-		billingAPI.Post("/quotes", svc.BillingHandler.CreateQuote)
+		billingAPI.Post("/quotes", svc.BillingHandler.CreateTaskQuote)
 		billingAPI.Get("/referral", svc.BillingHandler.Referral)
 
 		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
@@ -243,6 +243,9 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
 		apiV1.Put("/auth/password", svc.AuthHandler.ChangePassword)
 		apiV1.Post("/auth/set-password", svc.AuthHandler.SetPassword)
+	}
+	if svc.AgentProfileHandler != nil {
+		apiV1.Get("/agent/execution-profiles", svc.AgentProfileHandler.List)
 	}
 
 	// ---------------------------------------------------------------------------

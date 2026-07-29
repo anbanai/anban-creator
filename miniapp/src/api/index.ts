@@ -1,4 +1,5 @@
 import { apiKeysApi } from './api-keys'
+import { agentProfilesApi } from './agent-profiles'
 import { authApi } from './auth'
 import { projectsApi } from './projects'
 import { billingApi } from './billing'
@@ -19,6 +20,7 @@ export { del, get, getApiErrorMessage, patch, post, put } from './request'
 
 export const api = {
   apiKeys: apiKeysApi,
+  agentProfiles: agentProfilesApi,
   auth: authApi,
   projects: projectsApi,
   billing: billingApi,

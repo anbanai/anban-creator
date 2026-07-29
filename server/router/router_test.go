@@ -251,6 +251,19 @@ func TestBillingRoutes(t *testing.T) {
 	}
 }
 
+func TestAgentExecutionProfileRoute(t *testing.T) {
+	app := NewRouter(&Services{
+		Config:              &config.Config{},
+		AgentProfileHandler: &handler.AgentProfileHandler{},
+	})
+	for _, route := range app.GetRoutes() {
+		if route.Method == http.MethodGet && route.Path == "/api/v1/agent/execution-profiles" {
+			return
+		}
+	}
+	t.Fatal("GET /api/v1/agent/execution-profiles is not registered")
+}
+
 // TestPublicAuthEndpoints tests that public auth endpoints are accessible
 // without authentication.
 func TestPublicAuthEndpoints(t *testing.T) {

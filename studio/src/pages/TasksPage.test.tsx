@@ -63,6 +63,7 @@ const fixtures = vi.hoisted(() => {
     error_message: '模型超时',
     plan_id: null,
     project_id: project.id,
+    execution_profile: 'cost_effective',
     result: null,
     published: false,
     published_at: null,
@@ -80,6 +81,7 @@ const fixtures = vi.hoisted(() => {
     progress: 100,
     plan_id: null,
     project_id: project.id,
+    execution_profile: 'cost_effective',
     result: null,
     published: false,
     published_at: null,
@@ -125,12 +127,20 @@ vi.mock('@/lib/api', async () => {
           catalog_id: 'retail-test-v1',
           currency: 'credits',
           skus: [
-            { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.ecommerce.v1', operation: 'task.ecommerce', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
-            { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
+            { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
           ],
         }),
+      },
+      agentProfiles: {
+        ...actual.api.agentProfiles,
+        list: vi.fn().mockResolvedValue([
+          { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+        ]),
       },
     },
   }
@@ -290,6 +300,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
+    fireEvent.click(await screen.findByRole('button', { name: /性价比/ }))
     expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
     expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()

@@ -59,6 +59,7 @@ export interface BillingSKU {
   pricing_tier?: 'free' | 'pro' | 'enterprise'
   list_price_credits?: number
   discount_credits?: number
+  execution_profile?: import('./agent-profile').AgentExecutionProfileID
   route?: string
   delivery: string
 }

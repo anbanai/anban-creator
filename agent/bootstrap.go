@@ -416,17 +416,8 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if response.ResumeSessionID != "" && response.ResumeContextPath == "" {
 		return fmt.Errorf("bootstrap resume session requires resume context")
 	}
-	if strings.TrimSpace(response.Model) != response.Model || len(response.Model) > maxBootstrapModelBytes {
-		return fmt.Errorf("bootstrap model is invalid")
-	}
-	if err := serveragent.ValidateClaudeRuntimeEnv(response.RuntimeEnv); err != nil {
-		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
-	}
-	if len(response.ModelUsageAliases) == 0 {
-		return fmt.Errorf("bootstrap model usage aliases are required")
-	}
-	if err := serveragent.ValidateModelUsageAliases(response.ModelUsageAliases); err != nil {
-		return fmt.Errorf("bootstrap model usage aliases are invalid: %w", err)
+	if err := validateBootstrapExecutionProfile(response.ExecutionProfile); err != nil {
+		return err
 	}
 	if response.TaskType != model.PlatformMontage && len(response.Env) > 0 {
 		return fmt.Errorf("bootstrap environment is only valid for Montage tasks")
@@ -436,6 +427,59 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	}
 	if _, err := preflightBootstrapFiles(response.Files, false); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateBootstrapExecutionProfile(profile service.AgentRuntimeProfile) error {
+	if strings.TrimSpace(profile.ProfileID) != profile.ProfileID || strings.TrimSpace(profile.DisplayName) != profile.DisplayName ||
+		strings.TrimSpace(profile.ModelID) != profile.ModelID || len(profile.ModelID) > maxBootstrapModelBytes ||
+		profile.ProfileID == "" || profile.DisplayName == "" || profile.ModelID == "" {
+		return fmt.Errorf("bootstrap execution profile identity is invalid")
+	}
+	wantProvider, wantModel := "", ""
+	switch profile.ProfileID {
+	case "cost_effective":
+		wantProvider, wantModel = "deepseek", "deepseek-v4-pro"
+	case "balanced":
+		wantProvider, wantModel = "volcengine_ark", "doubao-seed-evolving"
+	case "maximum_quality":
+		wantProvider, wantModel = "kimi", "k3"
+	default:
+		return fmt.Errorf("bootstrap execution profile is unknown")
+	}
+	if profile.Provider != wantProvider || profile.ModelID != wantModel || profile.Protocol != "anthropic" {
+		return fmt.Errorf("bootstrap execution profile provider identity is invalid")
+	}
+	if profile.ContextWindow < 0 || profile.ContextWindow > 1048576 {
+		return fmt.Errorf("bootstrap execution profile context window is invalid")
+	}
+	switch profile.ReasoningEffort {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("bootstrap execution profile reasoning effort is invalid")
+	}
+	if profile.ThinkingRequired && profile.ReasoningEffort == "" {
+		return fmt.Errorf("bootstrap execution profile thinking requires reasoning effort")
+	}
+	if profile.ProfileID == "maximum_quality" && (profile.ContextWindow != 1048576 || profile.ReasoningEffort != "high" || !profile.ThinkingRequired) {
+		return fmt.Errorf("bootstrap maximum quality runtime controls are invalid")
+	}
+	if err := serveragent.ValidateClaudeRuntimeEnv(profile.RuntimeEnv); err != nil {
+		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
+	}
+	if profile.RuntimeEnv["ANTHROPIC_MODEL"] != profile.ModelID {
+		return fmt.Errorf("bootstrap runtime environment model does not match profile")
+	}
+	if len(profile.ModelUsageAliases) == 0 {
+		return fmt.Errorf("bootstrap model usage aliases are required")
+	}
+	if err := serveragent.ValidateModelUsageAliases(profile.ModelUsageAliases); err != nil {
+		return fmt.Errorf("bootstrap model usage aliases are invalid: %w", err)
+	}
+	identity, ok := profile.ModelUsageAliases[profile.ModelID]
+	if !ok || identity.Provider != profile.Provider || identity.Model != profile.ModelID {
+		return fmt.Errorf("bootstrap model usage alias does not match profile")
 	}
 	return nil
 }

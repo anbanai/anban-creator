@@ -1,5 +1,10 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
+export type {
+  AgentExecutionProfileID,
+  AgentExecutionProfileCapability,
+  AgentProfileSnapshot,
+} from './agent-profile'
 
 // Project
 export type {

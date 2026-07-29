@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import { loginSchema, registerSchema, createTaskSchema, planSchema, projectSchema } from './schemas'
+import {
+  loginSchema,
+  registerSchema,
+  createTaskSchema as rawCreateTaskSchema,
+  planSchema as rawPlanSchema,
+  projectSchema,
+} from './schemas'
+
+function withExecutionProfile(input: unknown) {
+  return {
+    execution_profile: 'cost_effective' as const,
+    ...(input as Record<string, unknown>),
+  }
+}
+
+const createTaskSchema = {
+  parse: (input: unknown) => rawCreateTaskSchema.parse(withExecutionProfile(input)),
+  safeParse: (input: unknown) => rawCreateTaskSchema.safeParse(withExecutionProfile(input)),
+}
+
+const planSchema = {
+  parse: (input: unknown) => rawPlanSchema.parse(withExecutionProfile(input)),
+  safeParse: (input: unknown) => rawPlanSchema.safeParse(withExecutionProfile(input)),
+}
 
 describe('loginSchema', () => {
   it('accepts valid email and password', () => {
@@ -74,6 +97,12 @@ describe('registerSchema', () => {
 })
 
 describe('createTaskSchema', () => {
+  it('requires a selected execution profile', () => {
+    const base = { project_id: 'ch-1', type: 'article', prompt: '测试主题' }
+    expect(rawCreateTaskSchema.safeParse(base).success).toBe(false)
+    expect(rawCreateTaskSchema.safeParse({ ...base, execution_profile: '' }).success).toBe(false)
+  })
+
   it('accepts valid task creation data', () => {
     expect(createTaskSchema.safeParse({
       project_id: 'ch-1',
@@ -331,6 +360,12 @@ describe('createTaskSchema', () => {
 })
 
 describe('planSchema', () => {
+  it('requires a selected execution profile', () => {
+    const base = { type: 'article', cron_expr: '0 9 * * 1' }
+    expect(rawPlanSchema.safeParse(base).success).toBe(false)
+    expect(rawPlanSchema.safeParse({ ...base, execution_profile: '' }).success).toBe(false)
+  })
+
   it('defaults plan input attachments to an empty snapshot', () => {
     const result = planSchema.parse({
       type: 'seednote',

@@ -74,6 +74,24 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func newTestTaskService(
+	repo repository.Repository,
+	enqueuer TaskEnqueuer,
+	store storage.Provider,
+	logger *zerolog.Logger,
+	taskLogDir string,
+	pubsub *RedisPubSub,
+	publishingSvc *PublishingService,
+) *TaskService {
+	svc := NewTaskService(repo, enqueuer, store, logger, taskLogDir, pubsub, publishingSvc)
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		panic(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	return svc
+}
+
 func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Repository) {
 	t.Helper()
 	db := setupTaskTestDB(t)
@@ -85,16 +103,103 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	return svc, repo
+}
+
+func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "execution_profile is required") {
+		t.Fatalf("CreateManual error = %v, want execution_profile is required", err)
+	}
+}
+
+func injectTestAgentProfiles(t *testing.T, svc *TaskService) {
+	t.Helper()
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatalf("NewAgentProfileRegistry: %v", err)
+	}
+	injector, ok := any(svc).(interface {
+		SetAgentProfileRegistry(*AgentProfileRegistry)
+	})
+	if !ok {
+		t.Fatal("TaskService does not expose AgentProfileRegistry injection")
+	}
+	injector.SetAgentProfileRegistry(registry)
+}
+
+func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	injectTestAgentProfiles(t, svc)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
+		ExecutionProfile: "balanced",
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
+	}
+	task := tasks[0]
+	if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.ModelID != "doubao-seed-evolving" {
+		t.Fatalf("task profile = %q, snapshot = %#v", task.ExecutionProfile, task.AgentProfileSnapshot)
+	}
+	if task.AgentProfileSnapshot.BaseURL != "" || task.AgentProfileSnapshot.AuthToken != "" {
+		t.Fatalf("task snapshot contains credentials: %#v", task.AgentProfileSnapshot)
+	}
+
+	if _, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID: userID, ProjectID: projectID, Prompt: "denied", Quantity: 1,
+		ExecutionProfile: "maximum_quality",
+	}); !errors.Is(err, ErrAgentProfileAccessDenied) {
+		t.Fatalf("enterprise profile error = %v, want ErrAgentProfileAccessDenied", err)
+	}
+}
+
+func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	injectTestAgentProfiles(t, svc)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic",
+	}
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.ModelID != "doubao-seed-evolving" {
+		t.Fatalf("plan task profile = %#v", task)
+	}
 }
 
 func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := NewTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -514,6 +619,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
+	ensureTestUser(t, repo, userID)
 	asset := &model.Asset{ID: uuid.NewString(), UserID: userID, Purpose: DirectUploadPurposeProjectReference, StorageKey: "assets/users/" + userID + "/reference/ref.png", FileName: "ref.png", ContentType: "image/png", Size: 3, ETag: "etag"}
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatalf("create reference asset: %v", err)
@@ -538,7 +644,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: project.ID,
 		Prompt:    "topic",
@@ -577,6 +683,7 @@ func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
+	ensureTestUser(t, repo, userID)
 	project := &model.Project{
 		ID:           uuid.New().String(),
 		UserID:       userID,
@@ -592,7 +699,7 @@ func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:          uuid.New().String(),
 		UserID:      userID,
 		ProjectID:   project.ID,
@@ -630,6 +737,9 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-plan-filter"}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 	project := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
@@ -641,7 +751,7 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	planA := &model.Plan{
+	planA := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: project.ID,
@@ -649,7 +759,7 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 		Status:    model.PlanStatusActive,
 		Prompt:    "计划 A",
 	}
-	planB := &model.Plan{
+	planB := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: project.ID,
@@ -686,7 +796,7 @@ func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditSe
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "做一组咖啡杯电商图",
@@ -710,7 +820,7 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 	userID := "user-om"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,
@@ -743,7 +853,7 @@ func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.
 	userID := "user-om-reject"
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "春季穿搭",
@@ -763,7 +873,7 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -844,7 +954,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{
+	src := &model.Task{ExecutionProfile: "cost_effective",
 		ID:         uuid.New().String(),
 		UserID:     userID,
 		ProjectID:  projectID,
@@ -880,6 +990,9 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode {
 		t.Fatalf("clone config = prompt %q ratio %q goal %q mode %v, want source config", clone.Prompt, clone.ImageRatio, clone.Goal, clone.GoalMode)
+	}
+	if clone.ExecutionProfile != src.ExecutionProfile || clone.AgentProfileSnapshot.ProfileID != src.ExecutionProfile {
+		t.Fatalf("clone profile = %q snapshot=%#v, want source profile %q", clone.ExecutionProfile, clone.AgentProfileSnapshot, src.ExecutionProfile)
 	}
 	if clone.InputSourceTaskID != src.ID {
 		t.Fatalf("clone input source = %q, want %q", clone.InputSourceTaskID, src.ID)
@@ -935,7 +1048,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{
+	source := &model.Task{ExecutionProfile: "cost_effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            sourceProjectID,
@@ -972,7 +1085,6 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
-		ExecutionTarget:          model.ExecutionTargetLocal,
 	}})
 	if err != nil {
 		t.Fatalf("Clone with editable overrides: %v", err)
@@ -1000,7 +1112,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
 			t.Fatalf("article fields = cover %v content %v", task.ArticleWithCover, task.ArticleWithContentImages)
 		}
-		if task.ExecutionTarget != model.ExecutionTargetLocal || task.LocalClaimDeadline == nil {
+		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline %v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
 		if got := task.InputAttachments.Data(); len(got) != 1 || got[0] != attachments[0] {
@@ -1070,7 +1182,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source := &model.Task{ExecutionProfile: "cost_effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
 	source.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: inherited.ID})
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -1084,7 +1196,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 
 	before := taskCount()
-	if _, err := svc.CreateManual(ctx, CreateManualParams{
+	if _, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID: userID, ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: inherited.ID,
 	}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
 		t.Fatalf("direct CreateManual error = %v, want ErrReferenceAssetPurposeMismatch", err)
@@ -1199,7 +1311,7 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 			userID := uuid.NewString()
 			sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
 			destinationProjectID := createTestProject(t, repo, userID, tt.platform)
-			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+			source := &model.Task{ExecutionProfile: "cost_effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(ctx, source); err != nil {
 				t.Fatalf("create source task: %v", err)
 			}
@@ -1227,7 +1339,7 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{
+	src := &model.Task{ExecutionProfile: "cost_effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
@@ -1262,7 +1374,7 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{
+	src := &model.Task{ExecutionProfile: "cost_effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
@@ -1296,7 +1408,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	src := &model.Task{
+	src := &model.Task{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -1345,7 +1457,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, enqueuer, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, enqueuer, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -1510,7 +1622,7 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enqueuer := &mockEnqueuer{}
 	store := &fakeTaskStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, enqueuer, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, enqueuer, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -1585,7 +1697,7 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}, failUploadAt: 2}
-	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1637,7 +1749,7 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{}}
-	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1677,7 +1789,7 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := &resumeTestStorage{files: map[string][]byte{"resume/old.txt": []byte("old")}}
-	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1714,7 +1826,7 @@ func TestTaskService_DeletePreventsConcurrentResumeFromRestoringAuthority(t *tes
 	logger := zerolog.New(io.Discard)
 	const objectKey = "tasks/delete-race/final.md"
 	store := newBlockingTaskDeleteStorage(objectKey)
-	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1756,7 +1868,7 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	ctx, cancel := context.WithCancel(context.Background())
-	svc := NewTaskService(repo, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -1797,7 +1909,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	store := newConcurrentResumeStorage()
-	svc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -2053,7 +2165,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Test topic",
@@ -2084,7 +2196,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 
 func TestTaskService_CreateManual_NoProject(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    "user1",
 		ProjectID: "",
 		Prompt:    "topic",
@@ -2099,7 +2211,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    "wrong-user",
 		ProjectID: projectID,
 		Prompt:    "topic",
@@ -2114,7 +2226,7 @@ func TestTaskService_GetByID(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Find me",
@@ -2143,7 +2255,7 @@ func TestTaskService_Cancel(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Cancel me",
@@ -2177,7 +2289,7 @@ func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 	log := zerolog.Nop()
 	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &log))
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Cancel me",
@@ -2205,12 +2317,12 @@ func TestTaskService_List(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	svc.CreateManual(context.Background(), CreateManualParams{
+	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Task 1",
 	})
-	svc.CreateManual(context.Background(), CreateManualParams{
+	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Task 2",
@@ -2233,7 +2345,7 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Pending task",
@@ -2599,7 +2711,7 @@ func TestCreateManualClonesInputAttachments(t *testing.T) {
 		Instruction: "保持包装和 Logo",
 	}}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
 		UserID:           userID,
 		ProjectID:        projectID,
 		Prompt:           "生成种草图文",
@@ -2639,7 +2751,7 @@ func TestCreateFromPlanClonesAttachmentSnapshotPerTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	plan := &model.Plan{
+	plan := &model.Plan{ExecutionProfile: "cost_effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,

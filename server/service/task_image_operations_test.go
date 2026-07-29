@@ -84,7 +84,7 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tasks := NewTaskService(repo, nil, nil, &logger, "", nil, nil)
+	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	images := &fakeTaskImageOperationsImage{}
 	writing := &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}
 	cost := &fakeTaskImageOperationsCost{}
@@ -128,7 +128,7 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 		t.Fatal(err)
 	}
 	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: "foreign", ProjectID: projectID, TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if !errors.Is(err, ErrTaskImageOperationOwnership) {
 		t.Fatalf("Analyze error = %v, want ownership error", err)
@@ -150,7 +150,7 @@ func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T)
 		t.Fatal(err)
 	}
 	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(NewTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: "wrong-project", TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if !errors.Is(err, ErrTaskImageOperationProjectMismatch) || writing.calls != 0 {
 		t.Fatalf("Analyze = %v, writing calls=%d; want project mismatch before delegation", err, writing.calls)

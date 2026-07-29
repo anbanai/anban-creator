@@ -1,6 +1,13 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
 
+// Agent execution profiles
+export type {
+  AgentExecutionProfileID,
+  AgentExecutionProfileCapability,
+  AgentProfileSnapshot,
+} from './agent-profile'
+
 // Finalized reference assets
 export type {
   ReferenceAssetView,

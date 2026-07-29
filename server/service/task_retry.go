@@ -62,6 +62,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		params := CreateManualParams{
 			UserID:                     src.UserID,
 			ProjectID:                  override.ProjectID,
+			ExecutionProfile:           src.ExecutionProfile,
 			Prompt:                     override.Prompt,
 			Quantity:                   override.Quantity,
 			ImageRatio:                 override.ImageRatio,
@@ -120,6 +121,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
+		ExecutionProfile:         src.ExecutionProfile,
 		FrozenTaskType:           src.Type,
 		PreserveFrozenConfig:     true,
 		Prompt:                   prompt,

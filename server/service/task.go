@@ -32,7 +32,21 @@ type UniqueTaskEnqueuer interface {
 	EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error)
 }
 
-var ErrTaskCapabilityAccessDenied = errors.New("task capability access denied")
+var (
+	ErrTaskCapabilityAccessDenied              = errors.New("task capability access denied")
+	ErrManagedProfileLocalExecutionUnsupported = errors.New("managed Agent profiles require cloud execution")
+)
+
+func validateAgentExecutionTarget(target string) error {
+	switch strings.TrimSpace(target) {
+	case model.ExecutionTargetCloud:
+		return nil
+	case model.ExecutionTargetLocal, model.ExecutionTargetLocalClaimed:
+		return ErrManagedProfileLocalExecutionUnsupported
+	default:
+		return fmt.Errorf("invalid execution target %q", target)
+	}
+}
 
 type PublishedTrackingService interface {
 	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
@@ -82,10 +96,7 @@ type TaskService struct {
 	// decoupled from the execution ctx so completed work is saved even on overrun.
 	// Default 10m; override via SetExecutionTimeouts.
 	persistTimeout time.Duration
-	// defaultModel / maxTurnsOverrides feed the local-executor claim response
-	// (LocalExecutionConfig) so a desktop-built agent argv mirrors what the cloud
-	// DockerExecutor would pass. Set via SetExecutorDefaults during wiring.
-	defaultModel      string
+	// maxTurnsOverrides feeds the local-executor claim response.
 	maxTurnsOverrides map[string]int
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
@@ -93,6 +104,7 @@ type TaskService struct {
 	providerCostSvc   *ProviderCostService
 	billingWalletSvc  *BillingWalletService
 	billingCatalogSvc *BillingCatalogService
+	agentProfiles     *AgentProfileRegistry
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -179,6 +191,18 @@ func (s *TaskService) SetBillingWalletService(wallet *BillingWalletService) {
 func (s *TaskService) SetBillingCatalogService(catalog *BillingCatalogService) {
 	if s != nil {
 		s.billingCatalogSvc = catalog
+		if catalog != nil && s.agentProfiles != nil {
+			catalog.SetAgentProfileRegistry(s.agentProfiles)
+		}
+	}
+}
+
+func (s *TaskService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
+	if s != nil {
+		s.agentProfiles = registry
+		if s.billingCatalogSvc != nil {
+			s.billingCatalogSvc.SetAgentProfileRegistry(registry)
+		}
 	}
 }
 
@@ -246,11 +270,7 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 	}
 }
 
-// SetExecutorDefaults wires the Claude model + per-type max-turns overrides used
-// to build local-executor claim responses. Mirrors the values the cloud
-// DockerExecutor receives, so a desktop-spawned agent argv matches the cloud path.
-func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides map[string]int) {
-	s.defaultModel = defaultModel
+func (s *TaskService) SetExecutorMaxTurns(maxTurnsOverrides map[string]int) {
 	s.maxTurnsOverrides = maxTurnsOverrides
 }
 
@@ -326,8 +346,9 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID    string
-	ProjectID string
+	UserID           string
+	ProjectID        string
+	ExecutionProfile string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType        string
@@ -464,6 +485,12 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 //
 // GoalMode is execution behavior only. It does not alter the fixed task SKU.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
+	if strings.TrimSpace(p.ExecutionProfile) == "" {
+		return nil, fmt.Errorf("execution_profile is required")
+	}
+	if err := validateAgentExecutionTarget(p.ExecutionTarget); err != nil {
+		return nil, err
+	}
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
 	}
@@ -481,6 +508,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
+	if err != nil {
+		return nil, err
+	}
+	p.ExecutionProfile = profile.ID
+	profileSnapshot := profile.Snapshot()
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot, p.allowProjectReferenceAsset); err != nil {
 		return nil, err
 	}
@@ -535,6 +568,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			}
 			p.ExecutionTarget = target
 		}
+	}
+	if err := validateAgentExecutionTarget(p.ExecutionTarget); err != nil {
+		return nil, err
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -611,15 +647,13 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ArticleWithCover:         &articleCover,
 			ArticleWithContentImages: &articleContent,
 			ExecutionTarget:          p.ExecutionTarget,
+			ExecutionProfile:         p.ExecutionProfile,
+			AgentProfileSnapshot:     profileSnapshot,
 		}
 		if p.ProjectSnapshot != nil {
 			task.SetProjectSnapshot(*p.ProjectSnapshot)
 		} else {
 			task.SetProjectSnapshot(model.SnapshotProject(project))
-		}
-		if p.ExecutionTarget == model.ExecutionTargetLocal {
-			deadline := time.Now().Add(LocalClaimWindow)
-			task.LocalClaimDeadline = &deadline
 		}
 		if p.Overrides != nil {
 			task.SetOverrides(*p.Overrides)
@@ -649,10 +683,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 	// Batch admission is fully committed before any task is dispatched.
 	for _, task := range tasks {
-		if task.ExecutionTarget == model.ExecutionTargetLocal {
-			s.logger.Info().Str("task_id", task.ID).Msg("task routed to local executor, awaiting desktop claim")
-			continue
-		}
 		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to enqueue task, marking as failed")
 			if failErr := s.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error()); failErr != nil {
@@ -737,8 +767,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return fmt.Errorf("marshal task billing fingerprint: %w", err)
 		}
 		fingerprint := billingFingerprint("task-admission", string(payload))
-		quote, err := s.billingCatalogSvc.CreateQuote(ctx, QuoteRequest{
-			UserID: task.UserID, Operation: "task." + task.Type, RequestFingerprint: fingerprint,
+		quote, err := s.billingCatalogSvc.CreateTaskQuote(ctx, TaskQuoteRequest{
+			UserID: task.UserID, TaskType: task.Type, RequestFingerprint: fingerprint,
+			ExecutionProfile: task.ExecutionProfile,
 			IdempotencyScope: "task-admission-quote", IdempotencyKey: task.ID,
 		})
 		if err != nil {
@@ -777,6 +808,16 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 // reference image, watermark, goal, seednote image composition) flow to the task.
 // Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("plan is required")
+	}
+	if strings.TrimSpace(plan.ExecutionProfile) == "" {
+		return nil, fmt.Errorf("execution_profile is required")
+	}
+	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, plan.UserID, plan.ExecutionProfile)
+	if err != nil {
+		return nil, err
+	}
 	taskID := generateTaskID()
 
 	prompt := plan.Prompt
@@ -847,6 +888,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		HasTailImage:             plan.HasTailImage,
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
+		ExecutionProfile:         profile.ID,
+		AgentProfileSnapshot:     profile.Snapshot(),
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if model.IsMontagePlatform(taskType) {

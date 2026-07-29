@@ -70,7 +70,7 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -150,7 +150,7 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 				UserID: userID, ProjectID: projectID, Text: "write content",
 				Attachments: []model.EntryAttachment{{Type: "image", UploadID: asset.ID, URL: "https://staging.example.com/ref.png", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}},
 			})
@@ -199,7 +199,7 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
 	entrySvc.SetReferenceAssetService(referenceSvc)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, Text: "write article"})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 	entrySvc.SetReferenceAssetService(referenceSvc)
 	attachment := model.EntryAttachment{Type: "image", URL: "/api/v1/files/product.png", FileName: "product.png", ContentType: "image/png", Instruction: "keep logo"}
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write seednote", Attachments: []model.EntryAttachment{attachment}})
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, Text: "write seednote", Attachments: []model.EntryAttachment{attachment}})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -288,14 +288,14 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 				t.Fatal(err)
 			}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}, downloadErr: errors.New("signer unavailable")}
-			taskSvc := NewTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+			taskSvc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
 			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write content"})
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, Text: "write content"})
 			if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
 				t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
 			}
@@ -356,14 +356,14 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			}
 			repoWithTopics := &taskCreationRepositoryOverride{Repository: repo, topicPools: topics}
 			store := &referenceAssetStore{objects: map[string]*storage.ObjectInfo{}}
-			taskSvc := NewTaskService(repoWithTopics, &mockEnqueuer{}, store, &logger, "", nil, nil)
+			taskSvc := newTestTaskService(repoWithTopics, &mockEnqueuer{}, store, &logger, "", nil, nil)
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repoWithTopics, &logger))
 			referenceSvc := NewReferenceAssetService(repoWithTopics, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			entrySvc := NewAIEntryService(repoWithTopics, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, Text: "write article"})
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, Text: "write article"})
 			if result != nil || !errors.Is(err, tt.want) {
 				t.Fatalf("result/error = %#v/%v, want %v", result, err, tt.want)
 			}
@@ -395,7 +395,7 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -430,7 +430,7 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -465,7 +465,7 @@ func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 	key := "uploads/pending/" + userID + "/image-upload/product.png"
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID: userID, ProjectID: projectID, Channel: "studio", Text: "制作保温杯电商主图",
 		Attachments: []model.EntryAttachment{{
 			Type: "image", UploadID: "image-upload", Key: key,
@@ -503,7 +503,7 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		logger := zerolog.New(io.Discard)
 		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 			UserID:    userID,
 			ProjectID: projectID,
 			Channel:   "studio",
@@ -543,7 +543,7 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		logger := zerolog.New(io.Discard)
 		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 			UserID:    userID,
 			ProjectID: projectID,
 			Channel:   "studio",
@@ -585,7 +585,7 @@ func TestAIEntryServiceSubmitRetriesJSONRepairOnce(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -613,7 +613,7 @@ func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, nil, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -636,7 +636,7 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Channel:   "studio",
@@ -682,7 +682,7 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			logger := zerolog.New(io.Discard)
 			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "cost_effective",
 				UserID:    userID,
 				ProjectID: projectID,
 				Channel:   "studio",

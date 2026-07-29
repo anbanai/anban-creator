@@ -126,34 +126,56 @@ func TestBillingHandler(t *testing.T) {
 		assertBillingHTTP(t, resp, http.StatusInternalServerError, BillingCodeLedgerInvalid)
 	})
 
-	t.Run("quote is server-priced and errors are typed", func(t *testing.T) {
+	t.Run("agent task quote is server-priced and errors are typed", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
+		f.provisionQuoteWallet(t, model.TierPro, 500, 0)
 		body := map[string]any{
-			"operation": "task.article", "request_fingerprint": strings.Repeat("a", 64),
+			"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("a", 64),
 			"idempotency_scope": "quote", "idempotency_key": "quote-1",
-			"pricing_tier": "enterprise", "price_credits": 1, "list_price_credits": 1, "discount_credits": 0,
 		}
 		resp := f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
 		assertBillingHTTP(t, resp, http.StatusOK, 0)
 		data := billingResponseData(t, resp)
-		assertJSONNumbers(t, data, map[string]float64{"list_price_credits": 500, "price_credits": 500, "discount_credits": 0})
-		if data["pricing_tier"] != string(model.TierFree) {
-			t.Fatalf("quote accepted spoofed pricing tier: %#v", data)
+		assertJSONNumbers(t, data, map[string]float64{"list_price_credits": 500, "price_credits": 450, "discount_credits": 50})
+		if data["pricing_tier"] != string(model.TierPro) {
+			t.Fatalf("quote pricing tier = %#v", data)
 		}
 		for _, field := range []string{"id", "catalog_id", "sku_id", "sku_snapshot", "expires_at"} {
 			if _, ok := data[field]; !ok {
 				t.Fatalf("quote response missing %s: %#v", field, data)
 			}
 		}
-		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{"operation": "task.article"})
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "article"})
 		assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
 		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{
-			"operation": "missing", "request_fingerprint": strings.Repeat("b", 64), "idempotency_scope": "quote", "idempotency_key": "missing",
+			"task_type": "unknown", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("b", 64), "idempotency_scope": "quote", "idempotency_key": "missing",
 		})
-		assertBillingHTTP(t, resp, http.StatusNotFound, BillingCodeSKUNotFound)
-		body["operation"] = "mcp.generate_image"
+		assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+		body["request_fingerprint"] = strings.Repeat("c", 64)
 		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
 		assertBillingHTTP(t, resp, http.StatusConflict, BillingCodeChargeConflict)
+	})
+
+	t.Run("agent task quote accepts only its structured identity", func(t *testing.T) {
+		f := newBillingHandlerFixture(t)
+		f.provisionQuoteWallet(t, model.TierPro, 500, 0)
+		body := map[string]any{
+			"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("d", 64),
+			"idempotency_scope": "agent-task-quote", "idempotency_key": "agent-task-quote-1",
+		}
+		resp := f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
+		assertBillingHTTP(t, resp, http.StatusOK, 0)
+
+		body["catalog_id"] = "retail-v4"
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
+		assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+		delete(body, "catalog_id")
+		for _, field := range []string{"endpoint", "base_url", "api_key", "unknown"} {
+			body[field] = "client-controlled"
+			resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
+			assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
+			delete(body, field)
+		}
 	})
 
 	t.Run("catalog returns only the authenticated user tier prices", func(t *testing.T) {
@@ -428,9 +450,7 @@ func TestBillingHandler(t *testing.T) {
 
 	t.Run("public DTOs contain no internal cost vocabulary", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
-		if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: f.inviteeID}); err != nil {
-			t.Fatalf("create empty wallet: %v", err)
-		}
+		f.provisionQuoteWallet(t, model.TierPro, 500, 0)
 		for _, endpoint := range []struct {
 			method string
 			path   string
@@ -439,7 +459,7 @@ func TestBillingHandler(t *testing.T) {
 			{http.MethodGet, "/api/billing/wallet", nil},
 			{http.MethodGet, "/api/billing/transactions?offset=0&limit=20", nil},
 			{http.MethodGet, "/api/billing/referral", nil},
-			{http.MethodPost, "/api/billing/quotes", map[string]any{"operation": "task.article", "request_fingerprint": strings.Repeat("c", 64), "idempotency_scope": "quote", "idempotency_key": "safe-dto"}},
+			{http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("c", 64), "idempotency_scope": "quote", "idempotency_key": "safe-dto"}},
 		} {
 			resp := f.publicRequest(t, endpoint.method, endpoint.path, endpoint.body)
 			assertBillingHTTP(t, resp, http.StatusOK, 0)
@@ -488,6 +508,15 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	bundle := billingHandlerBundle()
 	catalog := service.NewBillingCatalogService(repo, &bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }, QuoteTTL: 5 * time.Minute})
+	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
+		{ID: "cost_effective", DisplayName: "性价比", Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic", MinTier: model.TierFree, Available: true},
+		{ID: "balanced", DisplayName: "平衡型", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic", MinTier: model.TierPro, Available: true},
+		{ID: "maximum_quality", DisplayName: "极致效果", Provider: "kimi", ModelID: "k3", Protocol: "anthropic", MinTier: model.TierEnterprise, ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true, Available: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.SetAgentProfileRegistry(profiles)
 	if _, err := catalog.Publish(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +550,7 @@ func billingHandlerBundle() serverbilling.Bundle {
 			TopUp:         serverbilling.TopUpPolicy{RepayDebtFirst: true}, Promotions: serverbilling.PromotionsPolicy{MayRepayDebt: false},
 		},
 		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", PricingModel: serverbilling.PricingModelTierMatrixV1, SKUs: []serverbilling.SKUConfig{
-			{ID: "task.article.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 500, TierPrices: map[string]int64{"free": 500, "pro": 450, "enterprise": 400}, Delivery: "article"},
+			{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, TierPrices: map[string]int64{"free": 500, "pro": 450, "enterprise": 400}, Delivery: "article"},
 			{ID: "image.cover.v1", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, TierPrices: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, Delivery: "image"},
 		}},
 		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{
@@ -538,9 +567,26 @@ func (f *billingHandlerFixture) publicRequest(t *testing.T, method, path string,
 	app.Get("/api/billing/wallet", f.handler.Wallet)
 	app.Get("/api/billing/catalog", f.handler.Catalog)
 	app.Get("/api/billing/transactions", f.handler.Transactions)
-	app.Post("/api/billing/quotes", f.handler.CreateQuote)
+	app.Post("/api/billing/quotes", f.handler.CreateTaskQuote)
 	app.Get("/api/billing/referral", f.handler.Referral)
 	return billingTestRequest(t, app, method, path, body, "")
+}
+
+func (f *billingHandlerFixture) provisionQuoteWallet(t *testing.T, tier model.Tier, paid, debt int64) {
+	t.Helper()
+	user, err := f.repo.Users().FindByID(context.Background(), f.inviteeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = tier
+	if err := f.repo.Users().Update(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{
+		UserID: f.inviteeID, PaidCredits: paid, DebtCredits: debt,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f *billingHandlerFixture) adminRequest(t *testing.T, key string, body any) *http.Response {

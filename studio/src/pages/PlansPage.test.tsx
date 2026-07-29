@@ -64,12 +64,26 @@ vi.mock('@/lib/api', async () => {
           catalog_id: 'retail-test-v1',
           currency: 'credits',
           skus: [
-            { id: 'task.article.v1', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.v1', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.montage.v1', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.article.cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+            { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.seednote.maximum', operation: 'task.seednote', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 8000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 3000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.montage.maximum', operation: 'task.montage', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 4500, delivery: 'montage_artifacts_verified' },
           ],
         }),
         wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
+      },
+      agentProfiles: {
+        ...actual.api.agentProfiles,
+        list: vi.fn().mockResolvedValue([
+          { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+        ]),
       },
     },
   }
@@ -97,6 +111,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
         status: 'active',
         next_run_at: '2025-01-20T09:00:00Z',
         project_id: 'ch-1',
+        execution_profile: 'maximum_quality',
         created_at: '2025-01-10T00:00:00Z',
         updated_at: '2025-01-10T00:00:00Z',
       }],
@@ -124,6 +139,50 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       updated_at: '2025-01-01T00:00:00Z',
     }])
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 })
+  })
+
+  it('creates a plan with the selected server-backed execution profile and exact price', async () => {
+    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByRole('button', { name: /性价比/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByText(/4,800 积分/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /平衡型/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      execution_profile: 'balanced',
+    })))
+  })
+
+  it('retains the stored execution profile when editing a plan', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(await within(dialog).findByRole('button', { name: /极致效果/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
+      execution_profile: 'maximum_quality',
+    })))
+  })
+
+  it('blocks plan updates when the stored execution profile is no longer available', async () => {
+    vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
+      { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
+    ])
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(await within(dialog).findByRole('button', { name: '更新' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    expect(api.plans.update).not.toHaveBeenCalled()
   })
 
   it('renders the shared composer with project context in the create dialog', async () => {
@@ -186,17 +245,17 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
 
-  it('uses the active catalog price for article plan runs', async () => {
+  it('uses the cheapest available profile price for article plan runs', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const price = await within(dialog).findByText('6,000 积分')
-    expect(price.parentElement).toHaveTextContent('当前每次执行固定价：6,000 积分')
+    const price = await within(dialog).findByText('4,800 积分')
+    expect(price.parentElement).toHaveTextContent('当前每次执行固定价：4,800 积分')
     expect(within(dialog).getByText(/余额：7,000 →/)).toBeInTheDocument()
-    expect(within(dialog).getByText('1,000')).toBeInTheDocument()
+    expect(within(dialog).getByText('2,200')).toBeInTheDocument()
     expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
   })
@@ -244,6 +303,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     status: 'active',
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: seednoteProject.id,
+    execution_profile: 'cost_effective',
     reference_image: {
       asset_id: '22222222-2222-4222-8222-222222222222',
       file_name: 'plan-reference.png',
@@ -600,6 +660,7 @@ describe('PlansPage Montage input', () => {
     status: 'active',
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: montageProject.id,
+    execution_profile: 'cost_effective',
     montage_input: {
       brief: '保存的 brief',
       pipeline_key: 'saved-pipeline',

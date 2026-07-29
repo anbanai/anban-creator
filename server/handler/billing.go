@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strconv"
@@ -105,6 +106,7 @@ type BillingQuoteResponse struct {
 type BillingCatalogSKUResponse struct {
 	ID               string `json:"id"`
 	Operation        string `json:"operation"`
+	ExecutionProfile string `json:"execution_profile,omitempty"`
 	ChargePolicy     string `json:"charge_policy"`
 	PricingTier      string `json:"pricing_tier"`
 	ListPriceCredits int64  `json:"list_price_credits"`
@@ -165,13 +167,19 @@ func (h *BillingHandler) Catalog(c fiber.Ctx) error {
 	skus := make([]BillingCatalogSKUResponse, 0, len(h.bundle.Products.SKUs))
 	pricingTier := ""
 	for _, configured := range h.bundle.Products.SKUs {
-		resolved, err := h.catalog.ResolvePrice(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.Route)
+		var resolved *service.ResolvedSKUPrice
+		var err error
+		if configured.ExecutionProfile != "" {
+			resolved, err = h.catalog.ResolvePriceForExecutionProfile(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.ExecutionProfile)
+		} else {
+			resolved, err = h.catalog.ResolvePrice(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.Route)
+		}
 		if err != nil {
 			return writeBillingServiceError(c, err)
 		}
 		pricingTier = string(resolved.PricingTier)
 		skus = append(skus, BillingCatalogSKUResponse{
-			ID: configured.ID, Operation: configured.Operation, ChargePolicy: configured.ChargePolicy,
+			ID: configured.ID, Operation: configured.Operation, ExecutionProfile: configured.ExecutionProfile, ChargePolicy: configured.ChargePolicy,
 			PricingTier: pricingTier, ListPriceCredits: resolved.ListPriceCredits,
 			PriceCredits: resolved.PriceCredits, DiscountCredits: resolved.DiscountCredits,
 			Route: configured.Route, Delivery: configured.Delivery,
@@ -256,15 +264,17 @@ func (h *BillingHandler) Transactions(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"items": items, "total": total, "offset": offset, "limit": limit})
 }
 
-func (h *BillingHandler) CreateQuote(c fiber.Ctx) error {
+func (h *BillingHandler) CreateTaskQuote(c fiber.Ctx) error {
 	userID, ok := billingUserID(c)
 	if !ok {
 		return billingErrorResponse(c, fiber.StatusUnauthorized, BillingCodeUnauthorized, "billing_unauthorized")
 	}
+	if !hasOnlyTaskQuoteFields(c.Body()) {
+		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
+	}
 	var req struct {
-		Operation          string `json:"operation"`
-		Route              string `json:"route"`
-		CatalogID          string `json:"catalog_id"`
+		TaskType           string `json:"task_type"`
+		ExecutionProfile   string `json:"execution_profile"`
 		RequestFingerprint string `json:"request_fingerprint"`
 		IdempotencyScope   string `json:"idempotency_scope"`
 		IdempotencyKey     string `json:"idempotency_key"`
@@ -272,8 +282,8 @@ func (h *BillingHandler) CreateQuote(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
 	}
-	quote, err := h.catalog.CreateQuote(c.Context(), service.QuoteRequest{
-		UserID: userID, CatalogID: req.CatalogID, Operation: req.Operation, Route: req.Route,
+	quote, err := h.catalog.CreateTaskQuote(c.Context(), service.TaskQuoteRequest{
+		UserID: userID, TaskType: req.TaskType, ExecutionProfile: req.ExecutionProfile,
 		RequestFingerprint: req.RequestFingerprint, IdempotencyScope: req.IdempotencyScope, IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
@@ -284,6 +294,23 @@ func (h *BillingHandler) CreateQuote(c fiber.Ctx) error {
 		ListPriceCredits: quote.ListPriceCredits, PriceCredits: quote.PriceCredits, DiscountCredits: quote.DiscountCredits,
 		SKUSnapshot: append(datatypes.JSON(nil), quote.SKUSnapshot...), ExpiresAt: quote.ExpiresAt,
 	})
+}
+
+func hasOnlyTaskQuoteFields(body []byte) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		return true
+	}
+	allowed := map[string]struct{}{
+		"task_type": {}, "execution_profile": {}, "request_fingerprint": {},
+		"idempotency_scope": {}, "idempotency_key": {},
+	}
+	for field := range fields {
+		if _, ok := allowed[field]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *BillingHandler) Referral(c fiber.Ctx) error {
@@ -411,6 +438,10 @@ func billingUserID(c fiber.Ctx) (string, bool) {
 func writeBillingServiceError(c fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrBillingInvalid):
+		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
+	case errors.Is(err, service.ErrAgentProfileAccessDenied),
+		errors.Is(err, service.ErrAgentProfileNotFound),
+		errors.Is(err, service.ErrAgentProfileUnavailable):
 		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
 	case errors.Is(err, service.ErrBillingDebtOutstanding):
 		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeDebtOutstanding, "billing_debt_outstanding")

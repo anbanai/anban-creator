@@ -25,19 +25,21 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useImageModels } from '@/hooks/useImageModels'
+import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { contentTypeLabel, ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, platformDefaultRatio } from '@/lib/labels'
-import { canSubmitLocalTask, localExecutorCreateHint, shouldDefaultRunLocally } from '@/lib/local-executor-ux'
 import { initialMontageInput } from '@/lib/montage-form'
+import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
+import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
-import { getLocalExecutorStatus, setExecutorEnabled, startLocalExecutor, type LocalExecutorStatus } from '@/lib/tauri'
 import type { CreateTaskRequest, Project, Task, TaskType } from '@/types'
 import { ImageAspectRatioField } from './ImageAspectRatioField'
+import { ExecutionProfileSelector } from './ExecutionProfileSelector'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
   allowedTypes: ['image'],
@@ -82,26 +84,23 @@ export function TaskFormDialog({
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
-  const localExecutorStatusRef = useRef<LocalExecutorStatus | null>(null)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [localExecutorStatus, setLocalExecutorStatus] = useState<LocalExecutorStatus | null>(null)
-  const [localExecutorLoading, setLocalExecutorLoading] = useState(false)
-  const [runLocally, setRunLocally] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
   })
   const { data: billingWallet } = useQuery({
-    queryKey: ['billing', 'wallet'],
+    queryKey: queryKeys.billing.wallet,
     queryFn: () => api.billing.wallet(),
   })
   const { data: billingCatalog } = useQuery({
-    queryKey: ['billing', 'catalog'],
+    queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
   })
+  const executionProfilesQuery = useAgentExecutionProfiles()
   const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageModels()
 
   const form = useForm<TaskFormDefaults>({
@@ -109,6 +108,7 @@ export function TaskFormDialog({
     defaultValues: createTaskFormDefaults(),
   })
   const watchedType = useWatch({ control: form.control, name: 'type' })
+  const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
   const attachmentPolicy = watchedType === 'seednote'
     ? SEEDNOTE_ATTACHMENT_POLICY
     : GENERAL_AGENT_ATTACHMENT_POLICY
@@ -144,8 +144,6 @@ export function TaskFormDialog({
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const selectedProject = projectMap.get(watchedProjectId ?? '')
-  const localExecutorAvailable = localExecutorStatus?.available ?? false
-  const localExecutorHint = localExecutorCreateHint(localExecutorStatus)
   const imageModelOptionsForValue = useMemo(() => {
     if (!watchedImageModelKey || imageModelOptions.some((option) => option.key === watchedImageModelKey)) {
       return imageModelOptions
@@ -175,26 +173,6 @@ export function TaskFormDialog({
 
   useEffect(() => {
     if (!open) {
-      localExecutorStatusRef.current = null
-      setLocalExecutorStatus(null)
-      setLocalExecutorLoading(false)
-      return
-    }
-
-    let cancelled = false
-    setLocalExecutorLoading(true)
-    void getLocalExecutorStatus().then((status) => {
-      if (cancelled) return
-      localExecutorStatusRef.current = status
-      setLocalExecutorStatus(status)
-      setLocalExecutorLoading(false)
-      if (mode === 'create') setRunLocally(shouldDefaultRunLocally(status))
-    })
-    return () => { cancelled = true }
-  }, [mode, open])
-
-  useEffect(() => {
-    if (!open) {
       initializedKeyRef.current = undefined
       return
     }
@@ -202,7 +180,7 @@ export function TaskFormDialog({
     if ((mode === 'clone' || initialProjectId) && projectsLoading) return
 
     const initializationKey = mode === 'clone'
-      ? `clone:${sourceTask?.id ?? ''}:${sourceTask?.project_id ?? ''}:${sourceTask?.type ?? ''}:${sourceTask?.execution_target ?? ''}`
+      ? `clone:${sourceTask?.id ?? ''}:${sourceTask?.project_id ?? ''}:${sourceTask?.type ?? ''}:${sourceTask?.execution_profile ?? ''}`
       : `create:${initialProjectId ?? ''}:${initialType ?? ''}`
     if (initializedKeyRef.current === initializationKey) return
 
@@ -224,11 +202,20 @@ export function TaskFormDialog({
     setReferenceUploading(false)
     setMontageUploading(false)
     setShowDirtyDialog(false)
-    const inheritedLocal = defaults.execution_target === 'local' || defaults.execution_target === 'local_claimed'
-    setRunLocally(mode === 'clone' ? inheritedLocal : shouldDefaultRunLocally(localExecutorStatusRef.current))
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
   }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
+
+  const defaultExecutionProfile = cheapestAvailableExecutionProfile(
+    executionProfilesQuery.data,
+    billingCatalog,
+    watchedType,
+  )
+
+  useEffect(() => {
+    if (!open || form.getValues('execution_profile') || !defaultExecutionProfile) return
+    form.setValue('execution_profile', defaultExecutionProfile, { shouldValidate: true })
+  }, [defaultExecutionProfile, form, open])
 
   const taskMutation = useMutation({
     mutationFn: ({ request }: { request: CreateTaskRequest; quantity: number }) => {
@@ -301,35 +288,16 @@ export function TaskFormDialog({
   }
 
   async function onSubmit(values: TaskFormDefaults) {
-    let statusForSubmit = localExecutorStatus
-    const wantsLocalExecution = values.type !== 'montage' && runLocally
-    if (values.type !== 'montage' && localExecutorLoading && (mode === 'create' || wantsLocalExecution)) return
-    if (wantsLocalExecution && statusForSubmit?.state === 'ready_stopped') {
-      const started = await startLocalExecutor()
-      if (started) {
-        await setExecutorEnabled(true)
-        statusForSubmit = { ...statusForSubmit, running: true, state: 'running_idle' }
-        setLocalExecutorStatus(statusForSubmit)
-        toast.success('本地执行器已启动')
-      } else {
-        toast.error('本地执行器启动失败，本次将改为云端执行')
-      }
-    }
-    const runThisTaskLocally = canSubmitLocalTask(statusForSubmit, wantsLocalExecution)
-    if (wantsLocalExecution && !runThisTaskLocally) {
-      toast.message('本地执行器未运行，本次将改为云端执行')
-    }
     const submittedValues: TaskFormDefaults = {
       ...values,
       input_attachments: attachmentController.toInputAttachments(),
-      execution_target: values.type !== 'montage' && runThisTaskLocally ? 'local' : undefined,
     }
     const request = taskFormValuesToRequest(submittedValues)
     await submit(() => taskMutation.mutateAsync({ request, quantity: submittedValues.quantity })).catch(() => {})
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (hasIncompatibleSeednoteAttachments || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -341,8 +309,19 @@ export function TaskFormDialog({
     type: watchedType,
     quantity,
     balance: billingWallet?.balance ?? 0,
+    executionProfile: watchedExecutionProfile || undefined,
   })
-  const creationBlocker = !costPreview.priceAvailable
+  const selectedExecutionProfile = executionProfilesQuery.data?.find((profile) => profile.id === watchedExecutionProfile)
+  const selectedExecutionProfileUnavailable = Boolean(watchedExecutionProfile)
+    && !executionProfilesQuery.isLoading
+    && selectedExecutionProfile?.available !== true
+  const creationBlocker = executionProfilesQuery.isError
+    ? { message: '执行配置暂时无法加载，请稍后重试。', href: '' }
+    : !watchedExecutionProfile
+      ? { message: '请选择可用的执行配置。', href: '' }
+      : selectedExecutionProfileUnavailable
+        ? { message: '当前执行配置不可用，请重新选择。', href: '' }
+      : !costPreview.priceAvailable
     ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
     : mode === 'clone' && projectsLoading
       ? { message: '正在加载可用项目，请稍候。', href: '' }
@@ -350,9 +329,7 @@ export function TaskFormDialog({
         ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
         : hasIncompatibleSeednoteAttachments
           ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
-          : watchedType !== 'montage' && localExecutorLoading && (mode === 'create' || runLocally)
-            ? { message: '正在检查本地执行器，请稍候。', href: '' }
-            : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+          : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageModelUnavailable
                 ? { message: '当前图像模型不可用，请重新选择。', href: '' }
@@ -397,11 +374,7 @@ export function TaskFormDialog({
     />
   )
 
-  const submitLabel = mode === 'clone'
-    ? '克隆'
-    : runLocally && !isMontageTask && localExecutorStatus?.state === 'ready_stopped'
-      ? '启动并创建'
-      : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'
+  const submitLabel = mode === 'clone' ? '克隆' : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'
 
   return (
     <>
@@ -431,6 +404,21 @@ export function TaskFormDialog({
                   <p className="text-[11px] text-muted-foreground/80">创建后项目再修改，不会影响这个任务。</p>
                 </div>
               ) : null}
+
+              <FormField control={form.control} name="execution_profile" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>执行配置</FormLabel>
+                  <FormControl>
+                    <ExecutionProfileSelector
+                      profiles={executionProfilesQuery.data ?? []}
+                      value={field.value}
+                      onChange={field.onChange}
+                      loading={executionProfilesQuery.isLoading}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
@@ -742,7 +730,7 @@ export function TaskFormDialog({
                       ) : null}
                     </div>
                   ) : <p className="font-medium text-red-500">固定任务价暂不可用</p>}
-                  <p className="text-xs text-muted-foreground">{runLocally && !isMontageTask ? '本机运行使用你的 Claude Code 环境。' : '云端 Claude Code 运行成本由平台承担，不额外预留或补扣。'}</p>
+                  <p className="text-xs text-muted-foreground">云端 Agent 运行成本由平台承担，不额外预留或补扣。</p>
                   <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>
                   {costPreview.priceAvailable ? (
                     <p className="text-muted-foreground">余额：{(billingWallet?.balance ?? 0).toLocaleString()} → <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>{costPreview.remaining.toLocaleString()}</span></p>
@@ -755,15 +743,6 @@ export function TaskFormDialog({
             </form>
           </Form>
           <DialogFooter className="mx-0 mb-0 border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
-            {localExecutorAvailable && !isMontageTask ? (
-              <div className="mr-auto flex min-w-0 items-center gap-2 text-xs">
-                <label className="flex cursor-pointer items-center gap-2 text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
-                  <Switch checked={runLocally} onCheckedChange={setRunLocally} />
-                  <span className="whitespace-nowrap">在本机运行</span>
-                </label>
-                <span className="max-w-[260px] truncate text-muted-foreground/75" title={localExecutorHint}>{localExecutorHint}</span>
-              </div>
-            ) : null}
             <Button variant="secondary" disabled={isSubmitting} onClick={requestClose}>取消</Button>
             <Button
               type="submit"

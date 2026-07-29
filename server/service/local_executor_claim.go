@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,14 +94,21 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 			task = claimed
 			return err
 		}
+		if hasManagedAgentProfile(claimed) {
+			// The claim CAS has already staged the local state transition in this
+			// transaction. Returning the structured policy error rolls it back
+			// before a desktop config or execution record can be emitted.
+			return ErrManagedProfileLocalExecutionUnsupported
+		}
 		attempt, err := tx.TaskExecutions().NextAttempt(ctx, claimed.ID)
 		if err != nil {
 			return fmt.Errorf("allocate local task execution attempt: %w", err)
 		}
-		execution := &model.TaskExecution{
-			ID: uuid.NewString(), TaskID: claimed.ID, Attempt: attempt, Target: model.ExecutionTargetLocalClaimed,
-			Status: model.TaskExecutionRunning, Started: true, RuntimeProfile: "local",
-		}
+		profiledExecution := model.NewTaskExecutionAgentProfile(claimed.AgentProfileSnapshot)
+		execution := &profiledExecution
+		execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), claimed.ID, attempt
+		execution.Target, execution.Status = model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning
+		execution.Started, execution.RuntimeProfile = true, "local"
 		now := time.Now()
 		execution.StartedAt = &now
 		if err := tx.TaskExecutions().Create(ctx, execution); err != nil {
@@ -126,6 +134,18 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 	return s.buildLocalExecutionConfig(task), nil
 }
 
+func hasManagedAgentProfile(task *model.Task) bool {
+	if task == nil {
+		return false
+	}
+	snapshot := task.AgentProfileSnapshot
+	return strings.TrimSpace(task.ExecutionProfile) != "" ||
+		strings.TrimSpace(snapshot.ProfileID) != "" ||
+		strings.TrimSpace(snapshot.Provider) != "" ||
+		strings.TrimSpace(snapshot.ModelID) != "" ||
+		strings.TrimSpace(snapshot.Protocol) != ""
+}
+
 // buildLocalExecutionConfig resolves the agent argv inputs for a task the same
 // way managed runtime bootstrap does (default model from config, per-type
 // max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
@@ -136,7 +156,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		Topic:                    task.Prompt,
 		AgentFlag:                "anban:" + agent.TaskToAgent(task),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
-		Model:                    s.defaultModel,
+		Model:                    task.AgentProfileSnapshot.ModelID,
 		Goal:                     task.Goal,
 		HasContentImage:          task.HasContentImage,
 		HasTailImage:             task.HasTailImage,

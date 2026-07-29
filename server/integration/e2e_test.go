@@ -92,6 +92,16 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 
 	planSvc := service.NewPlanService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, &noopEnqueuer{}, nil, &logger, "", nil, nil)
+	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
+		ID: "balanced", DisplayName: "Balanced", ModelName: "Integration test model",
+		Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic",
+		MinTier: model.TierFree, Available: true,
+	}})
+	if err != nil {
+		t.Fatalf("create agent profile registry: %v", err)
+	}
+	planSvc.SetAgentProfileRegistry(profiles)
+	taskSvc.SetAgentProfileRegistry(profiles)
 
 	wsHub := handler.NewWebSocketHub(jwtSvc)
 	authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
@@ -196,8 +206,9 @@ func TestE2E_FullUserFlow(t *testing.T) {
 
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"project_id": testProject.ID,
-		"prompt":     "TestTopic",
+		"project_id":        testProject.ID,
+		"prompt":            "TestTopic",
+		"execution_profile": "balanced",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -325,9 +336,10 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"project_id": testProject.ID,
-		"cron_expr":  "0 9 * * *",
-		"prompt":     "spring fashion",
+		"project_id":        testProject.ID,
+		"cron_expr":         "0 9 * * *",
+		"prompt":            "spring fashion",
+		"execution_profile": "balanced",
 	})
 	createReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -556,8 +568,9 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"project_id": testProject.ID,
-		"prompt":     "User1 Article",
+		"project_id":        testProject.ID,
+		"prompt":            "User1 Article",
+		"execution_profile": "balanced",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -642,9 +655,10 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 
 	// User 1 creates a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"project_id": testProject.ID,
-		"cron_expr":  "0 10 * * *",
-		"prompt":     "daily inspiration",
+		"project_id":        testProject.ID,
+		"cron_expr":         "0 10 * * *",
+		"prompt":            "daily inspiration",
+		"execution_profile": "balanced",
 	})
 	planReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	planReq.Header.Set("Content-Type", "application/json")
@@ -741,7 +755,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			name:       "create task with non-existent project_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"project_id":"nonexistent-id","prompt":"test"}`,
+			body:       `{"project_id":"nonexistent-id","prompt":"test","execution_profile":"balanced"}`,
 			auth:       true,
 			wantStatus: fiber.StatusNotFound,
 		},
@@ -810,8 +824,9 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"project_id": testProject.ID,
-		"prompt":     "Runner1 Task",
+		"project_id":        testProject.ID,
+		"prompt":            "Runner1 Task",
+		"execution_profile": "balanced",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")

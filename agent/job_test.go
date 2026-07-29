@@ -59,16 +59,18 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 		if cfg.ExecutionID != "execution-1" || cfg.WorkloadTokenFile != "/token" {
 			t.Fatalf("job config=%+v", cfg)
 		}
-		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", Model: "sonnet", MaxTurns: 9, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect}, RuntimeEnv: map[string]string{
-			"ANTHROPIC_AUTH_TOKEN": "runtime-token",
-			"ANBAN_API_KEY":        "must-not-override",
-		}, ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
-			"raw-sonnet": {Provider: "volcengine_ark", Model: "sonnet"},
+		return &BootstrapResponse{ExecutionToken: "jwt", TaskID: "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write", MaxTurns: 9, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory", ResumeSessionID: "bba21f1d-70b8-4157-917b-f9802c2b1740", ResumeContextPath: ".anban-creator/resume/executions/execution-1/latest.md", ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect}, ExecutionProfile: service.AgentRuntimeProfile{
+			ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic",
+			ContextWindow: 262144, ReasoningEffort: "medium", DisplayName: "平衡型",
+			RuntimeEnv: map[string]string{"ANTHROPIC_AUTH_TOKEN": "runtime-token", "ANBAN_API_KEY": "must-not-override"},
+			ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
+				"doubao-seed-evolving": {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+			},
 		}}, nil
 	}
 	run := func(_ context.Context, cfg *Config) error {
 		order = append(order, "run")
-		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || len(cfg.RuntimeEnv) != 1 || cfg.ModelUsageAliases["raw-sonnet"].Provider != "volcengine_ark" {
+		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || len(cfg.RuntimeEnv) != 1 || cfg.ModelUsageAliases["doubao-seed-evolving"].Provider != "volcengine_ark" || cfg.Model != "doubao-seed-evolving" || cfg.ReasoningEffort != "medium" || cfg.ContextWindow != 262144 {
 			t.Fatalf("runtime config=%+v", cfg)
 		}
 		return nil

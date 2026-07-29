@@ -23,6 +23,7 @@ func TestBillingCatalogCanonicalRequestValidationPrecedesSQL(t *testing.T) {
 	bundle := testBillingBundle()
 	validQuote := QuoteRequest{
 		UserID: billingCatalogUserID, CatalogID: bundle.Products.CatalogID, Operation: "task.article",
+		ExecutionProfile:   "balanced",
 		RequestFingerprint: billingFingerprint("canonical-quote"), IdempotencyScope: "quote", IdempotencyKey: "canonical-quote",
 	}
 	quoteCases := []struct {
@@ -87,7 +88,7 @@ func TestBillingCatalogCanonicalQuoteTrimsPersistedIdentity(t *testing.T) {
 	}
 	quote, err := svc.CreateQuote(context.Background(), QuoteRequest{
 		UserID: "  " + billingCatalogUserID + "  ", CatalogID: "  " + bundle.Products.CatalogID + "  ",
-		Operation: "  task.article  ", Route: "  ", RequestFingerprint: "  " + billingFingerprint("trimmed") + "  ",
+		Operation: "  task.article  ", ExecutionProfile: "  balanced  ", Route: "  ", RequestFingerprint: "  " + billingFingerprint("trimmed") + "  ",
 		IdempotencyScope: "  quote  ", IdempotencyKey: "  trimmed  ",
 	})
 	if err != nil {
@@ -140,9 +141,12 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 		t.Fatalf("Publish production catalog: %v", err)
 	}
 
-	taskSKU, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.article", "")
-	if err != nil || taskSKU.SKUID != "task.article.standard.v1" {
-		t.Fatalf("ResolveSKU task empty route = %+v, %v", taskSKU, err)
+	taskSKU, err := svc.ResolveSKUForExecutionProfile(context.Background(), bundle.Products.CatalogID, "task.article", "balanced")
+	if err != nil || taskSKU.SKUID != "task.article.balanced.v1" {
+		t.Fatalf("ResolveSKUForExecutionProfile task balanced = %+v, %v", taskSKU, err)
+	}
+	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.article", ""); !errors.Is(err, ErrBillingSKUNotFound) {
+		t.Fatalf("route resolution matched task profile SKU: %v", err)
 	}
 	cover, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "mcp.generate_image", "image_generation.cover")
 	if err != nil || cover.SKUID != "image.seedream.cover.v1" {
@@ -153,6 +157,234 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 	}
 	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "missing", ""); !errors.Is(err, ErrBillingSKUNotFound) {
 		t.Fatalf("unknown operation error = %v, want ErrBillingSKUNotFound", err)
+	}
+}
+
+func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle, err := billing.LoadBundle(filepath.Join("..", "billing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{})
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	base := QuoteRequest{
+		UserID: billingCatalogUserID, RequestFingerprint: billingFingerprint("profile-contract"),
+		IdempotencyScope: "profile-contract", IdempotencyKey: "profile-contract",
+	}
+	tests := []struct {
+		name   string
+		mutate func(*QuoteRequest)
+	}{
+		{name: "agent task requires profile", mutate: func(req *QuoteRequest) { req.Operation = "task.article" }},
+		{name: "agent task rejects route", mutate: func(req *QuoteRequest) {
+			req.Operation = "task.article"
+			req.ExecutionProfile = "balanced"
+			req.Route = "legacy"
+		}},
+		{name: "operation rejects profile", mutate: func(req *QuoteRequest) {
+			req.Operation = "mcp.generate_image"
+			req.ExecutionProfile = "balanced"
+			req.Route = "image_generation.cover"
+		}},
+		{name: "designer rejects profile", mutate: func(req *QuoteRequest) {
+			req.Operation = "designer.generate_image"
+			req.ExecutionProfile = "balanced"
+			req.Route = "image_generation.designer.seedream"
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := base
+			req.IdempotencyKey = strings.ReplaceAll(tt.name, " ", "-")
+			tt.mutate(&req)
+			if _, err := svc.CreateQuote(ctx, req); !errors.Is(err, ErrBillingInvalid) {
+				t.Fatalf("CreateQuote error = %v, want ErrBillingInvalid", err)
+			}
+		})
+	}
+
+	valid := base
+	valid.Operation = "task.article"
+	valid.ExecutionProfile = "balanced"
+	valid.IdempotencyKey = "valid-balanced"
+	quote, err := svc.CreateQuote(ctx, valid)
+	if err != nil {
+		t.Fatalf("CreateQuote balanced: %v", err)
+	}
+	var frozen billing.SKUConfig
+	if err := json.Unmarshal(quote.SKUSnapshot, &frozen); err != nil {
+		t.Fatal(err)
+	}
+	if frozen.ExecutionProfile != "balanced" || frozen.ID != "task.article.balanced.v1" {
+		t.Fatalf("frozen SKU = %#v", frozen)
+	}
+}
+
+func TestCreateTaskQuoteRequiresAProfiledCurrentCatalogSKU(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	oldBundle := testBillingBundle()
+	oldBundle.Products.CatalogID = "retail-test-v4"
+	oldBundle.Products.SKUs[0].ExecutionProfile = ""
+	if _, err := NewBillingCatalogService(repo, &oldBundle, BillingCatalogOptions{Now: func() time.Time { return time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC) }}).Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewBillingCatalogService(repo, &oldBundle, BillingCatalogOptions{})
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	request := TaskQuoteRequest{
+		UserID: billingCatalogUserID, TaskType: "article", RequestFingerprint: billingFingerprint("public-agent-task-quote"),
+		IdempotencyScope: "public-agent-task-quote", IdempotencyKey: "public-agent-task-quote",
+	}
+	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingInvalid) {
+		t.Fatalf("profileless task quote error = %v, want ErrBillingInvalid", err)
+	}
+
+	currentBundle := testBillingBundle()
+	currentBundle.Products.CatalogID = "retail-test-v5"
+	if _, err := NewBillingCatalogService(repo, &currentBundle, BillingCatalogOptions{Now: func() time.Time { return time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC) }}).Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierPro
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: billingCatalogUserID, PaidCredits: 500}); err != nil {
+		t.Fatal(err)
+	}
+	request.ExecutionProfile = "balanced"
+	quote, err := svc.CreateTaskQuote(ctx, request)
+	if err != nil || quote.CatalogID != currentBundle.Products.CatalogID || quote.SKUID != "task.article.v1" {
+		t.Fatalf("profiled public task quote = %#v, %v", quote, err)
+	}
+}
+
+func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := testBillingBundle()
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{})
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	request := TaskQuoteRequest{
+		UserID: billingCatalogUserID, TaskType: "article", ExecutionProfile: "balanced",
+		RequestFingerprint: billingFingerprint("admission"), IdempotencyScope: "quote", IdempotencyKey: "admission",
+	}
+
+	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrAgentProfileAccessDenied) {
+		t.Fatalf("free balanced quote error = %v, want ErrAgentProfileAccessDenied", err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierPro
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingLedgerInvalid) {
+		t.Fatalf("missing wallet quote error = %v, want ErrBillingLedgerInvalid", err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{
+		UserID: billingCatalogUserID, PaidCredits: 1_000, DebtCredits: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingDebtOutstanding) {
+		t.Fatalf("debt quote error = %v, want ErrBillingDebtOutstanding", err)
+	}
+	account, err := repo.Billing().FindAccount(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account.DebtCredits = 0
+	account.PaidCredits = 499
+	expectedVersion := account.Version
+	account.Version++
+	if err := repo.Billing().UpdateAccount(ctx, account, expectedVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingInsufficientForTask) {
+		t.Fatalf("insufficient quote error = %v, want ErrBillingInsufficientForTask", err)
+	}
+	account.PaidCredits = 500
+	expectedVersion = account.Version
+	account.Version++
+	if err := repo.Billing().UpdateAccount(ctx, account, expectedVersion); err != nil {
+		t.Fatal(err)
+	}
+	quote, err := svc.CreateTaskQuote(ctx, request)
+	if err != nil || quote == nil {
+		t.Fatalf("admitted quote = %#v, %v", quote, err)
+	}
+	var profileSnapshot model.AgentProfileSnapshot
+	if err := json.Unmarshal(quote.AgentProfileSnapshot, &profileSnapshot); err != nil {
+		t.Fatalf("decode quote profile snapshot: %v", err)
+	}
+	if profileSnapshot.ProfileID != "balanced" || profileSnapshot.Provider != "volcengine_ark" || profileSnapshot.ModelID != "doubao-seed-evolving" || profileSnapshot.Protocol != "anthropic" {
+		t.Fatalf("quote profile snapshot = %#v", profileSnapshot)
+	}
+
+	// Exact idempotent replay is durable evidence. Later entitlement, wallet,
+	// provider availability, or catalog changes must not rewrite its outcome.
+	user.Tier = model.TierFree
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	account.PaidCredits = 0
+	account.DebtCredits = 1
+	expectedVersion = account.Version
+	account.Version++
+	if err := repo.Billing().UpdateAccount(ctx, account, expectedVersion); err != nil {
+		t.Fatal(err)
+	}
+	unavailableProfiles := testAgentProfiles()
+	unavailableProfiles[1].Available = false
+	unavailableProfiles[1].UnavailableReason = "provider_configuration_missing"
+	unavailableRegistry, err := NewAgentProfileRegistry(unavailableProfiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(unavailableRegistry)
+	nextBundle := bundle
+	nextBundle.Products.CatalogID = "retail-test-v2"
+	nextBundle.Products.SKUs = append([]billing.SKUConfig(nil), bundle.Products.SKUs...)
+	nextBundle.Products.SKUs[0].PriceCredits = 700
+	for tier := range nextBundle.Products.SKUs[0].TierPrices {
+		nextBundle.Products.SKUs[0].TierPrices[tier] = 700
+	}
+	if _, err := NewBillingCatalogService(repo, &nextBundle, BillingCatalogOptions{Now: func() time.Time { return time.Now().Add(time.Hour) }}).Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := svc.CreateTaskQuote(ctx, request)
+	if err != nil || replay.ID != quote.ID || replay.CatalogID != quote.CatalogID || replay.PriceCredits != quote.PriceCredits {
+		t.Fatalf("durable replay = %#v, %v; want original %#v", replay, err, quote)
+	}
+	if !sameJSONSemantic(replay.AgentProfileSnapshot, quote.AgentProfileSnapshot) {
+		t.Fatalf("replay profile snapshot drifted: got=%s want=%s", replay.AgentProfileSnapshot, quote.AgentProfileSnapshot)
+	}
+	conflict := request
+	conflict.RequestFingerprint = billingFingerprint("admission-conflict")
+	if _, err := svc.CreateTaskQuote(ctx, conflict); !errors.Is(err, ErrBillingConflict) {
+		t.Fatalf("identity conflict = %v, want ErrBillingConflict", err)
 	}
 }
 
@@ -169,7 +401,7 @@ func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", Route: "", RequestFingerprint: billingFingerprint("quote-request"),
+		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("quote-request"),
 		IdempotencyScope: "quote", IdempotencyKey: "quote-key-1",
 	}
 	first, err := svc.CreateQuote(ctx, req)
@@ -213,7 +445,7 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 			t.Fatal(err)
 		}
 		quote, err := svc.CreateQuote(ctx, QuoteRequest{
-			UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("tier", string(tt.tier)),
+			UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("tier", string(tt.tier)),
 			IdempotencyScope: "tier-quote", IdempotencyKey: string(tt.tier),
 		})
 		if err != nil {
@@ -229,7 +461,7 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("frozen-quote"),
+		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("frozen-quote"),
 		IdempotencyScope: "frozen-tier-quote", IdempotencyKey: "stable",
 	}
 	first, err := svc.CreateQuote(ctx, req)
@@ -261,7 +493,7 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", RequestFingerprint: billingFingerprint("rollover"),
+		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("rollover"),
 		IdempotencyScope: "quote", IdempotencyKey: "rollover",
 	}
 	first, err := firstService.CreateQuote(ctx, req)
@@ -283,7 +515,7 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 	}
 
 	conflict := req
-	conflict.Route = "different-route"
+	conflict.ExecutionProfile = "maximum_quality"
 	if _, err := secondService.CreateQuote(ctx, conflict); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("rollover parameter drift error = %v, want conflict", err)
 	}
@@ -404,6 +636,18 @@ func TestBillingCatalogPublishUsesSemanticJSONAndCompleteSKUEvidence(t *testing.
 				}
 			},
 		},
+		{
+			name: "drifted execution profile column",
+			mutate: func(t *testing.T, repo repository.Repository, db *gorm.DB, bundle billing.Bundle) {
+				skus, err := repo.Billing().ListSKUsByCatalog(context.Background(), bundle.Products.CatalogID)
+				if err != nil || len(skus) == 0 {
+					t.Fatalf("list SKUs = %+v, %v", skus, err)
+				}
+				if err := db.Model(&model.BillingSKU{}).Where("id = ?", skus[0].ID).Update("execution_profile", "maximum_quality").Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			repo, db := newBillingServiceRepositoryWithDB(t)
@@ -471,7 +715,7 @@ func testBillingBundle() billing.Bundle {
 		Products: billing.ProductCatalog{
 			CatalogID: "retail-test-v1", Currency: "credits",
 			SKUs: []billing.SKUConfig{
-				{ID: "task.article.v1", Operation: "task.article", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+				{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Route: "image.cover", Delivery: "image"},
 				{ID: "image.standalone.v1", Operation: "designer.generate_image", ChargePolicy: "standalone_operation", PriceCredits: 100, Route: "image.designer", Delivery: "image"},
 			},
