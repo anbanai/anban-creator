@@ -28,7 +28,7 @@ func TestConfigRejectsLegacyManagedExecutorFields(t *testing.T) {
 			if test.field == "executor" {
 				body = strings.Replace(body, "  executor: docker", "  executor: "+test.value, 1)
 			} else {
-				body = strings.Replace(body, "  env:\n", "  "+test.field+":"+test.value+"\n  env:\n", 1)
+				body = strings.Replace(body, "  executor: docker", "  "+test.field+":"+test.value+"\n  executor: docker", 1)
 			}
 			_, err := loadClaudeConfigYAML(t, body)
 			if err == nil || !strings.Contains(err.Error(), test.want) {

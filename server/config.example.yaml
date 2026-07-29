@@ -233,42 +233,70 @@ image_presets:
     min_tier: "pro"
 
 claude:
-  execution_profiles:
-    cost_effective:
-      display_name: "性价比"
-      model_name: "DeepSeek 4 Pro"
-      description: "适合日常创作和批量任务，成本最低"
-      provider: "deepseek"
-      model_id: "deepseek-v4-pro"
+  providers:
+    deepseek:
       protocol: "anthropic"
-      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
+      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
       auth_token: "${ANBAN_DEEPSEEK_API_KEY}"
-      min_tier: "free"
-    balanced:
-      display_name: "平衡型"
-      model_name: "豆包 Seed Evolving"
-      description: "兼顾复杂任务质量、速度和成本"
-      provider: "volcengine_ark"
-      model_id: "doubao-seed-evolving"
+    volcengine_ark:
       protocol: "anthropic"
       base_url: "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}"
       auth_token: "${ANBAN_DOUBAO_AGENT_API_KEY}"
+    moonshot:
+      protocol: "anthropic"
+      base_url: "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}"
+      auth_token: "${ANBAN_MOONSHOT_API_KEY}"
+    # GLM-5.2 readiness: any profile can select this provider and assign glm-5.2
+    # to its model roles without coupling Zhipu to a fixed product profile.
+    zhipu:
+      protocol: "anthropic"
+      base_url: "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}"
+      auth_token: "${ANBAN_ZHIPU_API_KEY}"
+  execution_profiles:
+    cost_effective:
+      description: "适合日常创作和批量任务，成本最低"
+      provider: "deepseek"
+      models:
+        default: "deepseek-v4-flash"
+        opus: "deepseek-v4-pro"
+        fable: "deepseek-v4-pro"
+        sonnet: "deepseek-v4-pro"
+        haiku: "deepseek-v4-flash"
+      model_usage_aliases:
+        deepseek-v4-flash: "deepseek-v4-flash"
+        deepseek-v4-pro: "deepseek-v4-pro"
+      claude:
+        effort_level: "low"
+    balanced:
+      description: "兼顾复杂任务质量、速度和成本"
+      provider: "volcengine_ark"
+      models:
+        default: "doubao-seed-evolving"
+        opus: "doubao-seed-evolving"
+        fable: "doubao-seed-evolving"
+        sonnet: "doubao-seed-evolving"
+        haiku: "doubao-seed-evolving"
       model_usage_aliases:
         doubao-seed-evolving-latest-version: "doubao-seed-evolving"
-      min_tier: "pro"
+      claude:
+        effort_level: "medium"
     maximum_quality:
-      display_name: "极致效果"
-      model_name: "Kimi K3（1M）"
       description: "旗舰模型与超长上下文，适合高难度任务"
-      provider: "kimi"
-      model_id: "k3"
-      protocol: "anthropic"
-      base_url: "https://api.kimi.com/coding/"
-      auth_token: "${ANBAN_KIMI_API_KEY}"
-      min_tier: "enterprise"
-      context_window: 1048576
-      reasoning_effort: "high"
-      thinking_required: true
+      provider: "moonshot"
+      models:
+        default: "kimi-k3[1m]"
+        opus: "kimi-k3[1m]"
+        fable: "kimi-k3[1m]"
+        sonnet: "kimi-k3[1m]"
+        haiku: "kimi-k3[1m]"
+      model_usage_aliases:
+        kimi-k3: "kimi-k3"
+        kimi-k3[1m]: "kimi-k3"
+        kimi-k2.7-code: "kimi-k2.7-code"
+        kimi-k2.7-code-highspeed: "kimi-k2.7-code"
+      claude:
+        effort_level: "high"
+        max_context_tokens: 1048576
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
@@ -348,11 +376,6 @@ claude:
     montage: 90
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
-  # 仅允许非 provider 的 Claude Code 运行控制。Provider URL、token 和模型不得放在 env。
-  env:
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000"
 
 email:
   smtp_host: "smtp.163.com"

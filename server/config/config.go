@@ -588,11 +588,11 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
+	Providers            map[string]ClaudeProviderConfig         `yaml:"providers" json:"providers"`
 	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
 	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
 	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
 	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
-	Env                  map[string]string                       `yaml:"env"`
 	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
 	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
@@ -602,32 +602,47 @@ type ClaudeConfig struct {
 	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
-type ClaudeExecutionProfileConfig struct {
-	DisplayName       string            `yaml:"display_name" json:"display_name"`
-	ModelName         string            `yaml:"model_name" json:"model_name"`
-	Description       string            `yaml:"description" json:"description"`
-	Provider          string            `yaml:"provider" json:"provider"`
-	ModelID           string            `yaml:"model_id" json:"model_id"`
-	Protocol          string            `yaml:"protocol" json:"protocol"`
-	BaseURL           string            `yaml:"base_url" json:"base_url"`
-	AuthToken         string            `yaml:"auth_token" json:"-"`
-	ModelUsageAliases map[string]string `yaml:"model_usage_aliases" json:"model_usage_aliases,omitempty"`
-	MinTier           model.Tier        `yaml:"min_tier" json:"min_tier"`
-	ContextWindow     int               `yaml:"context_window" json:"context_window,omitempty"`
-	ReasoningEffort   string            `yaml:"reasoning_effort" json:"reasoning_effort,omitempty"`
-	ThinkingRequired  bool              `yaml:"thinking_required" json:"thinking_required,omitempty"`
+type ClaudeProviderConfig struct {
+	Protocol  string `yaml:"protocol" json:"protocol"`
+	BaseURL   string `yaml:"base_url" json:"base_url"`
+	AuthToken string `yaml:"auth_token" json:"-"`
 }
 
-var claudeControlEnvKeys = map[string]bool{
-	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": true,
-	"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          true,
-	"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          true,
+type ClaudeModelMatrixConfig struct {
+	Default string `yaml:"default" json:"default"`
+	Opus    string `yaml:"opus" json:"opus"`
+	Fable   string `yaml:"fable" json:"fable"`
+	Sonnet  string `yaml:"sonnet" json:"sonnet"`
+	Haiku   string `yaml:"haiku" json:"haiku"`
+}
+
+type ClaudeControlsConfig struct {
+	EffortLevel             *string `yaml:"effort_level" json:"effort_level,omitempty"`
+	AlwaysEnableEffort      *bool   `yaml:"always_enable_effort" json:"always_enable_effort,omitempty"`
+	MaxContextTokens        *int    `yaml:"max_context_tokens" json:"max_context_tokens,omitempty"`
+	MaxOutputTokens         *int    `yaml:"max_output_tokens" json:"max_output_tokens,omitempty"`
+	MaxThinkingTokens       *int    `yaml:"max_thinking_tokens" json:"max_thinking_tokens,omitempty"`
+	DisableAdaptiveThinking *bool   `yaml:"disable_adaptive_thinking" json:"disable_adaptive_thinking,omitempty"`
+	DisableThinking         *bool   `yaml:"disable_thinking" json:"disable_thinking,omitempty"`
+	AutoCompactWindow       *int    `yaml:"auto_compact_window" json:"auto_compact_window,omitempty"`
+	AutocompactPctOverride  *int    `yaml:"autocompact_pct_override" json:"autocompact_pct_override,omitempty"`
+	Disable1MContext        *bool   `yaml:"disable_1m_context" json:"disable_1m_context,omitempty"`
+	SubagentModel           *string `yaml:"subagent_model" json:"subagent_model,omitempty"`
+	EnableToolSearch        *bool   `yaml:"enable_tool_search" json:"enable_tool_search,omitempty"`
+}
+
+type ClaudeExecutionProfileConfig struct {
+	Provider          string                  `yaml:"provider" json:"provider"`
+	Description       string                  `yaml:"description" json:"description"`
+	Models            ClaudeModelMatrixConfig `yaml:"models" json:"models"`
+	ModelUsageAliases map[string]string       `yaml:"model_usage_aliases" json:"model_usage_aliases"`
+	Claude            ClaudeControlsConfig    `yaml:"claude" json:"claude"`
 }
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "runtime_images": true,
-		"execution_token_secret": true, "env": true, "plugin_dir": true,
+		"providers": true, "execution_profiles": true, "executor": true, "runtime_images": true,
+		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
 	}
@@ -638,13 +653,96 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 		key := value.Content[i].Value
 		if !known[key] {
 			if key == "model" || key == "provider" || key == "base_url" || key == "auth_token" || key == "models" || key == "model_usage_aliases" {
-				return fmt.Errorf("claude.%s is not supported; configure provider runtime under claude.execution_profiles", key)
+				return fmt.Errorf("claude.%s is not supported; configure provider runtime under claude.providers", key)
 			}
 			return fmt.Errorf("unknown claude config field %q", key)
 		}
 	}
+	if err := validateClaudeNestedFields(value); err != nil {
+		return err
+	}
 	type plain ClaudeConfig
 	return value.Decode((*plain)(c))
+}
+
+func validateClaudeNestedFields(value *yaml.Node) error {
+	providers := yamlMappingValue(value, "providers")
+	if providers != nil {
+		if providers.Kind != yaml.MappingNode {
+			return fmt.Errorf("claude.providers must be a mapping")
+		}
+		for i := 0; i < len(providers.Content); i += 2 {
+			name, provider := providers.Content[i].Value, providers.Content[i+1]
+			path := "claude.providers." + name
+			if err := validateClaudeMappingFields(provider, path, map[string]bool{
+				"protocol": true, "base_url": true, "auth_token": true,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	profiles := yamlMappingValue(value, "execution_profiles")
+	if profiles == nil {
+		return nil
+	}
+	if profiles.Kind != yaml.MappingNode {
+		return fmt.Errorf("claude.execution_profiles must be a mapping")
+	}
+	for i := 0; i < len(profiles.Content); i += 2 {
+		name, profile := profiles.Content[i].Value, profiles.Content[i+1]
+		path := "claude.execution_profiles." + name
+		if err := validateClaudeMappingFields(profile, path, map[string]bool{
+			"provider": true, "description": true, "models": true,
+			"model_usage_aliases": true, "claude": true,
+		}); err != nil {
+			return err
+		}
+		if models := yamlMappingValue(profile, "models"); models != nil {
+			if err := validateClaudeMappingFields(models, path+".models", map[string]bool{
+				"default": true, "opus": true, "fable": true, "sonnet": true, "haiku": true,
+			}); err != nil {
+				return err
+			}
+		}
+		if controls := yamlMappingValue(profile, "claude"); controls != nil {
+			if err := validateClaudeMappingFields(controls, path+".claude", map[string]bool{
+				"effort_level": true, "always_enable_effort": true,
+				"max_context_tokens": true, "max_output_tokens": true, "max_thinking_tokens": true,
+				"disable_adaptive_thinking": true, "disable_thinking": true,
+				"auto_compact_window": true, "autocompact_pct_override": true,
+				"disable_1m_context": true, "subagent_model": true, "enable_tool_search": true,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func validateClaudeMappingFields(node *yaml.Node, path string, known map[string]bool) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		key := node.Content[i].Value
+		if !known[key] {
+			return fmt.Errorf("unknown config field %q", path+"."+key)
+		}
+	}
+	return nil
 }
 
 func (c ClaudeConfig) String() string {
@@ -657,17 +755,37 @@ func (c ClaudeConfig) GoString() string {
 
 func (c ClaudeConfig) Validate() error {
 	var errs []string
-	for key, value := range c.Env {
-		if strings.HasPrefix(key, "ANTHROPIC_") {
-			errs = append(errs, "claude.env."+key+" must be configured by claude.execution_profiles")
-			continue
+	for name := range c.Providers {
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, "claude.providers contains an empty provider name")
 		}
-		if !claudeControlEnvKeys[key] {
-			errs = append(errs, "claude.env."+key+" is not an allowed Claude runtime control")
+	}
+	for name, profile := range c.ExecutionProfiles {
+		path := "claude.execution_profiles." + name
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, "claude.execution_profiles contains an empty profile name")
 		}
-		if value == "" || strings.TrimSpace(value) != value || strings.ContainsRune(value, '\x00') {
-			errs = append(errs, "claude.env."+key+" has an invalid value")
+		if strings.TrimSpace(profile.Provider) == "" {
+			errs = append(errs, path+".provider is required")
+		} else if _, ok := c.Providers[profile.Provider]; !ok {
+			errs = append(errs, fmt.Sprintf("%s.provider %q is not configured in claude.providers", path, profile.Provider))
 		}
+		models := []struct {
+			role  string
+			value string
+		}{
+			{role: "default", value: profile.Models.Default},
+			{role: "opus", value: profile.Models.Opus},
+			{role: "fable", value: profile.Models.Fable},
+			{role: "sonnet", value: profile.Models.Sonnet},
+			{role: "haiku", value: profile.Models.Haiku},
+		}
+		for _, modelRole := range models {
+			if strings.TrimSpace(modelRole.value) == "" {
+				errs = append(errs, path+".models."+modelRole.role+" is required")
+			}
+		}
+		errs = append(errs, validateClaudeControls(path+".claude", profile.Claude)...)
 	}
 	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage}
 	for _, profile := range requiredRuntimeProfiles {
@@ -689,6 +807,38 @@ func (c ClaudeConfig) Validate() error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func validateClaudeControls(path string, controls ClaudeControlsConfig) []string {
+	var errs []string
+	if controls.EffortLevel != nil {
+		effort := *controls.EffortLevel
+		if effort != "low" && effort != "medium" && effort != "high" && effort != "max" {
+			errs = append(errs, path+".effort_level must be one of low, medium, high, or max")
+		}
+	}
+	for _, value := range []struct {
+		name string
+		ptr  *int
+	}{
+		{name: "max_context_tokens", ptr: controls.MaxContextTokens},
+		{name: "max_output_tokens", ptr: controls.MaxOutputTokens},
+		{name: "auto_compact_window", ptr: controls.AutoCompactWindow},
+	} {
+		if value.ptr != nil && *value.ptr <= 0 {
+			errs = append(errs, path+"."+value.name+" must be positive")
+		}
+	}
+	if controls.MaxThinkingTokens != nil && *controls.MaxThinkingTokens < 0 {
+		errs = append(errs, path+".max_thinking_tokens must not be negative")
+	}
+	if controls.AutocompactPctOverride != nil && (*controls.AutocompactPctOverride < 1 || *controls.AutocompactPctOverride > 100) {
+		errs = append(errs, path+".autocompact_pct_override must be between 1 and 100")
+	}
+	if controls.SubagentModel != nil && strings.TrimSpace(*controls.SubagentModel) == "" {
+		errs = append(errs, path+".subagent_model must not be empty")
+	}
+	return errs
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.

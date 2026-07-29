@@ -87,11 +87,21 @@ spec:
                   name: anban-agent-profile-providers
                   key: doubao-api-key
                   optional: true
-            - name: ANBAN_KIMI_API_KEY
+            - name: ANBAN_MOONSHOT_ANTHROPIC_BASE_URL
+              value: https://api.moonshot.cn/anthropic
+            - name: ANBAN_MOONSHOT_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: anban-agent-profile-providers
-                  key: kimi-api-key
+                  key: moonshot-api-key
+                  optional: true
+            - name: ANBAN_ZHIPU_ANTHROPIC_BASE_URL
+              value: https://open.bigmodel.cn/api/anthropic
+            - name: ANBAN_ZHIPU_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: zhipu-api-key
                   optional: true
             - name: ANBAN_BILLING_ADMIN_API_KEY
               valueFrom:
