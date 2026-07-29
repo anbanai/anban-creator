@@ -30,7 +30,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
     plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
-    env: { ...process.env, ...data.execution_profile.runtime_env, ...(data.task_type === "montage" ? data.env : {}), ANBAN_API_KEY: token, ANBAN_API_URL: serverURL, ANBAN_DEFAULT_PROJECT: data.project_id },
+    env: buildExecutionEnvironment(process.env, data, serverURL, token),
     includePartialMessages: false,
     stderr: (line) => void reporter.progress(line.trim()),
     hooks: data.task_type === "seednote" ? { Stop: [{ hooks: [createSeednoteStopGate(cwd)] }] } : undefined,
@@ -59,6 +59,22 @@ export function executionReasoningOptions(profile: Pick<BootstrapResponse["execu
   if (profile.reasoning_effort) options.effort = profile.reasoning_effort;
   if (profile.thinking_required) options.thinking = { type: "adaptive" };
   return options;
+}
+
+export function buildExecutionEnvironment(
+  processEnvironment: NodeJS.ProcessEnv,
+  data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "execution_profile">,
+  serverURL: string,
+  token: string,
+): NodeJS.ProcessEnv {
+  return {
+    ...processEnvironment,
+    ...(data.task_type === "montage" ? data.env : {}),
+    ...data.execution_profile.runtime_env,
+    ANBAN_API_KEY: token,
+    ANBAN_API_URL: serverURL,
+    ANBAN_DEFAULT_PROJECT: data.project_id,
+  };
 }
 
 export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills">, taskType: string): void {

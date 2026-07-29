@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as runner from "../src/runner.js";
 
-const { terminalModelUsage, validateManagedInit } = runner;
+const { buildExecutionEnvironment, terminalModelUsage, validateManagedInit } = runner;
 
 describe("validateManagedInit", () => {
   test("requires the configured remote MCP and article plugin skill", () => {
@@ -32,5 +32,43 @@ describe("executionReasoningOptions", () => {
     }).executionReasoningOptions;
 
     expect(buildOptions?.({ reasoning_effort: "", thinking_required: false })).toEqual({});
+  });
+});
+
+describe("buildExecutionEnvironment", () => {
+  test("keeps frozen profile and execution identity ahead of conflicting Montage environment", () => {
+    expect(buildExecutionEnvironment(
+      { ANTHROPIC_MODEL: "process-model" },
+      {
+        task_type: "montage",
+        env: {
+          NEW_PROVIDER_TOKEN: "future-secret",
+          ANBAN_API_KEY: "montage-override",
+          ANBAN_API_URL: "https://montage.invalid",
+          ANBAN_DEFAULT_PROJECT: "montage-project",
+          ANTHROPIC_AUTH_TOKEN: "montage-token",
+          ANTHROPIC_BASE_URL: "https://montage.invalid/anthropic",
+          ANTHROPIC_MODEL: "montage-model",
+        },
+        project_id: "project-1",
+        execution_profile: {
+          runtime_env: {
+            ANTHROPIC_AUTH_TOKEN: "runtime-token",
+            ANTHROPIC_BASE_URL: "https://runtime.example.com/anthropic",
+            ANTHROPIC_MODEL: "runtime-model",
+          },
+        },
+      },
+      "https://server.example.com",
+      "execution-jwt",
+    )).toEqual(expect.objectContaining({
+      NEW_PROVIDER_TOKEN: "future-secret",
+      ANBAN_API_KEY: "execution-jwt",
+      ANBAN_API_URL: "https://server.example.com",
+      ANBAN_DEFAULT_PROJECT: "project-1",
+      ANTHROPIC_AUTH_TOKEN: "runtime-token",
+      ANTHROPIC_BASE_URL: "https://runtime.example.com/anthropic",
+      ANTHROPIC_MODEL: "runtime-model",
+    }));
   });
 });
