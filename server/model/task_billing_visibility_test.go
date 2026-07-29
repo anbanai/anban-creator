@@ -16,8 +16,9 @@ func TestTaskJSONHidesInternalProviderCostEvidence(t *testing.T) {
 		CostStatus:         "reconciled", InputTokens: &value, OutputTokens: &value, CacheReadTokens: &value, CacheCreationTokens: &value,
 		BillingCatalogID: "retail-v1", BillingSKUID: "task.article.v1", BillingPriceCredits: 6000,
 		AgentProfileSnapshot: AgentProfileSnapshot{
-			ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic",
-			BaseURL: "https://secret.invalid", AuthToken: "secret-token",
+			SchemaVersion: 2, ProfileID: "balanced", Provider: "volcengine_ark", Protocol: "anthropic",
+			Models:            AgentModelMatrix{Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving", Sonnet: "doubao-seed-evolving", Haiku: "doubao-seed-evolving"},
+			ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
 		},
 	}
 	raw, err := json.Marshal(task)
@@ -30,7 +31,7 @@ func TestTaskJSONHidesInternalProviderCostEvidence(t *testing.T) {
 			t.Fatalf("task JSON leaked %q: %s", forbidden, encoded)
 		}
 	}
-	for _, required := range []string{"billing_catalog_id", "billing_sku_id", "billing_price_credits", `"agent_profile_snapshot"`, `"provider":"volcengine_ark"`, `"model_id":"doubao-seed-evolving"`} {
+	for _, required := range []string{"billing_catalog_id", "billing_sku_id", "billing_price_credits", `"agent_profile_snapshot"`, `"provider":"volcengine_ark"`, `"schema_version":2`, `"models":`, `"claude":`, `"model_usage_aliases":`} {
 		if !strings.Contains(encoded, required) {
 			t.Fatalf("task JSON omitted fixed billing identity %q: %s", required, encoded)
 		}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,19 +30,60 @@ func TestExecutionProfileColumnsHaveNoDatabaseDefault(t *testing.T) {
 
 func TestTaskExecutionStoresOnlyFrozenRuntimeIdentity(t *testing.T) {
 	executionType := reflect.TypeOf(TaskExecution{})
-	for _, redundant := range []string{"AgentProfileID", "AgentProfileSnapshot"} {
+	for _, redundant := range []string{"AgentProfileID", "AgentProfileSnapshot", "ModelID", "Protocol", "ReasoningEffort", "ContextWindow"} {
 		if _, exists := executionType.FieldByName(redundant); exists {
 			t.Fatalf("TaskExecution must not duplicate task snapshot field %s", redundant)
 		}
 	}
+	disabled := false
 	snapshot := AgentProfileSnapshot{
-		ProfileID: "maximum_quality", Provider: "kimi", ModelID: "k3", Protocol: "anthropic",
-		ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true, DisplayName: "Kimi K3（1M）",
-		BaseURL: "https://secret.invalid", AuthToken: "secret-token",
+		SchemaVersion: 2, ProfileID: "maximum_quality", Provider: "moonshot", Protocol: "anthropic", DisplayName: "Kimi K3（1M）",
+		Models:            AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
+		Claude:            AgentClaudeControls{EnableToolSearch: &disabled},
+		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
 	}
-	execution := NewTaskExecutionAgentProfile(snapshot)
-	if execution.Provider != "kimi" || execution.ModelID != "k3" || execution.Protocol != "anthropic" || execution.ReasoningEffort != "high" || execution.ContextWindow != 1048576 {
+	execution := NewTaskExecutionAgentProfile(snapshot, strings.Repeat("a", 64))
+	if execution.ExecutionProfile != "maximum_quality" || execution.Provider != "moonshot" || execution.ModelMatrix.Default != "kimi-k3[1m]" || execution.ClaudeControls.EnableToolSearch == nil || *execution.ClaudeControls.EnableToolSearch || execution.ProfileFingerprint != strings.Repeat("a", 64) {
 		t.Fatalf("execution = %#v", execution)
+	}
+}
+
+func TestAgentProfileSnapshotFingerprintIsCanonical(t *testing.T) {
+	disabled := false
+	first := AgentProfileSnapshot{
+		SchemaVersion: 2, ProfileID: "maximum_quality", DisplayName: "极致效果",
+		Provider: "moonshot", Protocol: "anthropic",
+		Models:            AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
+		Claude:            AgentClaudeControls{EnableToolSearch: &disabled},
+		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3", "kimi-k3": "kimi-k3"},
+	}
+	second := first
+	second.ModelUsageAliases = map[string]string{"kimi-k3": "kimi-k3", "kimi-k3[1m]": "kimi-k3"}
+	a, err := AgentProfileFingerprint(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := AgentProfileFingerprint(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b || len(a) != 64 {
+		t.Fatalf("fingerprints=%q %q", a, b)
+	}
+	raw, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(raw)
+	for _, required := range []string{`"schema_version":2`, `"models":`, `"claude":`, `"enable_tool_search":false`, `"model_usage_aliases":`} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("snapshot JSON omitted %q: %s", required, encoded)
+		}
+	}
+	for _, forbidden := range []string{"base_url", "auth_token", "secret", "endpoint"} {
+		if strings.Contains(strings.ToLower(encoded), forbidden) {
+			t.Fatalf("snapshot JSON leaked %q: %s", forbidden, encoded)
+		}
 	}
 }
 
@@ -61,11 +103,13 @@ func TestAgentExecutionProfileSchemaMatchesMigrationContract(t *testing.T) {
 	}
 
 	assertTagContains(t, Task{}, "AgentProfileSnapshot", "type:json", "serializer:json", "not null")
-	for _, fieldName := range []string{"Provider", "ModelID", "Protocol", "ReasoningEffort", "ContextWindow"} {
+	assertTagContains(t, Task{}, "AgentProfileFingerprint", "type:char(64)", "not null")
+	for _, fieldName := range []string{"ExecutionProfile", "Provider", "ModelMatrix", "ClaudeControls", "ProfileFingerprint"} {
 		assertTagContains(t, TaskExecution{}, fieldName, "not null")
 	}
-	assertTagContains(t, TaskExecution{}, "Provider", "index:idx_task_executions_provider_model,priority:1")
-	assertTagContains(t, TaskExecution{}, "ModelID", "index:idx_task_executions_provider_model,priority:2")
+	assertTagContains(t, TaskExecution{}, "ModelMatrix", "type:json", "serializer:json")
+	assertTagContains(t, TaskExecution{}, "ClaudeControls", "type:json", "serializer:json")
+	assertTagContains(t, TaskExecution{}, "ProfileFingerprint", "type:char(64)", "index")
 	assertTagContains(t, BillingSKU{}, "ExecutionProfile", "not null", "default:''", "index:idx_billing_skus_execution_profile", "index:idx_billing_skus_catalog_operation_profile,priority:3")
 	assertTagContains(t, BillingSKU{}, "CatalogID", "index:idx_billing_skus_catalog_operation_profile,priority:1")
 	assertTagContains(t, BillingSKU{}, "Operation", "index:idx_billing_skus_catalog_operation_profile,priority:2")
