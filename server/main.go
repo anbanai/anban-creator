@@ -930,12 +930,13 @@ func requireAgentExecutionProfileSchema(db *gorm.DB) error {
 	}{
 		{&model.Task{}, "ExecutionProfile"},
 		{&model.Task{}, "AgentProfileSnapshot"},
+		{&model.Task{}, "AgentProfileFingerprint"},
 		{&model.Plan{}, "ExecutionProfile"},
+		{&model.TaskExecution{}, "ExecutionProfile"},
 		{&model.TaskExecution{}, "Provider"},
-		{&model.TaskExecution{}, "ModelID"},
-		{&model.TaskExecution{}, "Protocol"},
-		{&model.TaskExecution{}, "ReasoningEffort"},
-		{&model.TaskExecution{}, "ContextWindow"},
+		{&model.TaskExecution{}, "ModelMatrix"},
+		{&model.TaskExecution{}, "ClaudeControls"},
+		{&model.TaskExecution{}, "ProfileFingerprint"},
 		{&model.BillingSKU{}, "ExecutionProfile"},
 		{&model.BillingQuote{}, "AgentProfileSnapshot"},
 	}
