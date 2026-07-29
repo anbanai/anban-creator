@@ -6,19 +6,18 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
 func resolveAgentProfileForUser(ctx context.Context, repo repository.Repository, registry *AgentProfileRegistry, userID, profileID string) (AgentExecutionProfile, error) {
-	if registry == nil {
-		return AgentExecutionProfile{}, fmt.Errorf("%w: registry is unavailable", ErrAgentProfileUnavailable)
-	}
-	if repo == nil {
-		return AgentExecutionProfile{}, fmt.Errorf("%w: user repository is unavailable", ErrAgentProfileUnavailable)
+	if registry == nil || repo == nil {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: profile dependencies are unavailable", ErrAgentProfileUnavailable)
 	}
 	user, err := repo.Users().FindByID(ctx, strings.TrimSpace(userID))
 	if err != nil {
@@ -33,149 +32,175 @@ var (
 	ErrAgentProfileUnavailable      = errors.New("agent execution profile unavailable")
 	ErrAgentProfileAccessDenied     = errors.New("agent execution profile access denied")
 	ErrAgentProfileSnapshotMismatch = errors.New("agent execution profile snapshot mismatch")
+	ErrAgentProviderUnavailable     = errors.New("agent provider unavailable")
+	ErrAgentModelCostUnmapped       = errors.New("agent model cost unmapped")
 )
 
-// AgentProfileCapability is the public, non-sensitive capability catalog row.
-type AgentProfileCapability struct {
-	ID                string     `json:"id"`
-	DisplayName       string     `json:"display_name"`
-	ModelName         string     `json:"model_name"`
-	ModelID           string     `json:"model_id"`
-	Description       string     `json:"description"`
-	MinTier           model.Tier `json:"min_tier"`
-	Available         bool       `json:"available"`
-	UnavailableReason string     `json:"unavailable_reason,omitempty"`
+var agentProfileProducts = map[string]struct {
+	DisplayName string
+	MinTier     model.Tier
+}{
+	"cost_effective":  {DisplayName: "性价比", MinTier: model.TierFree},
+	"balanced":        {DisplayName: "平衡型", MinTier: model.TierPro},
+	"maximum_quality": {DisplayName: "极致效果", MinTier: model.TierEnterprise},
 }
 
-// AgentExecutionProfile is the server-owned public and runtime identity of one
-// selectable Agent model. BaseURL/AuthToken are internal-only construction data
-// and are omitted from profile snapshots and API responses.
+type AgentProfileCapability struct {
+	ID                string                    `json:"id"`
+	DisplayName       string                    `json:"display_name"`
+	Description       string                    `json:"description"`
+	Provider          string                    `json:"provider"`
+	Protocol          string                    `json:"protocol"`
+	Models            model.AgentModelMatrix    `json:"models"`
+	Claude            model.AgentClaudeControls `json:"claude"`
+	MinTier           model.Tier                `json:"min_tier"`
+	Available         bool                      `json:"available"`
+	UnavailableReason string                    `json:"unavailable_reason,omitempty"`
+}
+
 type AgentExecutionProfile struct {
 	ID                string
 	DisplayName       string
-	ModelName         string
 	Description       string
 	Provider          string
-	ModelID           string
 	Protocol          string
+	Models            model.AgentModelMatrix
+	Claude            model.AgentClaudeControls
+	ModelUsageAliases map[string]string
 	BaseURL           string
 	AuthToken         string
-	ModelUsageAliases map[string]string
 	MinTier           model.Tier
-	ContextWindow     int
-	ReasoningEffort   string
-	ThinkingRequired  bool
 	Available         bool
 	UnavailableReason string
 }
 
-func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExecutionProfileConfig) (*AgentProfileRegistry, error) {
-	required := map[string]struct {
-		displayName string
-		modelName   string
-		provider    string
-		modelID     string
-		minTier     model.Tier
-	}{
-		"cost_effective":  {displayName: "性价比", modelName: "DeepSeek 4 Pro", provider: "deepseek", modelID: "deepseek-v4-pro", minTier: model.TierFree},
-		"balanced":        {displayName: "平衡型", modelName: "豆包 Seed Evolving", provider: "volcengine_ark", modelID: "doubao-seed-evolving", minTier: model.TierPro},
-		"maximum_quality": {displayName: "极致效果", modelName: "Kimi K3（1M）", provider: "kimi", modelID: "k3", minTier: model.TierEnterprise},
-	}
+type AgentProfileRegistry struct {
+	profiles  map[string]AgentExecutionProfile
+	providers map[string]srvconfig.ClaudeProviderConfig
+}
+
+func NewAgentProfileRegistryFromConfig(providers map[string]srvconfig.ClaudeProviderConfig, configured map[string]srvconfig.ClaudeExecutionProfileConfig, costs billing.CostCatalog) (*AgentProfileRegistry, error) {
 	for id := range configured {
-		if _, ok := required[id]; !ok {
+		if _, ok := agentProfileProducts[id]; !ok {
 			return nil, fmt.Errorf("%w: unsupported profile %q", ErrAgentProfileInvalid, id)
 		}
 	}
-	profiles := make([]AgentExecutionProfile, 0, len(required))
-	for id, expected := range required {
-		item := configured[id]
-		displayName := strings.TrimSpace(item.DisplayName)
-		if displayName == "" {
-			displayName = expected.displayName
+	providerSnapshot := cloneClaudeProviders(providers)
+	for id, provider := range providerSnapshot {
+		if strings.TrimSpace(id) == "" {
+			return nil, fmt.Errorf("%w: provider id is required", ErrAgentProfileInvalid)
 		}
-		modelName := strings.TrimSpace(item.ModelName)
-		if modelName == "" {
-			modelName = expected.modelName
+		if strings.TrimSpace(provider.Protocol) != "anthropic" {
+			return nil, fmt.Errorf("%w: provider %q must use the anthropic protocol", ErrAgentProfileInvalid, id)
 		}
-		missing := strings.TrimSpace(item.Provider) == "" || strings.TrimSpace(item.ModelID) == "" ||
-			strings.TrimSpace(item.Protocol) == "" || strings.TrimSpace(item.BaseURL) == "" || strings.TrimSpace(item.AuthToken) == ""
-		valid := !missing && item.Provider == expected.provider && item.ModelID == expected.modelID && item.Protocol == "anthropic" &&
-			item.MinTier == expected.minTier && validAgentProfileEndpoint(id, item.BaseURL) && validConfiguredProfileControls(id, item)
-		reason := "provider_configuration_invalid"
-		if missing {
-			reason = "provider_configuration_missing"
-		}
-		if valid {
-			reason = ""
-		}
-		contextWindow, reasoningEffort, thinkingRequired := item.ContextWindow, item.ReasoningEffort, item.ThinkingRequired
-		if id == "maximum_quality" {
-			contextWindow, reasoningEffort, thinkingRequired = 1048576, "high", true
-		} else if !validConfiguredControls(item) {
-			contextWindow, reasoningEffort, thinkingRequired = 0, "", false
-		}
-		profiles = append(profiles, AgentExecutionProfile{
-			ID: id, DisplayName: displayName, ModelName: modelName, Description: item.Description,
-			Provider: expected.provider, ModelID: expected.modelID, Protocol: "anthropic",
-			BaseURL: strings.TrimSpace(item.BaseURL), AuthToken: strings.TrimSpace(item.AuthToken),
-			ModelUsageAliases: cloneModelUsageAliasTargets(item.ModelUsageAliases), MinTier: expected.minTier,
-			ContextWindow: contextWindow, ReasoningEffort: reasoningEffort,
-			ThinkingRequired: thinkingRequired, Available: valid, UnavailableReason: reason,
-		})
 	}
-	return NewAgentProfileRegistry(profiles)
+
+	profiles := make([]AgentExecutionProfile, 0, len(agentProfileProducts))
+	for _, id := range []string{"cost_effective", "balanced", "maximum_quality"} {
+		product := agentProfileProducts[id]
+		item, configuredProfile := configured[id]
+		profile := AgentExecutionProfile{ID: id, DisplayName: product.DisplayName, MinTier: product.MinTier}
+		if !configuredProfile {
+			profile.UnavailableReason = "profile_configuration_missing"
+			profiles = append(profiles, profile)
+			continue
+		}
+		if err := validateConfiguredAgentProfile(id, item); err != nil {
+			return nil, err
+		}
+		profile.Description = strings.TrimSpace(item.Description)
+		profile.Provider = strings.TrimSpace(item.Provider)
+		profile.Models = modelMatrixFromConfig(item.Models)
+		profile.Claude = claudeControlsFromConfig(item.Claude)
+		profile.ModelUsageAliases = cloneModelUsageAliasTargets(item.ModelUsageAliases)
+
+		provider, providerExists := providerSnapshot[profile.Provider]
+		if !providerExists || !validAgentProfileEndpoint(provider.BaseURL) || strings.TrimSpace(provider.AuthToken) == "" {
+			profile.Protocol = "anthropic"
+			profile.UnavailableReason = "agent_provider_unavailable"
+			profiles = append(profiles, profile)
+			continue
+		}
+		profile.Protocol = provider.Protocol
+		profile.BaseURL = strings.TrimSpace(provider.BaseURL)
+		profile.AuthToken = strings.TrimSpace(provider.AuthToken)
+		if !profileModelsHaveCosts(profile, costs) {
+			profile.UnavailableReason = "agent_model_cost_unmapped"
+			profiles = append(profiles, profile)
+			continue
+		}
+		profile.Available = true
+		profiles = append(profiles, profile)
+	}
+	return newAgentProfileRegistry(profiles, providerSnapshot)
 }
 
-func validAgentProfileEndpoint(id, endpoint string) bool {
-	endpoint = strings.TrimSpace(endpoint)
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || endpoint == "" {
-		return false
+func validateConfiguredAgentProfile(id string, profile srvconfig.ClaudeExecutionProfileConfig) error {
+	models := modelMatrixFromConfig(profile.Models)
+	for _, field := range []struct{ role, value string }{
+		{role: "default", value: models.Default}, {role: "opus", value: models.Opus},
+		{role: "fable", value: models.Fable}, {role: "sonnet", value: models.Sonnet}, {role: "haiku", value: models.Haiku},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%w: profile %q models.%s is required", ErrAgentProfileInvalid, id, field.role)
+		}
 	}
-	return id != "maximum_quality" || endpoint == "https://api.kimi.com/coding/"
+	for raw, canonical := range profile.ModelUsageAliases {
+		if strings.TrimSpace(raw) == "" || strings.TrimSpace(canonical) == "" || strings.Contains(canonical, "/") {
+			return fmt.Errorf("%w: profile %q has an invalid model usage alias", ErrAgentProfileInvalid, id)
+		}
+	}
+	return nil
 }
 
-func validConfiguredProfileControls(id string, item srvconfig.ClaudeExecutionProfileConfig) bool {
-	if !validConfiguredControls(item) {
-		return false
+func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCatalog) bool {
+	models := []string{profile.Models.Default, profile.Models.Opus, profile.Models.Fable, profile.Models.Sonnet, profile.Models.Haiku}
+	if profile.Claude.SubagentModel != nil {
+		models = append(models, *profile.Claude.SubagentModel)
 	}
-	if id == "maximum_quality" {
-		return item.ContextWindow == 1048576 && item.ReasoningEffort == "high" && item.ThinkingRequired
+	seen := make(map[string]struct{}, len(models))
+	for _, raw := range models {
+		if _, ok := seen[raw]; ok {
+			continue
+		}
+		seen[raw] = struct{}{}
+		canonical := strings.TrimSpace(profile.ModelUsageAliases[raw])
+		if canonical == "" {
+			return false
+		}
+		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
+			return false
+		}
 	}
 	return true
 }
 
-func validConfiguredControls(item srvconfig.ClaudeExecutionProfileConfig) bool {
-	if item.ContextWindow < 0 || item.ContextWindow > 1048576 {
-		return false
-	}
-	if item.ReasoningEffort != "" && item.ReasoningEffort != "low" && item.ReasoningEffort != "medium" && item.ReasoningEffort != "high" {
-		return false
-	}
-	return !item.ThinkingRequired || item.ReasoningEffort != ""
-}
-
-func (p AgentExecutionProfile) RuntimeEnv() map[string]string {
-	return map[string]string{
-		"ANTHROPIC_BASE_URL":             p.BaseURL,
-		"ANTHROPIC_AUTH_TOKEN":           p.AuthToken,
-		"ANTHROPIC_MODEL":                p.ModelID,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   p.ModelID,
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  p.ModelID,
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": p.ModelID,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  p.ModelID,
-	}
-}
-
-type AgentProfileRegistry struct {
-	profiles map[string]AgentExecutionProfile
+func validAgentProfileEndpoint(endpoint string) bool {
+	endpoint = strings.TrimSpace(endpoint)
+	parsed, err := url.Parse(endpoint)
+	return err == nil && endpoint != "" && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func NewAgentProfileRegistry(profiles []AgentExecutionProfile) (*AgentProfileRegistry, error) {
-	registry := &AgentProfileRegistry{profiles: make(map[string]AgentExecutionProfile, len(profiles))}
+	providers := make(map[string]srvconfig.ClaudeProviderConfig)
 	for _, profile := range profiles {
-		if err := validateAgentExecutionProfile(profile); err != nil {
-			return nil, err
+		if profile.Provider != "" {
+			providers[profile.Provider] = srvconfig.ClaudeProviderConfig{Protocol: profile.Protocol, BaseURL: profile.BaseURL, AuthToken: profile.AuthToken}
+		}
+	}
+	return newAgentProfileRegistry(profiles, providers)
+}
+
+func newAgentProfileRegistry(profiles []AgentExecutionProfile, providers map[string]srvconfig.ClaudeProviderConfig) (*AgentProfileRegistry, error) {
+	registry := &AgentProfileRegistry{profiles: make(map[string]AgentExecutionProfile, len(profiles)), providers: cloneClaudeProviders(providers)}
+	for _, profile := range profiles {
+		if strings.TrimSpace(profile.ID) == "" || strings.TrimSpace(profile.DisplayName) == "" || !model.ValidTiers[profile.MinTier] {
+			return nil, fmt.Errorf("%w: profile product identity is invalid", ErrAgentProfileInvalid)
+		}
+		if profile.Available {
+			if _, _, err := profile.Freeze(); err != nil {
+				return nil, fmt.Errorf("%w: profile %q: %v", ErrAgentProfileInvalid, profile.ID, err)
+			}
 		}
 		if _, exists := registry.profiles[profile.ID]; exists {
 			return nil, fmt.Errorf("%w: duplicate profile %q", ErrAgentProfileInvalid, profile.ID)
@@ -188,43 +213,35 @@ func NewAgentProfileRegistry(profiles []AgentExecutionProfile) (*AgentProfileReg
 	return registry, nil
 }
 
-func validateAgentExecutionProfile(profile AgentExecutionProfile) error {
-	if strings.TrimSpace(profile.ID) == "" || strings.TrimSpace(profile.DisplayName) == "" || strings.TrimSpace(profile.ModelID) == "" || strings.TrimSpace(profile.Provider) == "" {
-		return fmt.Errorf("%w: id, display name, provider and model are required", ErrAgentProfileInvalid)
+func (p AgentExecutionProfile) RuntimeEnv() map[string]string {
+	env := map[string]string{
+		"ANTHROPIC_BASE_URL": p.BaseURL, "ANTHROPIC_AUTH_TOKEN": p.AuthToken,
+		"ANTHROPIC_MODEL": p.Models.Default, "ANTHROPIC_DEFAULT_OPUS_MODEL": p.Models.Opus,
+		"ANTHROPIC_DEFAULT_FABLE_MODEL": p.Models.Fable, "ANTHROPIC_DEFAULT_SONNET_MODEL": p.Models.Sonnet,
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": p.Models.Haiku,
 	}
-	if profile.Protocol != "anthropic" {
-		return fmt.Errorf("%w: profile %q must use the anthropic protocol", ErrAgentProfileInvalid, profile.ID)
+	if p.Claude.MaxContextTokens != nil {
+		env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(*p.Claude.MaxContextTokens)
 	}
-	if profile.Provider != "deepseek" && profile.Provider != "volcengine_ark" && profile.Provider != "kimi" {
-		return fmt.Errorf("%w: profile %q has unsupported provider", ErrAgentProfileInvalid, profile.ID)
+	return env
+}
+
+func (p AgentExecutionProfile) Snapshot() model.AgentProfileSnapshot {
+	return model.AgentProfileSnapshot{
+		SchemaVersion: 2, ProfileID: p.ID, DisplayName: p.DisplayName,
+		Provider: p.Provider, Protocol: p.Protocol, Models: p.Models,
+		Claude: cloneAgentClaudeControls(p.Claude), ModelUsageAliases: cloneModelUsageAliasTargets(p.ModelUsageAliases),
 	}
-	if !model.ValidTiers[profile.MinTier] {
-		return fmt.Errorf("%w: profile %q has invalid minimum tier", ErrAgentProfileInvalid, profile.ID)
-	}
-	if profile.ThinkingRequired && strings.TrimSpace(profile.ReasoningEffort) == "" {
-		return fmt.Errorf("%w: profile %q requires reasoning_effort", ErrAgentProfileInvalid, profile.ID)
-	}
-	if profile.ContextWindow < 0 || profile.ContextWindow > 1048576 {
-		return fmt.Errorf("%w: profile %q has invalid context window", ErrAgentProfileInvalid, profile.ID)
-	}
-	if profile.ReasoningEffort != "" && profile.ReasoningEffort != "low" && profile.ReasoningEffort != "medium" && profile.ReasoningEffort != "high" {
-		return fmt.Errorf("%w: profile %q has invalid reasoning effort", ErrAgentProfileInvalid, profile.ID)
-	}
-	aliases := make(map[string]model.ModelUsageIdentity, len(profile.ModelUsageAliases))
-	for raw, target := range profile.ModelUsageAliases {
-		if target != profile.ModelID {
-			return fmt.Errorf("%w: profile %q model usage alias %q must target canonical model %q", ErrAgentProfileInvalid, profile.ID, raw, profile.ModelID)
-		}
-		aliases[raw] = model.ModelUsageIdentity{Provider: profile.Provider, Model: target}
-	}
-	if err := model.ValidateModelUsageAliases(aliases); err != nil {
-		return fmt.Errorf("%w: profile %q model usage aliases: %v", ErrAgentProfileInvalid, profile.ID, err)
-	}
-	return nil
+}
+
+func (p AgentExecutionProfile) Freeze() (model.AgentProfileSnapshot, string, error) {
+	snapshot := p.Snapshot()
+	fingerprint, err := model.AgentProfileFingerprint(snapshot)
+	return snapshot, fingerprint, err
 }
 
 func cloneModelUsageAliasTargets(source map[string]string) map[string]string {
-	if len(source) == 0 {
+	if source == nil {
 		return nil
 	}
 	result := make(map[string]string, len(source))
@@ -234,9 +251,52 @@ func cloneModelUsageAliasTargets(source map[string]string) map[string]string {
 	return result
 }
 
+func cloneClaudeProviders(source map[string]srvconfig.ClaudeProviderConfig) map[string]srvconfig.ClaudeProviderConfig {
+	result := make(map[string]srvconfig.ClaudeProviderConfig, len(source))
+	for id, provider := range source {
+		result[id] = provider
+	}
+	return result
+}
+
+func cloneAgentClaudeControls(source model.AgentClaudeControls) model.AgentClaudeControls {
+	return model.AgentClaudeControls{
+		EffortLevel: clonePointer(source.EffortLevel), AlwaysEnableEffort: clonePointer(source.AlwaysEnableEffort),
+		MaxContextTokens: clonePointer(source.MaxContextTokens), MaxOutputTokens: clonePointer(source.MaxOutputTokens),
+		MaxThinkingTokens: clonePointer(source.MaxThinkingTokens), DisableAdaptiveThinking: clonePointer(source.DisableAdaptiveThinking),
+		DisableThinking: clonePointer(source.DisableThinking), AutoCompactWindow: clonePointer(source.AutoCompactWindow),
+		AutocompactPctOverride: clonePointer(source.AutocompactPctOverride), Disable1MContext: clonePointer(source.Disable1MContext),
+		SubagentModel: clonePointer(source.SubagentModel), EnableToolSearch: clonePointer(source.EnableToolSearch),
+	}
+}
+
 func cloneAgentExecutionProfile(profile AgentExecutionProfile) AgentExecutionProfile {
 	profile.ModelUsageAliases = cloneModelUsageAliasTargets(profile.ModelUsageAliases)
+	profile.Claude = cloneAgentClaudeControls(profile.Claude)
 	return profile
+}
+
+func modelMatrixFromConfig(source srvconfig.ClaudeModelMatrixConfig) model.AgentModelMatrix {
+	return model.AgentModelMatrix{Default: source.Default, Opus: source.Opus, Fable: source.Fable, Sonnet: source.Sonnet, Haiku: source.Haiku}
+}
+
+func claudeControlsFromConfig(source srvconfig.ClaudeControlsConfig) model.AgentClaudeControls {
+	return model.AgentClaudeControls{
+		EffortLevel: clonePointer(source.EffortLevel), AlwaysEnableEffort: clonePointer(source.AlwaysEnableEffort),
+		MaxContextTokens: clonePointer(source.MaxContextTokens), MaxOutputTokens: clonePointer(source.MaxOutputTokens),
+		MaxThinkingTokens: clonePointer(source.MaxThinkingTokens), DisableAdaptiveThinking: clonePointer(source.DisableAdaptiveThinking),
+		DisableThinking: clonePointer(source.DisableThinking), AutoCompactWindow: clonePointer(source.AutoCompactWindow),
+		AutocompactPctOverride: clonePointer(source.AutocompactPctOverride), Disable1MContext: clonePointer(source.Disable1MContext),
+		SubagentModel: clonePointer(source.SubagentModel), EnableToolSearch: clonePointer(source.EnableToolSearch),
+	}
+}
+
+func clonePointer[T any](source *T) *T {
+	if source == nil {
+		return nil
+	}
+	value := *source
+	return &value
 }
 
 func (r *AgentProfileRegistry) Resolve(id string) (AgentExecutionProfile, error) {
@@ -264,26 +324,24 @@ func (r *AgentProfileRegistry) ResolveForTier(id string, tier model.Tier) (Agent
 	return profile, nil
 }
 
-// ResolveRuntime combines current credentials with the task's frozen execution
-// controls. Provider or model substitution is not allowed.
-func (r *AgentProfileRegistry) ResolveRuntime(id string, snapshot model.AgentProfileSnapshot) (AgentExecutionProfile, error) {
-	profile, err := r.Resolve(id)
+func (r *AgentProfileRegistry) ResolveRuntime(id string, snapshot model.AgentProfileSnapshot, fingerprint string) (AgentExecutionProfile, error) {
+	product, err := r.Resolve(id)
 	if err != nil {
 		return AgentExecutionProfile{}, err
 	}
-	if !profile.Available {
-		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileUnavailable, profile.ID)
+	actualFingerprint, err := model.AgentProfileFingerprint(snapshot)
+	if err != nil || snapshot.ProfileID != product.ID || actualFingerprint != fingerprint {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotMismatch, id)
 	}
-	want := profile.Snapshot()
-	if snapshot.ProfileID != want.ProfileID || snapshot.Provider != want.Provider ||
-		snapshot.ModelID != want.ModelID || snapshot.Protocol != want.Protocol {
-		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotMismatch, profile.ID)
+	provider, ok := r.providers[snapshot.Provider]
+	if !ok || provider.Protocol != snapshot.Protocol || !validAgentProfileEndpoint(provider.BaseURL) || strings.TrimSpace(provider.AuthToken) == "" {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProviderUnavailable, snapshot.Provider)
 	}
-	profile.ContextWindow = snapshot.ContextWindow
-	profile.ReasoningEffort = snapshot.ReasoningEffort
-	profile.ThinkingRequired = snapshot.ThinkingRequired
-	profile.DisplayName = snapshot.DisplayName
-	return profile, nil
+	return AgentExecutionProfile{
+		ID: snapshot.ProfileID, DisplayName: snapshot.DisplayName, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
+		Models: snapshot.Models, Claude: cloneAgentClaudeControls(snapshot.Claude), ModelUsageAliases: cloneModelUsageAliasTargets(snapshot.ModelUsageAliases),
+		BaseURL: strings.TrimSpace(provider.BaseURL), AuthToken: strings.TrimSpace(provider.AuthToken), MinTier: product.MinTier, Available: true,
+	}, nil
 }
 
 func (r *AgentProfileRegistry) CapabilitiesForTier(tier model.Tier) []AgentProfileCapability {
@@ -291,9 +349,9 @@ func (r *AgentProfileRegistry) CapabilitiesForTier(tier model.Tier) []AgentProfi
 	result := make([]AgentProfileCapability, 0, len(profiles))
 	for _, profile := range profiles {
 		capability := AgentProfileCapability{
-			ID: profile.ID, DisplayName: profile.DisplayName, ModelName: profile.ModelName,
-			ModelID: profile.ModelID, Description: profile.Description, MinTier: profile.MinTier,
-			Available: profile.Available, UnavailableReason: profile.UnavailableReason,
+			ID: profile.ID, DisplayName: profile.DisplayName, Description: profile.Description,
+			Provider: profile.Provider, Protocol: profile.Protocol, Models: profile.Models, Claude: cloneAgentClaudeControls(profile.Claude),
+			MinTier: profile.MinTier, Available: profile.Available, UnavailableReason: profile.UnavailableReason,
 		}
 		if capability.Available && !tierCanUseProfile(tier, profile.MinTier) {
 			capability.Available = false
@@ -336,14 +394,6 @@ func (r *AgentProfileRegistry) DefaultForTier(tier model.Tier) AgentExecutionPro
 		return AgentExecutionProfile{}
 	}
 	return profiles[0]
-}
-
-func (p AgentExecutionProfile) Snapshot() model.AgentProfileSnapshot {
-	return model.AgentProfileSnapshot{
-		ProfileID: p.ID, Provider: p.Provider, ModelID: p.ModelID, Protocol: p.Protocol,
-		ContextWindow: p.ContextWindow, ReasoningEffort: p.ReasoningEffort,
-		ThinkingRequired: p.ThinkingRequired, DisplayName: p.DisplayName,
-	}
 }
 
 func tierCanUseProfile(userTier, minimum model.Tier) bool {

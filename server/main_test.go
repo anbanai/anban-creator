@@ -124,6 +124,10 @@ func TestBuildBillingRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bundle, err := serverbilling.LoadBundle(catalogDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	newRepo := func(t *testing.T) (*gorm.DB, repository.Repository) {
 		t.Helper()
 		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -145,17 +149,17 @@ func TestBuildBillingRuntime(t *testing.T) {
 			{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir}},
 		} {
 			db, repo := newRepo(t)
-			if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil {
+			if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err == nil {
 				t.Fatalf("buildBillingRuntime(%+v) error = nil", cfg.BillingRuntime)
 			}
 		}
 	})
 
-	t.Run("load failure", func(t *testing.T) {
-		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: t.TempDir(), AdminAPIKey: "key"}}
+	t.Run("bundle required", func(t *testing.T) {
+		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
 		db, repo := newRepo(t)
-		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "load billing bundle") {
-			t.Fatalf("load failure = %v", err)
+		if _, err := buildBillingRuntime(t.Context(), db, repo, nil, cfg, &logger); err == nil || !strings.Contains(err.Error(), "billing bundle is required") {
+			t.Fatalf("nil bundle = %v", err)
 		}
 	})
 
@@ -165,7 +169,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
+		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
 			t.Fatalf("publish failure = %v", err)
 		}
 	})
@@ -173,7 +177,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		db, repo := newRepo(t)
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		runtime, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger)
+		runtime, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger)
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
@@ -195,7 +199,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		}
 
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err != nil {
+		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err != nil {
 			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
 		}
 		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-28-v5"} {
@@ -213,7 +217,9 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	}
 	text := string(source)
 	for _, required := range []string{
-		"buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)",
+		"serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)",
+		"service.NewAgentProfileRegistryFromConfig(cfg.Claude.Providers, cfg.Claude.ExecutionProfiles, billingBundle.Costs)",
+		"buildBillingRuntime(context.Background(), mysqlDB, repo, billingBundle, cfg, log)",
 		"service.NewBillingMaintenanceWorker(wallet",
 		"BillingHandler:",
 		"go func() {",

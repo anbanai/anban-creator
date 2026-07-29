@@ -1,366 +1,194 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestAgentProfileRegistryCopiesAndValidatesModelUsageAliases(t *testing.T) {
-	const rawAlias = "doubao-seed-evolving-latest-version"
-	configuredAliases := map[string]string{rawAlias: "doubao-seed-evolving"}
-	configured := map[string]srvconfig.ClaudeExecutionProfileConfig{
+func testMatrix(name string) srvconfig.ClaudeModelMatrixConfig {
+	return srvconfig.ClaudeModelMatrixConfig{Default: name, Opus: name, Fable: name, Sonnet: name, Haiku: name}
+}
+
+func testProviderConfig() map[string]srvconfig.ClaudeProviderConfig {
+	return map[string]srvconfig.ClaudeProviderConfig{
+		"deepseek": {Protocol: "anthropic", BaseURL: "https://api.deepseek.test/anthropic", AuthToken: "deepseek-secret"},
+		"zhipu":    {Protocol: "anthropic", BaseURL: "https://open.bigmodel.test/api/anthropic", AuthToken: "zhipu-secret"},
+		"moonshot": {Protocol: "anthropic", BaseURL: "https://api.moonshot.test/anthropic", AuthToken: "moonshot-secret"},
+	}
+}
+
+func testProfileConfig() map[string]srvconfig.ClaudeExecutionProfileConfig {
+	return map[string]srvconfig.ClaudeExecutionProfileConfig{
 		"cost_effective": {
-			DisplayName: "性价比", ModelName: "DeepSeek 4 Pro", Provider: "deepseek",
-			ModelID: "deepseek-v4-pro", Protocol: "anthropic", BaseURL: "https://deepseek.example.com",
-			AuthToken: "deepseek-secret", MinTier: model.TierFree,
+			Provider: "deepseek", Description: "low cost", Models: testMatrix("deepseek-v4-flash"),
+			ModelUsageAliases: map[string]string{"deepseek-v4-flash": "deepseek-v4-flash"},
 		},
 		"balanced": {
-			DisplayName: "平衡型", ModelName: "豆包", Provider: "volcengine_ark",
-			ModelID: "doubao-seed-evolving", Protocol: "anthropic", BaseURL: "https://ark.example.com",
-			AuthToken: "ark-secret", ModelUsageAliases: configuredAliases, MinTier: model.TierPro,
+			Provider: "zhipu", Description: "balanced", Models: testMatrix("glm-5.2"),
+			ModelUsageAliases: map[string]string{"glm-5.2": "glm-5.2"},
 		},
 		"maximum_quality": {
-			DisplayName: "极致效果", ModelName: "Kimi K3（1M）", Provider: "kimi", ModelID: "k3",
-			Protocol: "anthropic", BaseURL: "https://api.kimi.com/coding/", AuthToken: "kimi-secret",
-			MinTier: model.TierEnterprise, ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true,
+			Provider: "moonshot", Description: "maximum", Models: testMatrix("kimi-k3[1m]"),
+			ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3", "kimi-k3": "kimi-k3"},
 		},
-	}
-
-	registry, err := NewAgentProfileRegistryFromConfig(configured)
-	if err != nil {
-		t.Fatalf("NewAgentProfileRegistryFromConfig: %v", err)
-	}
-	configuredAliases[rawAlias] = "mutated-after-construction"
-	profile, err := registry.Resolve("balanced")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := profile.ModelUsageAliases[rawAlias]; got != "doubao-seed-evolving" {
-		t.Fatalf("resolved alias = %q, want frozen canonical model", got)
-	}
-	profile.ModelUsageAliases[rawAlias] = "mutated-after-resolve"
-	profile, err = registry.Resolve("balanced")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := profile.ModelUsageAliases[rawAlias]; got != "doubao-seed-evolving" {
-		t.Fatalf("registry alias was mutated through Resolve: %q", got)
-	}
-
-	for _, test := range []struct {
-		name    string
-		aliases map[string]string
-	}{
-		{name: "empty alias", aliases: map[string]string{"": "doubao-seed-evolving"}},
-		{name: "wrong canonical target", aliases: map[string]string{rawAlias: "other-model"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			profiles := testAgentProfiles()
-			profiles[1].ModelUsageAliases = test.aliases
-			if _, err := NewAgentProfileRegistry(profiles); !errors.Is(err, ErrAgentProfileInvalid) {
-				t.Fatalf("NewAgentProfileRegistry error = %v, want ErrAgentProfileInvalid", err)
-			}
-		})
 	}
 }
 
-func TestAgentProfileRegistry_CapabilitiesIncludeLockedAndUnavailableProfiles(t *testing.T) {
-	profiles := testAgentProfiles()
-	profiles[2].Available = false
-	profiles[2].UnavailableReason = "provider_configuration_missing"
-	registry, err := NewAgentProfileRegistry(profiles)
+func testCostCatalog() billing.CostCatalog {
+	return billing.CostCatalog{Models: map[string]billing.ModelCostConfig{
+		"deepseek/deepseek-v4-flash": {PricingType: "token"},
+		"zhipu/glm-5.2":              {PricingType: "token"},
+		"moonshot/kimi-k3":           {PricingType: "token"},
+		"moonshot/kimi-k2.7-code":    {PricingType: "token"},
+	}}
+}
+
+func TestAgentProfileRegistryDoesNotHardCodeProviderIdentity(t *testing.T) {
+	costs := billing.CostCatalog{Models: map[string]billing.ModelCostConfig{"zhipu/glm-5.2": {PricingType: "token"}}}
+	registry, err := NewAgentProfileRegistryFromConfig(
+		map[string]srvconfig.ClaudeProviderConfig{"zhipu": {Protocol: "anthropic", BaseURL: "https://open.bigmodel.cn/api/anthropic", AuthToken: "secret"}},
+		map[string]srvconfig.ClaudeExecutionProfileConfig{"cost_effective": {
+			Provider: "zhipu", Models: testMatrix("glm-5.2"), ModelUsageAliases: map[string]string{"glm-5.2": "glm-5.2"},
+		}}, costs,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got, err := registry.ResolveForTier("cost_effective", model.TierFree)
+	if err != nil || got.Provider != "zhipu" || got.Models.Default != "glm-5.2" {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}
 
+func TestAgentProfileRegistryMarksOnlyUnmappedProfileUnavailable(t *testing.T) {
+	profiles := testProfileConfig()
+	costs := testCostCatalog()
+	delete(costs.Models, "zhipu/glm-5.2")
+	registry, err := NewAgentProfileRegistryFromConfig(testProviderConfig(), profiles, costs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := registry.Resolve("cost_effective"); !got.Available {
+		t.Fatalf("cost_effective = %#v", got)
+	}
+	if got, _ := registry.Resolve("balanced"); got.Available || got.UnavailableReason != "agent_model_cost_unmapped" {
+		t.Fatalf("balanced = %#v", got)
+	}
+}
+
+func TestAgentProfileRegistryConstructionDoesNotProbeProviderNetwork(t *testing.T) {
+	providers := testProviderConfig()
+	providers["deepseek"] = srvconfig.ClaudeProviderConfig{Protocol: "anthropic", BaseURL: "https://127.0.0.1:1/anthropic", AuthToken: "secret"}
+	if _, err := NewAgentProfileRegistryFromConfig(providers, testProfileConfig(), testCostCatalog()); err != nil {
+		t.Fatalf("registry construction must not dial provider: %v", err)
+	}
+}
+
+func TestResolveRuntimeKeepsFrozenModelsAndUsesCurrentProviderConnection(t *testing.T) {
+	providers := testProviderConfig()
+	profiles := testProfileConfig()
+	registry, err := NewAgentProfileRegistryFromConfig(providers, profiles, testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen := model.AgentProfileSnapshot{
+		SchemaVersion: 2, ProfileID: "maximum_quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic",
+		Models: model.AgentModelMatrix{Default: "kimi-k2.7-code", Opus: "kimi-k2.7-code", Fable: "kimi-k2.7-code", Sonnet: "kimi-k2.7-code", Haiku: "kimi-k2.7-code"},
+		Claude: model.AgentClaudeControls{}, ModelUsageAliases: map[string]string{"kimi-k2.7-code": "kimi-k2.7-code"},
+	}
+	fingerprint, err := model.AgentProfileFingerprint(frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers["moonshot"] = srvconfig.ClaudeProviderConfig{Protocol: "anthropic", BaseURL: "https://rotated.moonshot.test/anthropic", AuthToken: "rotated-secret"}
+	registry, err = NewAgentProfileRegistryFromConfig(providers, profiles, testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := registry.ResolveRuntime("maximum_quality", frozen, fingerprint)
+	if err != nil || got.Models.Default != "kimi-k2.7-code" || got.BaseURL != "https://rotated.moonshot.test/anthropic" || got.AuthToken != "rotated-secret" {
+		t.Fatalf("ResolveRuntime = %#v, %v", got, err)
+	}
+
+	delete(providers, "moonshot")
+	registry, err = NewAgentProfileRegistryFromConfig(providers, profiles, testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.ResolveRuntime("maximum_quality", frozen, fingerprint); !errors.Is(err, ErrAgentProviderUnavailable) {
+		t.Fatalf("ResolveRuntime missing provider = %v", err)
+	}
+}
+
+func TestResolveRuntimeRejectsSnapshotAndFingerprintConflict(t *testing.T) {
+	registry, err := NewAgentProfileRegistryFromConfig(testProviderConfig(), testProfileConfig(), testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := registry.ResolveForTier("balanced", model.TierPro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Models.Default = "drifted"
+	if _, err := registry.ResolveRuntime("balanced", snapshot, fingerprint); !errors.Is(err, ErrAgentProfileSnapshotMismatch) {
+		t.Fatalf("ResolveRuntime conflict = %v", err)
+	}
+}
+
+func TestAgentProfileRegistryCapabilitiesAndTierAccess(t *testing.T) {
+	registry, err := NewAgentProfileRegistryFromConfig(testProviderConfig(), testProfileConfig(), testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
 	capabilities := registry.CapabilitiesForTier(model.TierFree)
-	if len(capabilities) != 3 {
-		t.Fatalf("capabilities = %d, want 3", len(capabilities))
+	if len(capabilities) != 3 || capabilities[0].ID != "cost_effective" || !capabilities[0].Available || capabilities[1].UnavailableReason != "requires_pro" || capabilities[2].UnavailableReason != "requires_enterprise" {
+		t.Fatalf("capabilities = %#v", capabilities)
 	}
-	if !capabilities[0].Available || capabilities[0].ID != "cost_effective" {
-		t.Fatalf("free capability = %#v", capabilities[0])
+	if _, err := registry.ResolveForTier("maximum_quality", model.TierPro); !errors.Is(err, ErrAgentProfileAccessDenied) {
+		t.Fatalf("maximum_quality for Pro = %v", err)
 	}
-	if capabilities[1].Available || capabilities[1].UnavailableReason != "requires_pro" {
-		t.Fatalf("balanced capability = %#v", capabilities[1])
-	}
-	if capabilities[2].Available || capabilities[2].UnavailableReason != "provider_configuration_missing" {
-		t.Fatalf("maximum capability = %#v", capabilities[2])
+	if got := registry.DefaultForTier(model.TierEnterprise); got.ID != "cost_effective" {
+		t.Fatalf("default = %#v", got)
 	}
 }
 
-func TestAgentProfileRegistry_ResolveRuntimePreservesFrozenControlsAndRejectsIdentityDrift(t *testing.T) {
-	profiles := testAgentProfiles()
-	snapshot := profiles[2].Snapshot()
-	profiles[2].BaseURL = "https://rotated.kimi.example.com/coding/"
-	profiles[2].AuthToken = "rotated-secret"
-	profiles[2].DisplayName = "renamed after task creation"
-	profiles[2].ContextWindow = 524288
-	profiles[2].ReasoningEffort = "medium"
-	registry, err := NewAgentProfileRegistry(profiles)
+func TestAgentProfileSnapshotAndRegistryCopiesAreImmutable(t *testing.T) {
+	profiles := testProfileConfig()
+	registry, err := NewAgentProfileRegistryFromConfig(testProviderConfig(), profiles, testCostCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := registry.ResolveRuntime("maximum_quality", snapshot)
-	if err != nil || resolved.ModelID != "k3" || resolved.BaseURL != "https://rotated.kimi.example.com/coding/" || resolved.AuthToken != "rotated-secret" {
-		t.Fatalf("ResolveRuntime = %#v, %v", resolved, err)
-	}
-	if resolved.ContextWindow != snapshot.ContextWindow || resolved.ReasoningEffort != snapshot.ReasoningEffort || resolved.ThinkingRequired != snapshot.ThinkingRequired || resolved.DisplayName != snapshot.DisplayName {
-		t.Fatalf("runtime controls = %#v, want frozen snapshot %#v", resolved, snapshot)
-	}
-
-	drifted := snapshot
-	drifted.ModelID = "replacement-model"
-	if _, err := registry.ResolveRuntime("maximum_quality", drifted); !errors.Is(err, ErrAgentProfileSnapshotMismatch) {
-		t.Fatalf("drift error = %v, want ErrAgentProfileSnapshotMismatch", err)
-	}
-
-	profiles[2].Available = false
-	profiles[2].UnavailableReason = "provider_configuration_missing"
-	unavailable, err := NewAgentProfileRegistry(profiles)
+	profiles["balanced"].ModelUsageAliases["glm-5.2"] = "mutated"
+	first, err := registry.Resolve("balanced")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := unavailable.ResolveRuntime("maximum_quality", snapshot); !errors.Is(err, ErrAgentProfileUnavailable) {
-		t.Fatalf("unavailable error = %v, want ErrAgentProfileUnavailable", err)
+	first.ModelUsageAliases["glm-5.2"] = "mutated-again"
+	second, _ := registry.Resolve("balanced")
+	if second.ModelUsageAliases["glm-5.2"] != "glm-5.2" {
+		t.Fatalf("registry alias mutated: %#v", second.ModelUsageAliases)
+	}
+	snapshot, fingerprint, err := second.Freeze()
+	if err != nil || len(fingerprint) != 64 || strings.Contains(string(mustJSON(t, snapshot)), "secret") {
+		t.Fatalf("Freeze = %#v %q %v", snapshot, fingerprint, err)
 	}
 }
 
-func TestNewAgentProfileRegistryFromConfigFailsClosed(t *testing.T) {
-	configured := map[string]srvconfig.ClaudeExecutionProfileConfig{}
-	for _, profile := range testAgentProfiles() {
-		baseURL := "https://agent.example.com/"
-		if profile.ID == "maximum_quality" {
-			baseURL = "https://api.kimi.com/coding/"
-		}
-		configured[profile.ID] = srvconfig.ClaudeExecutionProfileConfig{
-			DisplayName: profile.DisplayName, ModelName: profile.ModelName, Description: profile.Description,
-			Provider: profile.Provider, ModelID: profile.ModelID, Protocol: profile.Protocol,
-			BaseURL: baseURL, AuthToken: "test-token", MinTier: profile.MinTier,
-			ContextWindow: profile.ContextWindow, ReasoningEffort: profile.ReasoningEffort,
-			ThinkingRequired: profile.ThinkingRequired,
-		}
-	}
-
-	missingSecret := cloneProfileConfig(configured)
-	item := missingSecret["cost_effective"]
-	item.AuthToken = ""
-	missingSecret["cost_effective"] = item
-	registry, err := NewAgentProfileRegistryFromConfig(missingSecret)
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
 	if err != nil {
-		t.Fatalf("missing secret should publish unavailable capability: %v", err)
+		t.Fatal(err)
 	}
-	profile, err := registry.Resolve("cost_effective")
-	if err != nil || profile.Available || profile.UnavailableReason != "provider_configuration_missing" {
-		t.Fatalf("missing-secret profile = %#v, %v", profile, err)
-	}
-
-	balancedWithoutDedicatedCredential := cloneProfileConfig(configured)
-	balanced := balancedWithoutDedicatedCredential["balanced"]
-	balanced.AuthToken = ""
-	balancedWithoutDedicatedCredential["balanced"] = balanced
-	registry, err = NewAgentProfileRegistryFromConfig(balancedWithoutDedicatedCredential)
-	if err != nil {
-		t.Fatalf("missing balanced credential must not prevent registry startup: %v", err)
-	}
-	if _, err := registry.ResolveForTier("balanced", model.TierPro); !errors.Is(err, ErrAgentProfileUnavailable) {
-		t.Fatalf("balanced without its dedicated credential = %v, want ErrAgentProfileUnavailable", err)
-	}
-
-	if values := cloneProfileConfig(configured); true {
-		delete(values, "balanced")
-		registry, err := NewAgentProfileRegistryFromConfig(values)
-		if err != nil {
-			t.Fatalf("missing known profile must remain listable: %v", err)
-		}
-		profile, err := registry.Resolve("balanced")
-		if err != nil || profile.Available || profile.UnavailableReason != "provider_configuration_missing" {
-			t.Fatalf("synthesized balanced profile = %#v, %v", profile, err)
-		}
-	}
-
-	if values := cloneProfileConfig(configured); true {
-		values["unknown"] = srvconfig.ClaudeExecutionProfileConfig{}
-		if _, err := NewAgentProfileRegistryFromConfig(values); !errors.Is(err, ErrAgentProfileInvalid) {
-			t.Fatalf("unknown profile error = %v, want ErrAgentProfileInvalid", err)
-		}
-	}
-
-	tests := []struct {
-		name   string
-		id     string
-		mutate func(map[string]srvconfig.ClaudeExecutionProfileConfig)
-	}{
-		{name: "missing provider", id: "balanced", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["balanced"]
-			value.Provider = ""
-			values["balanced"] = value
-		}},
-		{name: "missing model", id: "balanced", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["balanced"]
-			value.ModelID = ""
-			values["balanced"] = value
-		}},
-		{name: "missing protocol", id: "balanced", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["balanced"]
-			value.Protocol = ""
-			values["balanced"] = value
-		}},
-		{name: "unsupported provider", id: "balanced", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["balanced"]
-			value.Provider = "other"
-			values["balanced"] = value
-		}},
-		{name: "non https endpoint", id: "cost_effective", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["cost_effective"]
-			value.BaseURL = "http://deepseek.example.com"
-			values["cost_effective"] = value
-		}},
-		{name: "wrong kimi endpoint", id: "maximum_quality", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["maximum_quality"]
-			value.BaseURL = "https://kimi.example.com"
-			values["maximum_quality"] = value
-		}},
-		{name: "wrong kimi context", id: "maximum_quality", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["maximum_quality"]
-			value.ContextWindow = 0
-			values["maximum_quality"] = value
-		}},
-		{name: "kimi thinking disabled", id: "maximum_quality", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["maximum_quality"]
-			value.ThinkingRequired = false
-			values["maximum_quality"] = value
-		}},
-		{name: "kimi effort not high", id: "maximum_quality", mutate: func(values map[string]srvconfig.ClaudeExecutionProfileConfig) {
-			value := values["maximum_quality"]
-			value.ReasoningEffort = "medium"
-			values["maximum_quality"] = value
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			values := cloneProfileConfig(configured)
-			tt.mutate(values)
-			registry, err := NewAgentProfileRegistryFromConfig(values)
-			if err != nil {
-				t.Fatalf("profile configuration should remain listable: %v", err)
-			}
-			profile, err := registry.Resolve(tt.id)
-			if err != nil || profile.Available || profile.UnavailableReason == "" {
-				t.Fatalf("misconfigured profile = %#v, %v", profile, err)
-			}
-		})
-	}
-}
-
-func cloneProfileConfig(source map[string]srvconfig.ClaudeExecutionProfileConfig) map[string]srvconfig.ClaudeExecutionProfileConfig {
-	result := make(map[string]srvconfig.ClaudeExecutionProfileConfig, len(source))
-	for id, profile := range source {
-		result[id] = profile
-	}
-	return result
-}
-
-func testAgentProfiles() []AgentExecutionProfile {
-	return []AgentExecutionProfile{
-		{
-			ID: "cost_effective", DisplayName: "性价比", ModelName: "DeepSeek 4 Pro",
-			Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic",
-			MinTier: model.TierFree, Description: "低成本高效率", Available: true,
-		},
-		{
-			ID: "balanced", DisplayName: "平衡型", ModelName: "豆包",
-			Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic",
-			MinTier: model.TierPro, Description: "速度与效果平衡", Available: true,
-		},
-		{
-			ID: "maximum_quality", DisplayName: "极致效果", ModelName: "Kimi K3（1M）",
-			Provider: "kimi", ModelID: "k3", Protocol: "anthropic",
-			MinTier: model.TierEnterprise, ContextWindow: 1048576,
-			ReasoningEffort: "high", ThinkingRequired: true, Description: "旗舰质量", Available: true,
-		},
-	}
-}
-
-func TestAgentProfileRegistry_AccessibilityAndSelection(t *testing.T) {
-	registry, err := NewAgentProfileRegistry(testAgentProfiles())
-	if err != nil {
-		t.Fatalf("NewAgentProfileRegistry: %v", err)
-	}
-
-	tests := []struct {
-		name        string
-		tier        model.Tier
-		wantIDs     []string
-		wantDefault string
-	}{
-		{name: "free", tier: model.TierFree, wantIDs: []string{"cost_effective"}, wantDefault: "cost_effective"},
-		{name: "pro", tier: model.TierPro, wantIDs: []string{"cost_effective", "balanced"}, wantDefault: "cost_effective"},
-		{name: "enterprise", tier: model.TierEnterprise, wantIDs: []string{"cost_effective", "balanced", "maximum_quality"}, wantDefault: "cost_effective"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			profiles := registry.ListForTier(tt.tier)
-			gotIDs := make([]string, 0, len(profiles))
-			for _, profile := range profiles {
-				gotIDs = append(gotIDs, profile.ID)
-			}
-			if len(gotIDs) != len(tt.wantIDs) {
-				t.Fatalf("profiles = %#v, want ids %#v", gotIDs, tt.wantIDs)
-			}
-			for i := range gotIDs {
-				if gotIDs[i] != tt.wantIDs[i] {
-					t.Fatalf("profile[%d] = %q, want %q", i, gotIDs[i], tt.wantIDs[i])
-				}
-			}
-			if got := registry.DefaultForTier(tt.tier); got.ID != tt.wantDefault {
-				t.Fatalf("default profile = %q, want %q", got.ID, tt.wantDefault)
-			}
-		})
-	}
-
-	if _, err := registry.ResolveForTier("maximum_quality", model.TierPro); err == nil {
-		t.Fatal("Pro user must not resolve enterprise-only profile")
-	}
-}
-
-func TestAgentProfileRegistry_RejectsInvalidProfiles(t *testing.T) {
-	cases := []struct {
-		name   string
-		mutate func([]AgentExecutionProfile)
-	}{
-		{name: "duplicate id", mutate: func(profiles []AgentExecutionProfile) { profiles[1].ID = profiles[0].ID }},
-		{name: "missing model", mutate: func(profiles []AgentExecutionProfile) { profiles[0].ModelID = "" }},
-		{name: "invalid protocol", mutate: func(profiles []AgentExecutionProfile) { profiles[0].Protocol = "openai" }},
-		{name: "required thinking without effort", mutate: func(profiles []AgentExecutionProfile) { profiles[2].ReasoningEffort = "" }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			profiles := testAgentProfiles()
-			tc.mutate(profiles)
-			if _, err := NewAgentProfileRegistry(profiles); err == nil {
-				t.Fatal("expected invalid profile error")
-			}
-		})
-	}
-}
-
-func TestAgentProfileRegistry_SnapshotIsNonSensitiveAndStable(t *testing.T) {
-	registry, err := NewAgentProfileRegistry(testAgentProfiles())
-	if err != nil {
-		t.Fatalf("NewAgentProfileRegistry: %v", err)
-	}
-	profile, err := registry.ResolveForTier("maximum_quality", model.TierEnterprise)
-	if err != nil {
-		t.Fatalf("ResolveForTier: %v", err)
-	}
-	snapshot := profile.Snapshot()
-	if snapshot.ProfileID != "maximum_quality" || snapshot.ModelID != "k3" || snapshot.ContextWindow != 1048576 {
-		t.Fatalf("snapshot = %#v", snapshot)
-	}
-	if snapshot.AuthToken != "" || snapshot.BaseURL != "" {
-		t.Fatalf("snapshot contains sensitive/provider routing data: %#v", snapshot)
-	}
+	return raw
 }

@@ -87,7 +87,11 @@ func main() {
 	if err := config.ValidateImagePresets(cfg.ImagePresets); err != nil {
 		log.Fatal().Err(err).Msg("invalid image_presets configuration")
 	}
-	agentProfiles, err := service.NewAgentProfileRegistryFromConfig(cfg.Claude.ExecutionProfiles)
+	billingBundle, err := serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)
+	if err != nil {
+		log.Fatal().Err(err).Msg("load billing bundle")
+	}
+	agentProfiles, err := service.NewAgentProfileRegistryFromConfig(cfg.Claude.Providers, cfg.Claude.ExecutionProfiles, billingBundle.Costs)
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid agent execution profile configuration")
 	}
@@ -137,7 +141,7 @@ func main() {
 	if mysqlDB != nil {
 		repo = repository.New(mysqlDB)
 	}
-	fixedBilling, err := buildBillingRuntime(context.Background(), mysqlDB, repo, cfg, log)
+	fixedBilling, err := buildBillingRuntime(context.Background(), mysqlDB, repo, billingBundle, cfg, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize fixed-SKU billing runtime")
 	}
@@ -1041,7 +1045,7 @@ type billingRuntimeServices struct {
 	AdminHandler *handler.BillingAdminHandler
 }
 
-func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repository, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
+func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repository, bundle *serverbilling.Bundle, cfg *config.Config, log *zerolog.Logger) (*billingRuntimeServices, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("billing repository is required")
 	}
@@ -1054,9 +1058,8 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 	if strings.TrimSpace(cfg.BillingRuntime.AdminAPIKey) == "" {
 		return nil, fmt.Errorf("billing_runtime.admin_api_key is required")
 	}
-	bundle, err := serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)
-	if err != nil {
-		return nil, fmt.Errorf("load billing bundle: %w", err)
+	if bundle == nil {
+		return nil, fmt.Errorf("billing bundle is required")
 	}
 	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{})
 	if _, err := catalog.Publish(ctx); err != nil {
