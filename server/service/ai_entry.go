@@ -273,7 +273,7 @@ func (s *AIEntryService) recordIntentCost(ctx context.Context, usage srvconfig.T
 	}
 	providerRequestID := "internal:server_internal:" + uuid.NewString()
 	var err error
-	if usage.TotalTokens <= 0 && usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+	if usage.InputTokens <= 0 && usage.CachedInputTokens <= 0 && usage.CacheReadInputTokens <= 0 && usage.CacheCreationInputTokens <= 0 && usage.OutputTokens <= 0 {
 		_, err = s.costs.RecordProviderTokenUnreconciled(ctx, RecordProviderTokenUnreconciledRequest{
 			Provider: s.config.ProviderKey, Model: s.config.Model, ProviderRequestID: providerRequestID,
 			ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,

@@ -208,8 +208,12 @@ func responseModel(respModel, fallback string) string {
 }
 
 func chatCompletionUsage(usage openai.CompletionUsage) srvconfig.TokenUsage {
+	uncachedPromptTokens := usage.PromptTokens - usage.PromptTokensDetails.CachedTokens
+	if uncachedPromptTokens < 0 {
+		uncachedPromptTokens = 0
+	}
 	return srvconfig.TokenUsage{
-		InputTokens:       usage.PromptTokens,
+		InputTokens:       uncachedPromptTokens,
 		CachedInputTokens: usage.PromptTokensDetails.CachedTokens,
 		OutputTokens:      usage.CompletionTokens,
 		TotalTokens:       usage.TotalTokens,

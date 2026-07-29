@@ -710,6 +710,26 @@ func TestAIEntryRecordsMissingUsageAsUnreconciled(t *testing.T) {
 	}
 }
 
+func TestAIEntryRecordsTotalOnlyUsageAsUnreconciled(t *testing.T) {
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"整理成文章"}`}, usage: srvconfig.TokenUsage{TotalTokens: 42}}
+	costs := &fakeProviderTokenCostRecorder{}
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	logger := zerolog.New(io.Discard)
+	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "cost_effective", Text: "整理成文章",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs.reconciled) != 0 || len(costs.unreconciled) != 1 {
+		t.Fatalf("costs=%#v/%#v, want one unreconciled event", costs.reconciled, costs.unreconciled)
+	}
+}
+
 func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
