@@ -146,7 +146,7 @@ model_providers:
     base_url: http://18.141.196.64:18888/v1
     api_key: "${WANGCAI_OPENAI_API_KEY}"
 model_routes:
-  writing:
+  server_internal:
     provider: moonshot
     model: kimi-k2.7-code
     timeout: 5m
@@ -159,7 +159,6 @@ model_routes:
     provider: moonshot
     model: kimi-k2.7-code-highspeed
     timeout: 180s
-    require_usage: true
     require_native_video: true
   image_generation:
     cover:
@@ -227,8 +226,8 @@ claude:
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 
-	if cfg.Writing.Model != "kimi-k2.7-code" || cfg.Writing.BaseURL != "https://api.moonshot.cn/v1" {
-		t.Fatalf("derived writing config = %#v", cfg.Writing)
+	if cfg.ServerInternal.Model != "kimi-k2.7-code" || cfg.ServerInternal.BaseURL != "https://api.moonshot.cn/v1" {
+		t.Fatalf("derived server internal config = %#v", cfg.ServerInternal)
 	}
 	if cfg.ImageUnderstanding.Model != "kimi-k2.7-code-highspeed" || !cfg.ImageUnderstanding.RequireUsage {
 		t.Fatalf("image understanding route = %#v", cfg.ImageUnderstanding)
@@ -274,6 +273,67 @@ claude:
 	}
 	if !seedreamRoute.Capabilities.Watermark {
 		t.Fatalf("seedream watermark capability = false, want true")
+	}
+}
+
+func TestSemanticModelConfigRejectsWritingRoute(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_routes:
+  writing:
+    provider: moonshot
+    model: kimi-k2.7-code
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+	if err := os.WriteFile(cfgPath, body, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewConfig(cfgPath)
+	if err == nil {
+		t.Fatal("NewConfig() succeeded, want model_routes.writing error")
+	}
+	if !strings.Contains(err.Error(), "model_routes.writing") {
+		t.Fatalf("error = %v, want model_routes.writing hint", err)
+	}
+}
+
+func TestSemanticModelConfigRejectsNonNativeVideoUnderstandingRoute(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_routes:
+  video_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code-highspeed
+    require_native_video: false
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+	if err := os.WriteFile(cfgPath, body, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewConfig(cfgPath)
+	if err == nil {
+		t.Fatal("NewConfig() succeeded, want native-video requirement error")
+	}
+	if !strings.Contains(err.Error(), "model_routes.video_understanding.require_native_video must be true") {
+		t.Fatalf("error = %v, want native-video requirement hint", err)
 	}
 }
 

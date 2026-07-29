@@ -30,8 +30,7 @@ type Config struct {
 	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
-	Writing            WritingConfig                   `yaml:"writing"`
-	Vision             VisionConfig                    `yaml:"vision"`
+	ServerInternal     SemanticModelConfig             `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
 	BillingRuntime     BillingRuntimeConfig            `yaml:"billing_runtime" json:"billing_runtime"`
@@ -362,10 +361,13 @@ type UnderstandingRouteConfig struct {
 	RequireUsage bool `yaml:"require_usage"`
 }
 
+type ServerInternalRouteConfig struct {
+	RouteConfig `yaml:",inline"`
+}
+
 type VideoUnderstandingRouteConfig struct {
-	UnderstandingRouteConfig `yaml:",inline"`
-	RequireNativeVideo       bool   `yaml:"require_native_video"`
-	MaxRecommendedResolution string `yaml:"max_recommended_resolution"`
+	RouteConfig        `yaml:",inline"`
+	RequireNativeVideo bool `yaml:"require_native_video"`
 }
 
 type ImageGenerationRouteConfig struct {
@@ -400,7 +402,7 @@ type DesignerProviderCapabilities struct {
 }
 
 type ModelRoutesConfig struct {
-	Writing            RouteConfig                   `yaml:"writing"`
+	ServerInternal     ServerInternalRouteConfig     `yaml:"server_internal"`
 	ImageUnderstanding UnderstandingRouteConfig      `yaml:"image_understanding"`
 	VideoUnderstanding VideoUnderstandingRouteConfig `yaml:"video_understanding"`
 	ImageGeneration    ImageGenerationRoutesConfig   `yaml:"image_generation"`
@@ -537,26 +539,13 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 	return c.designerOrder
 }
 
-// WritingConfig holds the default OpenAI-compatible text LLM route for
-// LLM-backed writing-adjacent services.
-//
-// Markdown-to-WeChat HTML conversion is deterministic and does not use this
-// route.
-type WritingConfig struct {
-	BaseURL string        `yaml:"base_url"` // LLM API endpoint
-	Key     string        `yaml:"key"`      // API key
-	Model   string        `yaml:"model"`    // Model name
-	Timeout time.Duration `yaml:"timeout"`  // LLM request timeout (default 5m)
-}
-
-// VisionConfig holds LLM API configuration for vision/image analysis services.
-// Uses OpenAI-compatible /chat/completions with image content blocks.
-// Falls back to Writing config when not configured.
-type VisionConfig struct {
-	BaseURL string        `yaml:"base_url"` // Vision LLM API endpoint (OpenAI-compatible)
-	Key     string        `yaml:"key"`      // API key
-	Model   string        `yaml:"model"`    // Model name (must support vision/image input)
-	Timeout time.Duration `yaml:"timeout"`  // Request timeout (default 60s)
+// SemanticModelConfig is the provider-resolved route used only for synchronous
+// Server-internal decisions before agent execution.
+type SemanticModelConfig struct {
+	BaseURL string
+	Key     string
+	Model   string
+	Timeout time.Duration
 }
 
 // TingWuConfig holds Alibaba TingWu speech analysis configuration.
@@ -942,7 +931,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 	}
 	deprecated := map[string]string{
 		"vision":    "model_routes.image_understanding and model_routes.video_understanding",
-		"writing":   "model_routes.writing",
+		"writing":   "model_routes.server_internal",
 		"image_api": "model_routes.image_generation",
 	}
 	for key, replacement := range deprecated {
@@ -980,6 +969,20 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		}
 	}
 	if modelRoutes, ok := top["model_routes"].(map[string]any); ok {
+		if _, ok := modelRoutes["writing"]; ok {
+			return fmt.Errorf("deprecated config key model_routes.writing; use model_routes.server_internal")
+		}
+		knownModelRoutes := map[string]bool{
+			"server_internal":     true,
+			"image_understanding": true,
+			"video_understanding": true,
+			"image_generation":    true,
+		}
+		for key := range modelRoutes {
+			if !knownModelRoutes[key] {
+				return fmt.Errorf("unknown model_routes config key %s", key)
+			}
+		}
 		if imageGeneration, ok := modelRoutes["image_generation"].(map[string]any); ok {
 			if _, ok := imageGeneration["sizes"]; ok {
 				return fmt.Errorf("deprecated config key model_routes.image_generation.sizes; put business image sizes in the relevant Skill workflow")
@@ -1112,9 +1115,9 @@ func (c *Config) applyDefaults() {
 		c.Email.SMTPPort = 587
 	}
 
-	// Writing LLM defaults.
-	if c.Writing.Timeout == 0 {
-		c.Writing.Timeout = 10 * time.Minute
+	// Server-internal semantic route defaults.
+	if (c.ModelRoutes.ServerInternal.Model != "" || c.ModelRoutes.ServerInternal.Provider != "") && c.ModelRoutes.ServerInternal.Timeout == 0 {
+		c.ModelRoutes.ServerInternal.Timeout = 10 * time.Minute
 	}
 	// Seednote sidecar defaults.
 	if c.Seednote.BaseURL == "" {
@@ -1226,12 +1229,17 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		}
 		return p, nil
 	}
-	if c.ModelRoutes.Writing.Model != "" || c.ModelRoutes.Writing.Provider != "" {
-		p, err := provider("model_routes.writing", c.ModelRoutes.Writing.Provider)
+	if c.ModelRoutes.ServerInternal.Model != "" || c.ModelRoutes.ServerInternal.Provider != "" {
+		p, err := provider("model_routes.server_internal", c.ModelRoutes.ServerInternal.Provider)
 		if err != nil {
 			return err
 		}
-		c.Writing = WritingConfig{BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.Writing.Model, Timeout: c.ModelRoutes.Writing.Timeout}
+		c.ServerInternal = SemanticModelConfig{
+			BaseURL: p.BaseURL,
+			Key:     p.APIKey,
+			Model:   c.ModelRoutes.ServerInternal.Model,
+			Timeout: c.ModelRoutes.ServerInternal.Timeout,
+		}
 	}
 	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
 		p, err := provider("model_routes.image_understanding", c.ModelRoutes.ImageUnderstanding.Provider)
@@ -1253,10 +1261,9 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			UnderstandingRuntimeConfig: UnderstandingRuntimeConfig{
 				BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.VideoUnderstanding.Model,
 				Provider: providerKind(c.ModelRoutes.VideoUnderstanding.Provider), ProviderKey: c.ModelRoutes.VideoUnderstanding.Provider,
-				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout, RequireUsage: c.ModelRoutes.VideoUnderstanding.RequireUsage,
+				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout,
 			},
-			RequireNativeVideo:       c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
-			MaxRecommendedResolution: c.ModelRoutes.VideoUnderstanding.MaxRecommendedResolution,
+			RequireNativeVideo: c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
 		}
 	}
 	if c.ModelRoutes.ImageGeneration.Cover.Model != "" || c.ModelRoutes.ImageGeneration.Cover.Provider != "" {
@@ -1582,6 +1589,12 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.TingWu.AccessSecret) == "" {
 			errs = append(errs, "tingwu.access_secret is required when any TingWu setting is configured")
+		}
+	}
+
+	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
+		if !c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
+			errs = append(errs, "model_routes.video_understanding.require_native_video must be true")
 		}
 	}
 

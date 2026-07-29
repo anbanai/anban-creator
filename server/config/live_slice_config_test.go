@@ -106,10 +106,6 @@ claude:
 	if cfg.JWT.SecretKey != "real-secret" {
 		t.Errorf("jwt.secret_key = %q, want \"real-secret\" (env must not override without ${...})", cfg.JWT.SecretKey)
 	}
-	// Relocated default from the deleted applyEnvOverrides.
-	if cfg.Writing.Timeout == 0 {
-		t.Errorf("writing.timeout = 0, want default 10m after applyDefaults")
-	}
 }
 
 func TestTingWuConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
