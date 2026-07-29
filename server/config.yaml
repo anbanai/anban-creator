@@ -83,7 +83,9 @@ model_routes:
     provider: "moonshot"
     model: "kimi-k2.7-code-highspeed"
     timeout: 180s
+    require_usage: true
     require_native_video: true
+    max_recommended_resolution: "1920x1080"
 
   image_generation:
     cover:

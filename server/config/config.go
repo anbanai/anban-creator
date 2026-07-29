@@ -27,10 +27,10 @@ type Config struct {
 	WeChat             WeChatConfig                    `yaml:"wechat"`
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
-	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
+	ImageAPI           ImageAPIConfig                  `yaml:"-"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
-	ServerInternal     SemanticModelConfig             `yaml:"-"`
+	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
 	BillingRuntime     BillingRuntimeConfig            `yaml:"billing_runtime" json:"billing_runtime"`
@@ -361,13 +361,10 @@ type UnderstandingRouteConfig struct {
 	RequireUsage bool `yaml:"require_usage"`
 }
 
-type ServerInternalRouteConfig struct {
-	RouteConfig `yaml:",inline"`
-}
-
 type VideoUnderstandingRouteConfig struct {
-	RouteConfig        `yaml:",inline"`
-	RequireNativeVideo bool `yaml:"require_native_video"`
+	UnderstandingRouteConfig `yaml:",inline"`
+	RequireNativeVideo       bool   `yaml:"require_native_video"`
+	MaxRecommendedResolution string `yaml:"max_recommended_resolution"`
 }
 
 type ImageGenerationRouteConfig struct {
@@ -402,7 +399,7 @@ type DesignerProviderCapabilities struct {
 }
 
 type ModelRoutesConfig struct {
-	ServerInternal     ServerInternalRouteConfig     `yaml:"server_internal"`
+	ServerInternal     RouteConfig                   `yaml:"server_internal"`
 	ImageUnderstanding UnderstandingRouteConfig      `yaml:"image_understanding"`
 	VideoUnderstanding VideoUnderstandingRouteConfig `yaml:"video_understanding"`
 	ImageGeneration    ImageGenerationRoutesConfig   `yaml:"image_generation"`
@@ -539,13 +536,15 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 	return c.designerOrder
 }
 
-// SemanticModelConfig is the provider-resolved route used only for synchronous
+// ModelRuntimeConfig is the provider-resolved route used only for synchronous
 // Server-internal decisions before agent execution.
-type SemanticModelConfig struct {
-	BaseURL string
-	Key     string
-	Model   string
-	Timeout time.Duration
+type ModelRuntimeConfig struct {
+	BaseURL     string
+	Key         string
+	Model       string
+	Provider    string
+	ProviderKey string
+	Timeout     time.Duration
 }
 
 // TingWuConfig holds Alibaba TingWu speech analysis configuration.
@@ -1234,11 +1233,13 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		if err != nil {
 			return err
 		}
-		c.ServerInternal = SemanticModelConfig{
-			BaseURL: p.BaseURL,
-			Key:     p.APIKey,
-			Model:   c.ModelRoutes.ServerInternal.Model,
-			Timeout: c.ModelRoutes.ServerInternal.Timeout,
+		c.ServerInternal = ModelRuntimeConfig{
+			BaseURL:     p.BaseURL,
+			Key:         p.APIKey,
+			Model:       c.ModelRoutes.ServerInternal.Model,
+			Provider:    providerKind(c.ModelRoutes.ServerInternal.Provider),
+			ProviderKey: c.ModelRoutes.ServerInternal.Provider,
+			Timeout:     c.ModelRoutes.ServerInternal.Timeout,
 		}
 	}
 	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
@@ -1261,9 +1262,10 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			UnderstandingRuntimeConfig: UnderstandingRuntimeConfig{
 				BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.VideoUnderstanding.Model,
 				Provider: providerKind(c.ModelRoutes.VideoUnderstanding.Provider), ProviderKey: c.ModelRoutes.VideoUnderstanding.Provider,
-				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout,
+				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout, RequireUsage: c.ModelRoutes.VideoUnderstanding.RequireUsage,
 			},
-			RequireNativeVideo: c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
+			RequireNativeVideo:       c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
+			MaxRecommendedResolution: c.ModelRoutes.VideoUnderstanding.MaxRecommendedResolution,
 		}
 	}
 	if c.ModelRoutes.ImageGeneration.Cover.Model != "" || c.ModelRoutes.ImageGeneration.Cover.Provider != "" {
