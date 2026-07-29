@@ -15,8 +15,14 @@ import (
 func profileWithControls(controls model.AgentClaudeControls) AgentExecutionProfile {
 	return AgentExecutionProfile{
 		ID: "maximum_quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic",
-		Models: model.AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
-		Claude: controls, ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
+		Models: model.AgentModelMatrix{
+			Default: "kimi-default", Opus: "kimi-opus", Fable: "kimi-fable",
+			Sonnet: "kimi-sonnet", Haiku: "kimi-haiku",
+		},
+		Claude: controls, ModelUsageAliases: map[string]string{
+			"kimi-default": "kimi-k3", "kimi-opus": "kimi-k3", "kimi-fable": "kimi-k3",
+			"kimi-sonnet": "kimi-k3", "kimi-haiku": "kimi-k3",
+		},
 		BaseURL: "https://api.moonshot.cn/anthropic", AuthToken: "moonshot-secret", MinTier: model.TierEnterprise, Available: true,
 	}
 }
@@ -33,21 +39,23 @@ func TestAgentRuntimeProfileEmitsConfiguredFalseAndZero(t *testing.T) {
 }
 
 func TestAgentRuntimeProfileMapsEveryClaudeControl(t *testing.T) {
-	effort, enabled, integer, disabled, subagent := "max", true, 123, false, "kimi-k3[1m]"
+	effort, enabled, disabled, subagent := "max", true, false, "kimi-subagent"
+	contextTokens, outputTokens, thinkingTokens := 101, 202, 303
+	compactWindow, compactPercent := 404, 85
 	controls := model.AgentClaudeControls{
-		EffortLevel: &effort, AlwaysEnableEffort: &enabled, MaxContextTokens: &integer, MaxOutputTokens: &integer,
-		MaxThinkingTokens: &integer, DisableAdaptiveThinking: &disabled, DisableThinking: &disabled,
-		AutoCompactWindow: &integer, AutocompactPctOverride: &integer, Disable1MContext: &disabled,
+		EffortLevel: &effort, AlwaysEnableEffort: &enabled, MaxContextTokens: &contextTokens, MaxOutputTokens: &outputTokens,
+		MaxThinkingTokens: &thinkingTokens, DisableAdaptiveThinking: &disabled, DisableThinking: &enabled,
+		AutoCompactWindow: &compactWindow, AutocompactPctOverride: &compactPercent, Disable1MContext: &disabled,
 		SubagentModel: &subagent, EnableToolSearch: &enabled,
 	}
 	env := profileWithControls(controls).RuntimeEnv()
 	want := map[string]string{
 		"CLAUDE_CODE_EFFORT_LEVEL": "max", "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT": "true",
-		"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "123", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "123",
-		"MAX_THINKING_TOKENS": "123", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
-		"CLAUDE_CODE_DISABLE_THINKING": "false", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "123",
-		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "123", "CLAUDE_CODE_DISABLE_1M_CONTEXT": "false",
-		"CLAUDE_CODE_SUBAGENT_MODEL": "kimi-k3[1m]", "ENABLE_TOOL_SEARCH": "true",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "101", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "202",
+		"MAX_THINKING_TOKENS": "303", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
+		"CLAUDE_CODE_DISABLE_THINKING": "true", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "404",
+		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "85", "CLAUDE_CODE_DISABLE_1M_CONTEXT": "false",
+		"CLAUDE_CODE_SUBAGENT_MODEL": "kimi-subagent", "ENABLE_TOOL_SEARCH": "true",
 	}
 	for key, value := range want {
 		if env[key] != value {
@@ -56,9 +64,9 @@ func TestAgentRuntimeProfileMapsEveryClaudeControl(t *testing.T) {
 	}
 	for key, value := range map[string]string{
 		"ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic", "ANTHROPIC_AUTH_TOKEN": "moonshot-secret",
-		"ANTHROPIC_MODEL": "kimi-k3[1m]", "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k3[1m]",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL": "kimi-k3[1m]", "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3[1m]",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k3[1m]",
+		"ANTHROPIC_MODEL": "kimi-default", "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-opus",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL": "kimi-fable", "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-sonnet",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-haiku",
 	} {
 		if env[key] != value {
 			t.Fatalf("runtime env[%s] = %q", key, env[key])
@@ -92,6 +100,34 @@ func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
 			t.Fatalf("bootstrap JSON retained %q: %s", forbidden, encoded)
 		}
 	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	executionProfile, ok := payload["execution_profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("execution_profile = %#v", payload["execution_profile"])
+	}
+	aliases, ok := executionProfile["model_usage_aliases"].(map[string]any)
+	if !ok {
+		t.Fatalf("model_usage_aliases = %#v", executionProfile["model_usage_aliases"])
+	}
+	alias, ok := aliases["kimi-k3[1m]"].(map[string]any)
+	if !ok || alias["provider"] != "moonshot" || alias["model"] != "kimi-k3" {
+		t.Fatalf("model alias identity = %#v", aliases["kimi-k3[1m]"])
+	}
+	runtimeEnv, ok := executionProfile["runtime_env"].(map[string]any)
+	if !ok || runtimeEnv["ANTHROPIC_BASE_URL"] == "" || runtimeEnv["ANTHROPIC_AUTH_TOKEN"] == "" {
+		t.Fatalf("provider connection missing from runtime_env: %#v", executionProfile["runtime_env"])
+	}
+	delete(executionProfile, "runtime_env")
+	redacted, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(redacted), "api.moonshot.cn") || strings.Contains(string(redacted), "moonshot-secret") {
+		t.Fatalf("provider connection leaked outside runtime_env: %s", redacted)
+	}
 }
 
 func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
@@ -119,11 +155,11 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildResponse: %v", err)
 	}
-	if response.ExecutionProfile.Models.Default != "kimi-k3[1m]" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" {
+	if response.ExecutionProfile.Models.Default != "kimi-default" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile runtime response = %#v", response.ExecutionProfile)
 	}
 	wantAlias := serveragent.ModelUsageIdentity{Provider: "moonshot", Model: "kimi-k3"}
-	if len(response.ExecutionProfile.ModelUsageAliases) != 1 || response.ExecutionProfile.ModelUsageAliases["kimi-k3[1m]"] != wantAlias {
+	if len(response.ExecutionProfile.ModelUsageAliases) != 5 || response.ExecutionProfile.ModelUsageAliases["kimi-default"] != wantAlias {
 		t.Fatalf("model aliases = %#v", response.ExecutionProfile.ModelUsageAliases)
 	}
 
