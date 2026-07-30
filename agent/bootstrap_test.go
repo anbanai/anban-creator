@@ -31,21 +31,33 @@ func testClaudeRuntimeEnv() map[string]string {
 }
 
 func testAgentRuntimeProfile() service.AgentRuntimeProfile {
-	maxThinkingTokens := 0
-	enableToolSearch := false
-	return service.AgentRuntimeProfile{
+	profile := service.AgentRuntimeProfile{
 		ProfileID: "balanced", Provider: "zhipu", Protocol: "anthropic", DisplayName: "平衡型",
-		Models: model.AgentModelMatrix{
-			Default: "glm-5.2", Opus: "glm-5.2", Fable: "glm-5.2-air", Sonnet: "glm-5.2-air", Haiku: "glm-5.2-flash",
-		},
-		Claude:             model.AgentClaudeControls{MaxThinkingTokens: &maxThinkingTokens, EnableToolSearch: &enableToolSearch},
-		ProfileFingerprint: strings.Repeat("a", 64), RuntimeEnv: testClaudeRuntimeEnv(),
+		Envs: testClaudeRuntimeEnv(),
 		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
 			"glm-5.2":       {Provider: "zhipu", Model: "glm-5.2"},
 			"glm-5.2-air":   {Provider: "zhipu", Model: "glm-5.2-air"},
 			"glm-5.2-flash": {Provider: "zhipu", Model: "glm-5.2-flash"},
 		},
 	}
+	setTestAgentRuntimeProfileFingerprint(&profile)
+	return profile
+}
+
+func setTestAgentRuntimeProfileFingerprint(profile *service.AgentRuntimeProfile) {
+	aliases := make(map[string]string, len(profile.ModelUsageAliases))
+	for raw, identity := range profile.ModelUsageAliases {
+		aliases[raw] = identity.Model
+	}
+	fingerprint, err := model.AgentProfileFingerprint(model.AgentProfileSnapshot{
+		SchemaVersion: model.ClaudeProfileSchemaV3, ProfileID: profile.ProfileID, DisplayName: profile.DisplayName,
+		Provider: profile.Provider, Protocol: profile.Protocol,
+		Envs: model.RedactClaudeProfileEnvs(profile.Envs), ModelUsageAliases: aliases,
+	})
+	if err != nil {
+		panic(err)
+	}
+	profile.ProfileFingerprint = fingerprint
 }
 
 func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
@@ -345,6 +357,9 @@ func TestDecodeBoundedJSONRejectsUnknownFields(t *testing.T) {
 		`{"code":0,"msg":"ok","data":{},"unexpected":true}`,
 		`{"code":0,"msg":"ok","data":{"unexpected":true}}`,
 		`{"code":0,"msg":"ok","data":{"execution_profile":{"model_id":"legacy"}}}`,
+		`{"code":0,"msg":"ok","data":{"execution_profile":{"models":{}}}}`,
+		`{"code":0,"msg":"ok","data":{"execution_profile":{"claude":{}}}}`,
+		`{"code":0,"msg":"ok","data":{"execution_profile":{"runtime_env":{}}}}`,
 		`{"code":0,"msg":"ok","data":{"files":[{"path":"a","text":"x","mode":420,"unexpected":true}]}}`,
 	} {
 		var envelope bootstrapEnvelope
@@ -385,21 +400,17 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"invalid profile ID", func(r *BootstrapResponse) { r.ExecutionProfile.ProfileID = "custom" }},
 		{"invalid protocol", func(r *BootstrapResponse) { r.ExecutionProfile.Protocol = "openai" }},
 		{"invalid fingerprint", func(r *BootstrapResponse) { r.ExecutionProfile.ProfileFingerprint = "ABC" }},
-		{"missing matrix role", func(r *BootstrapResponse) { r.ExecutionProfile.Models.Haiku = "" }},
-		{"long matrix model", func(r *BootstrapResponse) {
-			r.ExecutionProfile.Models.Haiku = strings.Repeat("m", maxBootstrapModelBytes+1)
+		{"fingerprint mismatch", func(r *BootstrapResponse) { r.ExecutionProfile.Envs["MAX_THINKING_TOKENS"] = "1" }},
+		{"missing model env", func(r *BootstrapResponse) { delete(r.ExecutionProfile.Envs, "ANTHROPIC_DEFAULT_HAIKU_MODEL") }},
+		{"long model env", func(r *BootstrapResponse) {
+			r.ExecutionProfile.Envs["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = strings.Repeat("m", 16<<10+1)
 		}},
-		{"runtime matrix mismatch", func(r *BootstrapResponse) { r.ExecutionProfile.RuntimeEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "other" }},
-		{"runtime controls mismatch", func(r *BootstrapResponse) { delete(r.ExecutionProfile.RuntimeEnv, "ENABLE_TOOL_SEARCH") }},
-		{"runtime control without snapshot source", func(r *BootstrapResponse) {
-			r.ExecutionProfile.RuntimeEnv["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+		{"unknown profile environment", func(r *BootstrapResponse) { r.ExecutionProfile.Envs["PATH"] = "/tmp/bin" }},
+		{"empty profile environment value", func(r *BootstrapResponse) {
+			r.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] = ""
 		}},
-		{"unknown runtime environment", func(r *BootstrapResponse) { r.ExecutionProfile.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
-		{"empty runtime environment value", func(r *BootstrapResponse) {
-			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""}
-		}},
-		{"oversized runtime environment value", func(r *BootstrapResponse) {
-			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
+		{"oversized profile environment value", func(r *BootstrapResponse) {
+			r.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] = strings.Repeat("x", 16<<10+1)
 		}},
 		{"missing model usage aliases", func(r *BootstrapResponse) { r.ExecutionProfile.ModelUsageAliases = nil }},
 		{"missing matrix model alias", func(r *BootstrapResponse) { delete(r.ExecutionProfile.ModelUsageAliases, "glm-5.2-flash") }},
@@ -428,11 +439,22 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 }
 
 func TestValidateBootstrapExecutionProfileAcceptsStableIDsWithoutFixedProviderModelTuples(t *testing.T) {
-	for _, profileID := range []string{"cost_effective", "balanced", "maximum_quality"} {
+	for _, profileID := range []string{"effective", "balanced", "quality"} {
 		profile := testAgentRuntimeProfile()
 		profile.ProfileID = profileID
+		setTestAgentRuntimeProfileFingerprint(&profile)
 		if err := validateBootstrapExecutionProfile(profile); err != nil {
 			t.Fatalf("profile %q with transported provider/model matrix rejected: %v", profileID, err)
+		}
+	}
+}
+
+func TestValidateBootstrapExecutionProfileRejectsLegacyIDs(t *testing.T) {
+	for _, profileID := range []string{"cost_effective", "maximum_quality"} {
+		profile := testAgentRuntimeProfile()
+		profile.ProfileID = profileID
+		if err := validateBootstrapExecutionProfile(profile); err == nil {
+			t.Fatalf("legacy profile %q accepted", profileID)
 		}
 	}
 }

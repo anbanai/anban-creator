@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -31,7 +30,6 @@ const (
 	maxBootstrapTotalBytes   = 512 << 20
 	maxBootstrapFiles        = 256
 	maxBootstrapTurns        = 1000
-	maxBootstrapModelBytes   = 256
 	maxBootstrapPromptBytes  = 1 << 20
 	maxExecutionTokenBytes   = 16 << 10
 	bootstrapRequestTimeout  = 30 * time.Second
@@ -443,39 +441,24 @@ func validateBootstrapExecutionProfile(profile service.AgentRuntimeProfile) erro
 	if !validBootstrapProfileFingerprint(profile.ProfileFingerprint) {
 		return fmt.Errorf("bootstrap execution profile fingerprint is invalid")
 	}
-	for _, entry := range bootstrapModelMatrixEntries(profile.Models) {
-		if strings.TrimSpace(entry.model) != entry.model || entry.model == "" || len(entry.model) > maxBootstrapModelBytes || strings.ContainsAny(entry.model, "\x00\r\n") {
-			return fmt.Errorf("bootstrap execution profile model matrix is invalid")
-		}
-	}
 	canonicalAliases := make(map[string]string, len(profile.ModelUsageAliases))
 	for raw, identity := range profile.ModelUsageAliases {
 		canonicalAliases[raw] = identity.Model
 	}
 	snapshot := model.AgentProfileSnapshot{
-		SchemaVersion: 2, ProfileID: profile.ProfileID, DisplayName: profile.DisplayName,
-		Provider: profile.Provider, Protocol: profile.Protocol, Models: profile.Models,
-		Claude: profile.Claude, ModelUsageAliases: canonicalAliases,
+		SchemaVersion: model.ClaudeProfileSchemaV3, ProfileID: profile.ProfileID, DisplayName: profile.DisplayName,
+		Provider: profile.Provider, Protocol: profile.Protocol,
+		Envs: model.RedactClaudeProfileEnvs(profile.Envs), ModelUsageAliases: canonicalAliases,
 	}
 	if err := model.ValidateAgentProfileSnapshot(snapshot); err != nil {
 		return fmt.Errorf("bootstrap execution profile snapshot is invalid: %w", err)
 	}
-	if err := serveragent.ValidateClaudeRuntimeEnv(profile.RuntimeEnv); err != nil {
+	fingerprint, err := model.AgentProfileFingerprint(snapshot)
+	if err != nil || fingerprint != profile.ProfileFingerprint {
+		return fmt.Errorf("bootstrap execution profile fingerprint does not match snapshot")
+	}
+	if err := serveragent.ValidateClaudeRuntimeEnv(profile.Envs); err != nil {
 		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
-	}
-	if !validBootstrapProviderBaseURL(profile.RuntimeEnv["ANTHROPIC_BASE_URL"]) {
-		return fmt.Errorf("bootstrap runtime environment provider URL is invalid")
-	}
-	for _, entry := range bootstrapModelMatrixEntries(profile.Models) {
-		if profile.RuntimeEnv[entry.envKey] != entry.model {
-			return fmt.Errorf("bootstrap runtime environment model does not match profile")
-		}
-	}
-	for _, control := range bootstrapClaudeControlEntries(profile.Claude) {
-		emitted, exists := profile.RuntimeEnv[control.envKey]
-		if control.configured != exists || (control.configured && emitted != control.value) {
-			return fmt.Errorf("bootstrap runtime environment controls do not match profile")
-		}
 	}
 	if len(profile.ModelUsageAliases) == 0 {
 		return fmt.Errorf("bootstrap model usage aliases are required")
@@ -493,7 +476,7 @@ func validateBootstrapExecutionProfile(profile service.AgentRuntimeProfile) erro
 
 func validBootstrapProfileID(profileID string) bool {
 	switch profileID {
-	case "cost_effective", "balanced", "maximum_quality":
+	case "effective", "balanced", "quality":
 		return true
 	default:
 		return false
@@ -510,70 +493,6 @@ func validBootstrapProfileFingerprint(fingerprint string) bool {
 		}
 	}
 	return true
-}
-
-type bootstrapModelMatrixEntry struct {
-	envKey string
-	model  string
-}
-
-func bootstrapModelMatrixEntries(models model.AgentModelMatrix) []bootstrapModelMatrixEntry {
-	return []bootstrapModelMatrixEntry{
-		{envKey: "ANTHROPIC_MODEL", model: models.Default},
-		{envKey: "ANTHROPIC_DEFAULT_OPUS_MODEL", model: models.Opus},
-		{envKey: "ANTHROPIC_DEFAULT_FABLE_MODEL", model: models.Fable},
-		{envKey: "ANTHROPIC_DEFAULT_SONNET_MODEL", model: models.Sonnet},
-		{envKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL", model: models.Haiku},
-	}
-}
-
-type bootstrapClaudeControlEntry struct {
-	envKey     string
-	value      string
-	configured bool
-}
-
-func bootstrapClaudeControlEntries(controls model.AgentClaudeControls) []bootstrapClaudeControlEntry {
-	return []bootstrapClaudeControlEntry{
-		bootstrapStringControl("CLAUDE_CODE_EFFORT_LEVEL", controls.EffortLevel),
-		bootstrapBoolControl("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", controls.AlwaysEnableEffort),
-		bootstrapIntControl("CLAUDE_CODE_MAX_CONTEXT_TOKENS", controls.MaxContextTokens),
-		bootstrapIntControl("CLAUDE_CODE_MAX_OUTPUT_TOKENS", controls.MaxOutputTokens),
-		bootstrapIntControl("MAX_THINKING_TOKENS", controls.MaxThinkingTokens),
-		bootstrapBoolControl("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", controls.DisableAdaptiveThinking),
-		bootstrapBoolControl("CLAUDE_CODE_DISABLE_THINKING", controls.DisableThinking),
-		bootstrapIntControl("CLAUDE_CODE_AUTO_COMPACT_WINDOW", controls.AutoCompactWindow),
-		bootstrapIntControl("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", controls.AutocompactPctOverride),
-		bootstrapBoolControl("CLAUDE_CODE_DISABLE_1M_CONTEXT", controls.Disable1MContext),
-		bootstrapStringControl("CLAUDE_CODE_SUBAGENT_MODEL", controls.SubagentModel),
-		bootstrapBoolControl("ENABLE_TOOL_SEARCH", controls.EnableToolSearch),
-	}
-}
-
-func bootstrapStringControl(envKey string, value *string) bootstrapClaudeControlEntry {
-	if value == nil {
-		return bootstrapClaudeControlEntry{envKey: envKey}
-	}
-	return bootstrapClaudeControlEntry{envKey: envKey, value: *value, configured: true}
-}
-
-func bootstrapBoolControl(envKey string, value *bool) bootstrapClaudeControlEntry {
-	if value == nil {
-		return bootstrapClaudeControlEntry{envKey: envKey}
-	}
-	return bootstrapClaudeControlEntry{envKey: envKey, value: strconv.FormatBool(*value), configured: true}
-}
-
-func bootstrapIntControl(envKey string, value *int) bootstrapClaudeControlEntry {
-	if value == nil {
-		return bootstrapClaudeControlEntry{envKey: envKey}
-	}
-	return bootstrapClaudeControlEntry{envKey: envKey, value: strconv.Itoa(*value), configured: true}
-}
-
-func validBootstrapProviderBaseURL(raw string) bool {
-	parsed, err := url.Parse(raw)
-	return err == nil && raw != "" && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func validBootstrapTaskType(taskType string) bool {

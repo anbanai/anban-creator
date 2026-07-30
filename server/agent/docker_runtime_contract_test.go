@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1163,9 +1164,9 @@ func TestDockerRuntimeContract(t *testing.T) {
 		if cfg.Claude.Executor != "docker" || cfg.Storage.Provider != "oss" || cfg.Storage.Endpoint != "oss-cn-test.aliyuncs.com" {
 			t.Fatalf("loaded Compose config = executor %q storage %q/%q", cfg.Claude.Executor, cfg.Storage.Provider, cfg.Storage.Endpoint)
 		}
-		for _, providerID := range []string{"deepseek", "volcengine_ark", "moonshot", "zhipu"} {
-			if cfg.Claude.Providers[providerID].AuthToken == "" {
-				t.Fatalf("Compose environment did not configure Agent provider %q: %#v", providerID, cfg.Claude.Providers)
+		for _, profileID := range []string{"effective", "balanced", "quality"} {
+			if cfg.Claude.ExecutionProfiles[profileID].Envs[model.ClaudeEnvAuthToken] == "" {
+				t.Fatalf("Compose environment did not configure Agent profile %q", profileID)
 			}
 		}
 	})

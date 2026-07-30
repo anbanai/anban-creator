@@ -399,8 +399,8 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.ExecutionProfile.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.RuntimeEnv["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.RuntimeEnv["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.RuntimeEnv) != 7 {
-		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.ExecutionProfile.RuntimeEnv)
+	if first.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.Envs["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.Envs["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.Envs) != 7 {
+		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.ExecutionProfile.Envs)
 	}
 	if len(first.Files) < 2 {
 		t.Fatalf("files = %#v", first.Files)

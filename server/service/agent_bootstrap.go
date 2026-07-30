@@ -46,11 +46,9 @@ type AgentRuntimeProfile struct {
 	ProfileID          string                                    `json:"profile_id"`
 	Provider           string                                    `json:"provider"`
 	Protocol           string                                    `json:"protocol"`
-	Models             model.AgentModelMatrix                    `json:"models"`
-	Claude             model.AgentClaudeControls                 `json:"claude"`
 	DisplayName        string                                    `json:"display_name"`
 	ProfileFingerprint string                                    `json:"profile_fingerprint"`
-	RuntimeEnv         map[string]string                         `json:"runtime_env"`
+	Envs               map[string]string                         `json:"envs"`
 	ModelUsageAliases  map[string]serveragent.ModelUsageIdentity `json:"model_usage_aliases"`
 }
 
@@ -329,6 +327,9 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	runtimeEnv := profile.RuntimeEnv()
+	if err := model.ValidateClaudeProfileEnvs(runtimeEnv, true); err != nil {
+		return nil, fmt.Errorf("%w: invalid Claude profile environment: %w", ErrAgentBootstrapUnavailable, err)
+	}
 	aliases := make(map[string]serveragent.ModelUsageIdentity, len(profile.ModelUsageAliases))
 	for raw, target := range profile.ModelUsageAliases {
 		aliases[raw] = serveragent.ModelUsageIdentity{Provider: profile.Provider, Model: target}
@@ -336,14 +337,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
-	models := model.AgentModelMatrixFromClaudeProfileEnvs(task.AgentProfileSnapshot.Envs)
-	controls := model.AgentClaudeControlsFromClaudeProfileEnvs(task.AgentProfileSnapshot.Envs)
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
 			ProfileID: profile.ID, Provider: profile.Provider, Protocol: profile.Protocol,
-			Models: models, Claude: controls, DisplayName: profile.DisplayName,
-			ProfileFingerprint: task.AgentProfileFingerprint, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases,
+			DisplayName: profile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,
+			Envs: model.CloneClaudeProfileEnvs(runtimeEnv), ModelUsageAliases: aliases,
 		},
 		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
 		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,

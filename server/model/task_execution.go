@@ -1,7 +1,6 @@
 package model
 
 import (
-	"strconv"
 	"time"
 
 	"gorm.io/datatypes"
@@ -68,66 +67,6 @@ func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot, fingerprint str
 		ProfileEnvs:        RedactClaudeProfileEnvs(snapshot.Envs),
 		ProfileFingerprint: fingerprint,
 	}
-}
-
-// AgentModelMatrixFromClaudeProfileEnvs is a temporary Bootstrap bridge while
-// the legacy response contract still exposes role-specific model fields.
-func AgentModelMatrixFromClaudeProfileEnvs(envs map[string]string) AgentModelMatrix {
-	return AgentModelMatrix{
-		Default: envs[ClaudeEnvModel],
-		Opus:    envs[claudeEnvDefaultOpusModel],
-		Fable:   envs[claudeEnvDefaultFableModel],
-		Sonnet:  envs[claudeEnvDefaultSonnetModel],
-		Haiku:   envs[claudeEnvDefaultHaikuModel],
-	}
-}
-
-// AgentClaudeControlsFromClaudeProfileEnvs is the matching temporary bridge
-// for the legacy Bootstrap controls object.
-func AgentClaudeControlsFromClaudeProfileEnvs(envs map[string]string) AgentClaudeControls {
-	return AgentClaudeControls{
-		EffortLevel:             claudeEnvString(envs, claudeEnvEffortLevel),
-		AlwaysEnableEffort:      claudeEnvBool(envs, claudeEnvAlwaysEnableEffort),
-		MaxContextTokens:        claudeEnvInt(envs, claudeEnvMaxContextTokens),
-		MaxOutputTokens:         claudeEnvInt(envs, claudeEnvMaxOutputTokens),
-		MaxThinkingTokens:       claudeEnvInt(envs, claudeEnvMaxThinkingTokens),
-		DisableAdaptiveThinking: claudeEnvBool(envs, claudeEnvDisableAdaptiveThinking),
-		DisableThinking:         claudeEnvBool(envs, claudeEnvDisableThinking),
-		AutoCompactWindow:       claudeEnvInt(envs, claudeEnvAutoCompactWindow),
-		AutocompactPctOverride:  claudeEnvInt(envs, claudeEnvAutocompactPctOverride),
-		Disable1MContext:        claudeEnvBool(envs, claudeEnvDisable1MContext),
-		SubagentModel:           claudeEnvString(envs, claudeEnvSubagentModel),
-		EnableToolSearch:        claudeEnvBool(envs, claudeEnvEnableToolSearch),
-	}
-}
-
-func claudeEnvString(envs map[string]string, key string) *string {
-	value, exists := envs[key]
-	if !exists {
-		return nil
-	}
-	return &value
-}
-
-func claudeEnvBool(envs map[string]string, key string) *bool {
-	value, exists := envs[key]
-	if !exists || (value != "true" && value != "false") {
-		return nil
-	}
-	parsed := value == "true"
-	return &parsed
-}
-
-func claudeEnvInt(envs map[string]string, key string) *int {
-	value, exists := envs[key]
-	if !exists {
-		return nil
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return nil
-	}
-	return &parsed
 }
 
 const (

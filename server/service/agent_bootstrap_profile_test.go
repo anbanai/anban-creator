@@ -107,7 +107,7 @@ func TestAgentRuntimeProfileMapsEveryClaudeControl(t *testing.T) {
 	}
 }
 
-func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
+func TestAgentBootstrapJSONUsesUnifiedEnvsContractOnly(t *testing.T) {
 	profile := profileWithControls(model.AgentClaudeControls{})
 	snapshot, fingerprint, err := profile.Freeze()
 	if err != nil {
@@ -115,21 +115,19 @@ func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
 	}
 	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
 		ProfileID: snapshot.ProfileID, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
-		Models: model.AgentModelMatrixFromClaudeProfileEnvs(snapshot.Envs),
-		Claude: model.AgentClaudeControlsFromClaudeProfileEnvs(snapshot.Envs), DisplayName: snapshot.DisplayName,
-		ProfileFingerprint: fingerprint, RuntimeEnv: profile.RuntimeEnv(),
+		DisplayName: snapshot.DisplayName, ProfileFingerprint: fingerprint, Envs: profile.RuntimeEnv(),
 		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3[1m]": {Provider: "moonshot", Model: "kimi-k3"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	encoded := string(raw)
-	for _, required := range []string{`"models":`, `"claude":`, `"profile_fingerprint":`, `"model_usage_aliases":`} {
+	for _, required := range []string{`"envs":`, `"profile_fingerprint":`, `"model_usage_aliases":`} {
 		if !strings.Contains(encoded, required) {
 			t.Fatalf("bootstrap JSON omitted %q: %s", required, encoded)
 		}
 	}
-	for _, forbidden := range []string{`"model_id"`, `"context_window"`, `"reasoning_effort"`, `"thinking_required"`} {
+	for _, forbidden := range []string{`"models"`, `"claude"`, `"runtime_env"`, `"model_id"`, `"context_window"`, `"reasoning_effort"`, `"thinking_required"`} {
 		if strings.Contains(encoded, forbidden) {
 			t.Fatalf("bootstrap JSON retained %q: %s", forbidden, encoded)
 		}
@@ -150,11 +148,11 @@ func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
 	if !ok || alias["provider"] != "moonshot" || alias["model"] != "kimi-k3" {
 		t.Fatalf("model alias identity = %#v", aliases["kimi-k3[1m]"])
 	}
-	runtimeEnv, ok := executionProfile["runtime_env"].(map[string]any)
-	if !ok || runtimeEnv["ANTHROPIC_BASE_URL"] == "" || runtimeEnv["ANTHROPIC_AUTH_TOKEN"] == "" {
-		t.Fatalf("provider connection missing from runtime_env: %#v", executionProfile["runtime_env"])
+	envs, ok := executionProfile["envs"].(map[string]any)
+	if !ok || envs["ANTHROPIC_BASE_URL"] == "" || envs["ANTHROPIC_AUTH_TOKEN"] == "" {
+		t.Fatalf("provider connection missing from envs: %#v", executionProfile["envs"])
 	}
-	delete(executionProfile, "runtime_env")
+	delete(executionProfile, "envs")
 	redacted, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +187,7 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildResponse: %v", err)
 	}
-	if response.ExecutionProfile.Models.Default != "kimi-default" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" {
+	if response.ExecutionProfile.Envs[model.ClaudeEnvModel] != "kimi-default" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.Envs["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile runtime response = %#v", response.ExecutionProfile)
 	}
 	wantAlias := serveragent.ModelUsageIdentity{Provider: "moonshot", Model: "kimi-k3"}

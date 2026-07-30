@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
+func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContractWithoutRewritingValues(t *testing.T) {
 	source := map[string]string{
 		"ANTHROPIC_AUTH_TOKEN":                     " token ",
 		"ANTHROPIC_API_KEY":                        "api-key",
@@ -34,7 +34,7 @@ func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
 		"HOME":                                     "/untrusted/home",
 	}
 	got := ClaudeRuntimeEnv(source)
-	if len(got) != len(claudeRuntimeEnvKeys) || got["ANTHROPIC_AUTH_TOKEN"] != "token" {
+	if len(got) != len(ClaudeRuntimeEnvKeys()) || got["ANTHROPIC_AUTH_TOKEN"] != " token " {
 		t.Fatalf("runtime environment = %#v", got)
 	}
 	for _, forbidden := range []string{"ANTHROPIC_API_KEY", "ANBAN_API_KEY", "PATH", "HOME", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"} {
@@ -88,10 +88,10 @@ func TestValidateClaudeRuntimeEnvRejectsUnknownAndOversizedValues(t *testing.T) 
 		{"ANTHROPIC_AUTH_TOKEN": ""},
 		{"ANTHROPIC_AUTH_TOKEN": " token"},
 		{"ANTHROPIC_AUTH_TOKEN": "token\x00suffix"},
-		{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", maxClaudeRuntimeEnvValueBytes+1)},
+		{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)},
 		{
-			"ANTHROPIC_AUTH_TOKEN":         strings.Repeat("x", maxClaudeRuntimeEnvValueBytes),
-			"ANTHROPIC_DEFAULT_OPUS_MODEL": strings.Repeat("y", maxClaudeRuntimeEnvValueBytes),
+			"ANTHROPIC_AUTH_TOKEN":         strings.Repeat("x", 16<<10),
+			"ANTHROPIC_DEFAULT_OPUS_MODEL": strings.Repeat("y", 16<<10),
 		},
 	} {
 		if err := ValidateClaudeRuntimeEnv(runtimeEnv); err == nil {
