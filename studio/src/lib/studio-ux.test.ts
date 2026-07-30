@@ -64,7 +64,6 @@ describe('studio business UX helpers', () => {
         projectsError: false,
         activeProjectCount: 0,
         apiKeysReady: true,
-        modelConfigReady: true,
       }),
     ).toMatchObject({
       id: 'no-project',
@@ -73,20 +72,12 @@ describe('studio business UX helpers', () => {
       actionHref: '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
       blocking: true,
     })
-
-    expect(
-      buildDashboardBlocker({
-        projectsLoading: false,
-        projectsError: false,
-        activeProjectCount: 1,
-        apiKeysReady: true,
-        modelConfigReady: false,
-      }),
-    ).toMatchObject({
-      id: 'model-config',
-      actionHref: '/settings#model-key-settings',
-      blocking: true,
-    })
+    expect(buildDashboardBlocker({
+      projectsLoading: false,
+      projectsError: false,
+      activeProjectCount: 1,
+      apiKeysReady: true,
+    })).toBeNull()
   })
 
   it('derives task defaults from the selected project', () => {

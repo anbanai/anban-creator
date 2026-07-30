@@ -5,7 +5,7 @@ import { taskCostFor } from '@/lib/pricing'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
 export interface DashboardBlocker {
-  id: 'no-project' | 'api-key' | 'model-config'
+  id: 'no-project' | 'api-key'
   message: string
   actionLabel: string
   actionHref: string
@@ -17,13 +17,11 @@ export function buildDashboardBlocker({
   projectsError,
   activeProjectCount,
   apiKeysReady,
-  modelConfigReady,
 }: {
   projectsLoading: boolean
   projectsError: boolean
   activeProjectCount: number
   apiKeysReady?: boolean | null
-  modelConfigReady?: boolean | null
 }): DashboardBlocker | null {
   if (projectsLoading || projectsError) return null
   if (activeProjectCount === 0) {
@@ -39,15 +37,6 @@ export function buildDashboardBlocker({
     return {
       id: 'api-key',
       message: '平台密钥未就绪，先补齐接入能力。',
-      actionLabel: '去设置',
-      actionHref: '/settings#model-key-settings',
-      blocking: true,
-    }
-  }
-  if (modelConfigReady === false) {
-    return {
-      id: 'model-config',
-      message: '模型配置未就绪，先选择可用模型。',
       actionLabel: '去设置',
       actionHref: '/settings#model-key-settings',
       blocking: true,

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"mime"
@@ -31,10 +30,9 @@ const (
 	liveAudioKeyPrefix   = "uploads/live-audio/"
 )
 
-// LiveSliceService coordinates storage, TingWu transcription, and LLM-based live slicing.
+// LiveSliceService coordinates storage, TingWu transcription, and deterministic live slicing.
 type LiveSliceService struct {
 	tingwu TingWuClient
-	llm    LLMClient
 	store  storage.Provider
 	logger *zerolog.Logger
 }
@@ -46,19 +44,18 @@ type TingWuClient interface {
 }
 
 // NewLiveSliceService creates a live-slice service with a real TingWu client when config is present.
-func NewLiveSliceService(cfg config.TingWuConfig, llm LLMClient, store storage.Provider, logger *zerolog.Logger) (*LiveSliceService, error) {
+func NewLiveSliceService(cfg config.TingWuConfig, store storage.Provider, logger *zerolog.Logger) (*LiveSliceService, error) {
 	tw, err := NewAlibabaTingWuClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return NewLiveSliceServiceWithClients(tw, llm, store, logger), nil
+	return NewLiveSliceServiceWithClients(tw, store, logger), nil
 }
 
 // NewLiveSliceServiceWithClients creates a live-slice service with injected clients for tests.
-func NewLiveSliceServiceWithClients(tw TingWuClient, llm LLMClient, store storage.Provider, logger *zerolog.Logger) *LiveSliceService {
+func NewLiveSliceServiceWithClients(tw TingWuClient, store storage.Provider, logger *zerolog.Logger) *LiveSliceService {
 	return &LiveSliceService{
 		tingwu: tw,
-		llm:    llm,
 		store:  store,
 		logger: logger,
 	}
@@ -1033,151 +1030,6 @@ func (s *LiveSliceService) BuildLiveClipManifest(req LiveClipManifestRequest) (*
 	}, nil
 }
 
-// RecognizeLiveSubjects asks the LLM for short-video topics supported by the transcript.
-func (s *LiveSliceService) RecognizeLiveSubjects(ctx context.Context, sentences []LiveSentence) ([]LiveSubject, error) {
-	if s.llm == nil {
-		return nil, fmt.Errorf("LLM client is not configured")
-	}
-	if len(sentences) == 0 {
-		return nil, fmt.Errorf("sentences is required")
-	}
-	userPrompt := buildLiveSentencePrompt(sentences, "")
-	raw, err := s.llm.Complete(ctx, liveSubjectSystemPrompt, userPrompt)
-	if err != nil {
-		return nil, fmt.Errorf("recognize live subjects: %w", err)
-	}
-	extracted, err := extractJSONObject(raw)
-	if err != nil {
-		return nil, fmt.Errorf("extract live subjects JSON: %w", err)
-	}
-	var result struct {
-		Subjects []LiveSubject `json:"subjects"`
-	}
-	if err := json.Unmarshal([]byte(extracted), &result); err != nil {
-		return nil, fmt.Errorf("unmarshal live subjects JSON: %w", err)
-	}
-	return result.Subjects, nil
-}
-
-// RecognizeLiveInvalidSentences marks sentences that should not be used for short-video slices.
-func (s *LiveSliceService) RecognizeLiveInvalidSentences(ctx context.Context, sentences []LiveSentence) ([]LiveInvalid, error) {
-	if s.llm == nil {
-		return nil, fmt.Errorf("LLM client is not configured")
-	}
-	if len(sentences) == 0 {
-		return nil, fmt.Errorf("sentences is required")
-	}
-	const batchSize = 30
-	invalid := []LiveInvalid{}
-	for start := 0; start < len(sentences); start += batchSize {
-		end := start + batchSize
-		if end > len(sentences) {
-			end = len(sentences)
-		}
-		raw, err := s.llm.Complete(ctx, liveInvalidSystemPrompt, buildLiveSentencePrompt(sentences[start:end], ""))
-		if err != nil {
-			return nil, fmt.Errorf("recognize live invalid sentences: %w", err)
-		}
-		extracted, err := extractJSONObject(raw)
-		if err != nil {
-			return nil, fmt.Errorf("extract live invalid JSON: %w", err)
-		}
-		var result struct {
-			Invalid []LiveInvalid `json:"invalid"`
-		}
-		if err := json.Unmarshal([]byte(extracted), &result); err != nil {
-			return nil, fmt.Errorf("unmarshal live invalid JSON: %w", err)
-		}
-		invalid = append(invalid, result.Invalid...)
-	}
-	return normalizeLiveInvalids(invalid, sentences), nil
-}
-
-// RecognizeLiveSegments asks the LLM for a practical segmentation plan.
-func (s *LiveSliceService) RecognizeLiveSegments(ctx context.Context, sentences []LiveSentence, ask string) ([]LiveSegment, error) {
-	if s.llm == nil {
-		return nil, fmt.Errorf("LLM client is not configured")
-	}
-	if len(sentences) == 0 {
-		return nil, fmt.Errorf("sentences is required")
-	}
-	raw, err := s.llm.Complete(ctx, liveSegmentsSystemPrompt, buildLiveSentencePrompt(sentences, ask))
-	if err != nil {
-		return nil, fmt.Errorf("recognize live segments: %w", err)
-	}
-	extracted, err := extractJSONObject(raw)
-	if err != nil {
-		return nil, fmt.Errorf("extract live segments JSON: %w", err)
-	}
-	var result struct {
-		Segments []LiveSegment `json:"segments"`
-	}
-	if err := json.Unmarshal([]byte(extracted), &result); err != nil {
-		return nil, fmt.Errorf("unmarshal live segments JSON: %w", err)
-	}
-	if err := validateLiveSegments(result.Segments, sentences, nil); err != nil {
-		return nil, fmt.Errorf("validate live segments: %w", err)
-	}
-	return result.Segments, nil
-}
-
-// CompleteLiveSubject creates a detailed short-video script from a selected subject or ask.
-func (s *LiveSliceService) CompleteLiveSubject(ctx context.Context, sentences []LiveSentence, ask, subject, thoughts string) (*LiveSubjectCompletion, error) {
-	if s.llm == nil {
-		return nil, fmt.Errorf("LLM client is not configured")
-	}
-	if len(sentences) == 0 {
-		return nil, fmt.Errorf("sentences is required")
-	}
-	extra := strings.TrimSpace(ask)
-	if strings.TrimSpace(subject) != "" {
-		extra += "\n主题: " + subject
-	}
-	if strings.TrimSpace(thoughts) != "" {
-		extra += "\n思考: " + thoughts
-	}
-	raw, err := s.llm.Complete(ctx, liveCompleteSubjectSystemPrompt, buildLiveSentencePrompt(sentences, extra))
-	if err != nil {
-		return nil, fmt.Errorf("complete live subject: %w", err)
-	}
-	extracted, err := extractJSONObject(raw)
-	if err != nil {
-		return nil, fmt.Errorf("extract live subject completion JSON: %w", err)
-	}
-	var result LiveSubjectCompletion
-	if err := json.Unmarshal([]byte(extracted), &result); err != nil {
-		return nil, fmt.Errorf("unmarshal live subject completion JSON: %w", err)
-	}
-	if err := validateCompletionIndexes(&result, sentences); err != nil {
-		return nil, fmt.Errorf("validate live subject completion: %w", err)
-	}
-	fillCompletionTiming(&result, sentences)
-	return &result, nil
-}
-
-func fillCompletionTiming(result *LiveSubjectCompletion, source []LiveSentence) {
-	byIndex := make(map[int64]LiveSentence, len(source))
-	for _, sentence := range source {
-		byIndex[sentence.Index] = sentence
-	}
-	for i := range result.Sentences {
-		if result.Sentences[i].Index == 0 {
-			continue
-		}
-		if src, ok := byIndex[result.Sentences[i].Index]; ok {
-			if result.Sentences[i].Start == 0 {
-				result.Sentences[i].Start = src.Start
-			}
-			if result.Sentences[i].End == 0 {
-				result.Sentences[i].End = src.End
-			}
-			if strings.TrimSpace(result.Sentences[i].Text) == "" {
-				result.Sentences[i].Text = src.Text
-			}
-		}
-	}
-}
-
 func prepareClipPlanningInputs(sentences []LiveSentence, minDuration, maxDuration, headPadding, tailPadding float64) ([]LiveSentence, map[int64]LiveSentence, float64, float64, error) {
 	if headPadding < 0 || tailPadding < 0 {
 		return nil, nil, 0, 0, fmt.Errorf("padding seconds cannot be negative")
@@ -1408,39 +1260,6 @@ func ffmpegConcatFileQuote(path string) string {
 	return "'" + escaped + "'"
 }
 
-func validateCompletionIndexes(result *LiveSubjectCompletion, source []LiveSentence) error {
-	byIndex := liveSentenceMap(source)
-	for _, sentence := range result.Sentences {
-		if sentence.Index == 0 {
-			continue
-		}
-		if _, ok := byIndex[sentence.Index]; !ok {
-			return fmt.Errorf("sentence index %d does not exist in source sentences", sentence.Index)
-		}
-	}
-	return nil
-}
-
-func buildLiveSentencePrompt(sentences []LiveSentence, ask string) string {
-	var b strings.Builder
-	b.WriteString("直播切片:\n\"\"\"\n")
-	for _, sentence := range sentences {
-		if sentence.Start != 0 || sentence.End != 0 {
-			fmt.Fprintf(&b, "[%d] %.3f-%.3fs %s\n", sentence.Index, sentence.Start, sentence.End, sentence.Text)
-		} else {
-			fmt.Fprintf(&b, "[%d] %s\n", sentence.Index, sentence.Text)
-		}
-	}
-	b.WriteString("\"\"\"\n")
-	if strings.TrimSpace(ask) != "" {
-		b.WriteString("\n剪辑要求:\n\"\"\"\n")
-		b.WriteString(strings.TrimSpace(ask))
-		b.WriteString("\n\"\"\"\n")
-	}
-	b.WriteString("\n只返回严格 JSON，不要返回 Markdown 或解释。")
-	return b.String()
-}
-
 func validateLiveSegments(segments []LiveSegment, sentences []LiveSentence, invalid []LiveInvalid) error {
 	if len(segments) == 0 {
 		return nil
@@ -1473,24 +1292,6 @@ func validateLiveSegments(segments []LiveSegment, sentences []LiveSentence, inva
 		}
 	}
 	return nil
-}
-
-func normalizeLiveInvalids(invalid []LiveInvalid, sentences []LiveSentence) []LiveInvalid {
-	byIndex := liveSentenceMap(sentences)
-	seen := map[int64]bool{}
-	normalized := []LiveInvalid{}
-	for _, item := range invalid {
-		if item.Index <= 0 || seen[item.Index] {
-			continue
-		}
-		if _, ok := byIndex[item.Index]; !ok {
-			continue
-		}
-		seen[item.Index] = true
-		normalized = append(normalized, item)
-	}
-	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Index < normalized[j].Index })
-	return normalized
 }
 
 func sortedLiveSentences(sentences []LiveSentence) []LiveSentence {
@@ -1883,68 +1684,6 @@ func buildLiveClipSummaryMarkdown(req LiveClipManifestRequest, manifest []LiveCl
 	}
 	return b.String()
 }
-
-var liveSubjectSystemPrompt = strings.TrimSpace(`
-你是直播切片选题策划。目标是从直播字幕里找出适合做短视频的单一主题。
-
-要求:
-- 主题必须有多条原始切片支撑，不要凭空扩写。
-- 每个主题只表达一个核心问题、卖点或反差。
-- 避开只适合直播间当场互动的内容，比如欢迎、感谢、实时福利、催单倒计时。
-- 输出 3 到 8 个主题，按短视频潜力排序。
-
-返回 JSON:
-{"subjects":[{"title":"主题名","thoughts":"为什么适合剪成短视频，以及可用哪些内容支撑"}]}
-`)
-
-var liveInvalidSystemPrompt = strings.TrimSpace(`
-你是短视频剪辑筛选助手。用户会给直播字幕切片，你要找出“整条都不适合用于短视频”的切片。
-
-无效内容包括:
-- 欢迎、点名、感谢、直播间实时互动。
-- 只有语气词、重复垫话、没有信息量的过渡。
-- 只针对直播间当场生效的优惠、库存、倒计时。
-
-判断标准:
-- 只要切片里包含可复用的知识、卖点、故事、观点或演示，就不要标为无效。
-- reason 要短，说明为什么这条不能用。
-
-返回 JSON:
-{"invalid":[{"index":1,"reason":"原因"}]}
-`)
-
-var liveSegmentsSystemPrompt = strings.TrimSpace(`
-你是直播内容结构分析师。你要把连续直播字幕分成便于人工检查和批量剪辑的片段。
-
-要求:
-- 片段边界必须使用用户给出的切片 index。
-- 每个片段围绕一个清晰主题，尽量避免把无关话题混在一起。
-- title 写成剪辑师一眼能判断内容的短标题。
-- description/thoughts 说明该片段价值、适合剪法或风险。
-- 不要创造不存在的内容。
-
-返回 JSON:
-{"segments":[{"title":"片段标题","description":"片段说明","thoughts":"剪辑思路","start":1,"end":8}]}
-`)
-
-var liveCompleteSubjectSystemPrompt = strings.TrimSpace(`
-你是短视频文案剪辑师。你要从直播字幕中选择切片，组合成一条可剪辑的短视频脚本。
-
-要求:
-- 只能使用用户给出的切片 index，原句可以截短但不能改写事实。
-- 开头 3 到 5 秒要前置爆点、反差、痛点或核心结论。
-- 中段要有递进逻辑，不要随机拼贴。
-- 可以加入旁白句，旁白的 index 设为 0，并在 reason 说明用途。
-- 过滤欢迎、感谢、直播间实时福利等只适合直播场景的内容。
-
-返回 JSON:
-{
-  "title":"短视频标题",
-  "subtitle":"可选副标题",
-  "thoughts":"整体剪辑思路",
-  "sentences":[{"index":2,"text":"使用或截取的字幕","reason":"选择理由"}]
-}
-`)
 
 // ---------------------------------------------------------------------------
 // Raw TingWu result types

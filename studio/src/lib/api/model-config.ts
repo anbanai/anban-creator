@@ -1,13 +1,6 @@
 import { http } from '@/lib/http-client'
 import type { ApiResponse } from '@/types'
 
-export interface TextConfigDTO {
-  endpoint?: string
-  api_key?: string
-  model?: string
-  proxy?: string
-}
-
 export interface ImageConfigDTO {
   provider?: string
   endpoint?: string
@@ -17,13 +10,11 @@ export interface ImageConfigDTO {
 }
 
 export interface ModelConfigResponse {
-  text?: TextConfigDTO | null
   image?: ImageConfigDTO | null
 }
 
 export interface UpdateModelConfigRequest {
-  text?: TextConfigDTO | null
-  image?: ImageConfigDTO | null
+  image: ImageConfigDTO
 }
 
 export const modelConfigApi = {

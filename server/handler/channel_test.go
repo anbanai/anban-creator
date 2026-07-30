@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -218,65 +220,51 @@ func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
 }
 
-func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {
-	llm := &fakeProjectLLM{response: `{
-		"positioning": "面向职场人的高效生活方式账号",
-		"keywords": ["职场", "效率", "生活方式"],
-		"style": "清爽明亮的实拍封面，搭配高对比标题字",
-		"content_summary": "围绕职场效率和日常习惯做可执行分享"
-	}`}
+func TestProjectFetchProfilePreservesProviderFieldsWithoutLLMEnrichment(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/user/profile" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(seednote.APIResponse[seednote.UserProfile]{
+			Success: true,
+			Data: seednote.UserProfile{UserBasicInfo: seednote.UserBasicInfo{
+				Nickname: "原始昵称",
+				Desc:     "原始简介",
+				Avatar:   "https://cdn.example.com/avatar.png",
+				RedID:    "red-1",
+			}},
+		})
+	}))
+	defer upstream.Close()
+
 	h := NewProjectHandler(nil, testProjectLogger(t))
-	h.SetLLMClient(llm, 0)
-	profile := &platform.PlatformProfile{
-		Name:        "测试账号",
-		Positioning: "原始简介",
-		RawData: map[string]any{
-			"top_posts": []platform.SeednotePost{
-				{Title: "爆款选题", LikeCount: 12000, CommentCount: 200, EngagementScore: 12200},
-			},
-		},
-	}
+	h.SetSeednoteClient(seednote.NewClient(upstream.URL, time.Second))
+	app := fiber.New()
+	app.Post("/fetch", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.FetchProfile(c)
+	})
 
-	h.enrichSeednoteProfileWithAI(context.Background(), "user-1", profile)
-
-	if profile.Positioning != "面向职场人的高效生活方式账号" {
-		t.Fatalf("Positioning = %q", profile.Positioning)
+	resp, err := app.Test(httptestJSON("POST", "/fetch", `{"platform":"seednote","profile_url":"https://www.xiaohongshu.com/user/profile/user-1"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if profile.Keywords != "职场, 效率, 生活方式" {
-		t.Fatalf("Keywords = %q", profile.Keywords)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if profile.Style != "清爽明亮的实拍封面，搭配高对比标题字" {
-		t.Fatalf("Style = %q", profile.Style)
+	var envelope struct {
+		Data platform.PlatformProfile `json:"data"`
 	}
-	if llm.prompt == "" || !containsAll(llm.prompt, "爆款选题", "原始简介") {
-		t.Fatalf("prompt missing profile/post context: %q", llm.prompt)
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
 	}
-	analysis, ok := profile.RawData["analysis"].(seednoteProfileAnalysis)
-	if !ok {
-		t.Fatalf("RawData[analysis] type = %T", profile.RawData["analysis"])
+	if envelope.Data.Name != "原始昵称" || envelope.Data.RawData["desc"] != "原始简介" {
+		t.Fatalf("provider profile changed: %#v", envelope.Data)
 	}
-	if analysis.ContentSummary == "" {
-		t.Fatal("analysis.ContentSummary is empty")
-	}
-}
-
-func TestProjectFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
-	llm := &fakeProjectLLM{response: `not json`}
-	h := NewProjectHandler(nil, testProjectLogger(t))
-	h.SetLLMClient(llm, 0)
-	profile := &platform.PlatformProfile{
-		Name:        "测试账号",
-		Positioning: "原始简介",
-		RawData:     map[string]any{},
-	}
-
-	h.enrichSeednoteProfileWithAI(context.Background(), "user-1", profile)
-
-	if profile.Positioning != "原始简介" {
-		t.Fatalf("Positioning = %q, want 原始简介", profile.Positioning)
-	}
-	if profile.Keywords != "" {
-		t.Fatalf("Keywords = %q, want empty", profile.Keywords)
+	if _, exists := envelope.Data.RawData["analysis"]; exists {
+		t.Fatal("hidden LLM analysis remains")
 	}
 }
 
@@ -306,7 +294,7 @@ func TestAnalyzeImageRejectsInternalFileFromDifferentUser(t *testing.T) {
 	llm := &fakeProjectLLM{response: "清爽自然的视觉风格"}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(llm, 0)
+	h.SetVisionClient(llm)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -336,7 +324,7 @@ func TestAnalyzeImageAllowsOwnedInternalFile(t *testing.T) {
 	llm := &fakeProjectLLM{response: "清爽自然的视觉风格"}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(llm, 0)
+	h.SetVisionClient(llm)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -369,7 +357,7 @@ func TestAnalyzeImageAllowsReferenceUploadPrefix(t *testing.T) {
 	}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -400,7 +388,7 @@ func TestAnalyzeImageAllowsOwnStagingProjectReference(t *testing.T) {
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -435,7 +423,7 @@ func TestAnalyzeImageAllowsOwnStagingTaskReference(t *testing.T) {
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -470,7 +458,7 @@ func TestAnalyzeImageRejectsUnauthorizedUploadSession(t *testing.T) {
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -501,7 +489,7 @@ func TestAnalyzeImageRejectsUploadSessionWithWrongPurpose(t *testing.T) {
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -532,7 +520,7 @@ func TestAnalyzeImageAllowsOwnedOSSURL(t *testing.T) {
 	}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -563,7 +551,7 @@ func TestAnalyzeImageRejectsReferenceUploadFromDifferentUser(t *testing.T) {
 	}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -592,7 +580,7 @@ func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
 	}
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
+	h.SetVisionClient(&fakeProjectLLM{response: "风格"})
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -613,19 +601,15 @@ func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
 	}
 }
 
-// When a dedicated vision client is wired, AnalyzeImage must route the image
-// to it instead of the writing LLM. This is the regression test for the bug
-// where Kimi (text-only writing model) was being asked to analyze images,
-// causing every recognition request to fail.
+// AnalyzeImage must route image understanding exclusively through the
+// dedicated vision client.
 func TestAnalyzeImagePrefersVisionClient(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	writingLLM := &fakeProjectLLM{response: "from-writing"}
 	visionLLM := &fakeProjectLLM{response: "from-vision"}
 
 	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(writingLLM, 0)
 	h.SetVisionClient(visionLLM)
 
 	app := fiber.New()
@@ -644,38 +628,30 @@ func TestAnalyzeImagePrefersVisionClient(t *testing.T) {
 	if visionLLM.prompt == "" {
 		t.Fatal("vision LLM should have been called when SetVisionClient was wired")
 	}
-	if writingLLM.prompt != "" {
-		t.Fatal("writing LLM should NOT be called when vision client is available")
-	}
 }
 
-// Without a vision client, AnalyzeImage falls back to the writing LLM so
-// existing deployments without a vision model configured still work.
-func TestAnalyzeImageFallsBackToWritingLLM(t *testing.T) {
-	key := "uploads/references/user-1/abc.png"
-	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	writingLLM := &fakeProjectLLM{response: "from-writing"}
-
+func TestAnalyzeImageReturns503WithoutImageUnderstandingClient(t *testing.T) {
 	h := NewProjectHandler(nil, testProjectLogger(t))
-	h.SetStore(store)
-	h.SetLLMClient(writingLLM, 0)
-	// No SetVisionClient call.
-
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
 		return h.AnalyzeImage(c)
 	})
 
-	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"https://cdn.example.com/image.png"}`))
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusServiceUnavailable)
 	}
-	if writingLLM.prompt == "" {
-		t.Fatal("writing LLM should be used as fallback when no vision client is configured")
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "image understanding model is not configured") {
+		t.Fatalf("body = %s", body)
 	}
 }
 
@@ -779,15 +755,6 @@ func testProjectLogger(t *testing.T) *zerolog.Logger {
 	t.Helper()
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 	return &logger
-}
-
-func containsAll(s string, parts ...string) bool {
-	for _, part := range parts {
-		if !strings.Contains(s, part) {
-			return false
-		}
-	}
-	return true
 }
 
 func tinyPNG() []byte {

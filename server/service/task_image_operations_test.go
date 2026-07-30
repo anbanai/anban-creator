@@ -33,20 +33,20 @@ func (f *fakeTaskImageOperationsImage) CompressImage(filePath string, _ int) (st
 	return filePath + ".compressed", true, nil
 }
 
-type fakeTaskImageOperationsWriting struct {
+type fakeTaskImageUnderstandingClient struct {
 	calls  int
 	source string
 	usage  srvconfig.TokenUsage
 	err    error
 }
 
-func (f *fakeTaskImageOperationsWriting) AnalyzeImageDetailed(_ context.Context, _, imageSource, _ string) (*LLMResult, error) {
+func (f *fakeTaskImageUnderstandingClient) CompleteWithImageResult(_ context.Context, _, _, imageSource string) (*LLMResult, error) {
 	f.calls++
 	f.source = imageSource
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &LLMResult{Text: "analysis", Usage: f.usage}, nil
+	return &LLMResult{Text: "  analysis  ", Usage: f.usage}, nil
 }
 
 type fakeTaskImageOperationsCost struct {
@@ -86,9 +86,9 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 	}
 	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	images := &fakeTaskImageOperationsImage{}
-	writing := &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}
+	understanding := &fakeTaskImageUnderstandingClient{usage: srvconfig.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}
 	cost := &fakeTaskImageOperationsCost{}
-	svc := NewTaskImageOperationsService(tasks, images, writing, cost, TaskImageOperationsConfig{
+	svc := NewTaskImageOperationsService(tasks, images, understanding, cost, TaskImageOperationsConfig{
 		UnderstandingProvider: "provider", UnderstandingModel: "model",
 	}, &logger)
 
@@ -108,8 +108,8 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if result.Analysis != "analysis" || writing.calls != 1 || cost.recorded == nil {
-		t.Fatalf("result=%#v writing_calls=%d cost=%#v", result, writing.calls, cost.recorded)
+	if result.Analysis != "analysis" || understanding.calls != 1 || cost.recorded == nil {
+		t.Fatalf("result=%#v understanding_calls=%d cost=%#v", result, understanding.calls, cost.recorded)
 	}
 	if cost.recorded.TaskID != taskID || cost.recorded.Provider != "provider" || cost.recorded.Model != "model" {
 		t.Fatalf("provider cost request = %#v", cost.recorded)
@@ -127,14 +127,14 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
-	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: "foreign", ProjectID: projectID, TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if !errors.Is(err, ErrTaskImageOperationOwnership) {
 		t.Fatalf("Analyze error = %v, want ownership error", err)
 	}
-	if writing.calls != 0 {
-		t.Fatalf("writing calls = %d, want 0", writing.calls)
+	if understanding.calls != 0 {
+		t.Fatalf("understanding calls = %d, want 0", understanding.calls)
 	}
 }
 
@@ -149,11 +149,11 @@ func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T)
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
-	writing := &fakeTaskImageOperationsWriting{}
-	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
 	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: "wrong-project", TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
-	if !errors.Is(err, ErrTaskImageOperationProjectMismatch) || writing.calls != 0 {
-		t.Fatalf("Analyze = %v, writing calls=%d; want project mismatch before delegation", err, writing.calls)
+	if !errors.Is(err, ErrTaskImageOperationProjectMismatch) || understanding.calls != 0 {
+		t.Fatalf("Analyze = %v, understanding calls=%d; want project mismatch before delegation", err, understanding.calls)
 	}
 }
 
@@ -181,8 +181,8 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			writing := &fakeTaskImageOperationsWriting{}
-			svc := NewTaskImageOperationsService(nil, nil, writing, nil, TaskImageOperationsConfig{}, &logger)
+			understanding := &fakeTaskImageUnderstandingClient{}
+			svc := NewTaskImageOperationsService(nil, nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
 			svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
 				if int64(len(tt.downloaded)) > maxAnalyzedTaskImageBytes {
 					return nil, errors.New("external image exceeds max size")
@@ -190,8 +190,8 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 				return tt.downloaded, nil
 			}
 			_, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{ImageURL: tt.imageURL, FilePath: tt.filePath, ProjectID: "project", Prompt: "inspect"})
-			if err == nil || !strings.Contains(err.Error(), tt.want) || writing.calls != 0 {
-				t.Fatalf("Analyze = %v, calls=%d; want %q before delegation", err, writing.calls, tt.want)
+			if err == nil || !strings.Contains(err.Error(), tt.want) || understanding.calls != 0 {
+				t.Fatalf("Analyze = %v, calls=%d; want %q before delegation", err, understanding.calls, tt.want)
 			}
 		})
 	}
@@ -238,23 +238,23 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 	}
 	tests := []struct {
 		name             string
-		writing          *fakeTaskImageOperationsWriting
+		understanding    *fakeTaskImageUnderstandingClient
 		costErr          error
 		wantAnalyzeError bool
 		wantUnreconciled bool
 		wantCacheRead    int64
 	}{
-		{name: "analysis failure is unreconciled", writing: &fakeTaskImageOperationsWriting{err: errors.New("vision failed")}, wantAnalyzeError: true, wantUnreconciled: true},
-		{name: "zero usage is unreconciled", writing: &fakeTaskImageOperationsWriting{}, wantUnreconciled: true},
-		{name: "cached token fallback", writing: &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 9, CachedInputTokens: 4, OutputTokens: 1, TotalTokens: 10}}, wantCacheRead: 4},
-		{name: "explicit cache read wins", writing: &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 9, CachedInputTokens: 4, CacheReadInputTokens: 6, CacheCreationInputTokens: 2, OutputTokens: 1, TotalTokens: 10}}, wantCacheRead: 6},
-		{name: "cost write failure preserves result", writing: &fakeTaskImageOperationsWriting{usage: srvconfig.TokenUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}}, costErr: errors.New("cost write failed")},
+		{name: "analysis failure is unreconciled", understanding: &fakeTaskImageUnderstandingClient{err: errors.New("vision failed")}, wantAnalyzeError: true, wantUnreconciled: true},
+		{name: "zero usage is unreconciled", understanding: &fakeTaskImageUnderstandingClient{}, wantUnreconciled: true},
+		{name: "cached token fallback", understanding: &fakeTaskImageUnderstandingClient{usage: srvconfig.TokenUsage{InputTokens: 9, CachedInputTokens: 4, OutputTokens: 1, TotalTokens: 10}}, wantCacheRead: 4},
+		{name: "explicit cache read wins", understanding: &fakeTaskImageUnderstandingClient{usage: srvconfig.TokenUsage{InputTokens: 9, CachedInputTokens: 4, CacheReadInputTokens: 6, CacheCreationInputTokens: 2, OutputTokens: 1, TotalTokens: 10}}, wantCacheRead: 6},
+		{name: "cost write failure preserves result", understanding: &fakeTaskImageUnderstandingClient{usage: srvconfig.TokenUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}}, costErr: errors.New("cost write failed")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := zerolog.Nop()
 			cost := &fakeTaskImageOperationsCost{recordErr: tt.costErr}
-			svc := NewTaskImageOperationsService(nil, nil, tt.writing, cost, TaskImageOperationsConfig{UnderstandingProvider: "provider", UnderstandingModel: "model"}, &logger)
+			svc := NewTaskImageOperationsService(nil, nil, tt.understanding, cost, TaskImageOperationsConfig{UnderstandingProvider: "provider", UnderstandingModel: "model"}, &logger)
 			result, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{ProjectID: "project", FilePath: path, Prompt: "inspect"})
 			if tt.wantAnalyzeError {
 				if err == nil || result != nil {

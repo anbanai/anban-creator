@@ -14,6 +14,23 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
+func TestLiveSliceToolsExcludeGenerativeSemanticTools(t *testing.T) {
+	names := listToolNames(t, registerLiveSliceTools)
+	for _, removed := range []string{
+		"recognize_live_subjects", "recognize_live_invalid_sentences",
+		"recognize_live_segments", "complete_live_subject",
+	} {
+		if names[removed] {
+			t.Errorf("removed tool %s is still registered", removed)
+		}
+	}
+	for _, kept := range []string{"build_live_clip_plan", "build_live_subject_clip_plan", "build_live_clip_manifest"} {
+		if !names[kept] {
+			t.Errorf("deterministic tool %s is missing", kept)
+		}
+	}
+}
+
 type fakeMCPLiveSliceTingWu struct {
 	createReq service.LiveAnalysisTaskRequest
 }
@@ -87,7 +104,7 @@ func TestLiveSliceHandlersValidateMissingServiceAndArgs(t *testing.T) {
 func TestUploadLiveAudioHandlerErrorContainsCapabilityStateOnly(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"file_path":"/client/audio.mp3"}`)},
@@ -116,7 +133,7 @@ func TestCreateLiveAnalysisTaskHandlerAcceptsAudioKey(t *testing.T) {
 	t.Cleanup(func() { svcs = old })
 	tw := &fakeMCPLiveSliceTingWu{}
 	store := &fakeMCPLiveStorage{name: "oss"}
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(tw, nil, store, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(tw, store, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"audio_key":"uploads/live-audio/take.mp3"}`)},
@@ -134,32 +151,10 @@ func TestCreateLiveAnalysisTaskHandlerAcceptsAudioKey(t *testing.T) {
 	}
 }
 
-func TestRecognizeLiveSegmentsHandlerRequiresSentences(t *testing.T) {
-	old := svcs
-	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: nil}
-
-	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"ask":"找产品卖点"}`)},
-	}
-
-	result, err := recognizeLiveSegmentsHandler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("recognizeLiveSegmentsHandler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error")
-	}
-	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "live slice service not available") {
-		t.Fatalf("unexpected error text: %q", text)
-	}
-}
-
 func TestBuildLiveClipPlanHandlerRequiresArguments(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"sentences":[]}`)},
@@ -181,7 +176,7 @@ func TestBuildLiveClipPlanHandlerRequiresArguments(t *testing.T) {
 func TestBuildLiveClipPlanHandlerReturnsCommands(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -223,7 +218,7 @@ func TestBuildLiveClipPlanHandlerReturnsCommands(t *testing.T) {
 func TestBuildLiveSubjectClipPlanHandlerReturnsPartsAndConcat(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -259,7 +254,7 @@ func TestBuildLiveSubjectClipPlanHandlerReturnsPartsAndConcat(t *testing.T) {
 func TestBuildLiveSubjectClipPlanHandlerAllowsNarrationSentences(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -298,7 +293,7 @@ func TestBuildLiveSubjectClipPlanHandlerAllowsNarrationSentences(t *testing.T) {
 func TestBuildLiveSubjectClipPlanHandlerRequiresCompletions(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -324,7 +319,7 @@ func TestBuildLiveSubjectClipPlanHandlerRequiresCompletions(t *testing.T) {
 func TestBuildLiveClipManifestHandlerReturnsMarkdown(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -355,7 +350,7 @@ func TestBuildLiveClipManifestHandlerReturnsMarkdown(t *testing.T) {
 func TestBuildLiveClipManifestHandlerRejectsOutputMismatch(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -383,7 +378,7 @@ func TestBuildLiveClipManifestHandlerRejectsOutputMismatch(t *testing.T) {
 func TestBuildLiveClipManifestHandlerRejectsPartMismatch(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -436,7 +431,7 @@ func TestBuildLiveClipManifestHandlerRejectsPartMismatch(t *testing.T) {
 func TestBuildLiveClipManifestHandlerRejectsMissingActualDuration(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
@@ -464,7 +459,7 @@ func TestBuildLiveClipManifestHandlerRejectsMissingActualDuration(t *testing.T) 
 func TestBuildLiveClipManifestHandlerReturnsStrictValidationErrors(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
 
 	tests := []struct {
 		name string

@@ -3,12 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCommandCenterSignals,
   buildNextBestActions,
-  hasUsableModelConfig,
   projectCreatedReturnHref,
   createTaskHref,
   parseCreationIntent,
   projectsReturnHref,
-  type ModelConfigLike,
 } from './command-center'
 import type { BillingWallet, Plan, Project, Task } from '@/types'
 
@@ -92,7 +90,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 } satisfies BillingWallet,
       apiKeysReady: true,
-      modelConfigReady: true,
       localExecutorReady: true,
     })
 
@@ -115,7 +112,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 },
       apiKeysReady: true,
-      modelConfigReady: true,
       localExecutorReady: true,
     })
 
@@ -135,7 +131,6 @@ describe('command center rules', () => {
       projects: [],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: true,
-      modelConfigReady: true,
       localExecutorReady: true,
     })
 
@@ -203,7 +198,6 @@ describe('command center rules', () => {
       projects: [project({ config: { enable_publishing: true, require_publish_approval: true } })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
-      modelConfigReady: false,
       localExecutorReady: true,
     })
 
@@ -211,12 +205,20 @@ describe('command center rules', () => {
     expect(signals.readiness.publishingReady).toBe(true)
     expect(signals.readiness.checks.projects.status).toBe('ready')
     expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
-    expect(signals.readiness.checks.modelConfig.status).toBe('not_ready')
     expect(signals.readiness.checks.localExecutor.status).toBe('ready')
     expect(signals.readiness.checks.publishing.description).toContain('发布需审核')
   })
 
-  it('places setup review before generic creation when keys or model config are not ready', () => {
+  it('does not treat optional user model overrides as task readiness', () => {
+    const signals = buildCommandCenterSignals({
+      projects: [project()],
+      apiKeysReady: true,
+      localExecutorReady: true,
+    })
+    expect(signals.readiness.checks).not.toHaveProperty('modelConfig')
+  })
+
+  it('places setup review before generic creation when platform keys are not ready', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [],
@@ -224,7 +226,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: false,
-      modelConfigReady: null,
       localExecutorReady: true,
     })
 
@@ -234,13 +235,4 @@ describe('command center rules', () => {
     ])
   })
 
-  it('detects usable model config from text or image model settings', () => {
-    const empty: ModelConfigLike = {}
-    const textReady: ModelConfigLike = { text: { model: 'gpt-5' } }
-    const imageReady: ModelConfigLike = { image: { provider: 'openai' } }
-
-    expect(hasUsableModelConfig(empty)).toBe(false)
-    expect(hasUsableModelConfig(textReady)).toBe(true)
-    expect(hasUsableModelConfig(imageReady)).toBe(true)
-  })
 })

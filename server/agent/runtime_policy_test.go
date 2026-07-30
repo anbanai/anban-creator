@@ -143,19 +143,22 @@ func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
 	}
 }
 
+func TestManagedRequiredMCPToolsRequiresAnalyzeVideoForMontage(t *testing.T) {
+	if got := managedRequiredMCPTools(model.PlatformMontage); !reflect.DeepEqual(got, []string{"analyze_video"}) {
+		t.Fatalf("managedRequiredMCPTools(montage) = %#v", got)
+	}
+}
+
 func TestValidateManagedMCPStatusRequiresNamespacedLiveSlicerTools(t *testing.T) {
 	want := []string{
+		"analyze_video",
 		"build_live_clip_manifest",
 		"build_live_clip_plan",
 		"build_live_subject_clip_plan",
-		"complete_live_subject",
 		"create_live_analysis_task",
 		"get_media_pipeline_status",
 		"prepare_file_upload",
 		"query_live_analysis_task",
-		"recognize_live_invalid_sentences",
-		"recognize_live_segments",
-		"recognize_live_subjects",
 		"submit_agent_feedback",
 		"update_task_progress",
 	}
@@ -173,8 +176,8 @@ func TestValidateManagedMCPStatusRequiresNamespacedLiveSlicerTools(t *testing.T)
 		t.Fatalf("ValidateManagedMCPStatus namespaced tools: %v", err)
 	}
 	status.McpServers[0].Tools = status.McpServers[0].Tools[1:]
-	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err == nil || !strings.Contains(err.Error(), "build_live_clip_manifest") {
-		t.Fatalf("error = %v, want missing build_live_clip_manifest", err)
+	if err := ValidateManagedMCPStatus(status, model.TaskTypeLiveSlicer); err == nil || !strings.Contains(err.Error(), "analyze_video") {
+		t.Fatalf("error = %v, want missing analyze_video", err)
 	}
 }
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -26,6 +27,7 @@ function ModelSection({ title, description, children }: { title: string; descrip
   return (
     <div className="rounded-lg">
       <button
+        aria-label={title}
         className="flex items-center justify-between w-full px-3 py-2.5 text-left"
         onClick={() => setExpanded(!expanded)}
       >
@@ -33,14 +35,7 @@ function ModelSection({ title, description, children }: { title: string; descrip
           <p className="text-sm font-medium text-foreground">{title}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
         </div>
-        <svg
-          className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <ChevronDown className={`size-4 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded && <div className="px-3 pb-3 space-y-3 border-t border-border pt-3">{children}</div>}
     </div>
@@ -95,10 +90,6 @@ export default function ModelConfigSection() {
     queryFn: () => api.modelConfig.get(),
   })
 
-  const [textModel, setTextModel] = useState('')
-  const [textEndpoint, setTextEndpoint] = useState('')
-  const [textApiKey, setTextApiKey] = useState('')
-  const [textProxy, setTextProxy] = useState('')
   const [imageProvider, setImageProvider] = useState('')
   const [imageModel, setImageModel] = useState('')
   const [imageEndpoint, setImageEndpoint] = useState('')
@@ -109,12 +100,6 @@ export default function ModelConfigSection() {
 
   useEffect(() => {
     if (!config || initialized.current) return
-    if (config.text) {
-      setTextModel(config.text.model || '')
-      setTextEndpoint(config.text.endpoint || '')
-      setTextApiKey(config.text.api_key ? '****' : '')
-      setTextProxy(config.text.proxy || '')
-    }
     if (config.image) {
       setImageProvider(config.image.provider || '')
       setImageModel(config.image.model || '')
@@ -125,25 +110,7 @@ export default function ModelConfigSection() {
     initialized.current = true
   }, [config])
 
-  const textHasConfig = !!(config?.text?.model || config?.text?.endpoint || config?.text?.api_key)
   const imageHasConfig = !!(config?.image?.model || config?.image?.endpoint || config?.image?.api_key || config?.image?.provider)
-
-  const textMutation = useMutation({
-    mutationFn: () =>
-      api.modelConfig.update({
-        text: {
-          model: textModel,
-          endpoint: textEndpoint,
-          api_key: textApiKey === '****' ? '****' : textApiKey,
-          proxy: textProxy,
-        },
-      }),
-    onSuccess: () => {
-      toast.success('文本模型配置已保存')
-      queryClient.invalidateQueries({ queryKey: queryKeys.modelConfig.all })
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err, '保存失败')),
-  })
 
   const imageMutation = useMutation({
     mutationFn: () =>
@@ -168,10 +135,6 @@ export default function ModelConfigSection() {
     onSuccess: () => {
       toast.success('已恢复系统默认配置')
       queryClient.invalidateQueries({ queryKey: queryKeys.modelConfig.all })
-      setTextModel('')
-      setTextEndpoint('')
-      setTextApiKey('')
-      setTextProxy('')
       setImageProvider('')
       setImageModel('')
       setImageEndpoint('')
@@ -180,14 +143,6 @@ export default function ModelConfigSection() {
     },
     onError: (err) => toast.error(getApiErrorMessage(err, '恢复默认失败')),
   })
-
-  const handleEditText = () => {
-    if (textEndpoint && !textModel) {
-      toast.error('请填写模型名称')
-      return
-    }
-    textMutation.mutate()
-  }
 
   const handleEditImage = () => {
     const hasAnyImageConfig = !!(imageProvider || imageEndpoint || imageApiKey || imageModel || imageProxy)
@@ -204,9 +159,9 @@ export default function ModelConfigSection() {
     <Card>
       <div className="border-b border-border px-4 py-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">MCP 模型配置</h2>
+          <h2 className="text-sm font-semibold text-foreground">图片模型覆盖</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            仅用于 MCP 服务端工具中的写作、排版和图片生成，不会改变 Claude Code Agent 使用的模型。
+            可选。未配置时使用 Server 的系统图片生成路由。
           </p>
         </div>
         <Button
@@ -214,74 +169,18 @@ export default function ModelConfigSection() {
           variant="ghost"
           className="text-red-500 hover:text-red-600"
           onClick={() => clearMutation.mutate()}
-          disabled={!textHasConfig && !imageHasConfig}
+          disabled={!imageHasConfig}
         >
           恢复系统默认
         </Button>
       </div>
       <CardContent className="space-y-4">
-        {/* Text Model */}
         <ModelSection
-          title="服务端写作模型"
-          description={
-            textHasConfig
-              ? '已配置 MCP 写作自定义模型'
-              : 'MCP 写作工具使用系统默认模型'
-          }
-        >
-          <MaskedInput
-            label="Endpoint"
-            value={textEndpoint}
-            onChange={setTextEndpoint}
-            placeholder="https://api.openai.com/v1"
-            hasValue={!!config?.text?.endpoint}
-          />
-          <MaskedInput
-            label="API Key"
-            value={textApiKey}
-            onChange={setTextApiKey}
-            placeholder="sk-..."
-            hasValue={!!config?.text?.api_key}
-          />
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">模型名称</Label>
-              {config?.text?.model && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
-            </div>
-            <Input
-              value={textModel}
-              onChange={(e) => setTextModel(e.target.value)}
-              placeholder="gpt-4o / glm-5.1"
-              className="text-xs"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">代理服务器（可选）</Label>
-            <Input
-              value={textProxy}
-              onChange={(e) => setTextProxy(e.target.value)}
-              placeholder="http://proxy:port"
-              className="text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2 pt-1">
-            <Button
-              size="sm"
-              onClick={handleEditText}
-              disabled={textMutation.isPending}
-            >
-              {textMutation.isPending ? '保存中...' : '保存'}
-            </Button>
-          </div>
-        </ModelSection>
-
-        {/* Image Model */}
-        <ModelSection
-          title="服务端图片模型"
+          title="图片生成模型覆盖"
           description={
             imageHasConfig
-              ? '已配置 MCP 图片自定义模型'
-              : 'MCP 图片工具使用系统默认模型'
+              ? '已配置自定义图片生成模型'
+              : '使用系统图片生成模型'
           }
         >
           <p className="px-3 text-xs text-muted-foreground">
@@ -348,8 +247,9 @@ export default function ModelConfigSection() {
               size="sm"
               onClick={handleEditImage}
               disabled={imageMutation.isPending}
+              aria-label="保存图片模型配置"
             >
-              {imageMutation.isPending ? '保存中...' : '保存'}
+              {imageMutation.isPending ? '保存中...' : '保存图片模型配置'}
             </Button>
           </div>
         </ModelSection>

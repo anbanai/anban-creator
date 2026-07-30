@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -46,36 +47,27 @@ func (h *ModelConfigHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(c.Body(), &fields); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	for field := range fields {
+		if field != "image" {
+			return Error(c, fiber.StatusBadRequest, "unsupported model config field: "+field)
+		}
+	}
+
 	var req service.UpdateModelConfigRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if req.Text == nil && req.Image == nil {
-		return Error(c, fiber.StatusBadRequest, "no config provided")
+	if req.Image == nil {
+		return Error(c, fiber.StatusBadRequest, "no image config provided")
 	}
 
 	const maxFieldLen = 2048
 	const sentinel = "****"
-
-	if req.Text != nil {
-		if err := validateConfigField("text.endpoint", req.Text.Endpoint, maxFieldLen, true); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if err := validateConfigField("text.model", req.Text.Model, maxFieldLen, false); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if err := validateConfigField("text.api_key", req.Text.APIKey, maxFieldLen, false); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if err := validateConfigField("text.proxy", req.Text.Proxy, maxFieldLen, true); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		// Reject sentinel as a real API key value (must be used only to keep existing).
-		if req.Text.APIKey != sentinel && (req.Text.APIKey == "" || len(strings.TrimSpace(req.Text.APIKey)) != len(req.Text.APIKey)) {
-			return Error(c, fiber.StatusBadRequest, "text.api_key must not be blank or whitespace-only")
-		}
-	}
 
 	if req.Image != nil {
 		if err := validateConfigField("image.endpoint", req.Image.Endpoint, maxFieldLen, true); err != nil {

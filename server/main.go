@@ -391,10 +391,17 @@ func main() {
 		log.Info().Str("endpoint", route.BaseURL).Str("server_internal_model", route.Model).Msg("server internal model client initialized")
 	}
 
-	var imageUnderstandingClient service.LLMClient
+	var imageUnderstandingBaseClient service.LLMClient
+	var imageUnderstandingClient service.ImageUnderstandingClient
 	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
-		imageUnderstandingClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
+		imageUnderstandingBaseClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
+		imageUnderstandingClient, _ = imageUnderstandingBaseClient.(service.ImageUnderstandingClient)
 		log.Info().Str("endpoint", cfg.ImageUnderstanding.BaseURL).Str("model", cfg.ImageUnderstanding.Model).Msg("image understanding LLM client initialized")
+	}
+	var videoUnderstandingClient service.LLMClient
+	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
+		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
+		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
 	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
@@ -491,11 +498,8 @@ func main() {
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
-		if modelConfigSvc != nil {
-			projectHandler.SetModelConfigService(modelConfigSvc)
-		}
-		if imageUnderstandingClient != nil {
-			projectHandler.SetVisionClient(imageUnderstandingClient)
+		if imageUnderstandingBaseClient != nil {
+			projectHandler.SetVisionClient(imageUnderstandingBaseClient)
 		}
 		if templateSvc != nil {
 			projectHandler.SetTemplateService(templateSvc)
@@ -595,7 +599,7 @@ func main() {
 		}
 		if cfg.TingWu.Complete() || store != nil {
 			var err error
-			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, nil, store, log)
+			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, store, log)
 			if err != nil {
 				log.Warn().Err(err).Msg("live-slice service unavailable")
 			} else {
@@ -631,9 +635,13 @@ func main() {
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
 			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
-			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, nil, fixedBilling.Cost, service.TaskImageOperationsConfig{
+			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+			}, log),
+			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
+				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
+				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
@@ -642,6 +650,8 @@ func main() {
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
+			Bool("image_understanding", imageUnderstandingClient != nil).
+			Bool("video_understanding", videoUnderstandingClient != nil).
 			Bool("content_render_tools", contentRenderSvc != nil).
 			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
