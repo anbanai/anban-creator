@@ -52,7 +52,7 @@ function task(overrides: Partial<Task> = {}): Task {
     started_at: '',
     completed_at: '',
     ...overrides,
-    execution_profile: overrides.execution_profile ?? 'cost_effective',
+    execution_profile: overrides.execution_profile ?? 'effective',
   }
 }
 

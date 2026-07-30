@@ -64,15 +64,15 @@ vi.mock('@/lib/api', async () => {
           catalog_id: 'retail-test-v1',
           currency: 'credits',
           skus: [
-            { id: 'task.article.cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+            { id: 'task.article.cost', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
             { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.seednote.maximum', operation: 'task.seednote', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
+            { id: 'task.seednote.maximum', operation: 'task.seednote', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
             { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
-            { id: 'task.montage.maximum', operation: 'task.montage', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.montage.maximum', operation: 'task.montage', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'montage_artifacts_verified' },
           ],
         }),
         wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
@@ -80,9 +80,9 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
     },
@@ -111,7 +111,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
         status: 'active',
         next_run_at: '2025-01-20T09:00:00Z',
         project_id: 'ch-1',
-        execution_profile: 'maximum_quality',
+        execution_profile: 'quality',
         created_at: '2025-01-10T00:00:00Z',
         updated_at: '2025-01-10T00:00:00Z',
       }],
@@ -166,15 +166,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
-      execution_profile: 'maximum_quality',
+      execution_profile: 'quality',
     })))
   })
 
   it('blocks plan updates when the stored execution profile is no longer available', async () => {
     vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
-      { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
+      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
     ])
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
@@ -303,7 +303,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     status: 'active',
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: seednoteProject.id,
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     reference_image: {
       asset_id: '22222222-2222-4222-8222-222222222222',
       file_name: 'plan-reference.png',
@@ -660,7 +660,7 @@ describe('PlansPage Montage input', () => {
     status: 'active',
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: montageProject.id,
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     montage_input: {
       brief: '保存的 brief',
       pipeline_key: 'saved-pipeline',

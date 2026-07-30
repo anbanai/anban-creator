@@ -63,7 +63,7 @@ const fixtures = vi.hoisted(() => {
     error_message: '模型超时',
     plan_id: null,
     project_id: project.id,
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     result: null,
     published: false,
     published_at: null,
@@ -81,7 +81,7 @@ const fixtures = vi.hoisted(() => {
     progress: 100,
     plan_id: null,
     project_id: project.id,
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     result: null,
     published: false,
     published_at: null,
@@ -127,19 +127,19 @@ vi.mock('@/lib/api', async () => {
           catalog_id: 'retail-test-v1',
           currency: 'credits',
           skus: [
-            { id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
-            { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.article.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
+            { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
           ],
         }),
       },
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
     },
@@ -333,9 +333,9 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
         { id: 'task.article.balanced.v1', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-        { id: 'task.article.maximum-quality.v1', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.maximum-quality.v1', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
       ],
     })
   })
@@ -345,10 +345,10 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-        { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-        { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
-        { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+        { id: 'task.article.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+        { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+        { id: 'task.ecommerce.v1', operation: 'task.ecommerce', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
+        { id: 'task.montage.v1', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
       ],
     })
   })
@@ -370,7 +370,7 @@ describe('TasksPage bulk clone execution profile', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认克隆' }))
 
-    await waitFor(() => expect(api.tasks.bulkClone).toHaveBeenCalledWith(['failed-task'], 'cost_effective'))
+    await waitFor(() => expect(api.tasks.bulkClone).toHaveBeenCalledWith(['failed-task'], 'effective'))
   })
 
   it('disables confirmation when no available profile has a matching SKU', async () => {
@@ -390,7 +390,7 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
       ],
     })
     const dialog = await openBulkCloneDialog()

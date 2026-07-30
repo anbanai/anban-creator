@@ -35,7 +35,7 @@ const articleTask: Task = {
   status: 'completed',
   plan_id: null,
   project_id: project.id,
-  execution_profile: 'cost_effective',
+  execution_profile: 'effective',
   project_snapshot: {
     project_name: '创建时项目名称',
     platform: 'article',
@@ -513,21 +513,20 @@ describe('TaskConfigurationDetails', () => {
   it('renders the frozen task profile instead of the current capability catalog', () => {
     const frozenTask: Task = {
       ...articleTask,
-      execution_profile: 'maximum_quality',
+      execution_profile: 'quality',
       agent_profile_snapshot: {
-        schema_version: 2,
-        profile_id: 'maximum_quality',
+        schema_version: 3,
+        profile_id: 'quality',
         display_name: '极致效果',
         provider: 'moonshot',
         protocol: 'anthropic',
-        models: {
-          default: 'kimi-k2.7-code',
-          opus: 'kimi-k2.7-code',
-          fable: 'kimi-k2.7-code',
-          sonnet: 'kimi-k2.7-code',
-          haiku: 'kimi-k2.7-code',
+        envs: {
+          ANTHROPIC_MODEL: 'kimi-k2.7-code',
+          CLAUDE_CODE_EFFORT_LEVEL: 'high',
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: '9223372036854775807',
+          CLAUDE_CODE_DISABLE_THINKING: 'false',
+          ANTHROPIC_AUTH_TOKEN: 'must-not-render',
         },
-        claude: { effort_level: 'high', max_context_tokens: 262144 },
         model_usage_aliases: { 'kimi-k2.7-code': 'kimi-k2.7-code' },
       },
       agent_profile_fingerprint: 'a'.repeat(64),
@@ -537,9 +536,11 @@ describe('TaskConfigurationDetails', () => {
 
     expect(screen.getByRole('heading', { name: 'Agent 执行配置' })).toBeInTheDocument()
     expect(screen.getByText('moonshot')).toBeInTheDocument()
-    expect(screen.getByText('全部角色：kimi-k2.7-code')).toBeInTheDocument()
-    expect(screen.getByText('Claude 参数').nextElementSibling).toHaveTextContent('推理强度：high')
-    expect(screen.getByText('Claude 参数').nextElementSibling).toHaveTextContent('最大上下文：262,144')
+    expect(screen.getByText('kimi-k2.7-code')).toBeInTheDocument()
+    expect(screen.getByText('推理强度').nextElementSibling).toHaveTextContent('high')
+    expect(screen.getByText('最大上下文').nextElementSibling).toHaveTextContent('9,223,372,036,854,775,807')
+    expect(screen.getByText('思考模式').nextElementSibling).toHaveTextContent('开启')
+    expect(screen.queryByText('must-not-render')).not.toBeInTheDocument()
     expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
   })
 

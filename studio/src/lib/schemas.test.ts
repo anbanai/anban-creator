@@ -9,7 +9,7 @@ import {
 
 function withExecutionProfile(input: unknown) {
   return {
-    execution_profile: 'cost_effective' as const,
+    execution_profile: 'effective' as const,
     ...(input as Record<string, unknown>),
   }
 }
@@ -97,6 +97,17 @@ describe('registerSchema', () => {
 })
 
 describe('createTaskSchema', () => {
+  it('accepts only the current execution profile IDs', () => {
+    const base = { project_id: 'ch-1', type: 'article', prompt: '测试主题' }
+
+    for (const executionProfile of ['effective', 'balanced', 'quality']) {
+      expect(rawCreateTaskSchema.safeParse({ ...base, execution_profile: executionProfile }).success).toBe(true)
+    }
+    for (const executionProfile of ['cost_effective', 'maximum_quality']) {
+      expect(rawCreateTaskSchema.safeParse({ ...base, execution_profile: executionProfile }).success).toBe(false)
+    }
+  })
+
   it('requires a selected execution profile', () => {
     const base = { project_id: 'ch-1', type: 'article', prompt: '测试主题' }
     expect(rawCreateTaskSchema.safeParse(base).success).toBe(false)

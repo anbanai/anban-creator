@@ -33,7 +33,7 @@ const snapshotTask: Task = {
   prompt: '写一篇茶饮文章',
   status: 'completed',
   project_id: 'project-1',
-  execution_profile: 'cost_effective',
+  execution_profile: 'effective',
   result: null,
   published: false,
   published_at: null,

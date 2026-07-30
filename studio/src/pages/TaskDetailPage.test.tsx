@@ -228,9 +228,9 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.billing.wallet).mockResolvedValue(mockBillingWallet)
     vi.mocked(api.billing.catalog).mockResolvedValue(mockBillingCatalog)
     vi.mocked(api.agentProfiles.list).mockResolvedValue([
-      { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
     ])
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
@@ -279,24 +279,20 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
   })
 
-  it('shows the frozen task model matrix instead of the current capability catalog', async () => {
+  it('shows the frozen task model instead of the current capability catalog', async () => {
     mockTask(taskWith({
       status: 'completed',
-      execution_profile: 'maximum_quality',
+      execution_profile: 'quality',
       agent_profile_snapshot: {
-        schema_version: 2,
-        profile_id: 'maximum_quality',
+        schema_version: 3,
+        profile_id: 'quality',
         display_name: '极致效果',
         provider: 'moonshot',
         protocol: 'anthropic',
-        models: {
-          default: 'kimi-k2.7-code',
-          opus: 'kimi-k2.7-code',
-          fable: 'kimi-k2.7-code',
-          sonnet: 'kimi-k2.7-code',
-          haiku: 'kimi-k2.7-code',
+        envs: {
+          ANTHROPIC_MODEL: 'kimi-k2.7-code',
+          CLAUDE_CODE_EFFORT_LEVEL: 'high',
         },
-        claude: { effort_level: 'high' },
         model_usage_aliases: { 'kimi-k2.7-code': 'kimi-k2.7-code' },
       },
       agent_profile_fingerprint: 'a'.repeat(64),
@@ -306,7 +302,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
     await openTaskDetails('配置')
 
-    expect(screen.getByText('全部角色：kimi-k2.7-code')).toBeInTheDocument()
+    expect(screen.getByText('kimi-k2.7-code')).toBeInTheDocument()
     expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
   })
 

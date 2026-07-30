@@ -16,41 +16,16 @@ const goalSchema = z.string().refine(
 )
 
 const executionProfileSchema = z
-  .enum(['cost_effective', 'balanced', 'maximum_quality'])
+  .enum(['effective', 'balanced', 'quality'])
   .or(z.literal(''))
   .refine((value): boolean => value !== '', '请选择执行配置')
 
-const agentModelMatrixSchema = z.object({
-  default: z.string().min(1),
-  opus: z.string().min(1),
-  fable: z.string().min(1),
-  sonnet: z.string().min(1),
-  haiku: z.string().min(1),
-}).strict()
-
-const agentClaudeControlsSchema = z.object({
-  effort_level: z.enum(['low', 'medium', 'high', 'max']).optional(),
-  always_enable_effort: z.boolean().optional(),
-  max_context_tokens: z.number().int().positive().optional(),
-  max_output_tokens: z.number().int().positive().optional(),
-  max_thinking_tokens: z.number().int().nonnegative().optional(),
-  disable_adaptive_thinking: z.boolean().optional(),
-  disable_thinking: z.boolean().optional(),
-  auto_compact_window: z.number().int().positive().optional(),
-  autocompact_pct_override: z.number().int().min(1).max(100).optional(),
-  disable_1m_context: z.boolean().optional(),
-  subagent_model: z.string().min(1).optional(),
-  enable_tool_search: z.boolean().optional(),
-}).strict()
-
 export const agentExecutionProfileCapabilitySchema = z.object({
-  id: z.enum(['cost_effective', 'balanced', 'maximum_quality']),
+  id: z.enum(['effective', 'balanced', 'quality']),
   display_name: z.string().min(1),
   description: z.string(),
   provider: z.string().min(1),
-  protocol: z.literal('anthropic'),
-  models: agentModelMatrixSchema,
-  claude: agentClaudeControlsSchema,
+  model_name: z.string().min(1),
   min_tier: z.enum(['free', 'pro', 'enterprise']),
   available: z.boolean(),
   unavailable_reason: z.string().optional(),

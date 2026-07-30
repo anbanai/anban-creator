@@ -13,14 +13,14 @@ describe('taskCostFor', () => {
       catalog_id: 'retail-profile-v1',
       currency: 'credits' as const,
       skus: [
-        { id: 'article-cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
+        { id: 'article-cost', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
         { id: 'article-balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission' as const, price_credits: 6000, delivery: 'article' },
       ],
     } satisfies BillingCatalog
 
-    expect(taskCostFor(catalog, 'article', 'cost_effective')).toBe(4800)
+    expect(taskCostFor(catalog, 'article', 'effective')).toBe(4800)
     expect(taskCostFor(catalog, 'article', 'balanced')).toBe(6000)
-    expect(taskCostFor(catalog, 'article', 'maximum_quality')).toBeUndefined()
+    expect(taskCostFor(catalog, 'article', 'quality')).toBeUndefined()
   })
 
   it('chooses the cheapest available profile with an exact task SKU', () => {
@@ -28,14 +28,14 @@ describe('taskCostFor', () => {
       catalog_id: 'retail-profile-v1',
       currency: 'credits' as const,
       skus: [
-        { id: 'article-cost', operation: 'task.article', execution_profile: 'cost_effective' as const, charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
+        { id: 'article-cost', operation: 'task.article', execution_profile: 'effective' as const, charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
         { id: 'article-balanced', operation: 'task.article', execution_profile: 'balanced' as const, charge_policy: 'task_admission' as const, price_credits: 4000, delivery: 'article' },
       ],
     }
     const profiles = [
-      { id: 'cost_effective' as const, display_name: '性价比', provider: 'provider-a', protocol: 'anthropic' as const, models: { default: 'a', opus: 'a', fable: 'a', sonnet: 'a', haiku: 'a' }, claude: {}, description: '', min_tier: 'free' as const, available: true },
-      { id: 'balanced' as const, display_name: '平衡型', provider: 'provider-b', protocol: 'anthropic' as const, models: { default: 'b', opus: 'b', fable: 'b', sonnet: 'b', haiku: 'b' }, claude: {}, description: '', min_tier: 'pro' as const, available: true },
-      { id: 'maximum_quality' as const, display_name: '极致效果', provider: 'provider-c', protocol: 'anthropic' as const, models: { default: 'c', opus: 'c', fable: 'c', sonnet: 'c', haiku: 'c' }, claude: {}, description: '', min_tier: 'enterprise' as const, available: true },
+      { id: 'effective' as const, display_name: '性价比', provider: 'provider-a', model_name: 'a', description: '', min_tier: 'free' as const, available: true },
+      { id: 'balanced' as const, display_name: '平衡型', provider: 'provider-b', model_name: 'b', description: '', min_tier: 'pro' as const, available: true },
+      { id: 'quality' as const, display_name: '极致效果', provider: 'provider-c', model_name: 'c', description: '', min_tier: 'enterprise' as const, available: true },
     ]
 
     expect(cheapestAvailableExecutionProfile(profiles, catalog, 'article')).toBe('balanced')
@@ -43,6 +43,6 @@ describe('taskCostFor', () => {
       profiles.map((profile) => profile.id === 'balanced' ? { ...profile, available: false } : profile),
       catalog,
       'article',
-    )).toBe('cost_effective')
+    )).toBe('effective')
   })
 })

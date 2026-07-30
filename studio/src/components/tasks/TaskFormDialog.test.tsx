@@ -96,7 +96,7 @@ const fixtures = vi.hoisted(() => {
     goal_mode: true,
     goal: '必须包含三个案例',
     project_id: articleProject.id,
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     result: null,
     published: false,
     published_at: null,
@@ -176,18 +176,18 @@ beforeEach(() => {
     catalog_id: 'retail-test-v1',
     currency: 'credits',
     skus: [
-      { id: 'task.article.cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+      { id: 'task.article.cost', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
       { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-      { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
-      { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+      { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+      { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
       { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-      { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+      { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
     ],
   })
   vi.mocked(api.agentProfiles.list).mockResolvedValue([
-    { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-    { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-    { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+    { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+    { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+    { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
   ])
   vi.mocked(api.imageModels.list).mockResolvedValue({
     tier: 'pro',
@@ -227,7 +227,7 @@ describe('TaskFormDialog', () => {
   })
 
   it('retains the source execution profile when cloning', async () => {
-    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'maximum_quality' } })
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'quality' } })
 
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
@@ -236,11 +236,11 @@ describe('TaskFormDialog', () => {
 
   it('blocks cloning when the retained execution profile is no longer available', async () => {
     vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
-      { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
-      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
+      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
     ])
-    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'maximum_quality' } })
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'quality' } })
 
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByRole('button', { name: '克隆' })).toBeDisabled()
@@ -253,7 +253,7 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.billing.catalog).mockResolvedValueOnce({
       catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_model: 'tier_matrix_v1', pricing_tier: 'pro',
       skus: [{
-        id: 'task.article.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission',
+        id: 'task.article.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission',
         list_price_credits: 6000, price_credits: 5400, discount_credits: 600, pricing_tier: 'pro',
         delivery: 'article_artifacts_verified',
       }],
@@ -361,7 +361,7 @@ describe('TaskFormDialog', () => {
 
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
       type: 'article',
-      execution_profile: 'cost_effective',
+      execution_profile: 'effective',
       project_id: 'article-project',
       prompt: '复制后的完整创作要求',
       quantity: 1,

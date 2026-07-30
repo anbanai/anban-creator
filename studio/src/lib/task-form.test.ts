@@ -39,7 +39,7 @@ function task(overrides: Partial<Task> = {}): Task {
     prompt: 'Original prompt',
     status: 'completed',
     project_id: 'project-1',
-    execution_profile: 'cost_effective',
+    execution_profile: 'effective',
     published: false,
     published_at: null,
     billing_price_credits: 0,
@@ -60,9 +60,9 @@ describe('task form mapping', () => {
   })
 
   it('preserves the source execution profile when cloning', () => {
-    const defaults = cloneTaskFormDefaults(task({ execution_profile: 'maximum_quality' }))
-    expect(defaults.execution_profile).toBe('maximum_quality')
-    expect(taskFormValuesToRequest(defaults).execution_profile).toBe('maximum_quality')
+    const defaults = cloneTaskFormDefaults(task({ execution_profile: 'quality' }))
+    expect(defaults.execution_profile).toBe('quality')
+    expect(taskFormValuesToRequest(defaults).execution_profile).toBe('quality')
   })
 
   it('creates complete defaults from the selected project without sharing project config objects', () => {
@@ -453,7 +453,7 @@ describe('task form mapping', () => {
       image_ratio: '16:9',
       image_model_key: `${type}-model`,
       skip_reference_image: false,
-      execution_profile: 'cost_effective',
+      execution_profile: 'effective',
       watermark: false,
       goal: 'Publish-ready',
       goal_mode: false,
@@ -664,7 +664,7 @@ describe('task form mapping', () => {
     const formValues: TaskFormDefaults = {
       ...createTaskFormDefaults(project({ id: `${values.type}-project`, platform: values.type as Project['platform'] })),
       ...(values as unknown as Partial<TaskFormDefaults>),
-      execution_profile: 'cost_effective',
+      execution_profile: 'effective',
       quantity: 1,
       image_ratio: '',
       image_model_key: '',
