@@ -445,7 +445,7 @@ type AgentProfileEnvsBackfillOptions struct {
 func BackfillAgentProfileEnvs(ctx context.Context, db *gorm.DB, options AgentProfileEnvsBackfillOptions) error
 ```
 
-Convert operational IDs with `map[string]string{"cost_effective":"effective", "balanced":"balanced", "maximum_quality":"quality"}`. For each v2 snapshot, use its frozen models/controls, take only `ANTHROPIC_BASE_URL` from the corresponding new Profile, validate the redacted v3 snapshot, compute the Fingerprint with `model.AgentProfileFingerprint`, and update the task and its executions in one short transaction.
+Convert operational IDs with `map[string]string{"cost_effective":"effective", "balanced":"balanced", "maximum_quality":"quality"}`. For each v2 snapshot, use its frozen models/controls. Take `ANTHROPIC_BASE_URL` from the corresponding new Profile only when its Provider matches the frozen Provider; otherwise require an explicit repeatable `--legacy-provider-base-url provider=https://endpoint` migration argument. Validate the redacted v3 snapshot, compute the Fingerprint with `model.AgentProfileFingerprint`, and update the task and its executions in one short transaction.
 
 - [ ] **Step 6: Implement the command**
 

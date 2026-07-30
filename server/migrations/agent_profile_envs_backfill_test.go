@@ -21,7 +21,7 @@ func backfillProfiles() map[string]config.ClaudeExecutionProfileConfig {
 	}
 	return map[string]config.ClaudeExecutionProfileConfig{
 		"effective": {Provider: "deepseek", Envs: envs("https://deepseek.test/anthropic", "secret", "new-effective"), ModelUsageAliases: map[string]string{"new-effective": "new-effective"}},
-		"balanced":  {Provider: "volcengine_ark", Envs: envs("https://ark.test/anthropic", "secret", "new-balanced"), ModelUsageAliases: map[string]string{"new-balanced": "new-balanced"}},
+		"balanced":  {Provider: "zhipu", Envs: envs("https://zhipu.test/anthropic", "secret", "new-balanced"), ModelUsageAliases: map[string]string{"new-balanced": "new-balanced"}},
 		"quality":   {Provider: "moonshot", Envs: envs("https://moonshot.test/anthropic", "secret", "new-quality"), ModelUsageAliases: map[string]string{"new-quality": "new-quality"}},
 	}
 }
@@ -156,9 +156,26 @@ func TestBackfillAgentProfileEnvsDryRunDoesNotWrite(t *testing.T) {
 func TestVerifyAgentProfileEnvsRejectsFingerprintMismatch(t *testing.T) {
 	db := openBackfillFixture(t)
 	seedLegacyTask(t, db, "task-a", "balanced")
-	options := AgentProfileEnvsBackfillOptions{BatchSize: 1, Profiles: backfillProfiles()}
+	options := AgentProfileEnvsBackfillOptions{
+		BatchSize: 1,
+		Profiles:  backfillProfiles(),
+		LegacyProviderBaseURLs: map[string]string{
+			"volcengine_ark": "https://legacy-ark.test/anthropic",
+		},
+	}
 	if err := BackfillAgentProfileEnvs(t.Context(), db, options); err != nil {
 		t.Fatal(err)
+	}
+	var rawSnapshot string
+	if err := db.Raw(`SELECT agent_profile_snapshot FROM tasks WHERE id='task-a'`).Scan(&rawSnapshot).Error; err != nil {
+		t.Fatal(err)
+	}
+	var snapshot model.AgentProfileSnapshot
+	if err := json.Unmarshal([]byte(rawSnapshot), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Provider != "volcengine_ark" || snapshot.Envs[model.ClaudeEnvBaseURL] != "https://legacy-ark.test/anthropic" || snapshot.Envs[model.ClaudeEnvModel] != "legacy-balanced" {
+		t.Fatalf("historical snapshot drifted: %#v", snapshot)
 	}
 	if err := db.Exec(`UPDATE tasks SET agent_profile_fingerprint=? WHERE id='task-a'`, strings.Repeat("f", 64)).Error; err != nil {
 		t.Fatal(err)

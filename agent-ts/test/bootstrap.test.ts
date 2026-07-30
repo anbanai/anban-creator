@@ -55,6 +55,13 @@ describe("validateBootstrapResponse", () => {
     expect(validateBootstrapResponse("execution-1", response).execution_profile.envs).toEqual(response.execution_profile.envs);
   });
 
+  test("preserves the current auth token bytes", () => {
+    const response = validResponse();
+    response.execution_profile.envs.ANTHROPIC_AUTH_TOKEN = " rotated-secret ";
+
+    expect(validateBootstrapResponse("execution-1", response).execution_profile.envs.ANTHROPIC_AUTH_TOKEN).toBe(" rotated-secret ");
+  });
+
   test("accepts only the three new execution profile IDs", () => {
     for (const profileID of ["effective", "balanced", "quality"]) {
       const response = validResponse();
@@ -92,6 +99,25 @@ describe("validateBootstrapResponse", () => {
       if (!key.startsWith("ANTHROPIC_")) delete (response.execution_profile.envs as Record<string, string>)[key];
     }
     expect(validateBootstrapResponse("execution-1", response).execution_profile.profile_id).toBe("quality");
+  });
+
+  test("uses the Server value-only byte limit for Claude profile envs", () => {
+    const response = validResponse();
+    const model = "m".repeat(3324);
+    response.execution_profile.envs = {
+      ANTHROPIC_BASE_URL: "https://api.example.com/v1",
+      ANTHROPIC_AUTH_TOKEN: "t".repeat(16000),
+      ANTHROPIC_MODEL: model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+      ANTHROPIC_DEFAULT_FABLE_MODEL: model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+    } as ReturnType<typeof validProfileEnvs>;
+    response.execution_profile.model_usage_aliases = {
+      [model]: { provider: "moonshot", model: "canonical-model" },
+    } as typeof response.execution_profile.model_usage_aliases;
+
+    expect(() => validateBootstrapResponse("execution-1", response)).not.toThrow();
   });
 
   test("validates optional Claude env value domains", () => {

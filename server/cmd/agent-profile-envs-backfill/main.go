@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -28,6 +29,10 @@ func run(ctx context.Context, args []string) error {
 	batchSize := flags.Int("batch-size", 500, "positive task batch size")
 	dryRun := flags.Bool("dry-run", false, "validate conversions without writing")
 	verifyOnly := flags.Bool("verify-only", false, "verify completed v3 rows without writing")
+	legacyProviderBaseURLs := map[string]string{}
+	flags.Func("legacy-provider-base-url", "repeatable legacy provider mapping in provider=https://endpoint form", func(value string) error {
+		return setLegacyProviderBaseURL(legacyProviderBaseURLs, value)
+	})
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -58,7 +63,8 @@ func run(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("tasks=%d plans=%d task_executions=%d\n", counts.tasks, counts.plans, counts.executions)
 	if err := migrations.BackfillAgentProfileEnvs(ctx, db, migrations.AgentProfileEnvsBackfillOptions{
-		BatchSize: *batchSize, Profiles: cfg.Claude.ExecutionProfiles, DryRun: *dryRun, VerifyOnly: *verifyOnly,
+		BatchSize: *batchSize, Profiles: cfg.Claude.ExecutionProfiles, LegacyProviderBaseURLs: legacyProviderBaseURLs,
+		DryRun: *dryRun, VerifyOnly: *verifyOnly,
 	}); err != nil {
 		return err
 	}
@@ -69,6 +75,19 @@ func run(ctx context.Context, args []string) error {
 		mode = "verify-only"
 	}
 	fmt.Printf("mode=%s status=ok\n", mode)
+	return nil
+}
+
+func setLegacyProviderBaseURL(values map[string]string, raw string) error {
+	provider, endpoint, ok := strings.Cut(strings.TrimSpace(raw), "=")
+	provider, endpoint = strings.TrimSpace(provider), strings.TrimSpace(endpoint)
+	parsed, err := url.Parse(endpoint)
+	if !ok || provider == "" || strings.ContainsAny(provider, "/\x00\r\n") || err != nil ||
+		!strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return fmt.Errorf("legacy-provider-base-url must use provider=https://endpoint without credentials, query, or fragment")
+	}
+	values[provider] = endpoint
 	return nil
 }
 

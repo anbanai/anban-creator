@@ -13,10 +13,11 @@ import (
 )
 
 type AgentProfileEnvsBackfillOptions struct {
-	BatchSize  int
-	Profiles   map[string]config.ClaudeExecutionProfileConfig
-	DryRun     bool
-	VerifyOnly bool
+	BatchSize              int
+	Profiles               map[string]config.ClaudeExecutionProfileConfig
+	LegacyProviderBaseURLs map[string]string
+	DryRun                 bool
+	VerifyOnly             bool
 }
 
 type legacyAgentProfileSnapshotV2 struct {
@@ -145,10 +146,14 @@ func backfillAgentProfileTask(tx *gorm.DB, row agentProfileBackfillTaskRow, opti
 	if !ok {
 		return fmt.Errorf("task %s requires missing configured profile %q", row.ID, newID)
 	}
+	baseURL := configured.Envs[model.ClaudeEnvBaseURL]
 	if strings.TrimSpace(configured.Provider) != strings.TrimSpace(legacy.Provider) {
-		return fmt.Errorf("task %s provider %q conflicts with configured profile %q", row.ID, legacy.Provider, configured.Provider)
+		baseURL = strings.TrimSpace(options.LegacyProviderBaseURLs[legacy.Provider])
+		if baseURL == "" {
+			return fmt.Errorf("task %s legacy provider %q requires an explicit base URL", row.ID, legacy.Provider)
+		}
 	}
-	envs := legacyProfileEnvs(legacy, configured.Envs[model.ClaudeEnvBaseURL])
+	envs := legacyProfileEnvs(legacy, baseURL)
 	snapshot := model.AgentProfileSnapshot{
 		SchemaVersion: model.ClaudeProfileSchemaV3, ProfileID: newID, DisplayName: legacy.DisplayName,
 		Provider: legacy.Provider, Protocol: legacy.Protocol, Envs: envs,

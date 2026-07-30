@@ -190,9 +190,12 @@ mysql --defaults-extra-file=/secure/mysql.cnf anban_creator \
   < server/migrations/20260730_agent_profile_envs_expand.sql
 
 go run ./server/cmd/agent-profile-envs-backfill \
-  --config server/config.yaml --batch-size 500 --dry-run
+  --config server/config.yaml --batch-size 500 \
+  --legacy-provider-base-url 'volcengine_ark=https://ark.cn-beijing.volces.com/api/compatible' \
+  --dry-run
 go run ./server/cmd/agent-profile-envs-backfill \
-  --config server/config.yaml --batch-size 500
+  --config server/config.yaml --batch-size 500 \
+  --legacy-provider-base-url 'volcengine_ark=https://ark.cn-beijing.volces.com/api/compatible'
 go run ./server/cmd/agent-profile-envs-backfill \
   --config server/config.yaml --batch-size 500 --verify-only
 
@@ -201,6 +204,15 @@ mysql --defaults-extra-file=/secure/mysql.cnf anban_creator \
 mysql --defaults-extra-file=/secure/mysql.cnf anban_creator \
   < server/migrations/20260730_agent_profile_envs_contract.sql
 ```
+
+Repeat `--legacy-provider-base-url` for every historical snapshot Provider that
+differs from the current Provider assigned to the same product profile. The
+20260728 migration created `balanced` snapshots with `volcengine_ark`, so that
+mapping is required when the current `balanced` example uses Zhipu. Use the
+actual historical production endpoint if it differed from the example above.
+The mapping restores only the non-secret frozen endpoint; it does not restore a
+legacy Token or make a historical task executable after its product profile
+changes Provider.
 
 Do not run Contract DDL before `--verify-only` succeeds. The Contract phase
 drops legacy execution columns and cannot be rolled back by enabling old IDs;

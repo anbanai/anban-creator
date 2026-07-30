@@ -182,14 +182,14 @@ function validateClaudeProfileEnvs(input: unknown): Record<string, string> {
   if (!isRecord(input)) throw new Error("bootstrap execution profile environment is invalid");
   let totalBytes = 0;
   for (const [key, value] of Object.entries(input)) {
-    if (!CLAUDE_PROFILE_ENV_KEYS.has(key) || !cleanString(value) || /[\x00\r\n]/.test(value) || Buffer.byteLength(value) > MAX_CLAUDE_ENV_VALUE_BYTES) {
+    if (!CLAUDE_PROFILE_ENV_KEYS.has(key) || !validClaudeEnvString(key, value) || /[\x00\r\n]/.test(value) || Buffer.byteLength(value) > MAX_CLAUDE_ENV_VALUE_BYTES) {
       throw new Error("bootstrap execution profile environment is invalid");
     }
-    totalBytes += Buffer.byteLength(key) + Buffer.byteLength(value);
+    totalBytes += Buffer.byteLength(value);
     if (totalBytes > MAX_CLAUDE_ENV_TOTAL_BYTES) throw new Error("bootstrap execution profile environment is invalid");
   }
   const envs = input as Record<string, string>;
-  if (!REQUIRED_CLAUDE_PROFILE_ENV_KEYS.every((key) => cleanString(envs[key]))) throw new Error("bootstrap execution profile environment is invalid");
+  if (!REQUIRED_CLAUDE_PROFILE_ENV_KEYS.every((key) => validClaudeEnvString(key, envs[key]))) throw new Error("bootstrap execution profile environment is invalid");
   if (!validProviderBaseURL(envs.ANTHROPIC_BASE_URL)) throw new Error("bootstrap execution profile environment is invalid");
   if (envs.CLAUDE_CODE_EFFORT_LEVEL !== undefined && !new Set(["low", "medium", "high", "max"]).has(envs.CLAUDE_CODE_EFFORT_LEVEL)) throw new Error("bootstrap execution profile environment is invalid");
   for (const key of ["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "CLAUDE_CODE_DISABLE_THINKING", "CLAUDE_CODE_DISABLE_1M_CONTEXT", "ENABLE_TOOL_SEARCH"]) {
@@ -201,6 +201,11 @@ function validateClaudeProfileEnvs(input: unknown): Record<string, string> {
   if (envs.MAX_THINKING_TOKENS !== undefined && !validUnsignedInteger(envs.MAX_THINKING_TOKENS, true)) throw new Error("bootstrap execution profile environment is invalid");
   if (envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE !== undefined && (!validUnsignedInteger(envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, false) || BigInt(envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE) > 100n)) throw new Error("bootstrap execution profile environment is invalid");
   return envs;
+}
+
+function validClaudeEnvString(key: string, value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  return key === "ANTHROPIC_AUTH_TOKEN" || value.trim() === value;
 }
 
 function validUnsignedInteger(value: string, allowZero: boolean): boolean {

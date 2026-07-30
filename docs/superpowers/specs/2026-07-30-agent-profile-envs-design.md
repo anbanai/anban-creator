@@ -216,7 +216,7 @@ MySQL DDL 会隐式提交，因此本次切换不能伪装成一个跨 DDL 和�
 2. **Expand DDL**：给 `task_executions` 增加可空 `profile_envs` JSON；保留旧 `model_matrix` 和 `claude_controls`，不提前破坏当前数据。
 3. **Go 批量回填**：使用短事务和主键游标执行以下转换，每批可安全重试：
    - `tasks.execution_profile`、`plans.execution_profile` 和 `task_executions.execution_profile` 中 `cost_effective` -> `effective`、`maximum_quality` -> `quality`。
-   - `tasks.agent_profile_snapshot` 从 schema v2 转换为 schema v3；从旧 `models` 和 `claude` 生成字符串 `envs`，更新 `profile_id`，删除旧字段和敏感值。
+   - `tasks.agent_profile_snapshot` 从 schema v2 转换为 schema v3；从旧 `models` 和 `claude` 生成字符串 `envs`，更新 `profile_id`，删除旧字段和敏感值。若历史 Provider 与当前同档 Provider 不同，运维必须通过可重复的 `--legacy-provider-base-url provider=https://endpoint` 参数提供当时的非敏感 Endpoint；迁移禁止猜测或改写历史 Provider/模型。
    - 使用应用层规范化函数重新计算 `tasks.agent_profile_fingerprint`，不得使用与 Go 序列化顺序可能不一致的 SQL JSON 哈希。
    - 从任务的 schema v3 快照回填 `task_executions.profile_envs` 和 `profile_fingerprint`，并保持 Provider 与关联任务一致。
 4. **验证与 Contract DDL**：Go backfill 使用 verify-only 模式逐行重算并核对 Fingerprint；SQL 在任务、计划和执行表断言旧 ID、schema v2、空 `profile_envs` 和快照内 `ANTHROPIC_AUTH_TOKEN` 数量均为零；随后把 `profile_envs` 设为非空，删除 `task_executions.model_matrix` 与 `task_executions.claude_controls`，重建只允许三个新 ID 的约束和索引。
