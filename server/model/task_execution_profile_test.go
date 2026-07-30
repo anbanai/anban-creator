@@ -125,6 +125,46 @@ func TestAgentProfileSnapshotFingerprintIsCanonical(t *testing.T) {
 	}
 }
 
+func TestAgentProfileSnapshotFingerprintCrossRuntimeVector(t *testing.T) {
+	snapshot := AgentProfileSnapshot{
+		SchemaVersion: ClaudeProfileSchemaV3,
+		ProfileID:     "quality",
+		DisplayName:   "极致<&>效果",
+		Provider:      "moonshot",
+		Protocol:      "anthropic",
+		Envs: map[string]string{
+			"ANTHROPIC_BASE_URL":                    "https://api.moonshot.cn/anthropic",
+			"ANTHROPIC_MODEL":                       "kimi-k3[1m]",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL":          "kimi-k3[1m]",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL":         "kimi-k3[1m]",
+			"ANTHROPIC_DEFAULT_SONNET_MODEL":        "kimi-k3[1m]",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL":         "kimi-k3[1m]",
+			"CLAUDE_CODE_EFFORT_LEVEL":              "high",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":      "true",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":        "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":         "131072",
+			"MAX_THINKING_TOKENS":                   "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
+			"CLAUDE_CODE_DISABLE_THINKING":          "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":       "1048576",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":       "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":        "false",
+			"CLAUDE_CODE_SUBAGENT_MODEL":            "kimi-k3[1m]",
+			"ENABLE_TOOL_SEARCH":                    "true",
+		},
+		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
+	}
+
+	got, err := AgentProfileFingerprint(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "ddeb3859ae9f15f7fd674caa0982326d05cce496d2426a8be892845643d31aa7"
+	if got != want {
+		t.Fatalf("fingerprint = %q, want cross-runtime vector %q", got, want)
+	}
+}
+
 func TestAgentProfileSnapshotValidation(t *testing.T) {
 	tests := []struct {
 		name   string

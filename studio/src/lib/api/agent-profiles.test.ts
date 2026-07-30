@@ -52,4 +52,34 @@ describe('agentProfilesApi', () => {
 
     await expect(agentProfilesApi.list()).rejects.toThrow()
   })
+
+  it('keeps configured profiles usable when another profile is unavailable', async () => {
+    vi.spyOn(http, 'get').mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'effective',
+            display_name: '性价比',
+            provider: 'deepseek',
+            model_name: 'deepseek-model',
+            description: '日常创作',
+            min_tier: 'free',
+            available: true,
+          },
+          {
+            id: 'quality',
+            display_name: '极致效果',
+            provider: '',
+            model_name: '',
+            description: '',
+            min_tier: 'enterprise',
+            available: false,
+            unavailable_reason: 'profile_configuration_missing',
+          },
+        ],
+      },
+    } as never)
+
+    await expect(agentProfilesApi.list()).resolves.toHaveLength(2)
+  })
 })

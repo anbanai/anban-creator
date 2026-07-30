@@ -497,7 +497,7 @@ func validBootstrapProfileFingerprint(fingerprint string) bool {
 
 func validBootstrapTaskType(taskType string) bool {
 	switch taskType {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.TaskTypeLiveSlicer:
+	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.TaskTypeLiveSlicer, model.TaskTypeViralAnalysis:
 		return true
 	default:
 		return false

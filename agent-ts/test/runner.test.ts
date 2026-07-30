@@ -176,6 +176,8 @@ describe("buildExecutionEnvironment", () => {
       "CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
       "CLAUDE_CODE_SKIP_MANTLE_AUTH",
       "ANTHROPIC_PROFILE",
+      "ANTHROPIC_CONFIG_DIR",
+      "ANTHROPIC_SCOPE",
       "ANTHROPIC_IDENTITY_TOKEN",
       "ANTHROPIC_IDENTITY_TOKEN_FILE",
       "ANTHROPIC_AWS_API_KEY",
@@ -192,6 +194,11 @@ describe("buildExecutionEnvironment", () => {
       "GCE_METADATA_HOST",
       "ANTHROPIC_SMALL_FAST_MODEL",
       "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+      "CLAUDE_CONFIG_DIR",
+      "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+      "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
+      "CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS",
+      "CLAUDE_CODE_MOCK_REMOTE_SETTINGS",
     ].map((key) => [key, "host-value"]));
 
     const environment = buildExecutionEnvironment(

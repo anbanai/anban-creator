@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isAbsolute, resolve } from "node:path";
@@ -26,6 +27,15 @@ const EXECUTION_PROFILE_KEYS = [
 ];
 
 const EXECUTION_PROFILE_IDS = new Set(["effective", "balanced", "quality"]);
+const TASK_TYPE_AGENTS: Record<string, string> = {
+  article: "article",
+  seednote: "seednote",
+  moments: "moments",
+  ecommerce: "ecommerce",
+  montage: "montage",
+  "live-slicer": "live-slicer",
+  viral_analysis: "seednote",
+};
 
 export const CLAUDE_PROFILE_ENV_KEYS = new Set([
   "ANTHROPIC_AUTH_TOKEN",
@@ -140,11 +150,12 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     throw new Error("bootstrap response identity is incomplete");
   }
   validateExecutionToken(executionID, data);
-  if (!new Set(["article", "seednote", "moments", "ecommerce", "montage", "live-slicer"]).has(data.task_type)) throw new Error("bootstrap task type is invalid");
+  const expectedAgent = TASK_TYPE_AGENTS[data.task_type];
+  if (!expectedAgent) throw new Error("bootstrap task type is invalid");
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
   if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
-  if (data.agent_flag !== `anban:${data.task_type}`) throw new Error("bootstrap agent flag is invalid");
+  if (data.agent_flag !== `anban:${expectedAgent}`) throw new Error("bootstrap agent flag is invalid");
   if (data.auto_memory_directory !== ".claude/memory") throw new Error("bootstrap auto memory directory is invalid");
   validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");
@@ -176,6 +187,43 @@ function validateExecutionProfile(input: unknown): asserts input is ExecutionPro
   if (!Object.entries(aliases).every(([raw, identity]) => isRecord(identity) && hasOnlyKeys(identity, ["provider", "model"]) && validModelUsageAlias(raw, identity.provider, identity.model) && identity.provider === profile.provider)) {
     throw new Error("bootstrap execution profile model usage aliases are invalid");
   }
+  if (executionProfileFingerprint(profile as unknown as ExecutionProfile) !== profile.profile_fingerprint) {
+    throw new Error("bootstrap execution profile fingerprint does not match snapshot");
+  }
+}
+
+export function executionProfileFingerprint(profile: ExecutionProfile): string {
+  const envs = Object.entries(profile.envs)
+    .filter(([key]) => key !== "ANTHROPIC_AUTH_TOKEN")
+    .map(([key, value]) => ({ key, value }))
+    .sort((left, right) => compareCanonicalStrings(left.key, right.key) || compareCanonicalStrings(left.value, right.value));
+  const modelUsageAliases = Object.entries(profile.model_usage_aliases)
+    .map(([raw, identity]) => ({ raw, canonical: identity.model }))
+    .sort((left, right) => compareCanonicalStrings(left.raw, right.raw) || compareCanonicalStrings(left.canonical, right.canonical));
+  const canonical = goCompatibleJSON({
+    schema_version: 3,
+    profile_id: profile.profile_id,
+    display_name: profile.display_name,
+    provider: profile.provider,
+    protocol: profile.protocol,
+    envs,
+    model_usage_aliases: modelUsageAliases,
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+function goCompatibleJSON(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (character) => ({
+    "<": "\\u003c",
+    ">": "\\u003e",
+    "&": "\\u0026",
+    "\u2028": "\\u2028",
+    "\u2029": "\\u2029",
+  })[character]!);
+}
+
+function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function validateClaudeProfileEnvs(input: unknown): Record<string, string> {

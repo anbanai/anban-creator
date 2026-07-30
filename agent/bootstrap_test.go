@@ -438,6 +438,17 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 	}
 }
 
+func TestValidateBootstrapRuntimeAcceptsViralAnalysisSeednoteAgent(t *testing.T) {
+	response := &BootstrapResponse{
+		TaskID: "task-1", TaskType: model.TaskTypeViralAnalysis, ProjectID: "project-1", Prompt: "analyze",
+		ExecutionProfile: testAgentRuntimeProfile(), MaxTurns: 40, AgentFlag: "anban:seednote", AutoMemoryDirectory: ".claude/memory",
+		ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
+	}
+	if err := validateBootstrapRuntime("execution-1", response); err != nil {
+		t.Fatalf("viral analysis bootstrap rejected: %v", err)
+	}
+}
+
 func TestValidateBootstrapExecutionProfileAcceptsStableIDsWithoutFixedProviderModelTuples(t *testing.T) {
 	for _, profileID := range []string{"effective", "balanced", "quality"} {
 		profile := testAgentRuntimeProfile()

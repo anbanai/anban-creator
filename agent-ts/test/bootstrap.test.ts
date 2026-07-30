@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { validateBootstrapResponse } from "../src/bootstrap.js";
+import { executionProfileFingerprint, validateBootstrapResponse, type BootstrapResponse } from "../src/bootstrap.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -26,33 +26,41 @@ const validProfileEnvs = () => ({
   ENABLE_TOOL_SEARCH: "true",
 });
 
-const validResponse = () => ({
-  execution_token: tokenFor({ execution_id: "execution-1", task_id: "task-1", project_id: "project-1" }),
-  task_id: "task-1",
-  task_type: "article",
-  project_id: "project-1",
-  prompt: "Write an article",
-  execution_profile: {
-    profile_id: "quality",
-    provider: "moonshot",
-    protocol: "anthropic",
-    display_name: "极致效果",
-    profile_fingerprint: "a".repeat(64),
-    envs: validProfileEnvs(),
-    model_usage_aliases: {
-      "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" },
+const validResponse = (): BootstrapResponse => {
+  const response: BootstrapResponse = {
+    execution_token: tokenFor({ execution_id: "execution-1", task_id: "task-1", project_id: "project-1" }),
+    task_id: "task-1",
+    task_type: "article",
+    project_id: "project-1",
+    prompt: "Write an article",
+    execution_profile: {
+      profile_id: "quality",
+      provider: "moonshot",
+      protocol: "anthropic",
+      display_name: "极致<&>效果",
+      profile_fingerprint: "",
+      envs: validProfileEnvs(),
+      model_usage_aliases: {
+        "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" },
+      },
     },
-  },
-  max_turns: 10,
-  agent_flag: "anban:article",
-  auto_memory_directory: ".claude/memory",
-  artifact_transport: { mode: "stream" },
-});
+    max_turns: 10,
+    agent_flag: "anban:article",
+    auto_memory_directory: ".claude/memory",
+    artifact_transport: { mode: "stream" },
+  };
+  response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
+  return response;
+};
 
 describe("validateBootstrapResponse", () => {
   test("accepts all 19 Claude profile env values without rewriting them", () => {
     const response = validResponse();
     expect(validateBootstrapResponse("execution-1", response).execution_profile.envs).toEqual(response.execution_profile.envs);
+  });
+
+  test("matches the Server fingerprint canonicalization vector", () => {
+    expect(executionProfileFingerprint(validResponse().execution_profile)).toBe("ddeb3859ae9f15f7fd674caa0982326d05cce496d2426a8be892845643d31aa7");
   });
 
   test("preserves the current auth token bytes", () => {
@@ -65,14 +73,30 @@ describe("validateBootstrapResponse", () => {
   test("accepts only the three new execution profile IDs", () => {
     for (const profileID of ["effective", "balanced", "quality"]) {
       const response = validResponse();
-      response.execution_profile.profile_id = profileID;
+      response.execution_profile.profile_id = profileID as BootstrapResponse["execution_profile"]["profile_id"];
+      response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
       expect(validateBootstrapResponse("execution-1", response).execution_profile.profile_id).toBe(profileID);
     }
     for (const profileID of ["cost_effective", "maximum_quality", "custom"]) {
       const response = validResponse();
-      response.execution_profile.profile_id = profileID;
+      (response.execution_profile as unknown as Record<string, unknown>).profile_id = profileID;
       expect(() => validateBootstrapResponse("execution-1", response)).toThrow("identity");
     }
+  });
+
+  test("accepts viral analysis through the Seednote agent route", () => {
+    const response = validResponse();
+    response.task_type = "viral_analysis";
+    response.agent_flag = "anban:seednote";
+
+    expect(validateBootstrapResponse("execution-1", response).agent_flag).toBe("anban:seednote");
+  });
+
+  test("rejects a frozen profile whose fingerprint does not match its contents", () => {
+    const response = validResponse();
+    response.execution_profile.display_name = "tampered display name";
+
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow("fingerprint does not match snapshot");
   });
 
   test("rejects legacy profile payload fields", () => {
@@ -98,6 +122,7 @@ describe("validateBootstrapResponse", () => {
     for (const key of Object.keys(response.execution_profile.envs)) {
       if (!key.startsWith("ANTHROPIC_")) delete (response.execution_profile.envs as Record<string, string>)[key];
     }
+    response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
     expect(validateBootstrapResponse("execution-1", response).execution_profile.profile_id).toBe("quality");
   });
 
@@ -116,6 +141,7 @@ describe("validateBootstrapResponse", () => {
     response.execution_profile.model_usage_aliases = {
       [model]: { provider: "moonshot", model: "canonical-model" },
     } as typeof response.execution_profile.model_usage_aliases;
+    response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
 
     expect(() => validateBootstrapResponse("execution-1", response)).not.toThrow();
   });

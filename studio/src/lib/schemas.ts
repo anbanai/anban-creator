@@ -24,12 +24,20 @@ export const agentExecutionProfileCapabilitySchema = z.object({
   id: z.enum(['effective', 'balanced', 'quality']),
   display_name: z.string().min(1),
   description: z.string(),
-  provider: z.string().min(1),
-  model_name: z.string().min(1),
+  provider: z.string(),
+  model_name: z.string(),
   min_tier: z.enum(['free', 'pro', 'enterprise']),
   available: z.boolean(),
   unavailable_reason: z.string().optional(),
-}).strict()
+}).strict().superRefine((profile, context) => {
+  if (!profile.available) return
+  if (!profile.provider.trim()) {
+    context.addIssue({ code: 'custom', path: ['provider'], message: '可用配置必须包含 Provider' })
+  }
+  if (!profile.model_name.trim()) {
+    context.addIssue({ code: 'custom', path: ['model_name'], message: '可用配置必须包含模型' })
+  }
+})
 
 export const agentExecutionProfileCapabilitiesSchema = z.array(agentExecutionProfileCapabilitySchema)
 
