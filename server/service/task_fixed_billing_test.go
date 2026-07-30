@@ -31,7 +31,7 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 1_500, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "batch", Quantity: 2,
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testi
 			ctx := context.Background()
 			svc, f, enqueuer := newFixedTaskBillingFixture(t, tt.paid, tt.debt)
 			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: tt.name, Quantity: 1,
 			})
 			if !errors.Is(err, tt.want) || tasks != nil {
@@ -97,7 +97,7 @@ func TestTaskFixedBillingBatchAdmissionIsAtomicWhenTotalBalanceIsInsufficient(t 
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 700, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "atomic batch", Quantity: 2,
 	})
 	if !errors.Is(err, ErrBillingInsufficientForTask) || tasks != nil {
@@ -119,7 +119,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 2_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID: "plan-current-catalog", UserID: billingWalletUserID, ProjectID: projectID,
 		Type: model.PlatformArticle, Status: model.PlanStatusActive, Prompt: "scheduled",
 	}
@@ -131,7 +131,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 
 	bundle := testBillingBundle()
 	bundle.Products.CatalogID = "retail-test-v2"
-	bundle.Products.SKUs[0].ExecutionProfile = "cost_effective"
+	bundle.Products.SKUs[0].ExecutionProfile = "effective"
 	bundle.Products.SKUs[0].PriceCredits = 700
 	now := f.now.Add(time.Hour)
 	catalog := NewBillingCatalogService(f.repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
@@ -154,7 +154,7 @@ func TestTaskFixedBillingResumeKeepsOriginalCharge(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "first", Quantity: 1,
 	})
 	if err != nil {
@@ -260,7 +260,7 @@ func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "local failure", Quantity: 1,
 	})
 	if err != nil {
@@ -298,7 +298,7 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
 	})
 	if err != nil {

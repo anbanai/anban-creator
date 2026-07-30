@@ -1,10 +1,10 @@
-catalog_id: "retail-2026-07-29-v6"
+catalog_id: "retail-2026-07-30-v7"
 currency: "credits"
 pricing_model: "tier_matrix_v1"
 skus:
   - id: "task.article.cost-effective.v1"
     operation: "task.article"
-    execution_profile: "cost_effective"
+    execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 4800
     tier_prices: { free: 4800, pro: 4320, enterprise: 3840 }
@@ -18,7 +18,7 @@ skus:
     delivery: "article_artifacts_verified"
   - id: "task.article.maximum-quality.v1"
     operation: "task.article"
-    execution_profile: "maximum_quality"
+    execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 18000
     tier_prices: { free: 18000, pro: 16200, enterprise: 14400 }
@@ -26,7 +26,7 @@ skus:
 
   - id: "task.seednote.cost-effective.v1"
     operation: "task.seednote"
-    execution_profile: "cost_effective"
+    execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 4000
     tier_prices: { free: 4000, pro: 3600, enterprise: 3200 }
@@ -40,7 +40,7 @@ skus:
     delivery: "seednote_artifacts_verified"
   - id: "task.seednote.maximum-quality.v1"
     operation: "task.seednote"
-    execution_profile: "maximum_quality"
+    execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 15000
     tier_prices: { free: 15000, pro: 13500, enterprise: 12000 }
@@ -48,7 +48,7 @@ skus:
 
   - id: "task.moments.cost-effective.v1"
     operation: "task.moments"
-    execution_profile: "cost_effective"
+    execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 2400
     tier_prices: { free: 2400, pro: 2160, enterprise: 1920 }
@@ -62,7 +62,7 @@ skus:
     delivery: "moments_artifacts_verified"
   - id: "task.moments.maximum-quality.v1"
     operation: "task.moments"
-    execution_profile: "maximum_quality"
+    execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 9000
     tier_prices: { free: 9000, pro: 8100, enterprise: 7200 }
@@ -70,7 +70,7 @@ skus:
 
   - id: "task.ecommerce.cost-effective.v1"
     operation: "task.ecommerce"
-    execution_profile: "cost_effective"
+    execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 2400
     tier_prices: { free: 2400, pro: 2160, enterprise: 1920 }
@@ -84,7 +84,7 @@ skus:
     delivery: "ecommerce_artifacts_verified"
   - id: "task.ecommerce.maximum-quality.v1"
     operation: "task.ecommerce"
-    execution_profile: "maximum_quality"
+    execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 9000
     tier_prices: { free: 9000, pro: 8100, enterprise: 7200 }
@@ -92,7 +92,7 @@ skus:
 
   - id: "task.montage.cost-effective.v1"
     operation: "task.montage"
-    execution_profile: "cost_effective"
+    execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 1600
     tier_prices: { free: 1600, pro: 1440, enterprise: 1280 }
@@ -106,7 +106,7 @@ skus:
     delivery: "montage_artifacts_verified"
   - id: "task.montage.maximum-quality.v1"
     operation: "task.montage"
-    execution_profile: "maximum_quality"
+    execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 6000
     tier_prices: { free: 6000, pro: 5400, enterprise: 4800 }

@@ -1590,7 +1590,7 @@ func newBillingWalletFixtureWithRepositoryAndOperationPrice(t *testing.T, repo r
 	t.Helper()
 	bundle := testBillingBundle()
 	// Wallet and task-service fixtures exercise the Free-tier Agent profile.
-	bundle.Products.SKUs[0].ExecutionProfile = "cost_effective"
+	bundle.Products.SKUs[0].ExecutionProfile = "effective"
 	// Operation and standalone prices intentionally differ from task price.
 	bundle.Products.SKUs[1].PriceCredits = operationPrice
 	bundle.Products.SKUs[2].PriceCredits = 500

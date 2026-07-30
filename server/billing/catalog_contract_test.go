@@ -40,7 +40,7 @@ func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 	}
 }
 
-func TestAgentProfileCatalogV6(t *testing.T) {
+func TestAgentProfileCatalogV7(t *testing.T) {
 	if err := initialRetailCatalogContractError(loadProductionBundle(t).Products); err != nil {
 		t.Fatal(err)
 	}
@@ -389,9 +389,9 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		id, suffix string
 		numerator  int64
 	}{
-		{"cost_effective", "cost-effective", 8},
+		{"effective", "cost-effective", 8},
 		{"balanced", "balanced", 10},
-		{"maximum_quality", "maximum-quality", 30},
+		{"quality", "maximum-quality", 30},
 	}
 	for _, taskType := range taskTypes {
 		for _, profile := range profiles {
@@ -406,7 +406,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200,
 		delivery: "viral_analysis_report_verified",
 	}
-	if catalog.CatalogID != "retail-2026-07-29-v6" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
+	if catalog.CatalogID != "retail-2026-07-30-v7" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))
@@ -444,4 +444,17 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		}
 	}
 	return nil
+}
+
+func TestAgentProfileCatalogV7UsesOnlyNewIDsAndKeepsDesignerIsolated(t *testing.T) {
+	catalog := loadProductionBundle(t).Products
+	allowed := map[string]bool{"effective": true, "balanced": true, "quality": true}
+	for _, sku := range catalog.SKUs {
+		if strings.HasPrefix(sku.Operation, "task.") && sku.ExecutionProfile != "" && !allowed[sku.ExecutionProfile] {
+			t.Fatalf("task SKU %s uses profile %q", sku.ID, sku.ExecutionProfile)
+		}
+		if strings.HasPrefix(sku.Operation, "designer.") && sku.ExecutionProfile != "" {
+			t.Fatalf("Designer SKU %s has Agent profile %q", sku.ID, sku.ExecutionProfile)
+		}
+	}
 }

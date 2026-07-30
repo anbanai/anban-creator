@@ -515,7 +515,7 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 	}
 
 	conflict := req
-	conflict.ExecutionProfile = "maximum_quality"
+	conflict.ExecutionProfile = "quality"
 	if _, err := secondService.CreateQuote(ctx, conflict); !errors.Is(err, ErrBillingConflict) {
 		t.Fatalf("rollover parameter drift error = %v, want conflict", err)
 	}
@@ -643,7 +643,7 @@ func TestBillingCatalogPublishUsesSemanticJSONAndCompleteSKUEvidence(t *testing.
 				if err != nil || len(skus) == 0 {
 					t.Fatalf("list SKUs = %+v, %v", skus, err)
 				}
-				if err := db.Model(&model.BillingSKU{}).Where("id = ?", skus[0].ID).Update("execution_profile", "maximum_quality").Error; err != nil {
+				if err := db.Model(&model.BillingSKU{}).Where("id = ?", skus[0].ID).Update("execution_profile", "quality").Error; err != nil {
 					t.Fatal(err)
 				}
 			},

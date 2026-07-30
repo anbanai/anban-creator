@@ -401,8 +401,8 @@ func validateBundle(bundle *Bundle) error {
 		}
 		switch sku.ChargePolicy {
 		case "task_admission":
-			if sku.ExecutionProfile != "" && sku.ExecutionProfile != "cost_effective" && sku.ExecutionProfile != "balanced" && sku.ExecutionProfile != "maximum_quality" {
-				return configError("products.yaml", field+".execution_profile", errors.New("must be cost_effective, balanced, or maximum_quality"))
+			if sku.ExecutionProfile != "" && sku.ExecutionProfile != "effective" && sku.ExecutionProfile != "balanced" && sku.ExecutionProfile != "quality" {
+				return configError("products.yaml", field+".execution_profile", errors.New("must be effective, balanced, or quality"))
 			}
 			if sku.Route != "" {
 				return configError("products.yaml", field+".route", errors.New("must be empty for task_admission"))
