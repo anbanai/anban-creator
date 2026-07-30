@@ -138,6 +138,28 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 	}
 }
 
+func TestTaskImageOperationsRejectsForeignProjectWithoutTaskBeforeDelegation(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.Nop()
+	ownerID := "task-image-project-owner-no-task"
+	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
+	imagePath := filepath.Join(t.TempDir(), "image.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	understanding := &fakeTaskImageUnderstandingClient{}
+	svc := NewTaskImageOperationsService(newTestTaskService(repo, nil, nil, &logger, "", nil, nil), nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
+	_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: "foreign", ProjectID: projectID, FilePath: imagePath, Prompt: "inspect"})
+	if err == nil || !strings.Contains(err.Error(), "project does not belong to user") {
+		t.Fatalf("Analyze error = %v, want project ownership error", err)
+	}
+	if understanding.calls != 0 {
+		t.Fatalf("understanding calls = %d, want 0", understanding.calls)
+	}
+}
+
 func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
@@ -158,7 +180,13 @@ func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T)
 }
 
 func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
 	logger := zerolog.Nop()
+	userID := "task-image-invalid-source-user"
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	localText := filepath.Join(t.TempDir(), "not-image.txt")
 	if err := os.WriteFile(localText, []byte("plain text"), 0o644); err != nil {
 		t.Fatal(err)
@@ -182,14 +210,14 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			understanding := &fakeTaskImageUnderstandingClient{}
-			svc := NewTaskImageOperationsService(nil, nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
+			svc := NewTaskImageOperationsService(tasks, nil, understanding, nil, TaskImageOperationsConfig{}, &logger)
 			svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
 				if int64(len(tt.downloaded)) > maxAnalyzedTaskImageBytes {
 					return nil, errors.New("external image exceeds max size")
 				}
 				return tt.downloaded, nil
 			}
-			_, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{ImageURL: tt.imageURL, FilePath: tt.filePath, ProjectID: "project", Prompt: "inspect"})
+			_, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ImageURL: tt.imageURL, FilePath: tt.filePath, ProjectID: projectID, Prompt: "inspect"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) || understanding.calls != 0 {
 				t.Fatalf("Analyze = %v, calls=%d; want %q before delegation", err, understanding.calls, tt.want)
 			}
@@ -231,6 +259,13 @@ func TestTaskImageAnalysisSSRFAndRedirectPolicy(t *testing.T) {
 }
 
 func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.Nop()
+	userID := "task-image-cost-user"
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR")
 	path := filepath.Join(t.TempDir(), "image.png")
 	if err := os.WriteFile(path, png, 0o644); err != nil {
@@ -252,10 +287,9 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := zerolog.Nop()
 			cost := &fakeTaskImageOperationsCost{recordErr: tt.costErr}
-			svc := NewTaskImageOperationsService(nil, nil, tt.understanding, cost, TaskImageOperationsConfig{UnderstandingProvider: "provider", UnderstandingModel: "model"}, &logger)
-			result, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{ProjectID: "project", FilePath: path, Prompt: "inspect"})
+			svc := NewTaskImageOperationsService(tasks, nil, tt.understanding, cost, TaskImageOperationsConfig{UnderstandingProvider: "provider", UnderstandingModel: "model"}, &logger)
+			result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, FilePath: path, Prompt: "inspect"})
 			if tt.wantAnalyzeError {
 				if err == nil || result != nil {
 					t.Fatalf("Analyze = %#v, %v; want analysis error", result, err)

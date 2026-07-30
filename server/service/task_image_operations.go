@@ -23,15 +23,18 @@ import (
 const maxAnalyzedTaskImageBytes = 10 << 20
 
 var (
-	ErrTaskImageOperationOwnership       = errors.New("task does not belong to user")
-	ErrTaskImageOperationProjectMismatch = errors.New("task does not belong to the requested project")
-	ErrTaskImageOperationTaskNotFound    = errors.New("task not found")
-	ErrTaskImageOperationTaskUnavailable = errors.New("task service not available")
-	ErrTaskImageOperationProjectRequired = errors.New("project_id is required")
-	ErrTaskImageOperationFileRequired    = errors.New("file_path is required")
-	ErrTaskImageOperationPromptRequired  = errors.New("prompt is required")
-	ErrTaskImageOperationSourceRequired  = errors.New("either image_url or file_path is required")
-	ErrImageUnderstandingUnavailable     = errors.New("image understanding model is not configured")
+	ErrTaskImageOperationOwnership        = errors.New("task does not belong to user")
+	ErrTaskImageOperationProjectMismatch  = errors.New("task does not belong to the requested project")
+	ErrTaskImageOperationTaskNotFound     = errors.New("task not found")
+	ErrTaskImageOperationTaskUnavailable  = errors.New("task service not available")
+	ErrTaskImageOperationProjectNotFound  = errors.New("project not found")
+	ErrTaskImageOperationProjectOwnership = errors.New("project does not belong to user")
+	ErrTaskImageOperationProjectInactive  = errors.New("project is not active")
+	ErrTaskImageOperationProjectRequired  = errors.New("project_id is required")
+	ErrTaskImageOperationFileRequired     = errors.New("file_path is required")
+	ErrTaskImageOperationPromptRequired   = errors.New("prompt is required")
+	ErrTaskImageOperationSourceRequired   = errors.New("either image_url or file_path is required")
+	ErrImageUnderstandingUnavailable      = errors.New("image understanding model is not configured")
 )
 
 type UploadTaskImageRequest struct {
@@ -163,6 +166,22 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 
 func (s *TaskImageOperationsService) validateTask(ctx context.Context, userID, taskID, projectID string) error {
 	if taskID == "" {
+		if projectID == "" {
+			return nil
+		}
+		if s == nil || s.tasks == nil || s.tasks.repo == nil {
+			return ErrTaskImageOperationTaskUnavailable
+		}
+		project, err := s.tasks.repo.Projects().FindByID(ctx, projectID)
+		if err != nil || project == nil {
+			return ErrTaskImageOperationProjectNotFound
+		}
+		if userID == "" || project.UserID != userID {
+			return ErrTaskImageOperationProjectOwnership
+		}
+		if project.Status != model.ProjectStatusActive {
+			return ErrTaskImageOperationProjectInactive
+		}
 		return nil
 	}
 	if s == nil || s.tasks == nil {

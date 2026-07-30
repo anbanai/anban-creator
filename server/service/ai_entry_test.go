@@ -643,8 +643,8 @@ func TestAIEntryRequiresServerInternalClientBeforeTaskCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusNeedsConfiguration || result.ActionURL != "/settings" {
-		t.Fatalf("result = %#v, want server internal model configuration action", result)
+	if result.Status != AIEntryStatusNeedsConfiguration || result.ActionURL != "" || !strings.Contains(result.Message, "管理员") {
+		t.Fatalf("result = %#v, want an operator-owned server internal configuration error", result)
 	}
 	count, countErr := repo.Tasks().CountByUserID(ctx, userID, "", "")
 	if countErr != nil || count != 0 {

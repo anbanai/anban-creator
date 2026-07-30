@@ -123,7 +123,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
 	if s.llm == nil {
-		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用。", "/settings"), nil
+		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用，请联系管理员。", ""), nil
 	}
 
 	intent, parseErr := s.parseIntent(ctx, project, req)
