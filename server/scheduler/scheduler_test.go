@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,22 +53,16 @@ func TestAsynqClientEnqueueUniqueUsesTaskIDAndAcceptsReplay(t *testing.T) {
 	}
 }
 
-func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
+func TestTaskProcessorDoesNotRegisterSeednoteDiscoveryAndCapturesMetrics(t *testing.T) {
 	logger := zerolog.Nop()
-	var discovered []string
 	var captured []string
 	processor := NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return nil },
 		func(ctx context.Context, trackingID string) error {
-			discovered = append(discovered, trackingID)
-			return nil
-		},
-		func(ctx context.Context, trackingID string) error {
 			captured = append(captured, trackingID)
 			return nil
 		},
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -75,18 +70,29 @@ func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 		&logger,
 	)
 
-	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteDiscover, []byte(`{"tracking_id":"tracking-1"}`))); err != nil {
-		t.Fatalf("process discover: %v", err)
+	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask("seednote:"+"discover", []byte(`{"tracking_id":"tracking-1"}`))); err == nil || !strings.Contains(err.Error(), "handler not found") {
+		t.Fatalf("legacy seednote discovery error = %v, want handler not found", err)
 	}
 	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`))); err != nil {
 		t.Fatalf("process capture: %v", err)
 	}
 
-	if len(discovered) != 1 || discovered[0] != "tracking-1" {
-		t.Fatalf("discovered = %#v, want tracking-1", discovered)
-	}
 	if len(captured) != 1 || captured[0] != "tracking-2" {
 		t.Fatalf("captured = %#v, want tracking-2", captured)
+	}
+}
+
+func TestTaskProcessorDoesNotRegisterLegacyViralAnalysisJob(t *testing.T) {
+	logger := zerolog.Nop()
+	processor := NewTaskProcessor(
+		func(context.Context, string, string) error { return nil },
+		func(context.Context, string) error { return nil },
+		nil,
+		"127.0.0.1:6379", "", 0, 1, &logger,
+	)
+	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask("viral:"+"analyze", []byte(`{"analysis_id":"legacy"}`)))
+	if err == nil || !strings.Contains(err.Error(), "handler not found") {
+		t.Fatalf("legacy viral job error = %v, want handler not found", err)
 	}
 }
 
@@ -99,8 +105,6 @@ func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
 			triggered = append(triggered, planID)
 			return nil
 		},
-		nil,
-		nil,
 		nil,
 		"127.0.0.1:6379",
 		"",
@@ -125,8 +129,6 @@ func TestTaskProcessor_PlanTriggerHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return wantErr },
 		nil,
-		nil,
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -146,9 +148,7 @@ func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 	processor := NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return nil },
-		func(ctx context.Context, trackingID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return wantErr },
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,

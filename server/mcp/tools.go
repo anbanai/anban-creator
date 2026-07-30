@@ -41,6 +41,10 @@ type ImageGenerator interface {
 	) (*service.ImageResult, error)
 }
 
+type TaskVideoAnalyzer interface {
+	Analyze(context.Context, service.AnalyzeTaskVideoRequest) (*service.AnalyzeTaskVideoResult, error)
+}
+
 // Services holds the service instances needed by MCP tools.
 type Services struct {
 	ProjectSvc             *service.ProjectService
@@ -52,7 +56,7 @@ type Services struct {
 	ProviderCostSvc        *service.ProviderCostService
 	BillingCatalogSvc      *service.BillingCatalogService
 	GenerateImageTimeout   time.Duration
-	WritingSvc             *service.WritingService
+	ContentRenderSvc       *service.ContentRenderService
 	PublishingSvc          *service.PublishingService
 	TemplateSvc            *service.TemplateService
 	LiveSliceSvc           *service.LiveSliceService
@@ -67,6 +71,7 @@ type Services struct {
 	ResourceCatalogSvc     *service.ResourceCatalogService
 	TaskImageSvc           *service.TaskImageService
 	TaskImageOperationsSvc *service.TaskImageOperationsService
+	TaskVideoOperationsSvc TaskVideoAnalyzer
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -75,7 +80,8 @@ func RegisterTools(server *mcp.Server) {
 	registerTaskTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
-	registerWritingTools(server)
+	registerVideoUnderstandingTools(server)
+	registerContentRenderTools(server)
 	registerPublishingTools(server)
 	registerSeednoteFormatTools(server)
 	registerTemplateTools(server)

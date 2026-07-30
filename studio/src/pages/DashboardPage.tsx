@@ -11,7 +11,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { api } from '@/lib/api'
-import { hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
+import { projectsReturnHref } from '@/lib/command-center'
 import { contentTypeLabel } from '@/lib/labels'
 import { cheapestAvailableExecutionProfile, taskCostFor } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
@@ -49,12 +49,6 @@ export default function DashboardPage() {
   const { data: apiKeysResponse } = useQuery({
     queryKey: queryKeys.apiKeys.all,
     queryFn: () => api.apiKeys.list(),
-    staleTime: 60_000,
-  })
-
-  const { data: modelConfig } = useQuery({
-    queryKey: queryKeys.modelConfig.all,
-    queryFn: () => api.modelConfig.get(),
     staleTime: 60_000,
   })
 
@@ -131,7 +125,6 @@ export default function DashboardPage() {
     projectsError,
     activeProjectCount: activeProjects.length,
     apiKeysReady: apiKeysResponse ? (apiKeysResponse.items || []).length > 0 : null,
-    modelConfigReady: modelConfig ? hasUsableModelConfig(modelConfig) : null,
   })
   const canSubmit = Boolean(selectedProjectId && selectedProject)
     && executionProfileReady

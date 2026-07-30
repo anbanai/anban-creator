@@ -66,7 +66,9 @@ model_providers:
     api_key: "${WANGCAI_OPENAI_API_KEY}"
 
 model_routes:
-  writing:
+  # Used only for synchronous Server-internal decisions before agent execution;
+  # this is not a writing route. Multimodal routes remain separate below.
+  server_internal:
     provider: "moonshot"
     model: "kimi-k2.7-code"
     timeout: 5m
@@ -385,7 +387,6 @@ claude:
         limits: { cpu: "4", memory: "7Gi" }
   max_turns:
     moments: 25
-    viral_analysis: 30
     # 热门内容研究、多图生成与交付需要更完整的 Agent 工具调用预算。
     seednote: 100
     article: 60

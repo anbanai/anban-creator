@@ -1874,7 +1874,7 @@ func (r *rejectNestedTxRepository) WithTx(context.Context, func(repository.Repos
 func (f *billingWalletFixture) quote(t *testing.T, userID, operation, route, identity string) *model.BillingQuote {
 	t.Helper()
 	executionProfile := ""
-	if strings.HasPrefix(operation, "task.") && operation != "task.viral_analysis" {
+	if strings.HasPrefix(operation, "task.") {
 		executionProfile = "effective"
 	}
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{

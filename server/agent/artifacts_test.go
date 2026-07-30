@@ -24,6 +24,54 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
+	required := []string{"source-analysis.md", "viral-template.json", "template-meta.json"}
+	tests := []struct {
+		name         string
+		missing      string
+		failureState bool
+		valid        bool
+	}{
+		{name: "complete", valid: true},
+		{name: "failure state blocks complete deliverables", failureState: true},
+		{name: "missing source analysis", missing: "source-analysis.md"},
+		{name: "missing viral template", missing: "viral-template.json"},
+		{name: "missing template metadata", missing: "template-meta.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var files []*model.TaskFile
+			for _, name := range required {
+				if name != tt.missing {
+					files = append(files, &model.TaskFile{FileName: name, FilePath: filepath.Join("output", name)})
+				}
+			}
+			if tt.failureState {
+				files = append(files, &model.TaskFile{FileName: "failure-state.json", FilePath: "output/failure-state.json"})
+			}
+			got := ValidateTaskArtifactsFromTaskFiles(&model.Task{Type: model.TaskTypeViralAnalysis}, files)
+			if got.Valid != tt.valid {
+				t.Fatalf("validation = %#v, want valid=%v", got, tt.valid)
+			}
+			if tt.missing != "" && !containsArtifactName(got.Missing, tt.missing) {
+				t.Fatalf("missing = %#v, want %q", got.Missing, tt.missing)
+			}
+			if tt.failureState && !containsArtifactName(got.Missing, "successful seednote completion") {
+				t.Fatalf("missing = %#v, want failure-state rejection", got.Missing)
+			}
+		})
+	}
+}
+
+func containsArtifactName(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func seednoteRequiredArtifactPaths(prefix string) []string {
 	names := []string{
 		"content.md",

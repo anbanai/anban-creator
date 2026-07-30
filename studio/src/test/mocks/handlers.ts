@@ -39,7 +39,9 @@ export const mockBillingCatalog: BillingCatalog = {
     { id: 'task.article.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
     { id: 'task.seednote.v1', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
     { id: 'task.moments.v1', operation: 'task.moments', charge_policy: 'task_admission', price_credits: 3000, delivery: 'moments_artifacts_verified' },
-    { id: 'task.viral-analysis.v1', operation: 'task.viral_analysis', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+    { id: 'task.viral-analysis.cost-effective.v2', operation: 'task.viral_analysis', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+    { id: 'task.viral-analysis.balanced.v2', operation: 'task.viral_analysis', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+    { id: 'task.viral-analysis.maximum-quality.v2', operation: 'task.viral_analysis', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
   ],
 }
 
@@ -312,24 +314,6 @@ export const handlers = [
         artifacts: {},
         retake_actions: ['keep', 'fix_in_post', 'edit', 're_roll', 'rewrite'],
         next_actions: ['continue_editing', 'generate_cover', 'export_capcut_draft'],
-      },
-    })
-  }),
-
-  http.post('/api/v1/viral-analyses', async () => {
-    return HttpResponse.json({
-      code: 0,
-      msg: 'ok',
-      data: {
-        id: 'analysis-1',
-        user_id: '1',
-        source_type: 'note',
-        source_url: 'https://www.xiaohongshu.com/explore/mock',
-        source_data: {},
-        analysis_result: null,
-        status: 'pending',
-        created_at: '2025-01-15T10:00:00Z',
-        updated_at: '2025-01-15T10:00:00Z',
       },
     })
   }),

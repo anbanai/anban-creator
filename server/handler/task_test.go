@@ -30,6 +30,15 @@ import (
 
 type noopTaskEnqueuer struct{}
 
+type capturedTaskEnqueue struct {
+	taskType string
+	payload  []byte
+}
+
+type capturingTaskEnqueuer struct {
+	items []capturedTaskEnqueue
+}
+
 type availableRuntimeDispatcher struct{}
 
 func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
@@ -102,6 +111,19 @@ func (noopTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) error {
 
 func (noopTaskEnqueuer) EnqueueUnique(string, []byte, string) (bool, error) {
 	return true, nil
+}
+
+func (e *capturingTaskEnqueuer) Enqueue(taskType string, payload []byte) error {
+	e.items = append(e.items, capturedTaskEnqueue{taskType: taskType, payload: append([]byte(nil), payload...)})
+	return nil
+}
+
+func (e *capturingTaskEnqueuer) EnqueueIn(taskType string, payload []byte, _ time.Duration) error {
+	return e.Enqueue(taskType, payload)
+}
+
+func (e *capturingTaskEnqueuer) EnqueueUnique(taskType string, payload []byte, _ string) (bool, error) {
+	return true, e.Enqueue(taskType, payload)
 }
 
 func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
@@ -221,6 +243,131 @@ func TestTaskAndPlanCreateRejectLegacyExecutionProfileIDs(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "Viral analysis", Status: model.ProjectStatusActive}
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "viralmanaged"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := billing.LoadBundle("../billing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := catalog.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: userID, PaidCredits: 5_000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateLot(ctx, &model.BillingCreditLot{
+		ID: uuid.NewString(), UserID: userID, Kind: model.BillingCreditLotKindPaid,
+		SourceType: "fixture", SourceID: "viral-managed", CatalogID: bundle.Products.CatalogID,
+		OriginalCredits: 5_000, AvailableCredits: 5_000, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	enqueuer := &capturingTaskEnqueuer{}
+	logger := zerolog.New(io.Discard)
+	taskSvc := newHandlerTaskService(t, repo, enqueuer, nil, &logger, "", nil, nil)
+	taskSvc.SetBillingCatalogService(catalog)
+	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{Now: func() time.Time { return now }}))
+	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	body := `{"project_id":"` + project.ID + `","type":"viral_analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","execution_profile":"effective","quantity":1}`
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+	data := decodeEnvelopeRawData(t, resp)
+	var taskID string
+	if err := json.Unmarshal(data["id"], &taskID); err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Type != model.TaskTypeViralAnalysis || task.ExecutionProfile != "effective" || task.AgentProfileSnapshot.ProfileID != "effective" {
+		t.Fatalf("task contract = %#v", task)
+	}
+	if task.BillingCatalogID != "retail-2026-07-30-v7" || task.BillingSKUID != "task.viral-analysis.cost-effective.v2" {
+		t.Fatalf("task billing = %q/%q", task.BillingCatalogID, task.BillingSKUID)
+	}
+	quote, err := repo.Billing().FindQuoteByKey(ctx, "task-admission-quote", task.ID)
+	if err != nil {
+		t.Fatalf("find task admission quote: %v", err)
+	}
+	var frozenSKU billing.SKUConfig
+	if err := json.Unmarshal(quote.SKUSnapshot, &frozenSKU); err != nil {
+		t.Fatalf("decode task admission SKU: %v", err)
+	}
+	if frozenSKU.Operation != "task.viral_analysis" || frozenSKU.ExecutionProfile != "effective" || frozenSKU.ID != task.BillingSKUID {
+		t.Fatalf("task admission SKU = %#v", frozenSKU)
+	}
+	if len(enqueuer.items) != 1 || enqueuer.items[0].taskType != service.TypeContentGenerate {
+		t.Fatalf("queue = %#v, want one content generate", enqueuer.items)
+	}
+	var queued map[string]string
+	if err := json.Unmarshal(enqueuer.items[0].payload, &queued); err != nil || queued["task_id"] != task.ID || queued["user_id"] != userID {
+		t.Fatalf("queued payload = %#v, %v", queued, err)
+	}
+	if err := taskSvc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
+		t.Fatalf("HandleExecutionFromPayload: %v", err)
+	}
+	if _, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID); err != nil {
+		t.Fatalf("find current task execution: %v", err)
+	}
+}
+
+func TestCreateViralAnalysisTaskValidatesRequestedTypeAgainstProjectPlatform(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		platform string
+		taskType string
+	}{
+		{name: "viral analysis requires seednote", platform: model.PlatformArticle, taskType: model.TaskTypeViralAnalysis},
+		{name: "ordinary type must match project", platform: model.PlatformSeednote, taskType: model.PlatformArticle},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			userID := uuid.NewString()
+			projectID := uuid.NewString()
+			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "typeguard"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Projects().Create(t.Context(), &model.Project{ID: projectID, UserID: userID, Platform: tt.platform, Name: tt.name, Status: model.ProjectStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			h := NewTaskHandler(taskSvc, &logger)
+			app := fiber.New()
+			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","type":"`+tt.taskType+`","prompt":"source","execution_profile":"effective","quantity":1}`)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+			}
+		})
 	}
 }
 
@@ -483,6 +630,60 @@ func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
 	found, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || !found.Published {
 		t.Fatalf("published task = %+v err=%v", found, err)
+	}
+}
+
+func TestTaskHandlerMarkPublishedRejectsInvalidSeednoteIdentityWithoutPublishing(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid id", body: `{"published":true,"note_id":"invalid/id"}`},
+		{name: "invalid url", body: `{"published":true,"note_url":"https://example.com/explore/note-1"}`},
+		{name: "conflicting identity", body: `{"published":true,"note_id":"note-2","note_url":"https://www.xiaohongshu.com/explore/note-1"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			ctx := context.Background()
+			userID, projectID, taskID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: uuid.NewString()[:12]}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote", Status: model.ProjectStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
+			app := fiber.New()
+			app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
+				c.Locals("user_id", userID)
+				return h.MarkPublished(c)
+			})
+
+			req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/published", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				data, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, data)
+			}
+			found, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found.Published {
+				t.Fatal("invalid identity must not set published=true")
+			}
+		})
 	}
 }
 

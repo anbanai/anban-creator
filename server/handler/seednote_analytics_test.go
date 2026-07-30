@@ -36,7 +36,7 @@ func setupSeednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Rep
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
+	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
 	handler := NewSeednoteAnalyticsHandler(trackingSvc, &logger)
 	app := fiber.New()
 	app.Get("/tasks/:id/seednote-analytics", func(c fiber.Ctx) error {

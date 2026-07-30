@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,6 +17,19 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+func TestModelConfigUpdateRejectsRemovedTextConfig(t *testing.T) {
+	app := setupModelConfigHandlerTest(t)
+	req := httptest.NewRequest(http.MethodPut, "/model-config", strings.NewReader(`{"text":{"model":"gpt-5"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
 
 func setupModelConfigHandlerTest(t *testing.T) *fiber.App {
 	t.Helper()

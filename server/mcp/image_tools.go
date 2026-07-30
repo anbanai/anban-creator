@@ -298,7 +298,7 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 
 func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
-		return errorResult("writing/vision service not available"), nil
+		return errorResult("image understanding service not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
 	result, err := svcs.TaskImageOperationsSvc.Analyze(ctx, service.AnalyzeTaskImageRequest{

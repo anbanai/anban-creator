@@ -54,36 +54,6 @@ func registerLiveSliceTools(server *mcp.Server) {
 	}, queryLiveAnalysisTaskHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "recognize_live_subjects",
-		Description: "Analyze live transcript sentences and return short-video topic candidates as strict JSON subjects.",
-		InputSchema: liveSentenceSchema(nil),
-	}, recognizeLiveSubjectsHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "recognize_live_invalid_sentences",
-		Description: "Identify transcript sentences that are entirely unsuitable for short-video slicing, such as greetings, thanks, filler, and live-only promotions.",
-		InputSchema: liveSentenceSchema(nil),
-	}, recognizeLiveInvalidSentencesHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "recognize_live_segments",
-		Description: "Split live transcript sentences into coherent slicing ranges. Returns segment title, description, thoughts, start index, and end index.",
-		InputSchema: liveSentenceSchema(map[string]any{
-			"ask": map[string]any{"type": "string", "description": "Optional slicing goal or constraints"},
-		}),
-	}, recognizeLiveSegmentsHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "complete_live_subject",
-		Description: "Create a short-video script from live transcript sentences, optional ask, selected subject, and thoughts. Returns title, subtitle, reasoning, and chosen sentences.",
-		InputSchema: liveSentenceSchema(map[string]any{
-			"ask":      map[string]any{"type": "string", "description": "Optional slicing goal or constraints"},
-			"subject":  map[string]any{"type": "string", "description": "Selected short-video topic"},
-			"thoughts": map[string]any{"type": "string", "description": "Planning notes for the selected topic"},
-		}),
-	}, completeLiveSubjectHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "build_live_clip_plan",
 		Description: "Deterministically map live transcript sentences and LLM segment indexes to clip timings, safe output paths, and ffmpeg command strings. Does not execute commands or touch files.",
 		InputSchema: map[string]any{
@@ -404,74 +374,6 @@ func queryLiveAnalysisTaskHandler(ctx context.Context, req *mcp.CallToolRequest)
 		return errorResult("query live analysis task: " + err.Error()), nil
 	}
 	return textResult(result)
-}
-
-func recognizeLiveSubjectsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.LiveSliceSvc == nil {
-		return errorResult("live slice service not available"), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-	sentences, err := parseLiveSentences(args)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	subjects, err := svcs.LiveSliceSvc.RecognizeLiveSubjects(ctx, sentences)
-	if err != nil {
-		return billingError("recognize live subjects", err), nil
-	}
-	return textResult(map[string]any{"subjects": subjects})
-}
-
-func recognizeLiveInvalidSentencesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.LiveSliceSvc == nil {
-		return errorResult("live slice service not available"), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-	sentences, err := parseLiveSentences(args)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	invalid, err := svcs.LiveSliceSvc.RecognizeLiveInvalidSentences(ctx, sentences)
-	if err != nil {
-		return billingError("recognize live invalid sentences", err), nil
-	}
-	return textResult(map[string]any{"invalid": invalid})
-}
-
-func recognizeLiveSegmentsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.LiveSliceSvc == nil {
-		return errorResult("live slice service not available"), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-	sentences, err := parseLiveSentences(args)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	ask, _ := args["ask"].(string)
-	segments, err := svcs.LiveSliceSvc.RecognizeLiveSegments(ctx, sentences, ask)
-	if err != nil {
-		return billingError("recognize live segments", err), nil
-	}
-	return textResult(map[string]any{"segments": segments})
-}
-
-func completeLiveSubjectHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.LiveSliceSvc == nil {
-		return errorResult("live slice service not available"), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-	sentences, err := parseLiveSentences(args)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	ask, _ := args["ask"].(string)
-	subject, _ := args["subject"].(string)
-	thoughts, _ := args["thoughts"].(string)
-	completion, err := svcs.LiveSliceSvc.CompleteLiveSubject(ctx, sentences, ask, subject, thoughts)
-	if err != nil {
-		return billingError("complete live subject", err), nil
-	}
-	return textResult(completion)
 }
 
 func buildLiveClipPlanHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

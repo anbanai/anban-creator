@@ -51,6 +51,43 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task form mapping', () => {
+  it('keeps viral_analysis when selecting a seednote project', () => {
+    const seednoteProject = project({ id: 'seednote-project', platform: 'seednote' })
+    const current = {
+      ...createTaskFormDefaults(seednoteProject),
+      type: 'viral_analysis' as const,
+      prompt: 'https://www.xiaohongshu.com/explore/note-1',
+    }
+
+    const result = switchTaskFormDefaults(current, seednoteProject)
+
+    expect(result.type).toBe('viral_analysis')
+    expect(result.project_id).toBe(seednoteProject.id)
+  })
+
+  it('does not send image options for viral analysis tasks', () => {
+    const values = {
+      ...createTaskFormDefaults(project()),
+      type: 'viral_analysis' as const,
+      execution_profile: 'effective' as const,
+      prompt: 'https://www.xiaohongshu.com/explore/note-1',
+      image_ratio: '3:4' as const,
+      image_model_key: 'image-model',
+      skip_reference_image: true,
+      reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' } as const,
+      watermark: true,
+    }
+
+    expect(taskFormValuesToRequest(values)).toEqual({
+      type: 'viral_analysis',
+      execution_profile: 'effective',
+      prompt: 'https://www.xiaohongshu.com/explore/note-1',
+      project_id: 'project-1',
+      quantity: 1,
+      input_attachments: [],
+    })
+  })
+
   it('requires an execution profile in defaults and request payloads', () => {
     const values = createTaskFormDefaults(project())
     expect(values.execution_profile).toBe('')

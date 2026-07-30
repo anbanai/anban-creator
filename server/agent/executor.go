@@ -250,6 +250,9 @@ func loadAgentDefinition(pluginDir, agentName string) (*claudecode.AgentDefiniti
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
+	if taskType == model.TaskTypeViralAnalysis {
+		taskType = model.PlatformSeednote
+	}
 	if v, ok := maxTurns[taskType]; ok && v > 0 {
 		return v
 	}

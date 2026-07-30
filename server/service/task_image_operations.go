@@ -23,14 +23,18 @@ import (
 const maxAnalyzedTaskImageBytes = 10 << 20
 
 var (
-	ErrTaskImageOperationOwnership       = errors.New("task does not belong to user")
-	ErrTaskImageOperationProjectMismatch = errors.New("task does not belong to the requested project")
-	ErrTaskImageOperationTaskNotFound    = errors.New("task not found")
-	ErrTaskImageOperationTaskUnavailable = errors.New("task service not available")
-	ErrTaskImageOperationProjectRequired = errors.New("project_id is required")
-	ErrTaskImageOperationFileRequired    = errors.New("file_path is required")
-	ErrTaskImageOperationPromptRequired  = errors.New("prompt is required")
-	ErrTaskImageOperationSourceRequired  = errors.New("either image_url or file_path is required")
+	ErrTaskImageOperationOwnership        = errors.New("task does not belong to user")
+	ErrTaskImageOperationProjectMismatch  = errors.New("task does not belong to the requested project")
+	ErrTaskImageOperationTaskNotFound     = errors.New("task not found")
+	ErrTaskImageOperationTaskUnavailable  = errors.New("task service not available")
+	ErrTaskImageOperationProjectNotFound  = errors.New("project not found")
+	ErrTaskImageOperationProjectOwnership = errors.New("project does not belong to user")
+	ErrTaskImageOperationProjectInactive  = errors.New("project is not active")
+	ErrTaskImageOperationProjectRequired  = errors.New("project_id is required")
+	ErrTaskImageOperationFileRequired     = errors.New("file_path is required")
+	ErrTaskImageOperationPromptRequired   = errors.New("prompt is required")
+	ErrTaskImageOperationSourceRequired   = errors.New("either image_url or file_path is required")
+	ErrImageUnderstandingUnavailable      = errors.New("image understanding model is not configured")
 )
 
 type UploadTaskImageRequest struct {
@@ -66,11 +70,11 @@ type taskImageOperationsImage interface {
 	CompressImage(string, int) (string, bool, error)
 }
 
-type taskImageOperationsWriting interface {
-	AnalyzeImageDetailed(context.Context, string, string, string) (*LLMResult, error)
+type ImageUnderstandingClient interface {
+	CompleteWithImageResult(context.Context, string, string, string) (*LLMResult, error)
 }
 
-type taskImageOperationsCost interface {
+type UnderstandingCostRecorder interface {
 	CatalogID() string
 	RecordProviderTokenUsage(context.Context, RecordProviderTokenCostRequest) (*model.BillingProviderCostEvent, error)
 	RecordMediaUnreconciled(context.Context, RecordMediaUnreconciledRequest) (*model.BillingProviderCostEvent, error)
@@ -79,16 +83,16 @@ type taskImageOperationsCost interface {
 type TaskImageOperationsService struct {
 	tasks                 *TaskService
 	images                taskImageOperationsImage
-	writing               taskImageOperationsWriting
-	costs                 taskImageOperationsCost
+	understanding         ImageUnderstandingClient
+	costs                 UnderstandingCostRecorder
 	config                TaskImageOperationsConfig
 	logger                *zerolog.Logger
 	downloadAnalysisImage func(context.Context, string, int64) ([]byte, error)
 }
 
-func NewTaskImageOperationsService(tasks *TaskService, images taskImageOperationsImage, writing taskImageOperationsWriting, costs taskImageOperationsCost, cfg TaskImageOperationsConfig, logger *zerolog.Logger) *TaskImageOperationsService {
+func NewTaskImageOperationsService(tasks *TaskService, images taskImageOperationsImage, understanding ImageUnderstandingClient, costs UnderstandingCostRecorder, cfg TaskImageOperationsConfig, logger *zerolog.Logger) *TaskImageOperationsService {
 	return &TaskImageOperationsService{
-		tasks: tasks, images: images, writing: writing, costs: costs, config: cfg, logger: logger,
+		tasks: tasks, images: images, understanding: understanding, costs: costs, config: cfg, logger: logger,
 		downloadAnalysisImage: downloadTaskAnalysisImage,
 	}
 }
@@ -140,8 +144,8 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 	if req.ImageURL == "" && req.FilePath == "" {
 		return nil, ErrTaskImageOperationSourceRequired
 	}
-	if s == nil || s.writing == nil {
-		return nil, errors.New("writing/vision service not available")
+	if s == nil || s.understanding == nil {
+		return nil, ErrImageUnderstandingUnavailable
 	}
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
@@ -151,17 +155,33 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 		return nil, err
 	}
 	providerRequestID := "internal:understanding:" + model.OperationImageUnderstanding + ":" + uuid.NewString()
-	result, err := s.writing.AnalyzeImageDetailed(ctx, req.UserID, imageSource, req.Prompt)
+	result, err := s.understanding.CompleteWithImageResult(ctx, "Analyze the authorized image accurately and answer only the user's request.", req.Prompt, imageSource)
 	if err != nil {
 		s.recordAnalysisCost(ctx, req.TaskID, providerRequestID, nil)
 		return nil, fmt.Errorf("analyze image: %w", err)
 	}
 	s.recordAnalysisCost(ctx, req.TaskID, providerRequestID, &result.Usage)
-	return &AnalyzeTaskImageResult{Analysis: result.Text, Usage: result.Usage}, nil
+	return &AnalyzeTaskImageResult{Analysis: strings.TrimSpace(result.Text), Usage: result.Usage}, nil
 }
 
 func (s *TaskImageOperationsService) validateTask(ctx context.Context, userID, taskID, projectID string) error {
 	if taskID == "" {
+		if projectID == "" {
+			return nil
+		}
+		if s == nil || s.tasks == nil || s.tasks.repo == nil {
+			return ErrTaskImageOperationTaskUnavailable
+		}
+		project, err := s.tasks.repo.Projects().FindByID(ctx, projectID)
+		if err != nil || project == nil {
+			return ErrTaskImageOperationProjectNotFound
+		}
+		if userID == "" || project.UserID != userID {
+			return ErrTaskImageOperationProjectOwnership
+		}
+		if project.Status != model.ProjectStatusActive {
+			return ErrTaskImageOperationProjectInactive
+		}
 		return nil
 	}
 	if s == nil || s.tasks == nil {
@@ -222,30 +242,10 @@ func imageDataURL(mimeType string, data []byte) string {
 }
 
 func (s *TaskImageOperationsService) recordAnalysisCost(ctx context.Context, taskID, providerRequestID string, usage *srvconfig.TokenUsage) {
-	if s == nil || s.costs == nil || s.config.UnderstandingProvider == "" || s.config.UnderstandingModel == "" {
-		return
-	}
-	var err error
-	if usage == nil || usage.TotalTokens <= 0 {
-		_, err = s.costs.RecordMediaUnreconciled(ctx, RecordMediaUnreconciledRequest{
-			TaskID: taskID, Provider: s.config.UnderstandingProvider, Model: s.config.UnderstandingModel,
-			ProviderRequestID: providerRequestID, MediaKind: "image", ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
-		})
-	} else {
-		cacheRead := usage.CacheReadInputTokens
-		if cacheRead == 0 {
-			cacheRead = usage.CachedInputTokens
-		}
-		_, err = s.costs.RecordProviderTokenUsage(ctx, RecordProviderTokenCostRequest{
-			TaskID: taskID, Provider: s.config.UnderstandingProvider, Model: s.config.UnderstandingModel,
-			ProviderRequestID: providerRequestID, CatalogID: s.costs.CatalogID(), IdempotencyKey: providerRequestID,
-			Usage:  TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
-			Source: string(model.BillingProviderCostSourceProviderResponse),
-		})
-	}
-	if err != nil && s.logger != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Str("provider_request_id", providerRequestID).Msg("record understanding provider cost; operation result remains valid")
-	}
+	recordUnderstandingCost(ctx, s.costs, s.logger, understandingCostRequest{
+		TaskID: taskID, Provider: s.config.UnderstandingProvider, Model: s.config.UnderstandingModel,
+		ProviderRequestID: providerRequestID, MediaKind: "image", Usage: usage,
+	})
 }
 
 func downloadTaskAnalysisImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {

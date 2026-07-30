@@ -49,7 +49,7 @@ func validateAgentExecutionTarget(target string) error {
 }
 
 type PublishedTrackingService interface {
-	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
+	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error
 }
 
 type cloudDraftPublisher interface {
@@ -333,8 +333,9 @@ func (s *TaskService) StorageProviderName() string {
 }
 
 var (
-	ErrMontageInput                = errors.New("montage input invalid")
-	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
+	ErrMontageInput                         = errors.New("montage input invalid")
+	ErrTaskCreationProjectInactive          = errors.New("task creation project is not active")
+	ErrViralAnalysisRequiresSeednoteProject = errors.New("viral analysis requires a Seednote project")
 )
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
@@ -346,9 +347,10 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID           string
-	ProjectID        string
-	ExecutionProfile string
+	UserID            string
+	ProjectID         string
+	ExecutionProfile  string
+	RequestedTaskType string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType        string
@@ -522,6 +524,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	if p.RequestedTaskType == model.TaskTypeViralAnalysis {
+		if project.Platform != model.PlatformSeednote {
+			return nil, ErrViralAnalysisRequiresSeednoteProject
+		}
+		taskType = model.TaskTypeViralAnalysis
+	}
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
@@ -1547,7 +1555,7 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 }
 
 // SetPublished toggles the published flag on a task.
-func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool) error {
+func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool, identity SeednotePublicationIdentity) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
@@ -1555,17 +1563,25 @@ func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, p
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	return s.setPublishedAndMaybeTrack(ctx, userID, task, published)
+	if published && task.Type == model.PlatformSeednote {
+		identity, err = NormalizeSeednotePublicationIdentity(identity)
+		if err != nil {
+			return err
+		}
+	} else {
+		identity = SeednotePublicationIdentity{}
+	}
+	return s.setPublishedAndMaybeTrack(ctx, userID, task, published, identity)
 }
 
-func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool) error {
+func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool, identity SeednotePublicationIdentity) error {
 	if err := s.repo.Tasks().SetPublished(ctx, task.ID, published); err != nil {
 		return err
 	}
 	if !published || task.Type != model.PlatformSeednote || s.seednoteTrackingSvc == nil {
 		return nil
 	}
-	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID); err != nil {
+	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID, identity); err != nil {
 		return fmt.Errorf("ensure seednote tracking: %w", err)
 	}
 	return nil

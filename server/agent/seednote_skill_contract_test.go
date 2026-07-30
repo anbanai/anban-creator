@@ -101,6 +101,25 @@ func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	}
 }
 
+func TestSeednoteAgentsStopAfterViralAnalysisArtifacts(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "plugins", "agents", "seednote.md"),
+		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		for _, want := range []string{"viral_analysis", "output/source-analysis.md", "output/viral-template.json", "output/template-meta.json", "立即结束", "禁止进入", "seednote-writing"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %q", path, want)
+			}
+		}
+	}
+}
+
 func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.T) {
 	root := repoRoot(t)
 	visualSkills := []string{

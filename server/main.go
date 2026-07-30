@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -318,7 +317,7 @@ func main() {
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var templateSvc *service.TemplateService
-	var viralAnalysisSvc *service.ViralAnalysisService
+	var viralAnalysisHistorySvc *service.ViralAnalysisHistoryService
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
@@ -379,8 +378,6 @@ func main() {
 			log.Info().Int64("count", count).Msg("cleared artifact task titles")
 		}
 
-		// Wire goal-mode evaluator: reuse the writing LLM client when available.
-		// If writingLLMClient is nil at this point, we wire it later (see below).
 	}
 
 	// 12.1 Create per-user model config service.
@@ -390,26 +387,18 @@ func main() {
 		log.Info().Msg("model config service initialized")
 	}
 
-	var writingLLMClient service.LLMClient
-	if repo != nil {
-		// Writing LLM comes from model_routes.writing.
-		llmBaseURL := cfg.Writing.BaseURL
-		llmAPIKey := cfg.Writing.Key
-		llmModel := cfg.Writing.Model
-		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
-			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)
-			if strings.Contains(llmBaseURL, "/anthropic") {
-				log.Warn().
-					Str("base_url", llmBaseURL).
-					Msg("model_routes.writing base_url contains '/anthropic' — the writing service uses the OpenAI SDK; ensure the endpoint supports /v1/chat/completions")
-			}
-			log.Info().Str("endpoint", llmBaseURL).Str("model", llmModel).Msg("writing LLM client initialized")
-		}
+	var serverInternalLLMClient service.ResultLLMClient
+	if route := cfg.ServerInternal; route.BaseURL != "" && route.Key != "" && route.Model != "" {
+		client := service.NewOpenAILLMClient(route.BaseURL, route.Key, route.Model, route.Timeout)
+		serverInternalLLMClient, _ = client.(service.ResultLLMClient)
+		log.Info().Str("endpoint", route.BaseURL).Str("server_internal_model", route.Model).Msg("server internal model client initialized")
 	}
 
-	var imageUnderstandingClient service.LLMClient
+	var imageUnderstandingBaseClient service.LLMClient
+	var imageUnderstandingClient service.ImageUnderstandingClient
 	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
-		imageUnderstandingClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
+		imageUnderstandingBaseClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
+		imageUnderstandingClient, _ = imageUnderstandingBaseClient.(service.ImageUnderstandingClient)
 		log.Info().Str("endpoint", cfg.ImageUnderstanding.BaseURL).Str("model", cfg.ImageUnderstanding.Model).Msg("image understanding LLM client initialized")
 	}
 	var videoUnderstandingClient service.LLMClient
@@ -417,25 +406,23 @@ func main() {
 		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
 		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
 	}
-
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
-		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, writingLLMClient, log)
+		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, serverInternalLLMClient, fixedBilling.Cost, service.AIEntryModelConfig{
+			ProviderKey: cfg.ServerInternal.ProviderKey,
+			Model:       cfg.ServerInternal.Model,
+		}, log)
 		aiEntrySvc.SetReferenceAssetService(referenceAssetSvc)
-		if modelConfigSvc != nil {
-			aiEntrySvc.SetModelConfigService(modelConfigSvc, cfg.Writing.Timeout)
-		}
-		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("AI entry service initialized")
+		log.Info().Bool("llm_configured", serverInternalLLMClient != nil).Str("server_internal_model", cfg.ServerInternal.Model).Msg("AI entry service initialized")
 	}
 
 	if repo != nil {
-		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
-		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
+		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
+		log.Info().Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
-			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
-			viralAnalysisSvc.SetBillingServices(fixedBilling.Catalog, fixedBilling.Wallet)
+			viralAnalysisHistorySvc = service.NewViralAnalysisHistoryService(repo)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
-			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
+			log.Info().Msg("Viral analysis history service initialized")
 		}
 	}
 
@@ -513,14 +500,8 @@ func main() {
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
-		if modelConfigSvc != nil {
-			projectHandler.SetModelConfigService(modelConfigSvc)
-		}
-		if writingLLMClient != nil {
-			projectHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
-		}
-		if imageUnderstandingClient != nil {
-			projectHandler.SetVisionClient(imageUnderstandingClient)
+		if imageUnderstandingBaseClient != nil {
+			projectHandler.SetVisionClient(imageUnderstandingBaseClient)
 		}
 		if templateSvc != nil {
 			projectHandler.SetTemplateService(templateSvc)
@@ -558,8 +539,8 @@ func main() {
 		if store != nil {
 			templateHandler.SetStore(store)
 		}
-		if viralAnalysisSvc != nil {
-			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
+		if viralAnalysisHistorySvc != nil {
+			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisHistorySvc, log)
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
@@ -595,7 +576,7 @@ func main() {
 	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
-		var writingSvc *service.WritingService
+		var contentRenderSvc *service.ContentRenderService
 		var liveSliceSvc *service.LiveSliceService
 
 		if store != nil {
@@ -616,36 +597,16 @@ func main() {
 			imageSvc.SetProviderCostService(fixedBilling.Cost)
 		}
 		if repo != nil {
-			if writingLLMClient != nil || imageUnderstandingClient != nil || videoUnderstandingClient != nil {
-				writersDir := ""
-				if cfg.Claude.PluginDir != "" {
-					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
-				}
-				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, log)
-				if imageUnderstandingClient != nil {
-					writingSvc.SetImageUnderstandingClient(imageUnderstandingClient)
-				}
-				if videoUnderstandingClient != nil {
-					writingSvc.SetVideoUnderstandingClient(videoUnderstandingClient)
-				}
-				if modelConfigSvc != nil {
-					writingSvc.SetModelConfigService(modelConfigSvc)
-				}
-				if writingLLMClient == nil {
-					log.Warn().Msg("writing LLM client not configured; understanding-only MCP tools remain available when image/video understanding routes are configured")
-				}
-			} else {
-				log.Warn().Msg("LLM client not configured (set model_routes.writing provider/model), writing tools unavailable")
-			}
+			contentRenderSvc = service.NewContentRenderService(repo, log)
 		}
-		if writingLLMClient != nil || cfg.TingWu.Complete() || store != nil {
+		if cfg.TingWu.Complete() || store != nil {
 			var err error
-			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, writingLLMClient, store, log)
+			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, store, log)
 			if err != nil {
 				log.Warn().Err(err).Msg("live-slice service unavailable")
 			} else {
 				log.Info().
-					Bool("llm_configured", writingLLMClient != nil).
+					Bool("llm_configured", false).
 					Bool("tingwu_configured", cfg.TingWu.Complete()).
 					Bool("storage_configured", store != nil).
 					Msg("live-slice service initialized")
@@ -662,7 +623,7 @@ func main() {
 			ProviderCostSvc:        fixedBilling.Cost,
 			BillingCatalogSvc:      fixedBilling.Catalog,
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
-			WritingSvc:             writingSvc,
+			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
 			TemplateSvc:            templateSvc,
 			LiveSliceSvc:           liveSliceSvc,
@@ -676,9 +637,13 @@ func main() {
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
 			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
-			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, writingSvc, fixedBilling.Cost, service.TaskImageOperationsConfig{
+			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+			}, log),
+			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
+				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
+				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
 		})
 		mcp.SetBillingServices(modelConfigSvc, cfg)
@@ -687,7 +652,9 @@ func main() {
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
-			Bool("writing_tools", writingSvc != nil).
+			Bool("image_understanding", imageUnderstandingClient != nil).
+			Bool("video_understanding", videoUnderstandingClient != nil).
+			Bool("content_render_tools", contentRenderSvc != nil).
 			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
@@ -705,7 +672,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, viralAnalysisSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -723,7 +690,7 @@ func main() {
 	if repo != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
+		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, posterSvc, log)
 	}
 
 	// 15.3 Start the local-claim fallback worker (every 10s). Flips
@@ -1029,7 +996,7 @@ func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logg
 	if repo == nil {
 		return nil
 	}
-	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, log)
+	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, log)
 	return handler.NewSeednoteAnalyticsHandler(trackingSvc, log)
 }
 
@@ -1078,22 +1045,11 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
-	var seednoteDiscoverHandler scheduler.SeednoteTrackingHandler
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
-		seednoteDiscoverHandler = func(ctx context.Context, trackingID string) error {
-			return seednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
-		}
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
 			return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
-		}
-	}
-
-	var viralAnalysisHandler scheduler.ViralAnalysisHandler
-	if viralAnalysisSvc != nil {
-		viralAnalysisHandler = func(ctx context.Context, analysisID string) error {
-			return viralAnalysisSvc.ExecuteAnalysis(ctx, analysisID)
 		}
 	}
 
@@ -1104,9 +1060,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		func(ctx context.Context, planID string) error {
 			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
 		},
-		seednoteDiscoverHandler,
 		seednoteCaptureHandler,
-		viralAnalysisHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
@@ -1146,7 +1100,7 @@ func parseLogLevel(level string) zerolog.Level {
 }
 
 // startPeriodicArtifactCleanup removes expirable derived records without touching NAS task workspaces.
-func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
+func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -1154,11 +1108,6 @@ func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskServ
 		if taskSvc != nil {
 			if _, err := taskSvc.CleanupSupersededTaskFileObjects(ctx, 100); err != nil {
 				log.Error().Err(err).Msg("superseded task file object cleanup failed")
-			}
-		}
-		if viralSvc != nil {
-			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
-				log.Error().Err(err).Msg("viral analysis cleanup failed")
 			}
 		}
 		if posterSvc != nil {

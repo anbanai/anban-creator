@@ -131,7 +131,6 @@ export type {
   ViralTemplate,
   ViralTemplateMeta,
   ViralAnalysis,
-  CreateViralAnalysisRequest,
 } from './viral-analysis'
 
 // Designer

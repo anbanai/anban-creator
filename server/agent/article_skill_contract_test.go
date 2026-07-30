@@ -705,7 +705,7 @@ func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		filepath.Join(root, "server", "mcp", "writing_tools.go"),
+		filepath.Join(root, "server", "mcp", "content_render_tools.go"),
 	} {
 		text := readArticleContractFile(t, path)
 		if strings.Contains(text, `"inspect_article"`) {

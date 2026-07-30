@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -30,10 +29,7 @@ import (
 type ProjectHandler struct {
 	service         *service.ProjectService
 	logger          *zerolog.Logger
-	llm             service.LLMClient
-	llmTimeout      time.Duration
-	visionClient    service.LLMClient // dedicated vision model for AnalyzeImage; nil = fall back to llm
-	modelConfigSvc  *service.ModelConfigService
+	visionClient    service.LLMClient
 	templateSvc     *service.TemplateService
 	store           storage.Provider
 	uploadRepo      repository.Repository
@@ -47,21 +43,9 @@ func NewProjectHandler(svc *service.ProjectService, logger *zerolog.Logger) *Pro
 	return &ProjectHandler{service: svc, logger: logger}
 }
 
-// SetLLMClient injects an optional LLM client for profile analysis.
-func (h *ProjectHandler) SetLLMClient(llm service.LLMClient, timeout time.Duration) {
-	h.llm = llm
-	h.llmTimeout = timeout
-}
-
 // SetVisionClient injects a dedicated vision-capable LLM client used by AnalyzeImage.
-// When nil or never called, AnalyzeImage falls back to the writing LLM client.
 func (h *ProjectHandler) SetVisionClient(client service.LLMClient) {
 	h.visionClient = client
-}
-
-// SetModelConfigService injects per-user model overrides for profile analysis.
-func (h *ProjectHandler) SetModelConfigService(svc *service.ModelConfigService) {
-	h.modelConfigSvc = svc
 }
 
 // SetTemplateService injects an optional TemplateService for template recommendations on project creation.
@@ -706,199 +690,7 @@ func (h *ProjectHandler) FetchProfile(c fiber.Ctx) error {
 			Msg("fetch profile failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to fetch profile: "+err.Error())
 	}
-	h.enrichSeednoteProfileWithAI(c.Context(), userID, profile)
-
 	return Success(c, profile)
-}
-
-type seednoteProfileAnalysis struct {
-	Name           string   `json:"name"`
-	AvatarURL      string   `json:"avatar_url"`
-	Positioning    string   `json:"positioning"`
-	Keywords       []string `json:"keywords"`
-	Style          string   `json:"style"`
-	ContentSummary string   `json:"content_summary"`
-}
-
-func (h *ProjectHandler) enrichSeednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
-	llm := h.getLLMClient(ctx, userID)
-	if llm == nil || profile == nil {
-		return
-	}
-
-	// Prefer AI extraction from __INITIAL_STATE__ JSON when available.
-	if initialState, ok := profile.RawData["initial_state"].(string); ok && initialState != "" {
-		prompt := buildSeednoteProfileExtractionPrompt(initialState, topPostsFromProfile(profile))
-		raw, err := llm.Complete(ctx, "", prompt)
-		if err != nil {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("seednote profile AI extraction failed")
-			return
-		}
-		analysis, err := parseSeednoteProfileAnalysis(raw)
-		if err != nil {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse seednote profile AI extraction failed")
-			return
-		}
-		if analysis.Name != "" {
-			profile.Name = analysis.Name
-		}
-		if analysis.AvatarURL != "" {
-			profile.AvatarURL = analysis.AvatarURL
-		}
-		if analysis.Positioning != "" {
-			profile.Positioning = analysis.Positioning
-		}
-		profile.Keywords = cleanKeywords(analysis.Keywords)
-		if analysis.Style != "" {
-			profile.Style = analysis.Style
-		}
-		if profile.RawData == nil {
-			profile.RawData = map[string]any{}
-		}
-		profile.RawData["analysis"] = analysis
-		return
-	}
-
-	// Fallback: generate positioning/keywords/style from code-parsed fields.
-	prompt := buildSeednoteProfileAnalysisPrompt(profile)
-	raw, err := llm.Complete(ctx, "", prompt)
-	if err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("seednote profile AI analysis failed")
-		return
-	}
-	analysis, err := parseSeednoteProfileAnalysis(raw)
-	if err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse seednote profile AI analysis failed")
-		return
-	}
-	if analysis.Positioning != "" {
-		profile.Positioning = analysis.Positioning
-	}
-	profile.Keywords = cleanKeywords(analysis.Keywords)
-	if analysis.Style != "" {
-		profile.Style = analysis.Style
-	}
-	if profile.RawData == nil {
-		profile.RawData = map[string]any{}
-	}
-	profile.RawData["analysis"] = analysis
-}
-
-func (h *ProjectHandler) getLLMClient(ctx context.Context, userID string) service.LLMClient {
-	if h.modelConfigSvc != nil {
-		if baseURL, key, modelName, ok := h.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
-			h.logger.Info().
-				Str("user_id", userID).
-				Str("endpoint", baseURL).
-				Str("model", modelName).
-				Msg("using user custom model for seednote profile analysis")
-			return service.NewOpenAILLMClient(baseURL, key, modelName, h.llmTimeout)
-		}
-	}
-	return h.llm
-}
-
-func cleanKeywords(keywords []string) string {
-	cleaned := make([]string, 0, len(keywords))
-	for _, kw := range keywords {
-		kw = strings.TrimSpace(kw)
-		if kw != "" {
-			cleaned = append(cleaned, kw)
-		}
-	}
-	return strings.Join(cleaned, ", ")
-}
-
-func buildSeednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string {
-	var b strings.Builder
-	b.WriteString("你是种草笔记账号定位和视觉策略分析师。请基于账号主页信息和表现最好的可见作品，生成账号定位、关键词和视觉风格。\n\n")
-	b.WriteString("## 账号信息\n")
-	b.WriteString("- 昵称: " + truncateRunes(profile.Name, 80) + "\n")
-	b.WriteString("- 简介: " + truncateRunes(profile.Positioning, 240) + "\n\n")
-	b.WriteString("## 表现较好的可见作品\n")
-	for i, post := range topPostsFromProfile(profile) {
-		b.WriteString(fmt.Sprintf("%d. 标题: %s；点赞: %d；收藏: %d；评论: %d；分享: %d；总互动: %d\n",
-			i+1,
-			truncateRunes(post.Title, 120),
-			post.LikeCount,
-			post.CollectCount,
-			post.CommentCount,
-			post.ShareCount,
-			post.EngagementScore,
-		))
-	}
-	b.WriteString("\n## 输出要求\n")
-	b.WriteString("只输出 JSON，不要 markdown 代码块，不要解释。格式如下：\n")
-	b.WriteString(`{"positioning":"80字以内账号定位","keywords":["关键词1","关键词2","关键词3"],"style":"120字以内视觉风格描述","content_summary":"120字以内内容方向摘要"}`)
-	return b.String()
-}
-
-func buildSeednoteProfileExtractionPrompt(initialState string, topPosts []platform.SeednotePost) string {
-	var b strings.Builder
-	b.WriteString("你是种草笔记账号分析专家。请从以下种草笔记页面数据中提取账号信息并生成分析。\n\n")
-	b.WriteString("## 页面数据\n")
-	b.WriteString(truncateRunes(initialState, 15000))
-	b.WriteString("\n\n")
-	if len(topPosts) > 0 {
-		b.WriteString("## 表现较好的可见作品\n")
-		for i, post := range topPosts {
-			b.WriteString(fmt.Sprintf("%d. 标题: %s；点赞: %d；收藏: %d；评论: %d；分享: %d\n",
-				i+1,
-				truncateRunes(post.Title, 120),
-				post.LikeCount,
-				post.CollectCount,
-				post.CommentCount,
-				post.ShareCount,
-			))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("## 提取要求\n")
-	b.WriteString("1. 从页面数据中找到用户信息（昵称、头像URL、简介）。注意区分用户数据与平台自身数据，用户信息通常在 user 节点下。\n")
-	b.WriteString("2. 基于简介和作品分析账号定位、关键词和视觉风格。\n")
-	b.WriteString("3. 只输出 JSON，不要 markdown 代码块，不要解释。\n\n")
-	b.WriteString(`{"name":"用户昵称","avatar_url":"头像URL","positioning":"80字以内账号定位","keywords":["关键词1","关键词2","关键词3"],"style":"120字以内视觉风格描述","content_summary":"120字以内内容方向摘要"}`)
-	return b.String()
-}
-
-func topPostsFromProfile(profile *platform.PlatformProfile) []platform.SeednotePost {
-	if profile == nil || profile.RawData == nil {
-		return nil
-	}
-	posts, ok := profile.RawData["top_posts"].([]platform.SeednotePost)
-	if !ok {
-		return nil
-	}
-	if len(posts) > 5 {
-		return posts[:5]
-	}
-	return posts
-}
-
-func parseSeednoteProfileAnalysis(raw string) (seednoteProfileAnalysis, error) {
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
-	var analysis seednoteProfileAnalysis
-	if err := json.Unmarshal([]byte(raw), &analysis); err != nil {
-		return analysis, fmt.Errorf("unmarshal seednote profile analysis: %w", err)
-	}
-	analysis.Positioning = truncateRunes(strings.TrimSpace(analysis.Positioning), 120)
-	analysis.Style = truncateRunes(strings.TrimSpace(analysis.Style), 180)
-	analysis.ContentSummary = truncateRunes(strings.TrimSpace(analysis.ContentSummary), 180)
-	if len(analysis.Keywords) > 8 {
-		analysis.Keywords = analysis.Keywords[:8]
-	}
-	return analysis, nil
-}
-
-func truncateRunes(s string, max int) string {
-	if max <= 0 || utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	return string([]rune(s)[:max])
 }
 
 // getRecommendedTemplates returns templates recommended for a project based on its profile keywords.
@@ -1057,14 +849,9 @@ func (h *ProjectHandler) AnalyzeImage(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_url is required")
 	}
 
-	// Prefer the dedicated vision client for image analysis; fall back to the
-	// writing LLM client (with per-user override) when no vision model is wired.
 	llm := h.visionClient
 	if llm == nil {
-		llm = h.getLLMClient(c.Context(), userID)
-	}
-	if llm == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "LLM service is not configured")
+		return Error(c, fiber.StatusServiceUnavailable, "image understanding model is not configured")
 	}
 
 	const maxAnalysisImageSize = 10 << 20 // 10 MB

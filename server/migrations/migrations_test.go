@@ -40,6 +40,17 @@ func TestPendingStartupMigrationSQLContract(t *testing.T) {
 	}
 }
 
+func TestRemoveUserTextModelConfigMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260729_remove_user_text_model_config.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	if !strings.Contains(sql, "drop column text_config_json") {
+		t.Fatal("migration must drop user_model_configs.text_config_json")
+	}
+}
+
 func TestWorkspaceManifestSealMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260723_workspace_manifest_seal.sql")
 	if err != nil {

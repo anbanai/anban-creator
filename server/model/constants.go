@@ -59,7 +59,10 @@ const (
 )
 
 // Managed task types that are not project platforms.
-const TaskTypeLiveSlicer = "live-slicer"
+const (
+	TaskTypeLiveSlicer    = "live-slicer"
+	TaskTypeViralAnalysis = "viral_analysis"
+)
 
 // File role constants.
 const (

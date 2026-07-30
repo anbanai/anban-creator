@@ -45,16 +45,7 @@ func NewModelConfigService(repo repository.Repository, cfg *config.Config, logge
 
 // ModelConfigResponse is the API response for GET /api/v1/model-config.
 type ModelConfigResponse struct {
-	Text  *TextConfigDTO  `json:"text,omitempty"`
 	Image *ImageConfigDTO `json:"image,omitempty"`
-}
-
-// TextConfigDTO represents text model config for API display.
-type TextConfigDTO struct {
-	Endpoint string `json:"endpoint,omitempty"`
-	APIKey   string `json:"api_key,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Proxy    string `json:"proxy,omitempty"`
 }
 
 // ImageConfigDTO represents image model config for API display.
@@ -68,7 +59,6 @@ type ImageConfigDTO struct {
 
 // UpdateModelConfigRequest is the API request for PUT /api/v1/model-config.
 type UpdateModelConfigRequest struct {
-	Text  *TextConfigDTO  `json:"text,omitempty"`
 	Image *ImageConfigDTO `json:"image,omitempty"`
 }
 
@@ -87,18 +77,6 @@ func (s *ModelConfigService) Get(ctx context.Context, userID string) (*ModelConf
 	}
 
 	resp := &ModelConfigResponse{}
-
-	if row.TextConfigJSON != "" {
-		var uc model.TextUserConfig
-		if json.Unmarshal([]byte(row.TextConfigJSON), &uc) == nil {
-			resp.Text = &TextConfigDTO{
-				Endpoint: uc.Endpoint,
-				APIKey:   maskKey(uc.APIKey),
-				Model:    uc.Model,
-				Proxy:    uc.Proxy,
-			}
-		}
-	}
 
 	if row.ImageConfigJSON != "" {
 		var uc model.ImageUserConfig
@@ -127,32 +105,6 @@ func (s *ModelConfigService) Update(ctx context.Context, userID string, req *Upd
 		row = &model.UserModelConfig{
 			ID:     uuid.New().String(),
 			UserID: userID,
-		}
-	}
-
-	// Handle text config.
-	if req.Text != nil {
-		if req.Text.APIKey == "" && req.Text.Endpoint == "" && req.Text.Model == "" && req.Text.Proxy == "" {
-			row.TextConfigJSON = ""
-		} else {
-			existing := s.loadTextConfig(row.TextConfigJSON)
-			if req.Text.APIKey == keepExistingKey {
-				if existing.APIKey == "" {
-					return fmt.Errorf("%w: text.api_key cannot keep existing key because no existing key is saved", ErrInvalidModelConfig)
-				}
-				req.Text.APIKey = existing.APIKey
-			}
-			uc := model.TextUserConfig{
-				Endpoint: req.Text.Endpoint,
-				APIKey:   req.Text.APIKey,
-				Model:    req.Text.Model,
-				Proxy:    req.Text.Proxy,
-			}
-			if data, err := json.Marshal(&uc); err != nil {
-				return err
-			} else {
-				row.TextConfigJSON = string(data)
-			}
 		}
 	}
 
@@ -191,20 +143,6 @@ func (s *ModelConfigService) Delete(ctx context.Context, userID string) error {
 	return s.repo.ModelConfigs().Delete(ctx, userID)
 }
 
-// GetTextConfig returns the user's text model config (structured).
-func (s *ModelConfigService) GetTextConfig(ctx context.Context, userID string) (*model.TextUserConfig, error) {
-	return s.loadUserTextConfig(ctx, userID)
-}
-
-// HasTextOverride returns true if the user has custom text model config.
-func (s *ModelConfigService) HasTextOverride(ctx context.Context, userID string) bool {
-	uc, err := s.loadUserTextConfig(ctx, userID)
-	if err != nil {
-		return false
-	}
-	return uc.HasConfig()
-}
-
 // HasImageOverride returns true if the user has custom image model config.
 func (s *ModelConfigService) HasImageOverride(ctx context.Context, userID string) bool {
 	uc, err := s.loadUserImageConfig(ctx, userID)
@@ -222,21 +160,6 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 		return false
 	}
 	return uc.HasCompleteConfig()
-}
-
-// GetEffectiveWritingConfig returns the resolved writing config (endpoint, key, model).
-// Returns (endpoint, key, model, ok). ok=false means use server default.
-func (s *ModelConfigService) GetEffectiveWritingConfig(ctx context.Context, userID string) (string, string, string, bool) {
-	uc, err := s.loadUserTextConfig(ctx, userID)
-	if err != nil || !uc.HasConfig() {
-		return "", "", "", false
-	}
-
-	if uc.APIKey == "" || uc.Endpoint == "" || uc.Model == "" {
-		return "", "", "", false
-	}
-
-	return uc.Endpoint, uc.APIKey, uc.Model, true
 }
 
 // GetEffectiveImageConfig returns the resolved image config as an ImageAPIConfig.
@@ -710,29 +633,9 @@ func presetToImageAPIConfig(p *config.ImageModelPreset, base *config.Config) *co
 	}
 }
 
-// GetTextProxy returns the user's configured text model proxy, if any.
-func (s *ModelConfigService) GetTextProxy(ctx context.Context, userID string) string {
-	uc, err := s.loadUserTextConfig(ctx, userID)
-	if err != nil {
-		return ""
-	}
-	return uc.Proxy
-}
-
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-func (s *ModelConfigService) loadUserTextConfig(ctx context.Context, userID string) (*model.TextUserConfig, error) {
-	row, err := s.repo.ModelConfigs().FindByUserID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return &model.TextUserConfig{}, nil
-	}
-	return s.loadTextConfig(row.TextConfigJSON), nil
-}
 
 func (s *ModelConfigService) loadUserImageConfig(ctx context.Context, userID string) (*model.ImageUserConfig, error) {
 	row, err := s.repo.ModelConfigs().FindByUserID(ctx, userID)
@@ -743,17 +646,6 @@ func (s *ModelConfigService) loadUserImageConfig(ctx context.Context, userID str
 		return &model.ImageUserConfig{}, nil
 	}
 	return s.loadImageConfig(row.ImageConfigJSON), nil
-}
-
-func (s *ModelConfigService) loadTextConfig(jsonStr string) *model.TextUserConfig {
-	if jsonStr == "" {
-		return &model.TextUserConfig{}
-	}
-	var uc model.TextUserConfig
-	if json.Unmarshal([]byte(jsonStr), &uc) != nil {
-		return &model.TextUserConfig{}
-	}
-	return &uc
 }
 
 func (s *ModelConfigService) loadImageConfig(jsonStr string) *model.ImageUserConfig {

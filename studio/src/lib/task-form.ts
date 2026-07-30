@@ -67,7 +67,7 @@ export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
-  if (project && current.type === project.platform) {
+  if (project && (current.type === project.platform || (current.type === 'viral_analysis' && project.platform === 'seednote'))) {
     const defaults = createTaskFormDefaults(project)
     const switched = {
       ...cloneValue(current),
@@ -154,6 +154,16 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
 
 export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskRequest {
   const prompt = values.prompt?.trim() || undefined
+  if (values.type === 'viral_analysis') {
+    return {
+      type: values.type,
+      execution_profile: values.execution_profile as AgentExecutionProfileID,
+      prompt,
+      project_id: values.project_id,
+      quantity: values.quantity,
+      input_attachments: [],
+    }
+  }
   const goal = values.goal?.trim() || undefined
   const sellingPoints = values.selling_points?.trim() || undefined
   const hasActiveModules = Object.values(values.selected_modules ?? {}).some((quantity) => quantity >= 1)

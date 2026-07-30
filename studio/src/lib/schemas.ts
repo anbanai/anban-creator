@@ -141,6 +141,14 @@ export const createTaskSchema = z.object({
   language: z.string().optional(),
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
+  if (!data.project_id?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "请选择项目",
+      path: ["project_id"],
+    })
+  }
+
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
     if (!/https?:\/\/[^\s]+/.test(prompt)) {
@@ -181,14 +189,6 @@ export const createTaskSchema = z.object({
         path: ["montage_input", "brief"],
       })
     }
-  }
-
-  if (!data.project_id?.trim()) {
-    ctx.addIssue({
-      code: "custom",
-      message: "请选择项目",
-      path: ["project_id"],
-    })
   }
 
   if (data.goal_mode) {

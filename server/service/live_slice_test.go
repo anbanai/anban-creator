@@ -14,25 +14,6 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-type fakeLiveSliceLLM struct {
-	responses []string
-	prompts   []string
-}
-
-func (f *fakeLiveSliceLLM) Complete(_ context.Context, systemPrompt, userPrompt string) (string, error) {
-	f.prompts = append(f.prompts, systemPrompt+"\n"+userPrompt)
-	if len(f.responses) == 0 {
-		return "", errors.New("no fake response")
-	}
-	resp := f.responses[0]
-	f.responses = f.responses[1:]
-	return resp, nil
-}
-
-func (f *fakeLiveSliceLLM) CompleteWithImage(context.Context, string, string, string) (string, error) {
-	return "", errors.New("not implemented")
-}
-
 type fakeLiveSliceTingWu struct {
 	createReq LiveAnalysisTaskRequest
 	task      *TingWuTaskInfo
@@ -102,7 +83,7 @@ func (f *fakeLiveSliceTingWu) QueryTask(context.Context, string) (*TingWuTaskInf
 func TestCreateLiveAnalysisTaskSignsOwnedAudioURL(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss"}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioURL: "https://cdn.example.com/uploads/live-audio/take.wav",
@@ -118,7 +99,7 @@ func TestCreateLiveAnalysisTaskSignsOwnedAudioURL(t *testing.T) {
 func TestCreateLiveAnalysisTaskSignsAudioKey(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss"}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioKey: "uploads/live-audio/take.mp3",
@@ -134,7 +115,7 @@ func TestCreateLiveAnalysisTaskSignsAudioKey(t *testing.T) {
 func TestCreateLiveAnalysisTaskRejectsNonLiveAudioKey(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss"}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioKey: "uploads/video-audio/take.wav",
@@ -147,7 +128,7 @@ func TestCreateLiveAnalysisTaskRejectsNonLiveAudioKey(t *testing.T) {
 func TestCreateLiveAnalysisTaskRejectsAudioKeyWithoutOSS(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "local"}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioKey: "uploads/live-audio/take.mp3",
@@ -160,7 +141,7 @@ func TestCreateLiveAnalysisTaskRejectsAudioKeyWithoutOSS(t *testing.T) {
 func TestCreateLiveAnalysisTaskKeepsExternalAudioURL(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss"}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioURL: "https://media.example.org/take.wav",
@@ -176,7 +157,7 @@ func TestCreateLiveAnalysisTaskKeepsExternalAudioURL(t *testing.T) {
 func TestCreateLiveAnalysisTaskReportsOwnedAudioURLSignFailure(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss", signErr: errors.New("sign failed")}
-	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(tw, store, nil)
 
 	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioURL: "https://cdn.example.com/uploads/live-audio/take.wav",
@@ -291,7 +272,7 @@ func TestLiveSliceServiceCreateAndQueryTask(t *testing.T) {
 			Transcription: &TingWuTranscriptionResult{},
 		},
 	}
-	svc := NewLiveSliceServiceWithClients(fakeTW, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(fakeTW, nil, nil)
 
 	created, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
 		AudioURL:                 "https://example.com/audio.mp3",
@@ -319,97 +300,8 @@ func TestLiveSliceServiceCreateAndQueryTask(t *testing.T) {
 	}
 }
 
-func TestRecognizeLiveSubjectsParsesFencedJSONObject(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{"```json\n{\"subjects\":[{\"title\":\"茶汤为什么金黄\",\"thoughts\":\"有足够讲解片段支撑。\"}]}\n```"}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-
-	subjects, err := svc.RecognizeLiveSubjects(context.Background(), []LiveSentence{{Index: 1, Text: "这个茶汤是金黄的"}})
-	if err != nil {
-		t.Fatalf("recognize subjects: %v", err)
-	}
-	if len(subjects) != 1 || subjects[0].Title != "茶汤为什么金黄" {
-		t.Fatalf("subjects = %#v", subjects)
-	}
-	if !strings.Contains(llm.prompts[0], "[1] 这个茶汤是金黄的") {
-		t.Fatalf("prompt did not include indexed sentence: %s", llm.prompts[0])
-	}
-}
-
-func TestRecognizeLiveInvalidSentencesBatchesAndParsesJSON(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{
-		`{"invalid":[{"index":1,"reason":"直播间欢迎语"},{"index":1,"reason":"重复"},{"index":99,"reason":"不存在"}]}`,
-		`{"invalid":[{"index":31,"reason":"重复感谢用户"}]}`,
-	}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-	sentences := make([]LiveSentence, 31)
-	for i := range sentences {
-		sentences[i] = LiveSentence{Index: int64(i + 1), Start: float64(i), End: float64(i + 1), Text: "直播切片"}
-	}
-
-	invalid, err := svc.RecognizeLiveInvalidSentences(context.Background(), sentences)
-	if err != nil {
-		t.Fatalf("recognize invalid sentences: %v", err)
-	}
-	if len(llm.prompts) != 2 {
-		t.Fatalf("llm calls = %d, want 2", len(llm.prompts))
-	}
-	if len(invalid) != 2 || invalid[0].Index != 1 || invalid[1].Index != 31 {
-		t.Fatalf("invalid = %#v", invalid)
-	}
-}
-
-func TestRecognizeLiveSegmentsReturnsJSONError(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{"not json"}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-
-	_, err := svc.RecognizeLiveSegments(context.Background(), []LiveSentence{{Index: 1, Text: "有效内容"}}, "")
-	if err == nil {
-		t.Fatal("expected invalid JSON error")
-	}
-	if !strings.Contains(err.Error(), "live segments JSON") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRecognizeLiveSegmentsRejectsOutOfRangeIndexes(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{`{"segments":[{"title":"越界片段","start":1,"end":99}]}`}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-
-	_, err := svc.RecognizeLiveSegments(context.Background(), []LiveSentence{
-		{Index: 1, Start: 0, End: 3, Text: "有效内容"},
-	}, "")
-	if err == nil {
-		t.Fatal("expected segment validation error")
-	}
-	if !strings.Contains(err.Error(), "end index 99") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(llm.prompts[0], "[1] 0.000-3.000s 有效内容") {
-		t.Fatalf("prompt should include timing, got: %s", llm.prompts[0])
-	}
-}
-
-func TestCompleteLiveSubjectRejectsUnknownSourceIndex(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{`{
-		"title":"错误脚本",
-		"thoughts":"包含不存在句子",
-		"sentences":[{"index":9,"text":"不存在","reason":"错误"}]
-	}`}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-
-	_, err := svc.CompleteLiveSubject(context.Background(), []LiveSentence{
-		{Index: 2, Start: 3, End: 8, Text: "核心产区带来的香气"},
-	}, "", "", "")
-	if err == nil {
-		t.Fatal("expected unknown index error")
-	}
-	if !strings.Contains(err.Error(), "sentence index 9") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestBuildLiveClipPlanMapsSegmentsAndQuotesCommands(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath: "/tmp/直播 video's.mp4",
@@ -454,7 +346,7 @@ func TestBuildLiveClipPlanMapsSegmentsAndQuotesCommands(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanWarnsForShortAndLongDurations(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -482,7 +374,7 @@ func TestBuildLiveClipPlanWarnsForShortAndLongDurations(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanWarnsForPartialInvalidAndRejectsAllInvalid(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -513,7 +405,7 @@ func TestBuildLiveClipPlanWarnsForPartialInvalidAndRejectsAllInvalid(t *testing.
 }
 
 func TestBuildLiveClipPlanSinglePartCanBuildManifestWithoutPartResults(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -552,7 +444,7 @@ func TestBuildLiveClipPlanSinglePartCanBuildManifestWithoutPartResults(t *testin
 }
 
 func TestBuildLiveClipPlanRejectsInvalidPlanningInputs(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	base := LiveClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
 		OutputDir: "output/live-slice/task",
@@ -604,6 +496,13 @@ func TestBuildLiveClipPlanRejectsInvalidPlanningInputs(t *testing.T) {
 			},
 			want: "start index 2 must be <= end index 1",
 		},
+		{
+			name: "unknown segment index",
+			mutate: func(req *LiveClipPlanRequest) {
+				req.Segments = []LiveSegment{{Title: "越界", Start: 1, End: 9}}
+			},
+			want: "end index 9 does not exist",
+		},
 	}
 
 	for _, tt := range tests {
@@ -625,7 +524,7 @@ func TestBuildLiveClipPlanRejectsInvalidPlanningInputs(t *testing.T) {
 }
 
 func TestBuildLiveSubjectClipPlanBuildsSinglePartForContinuousIndexes(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveSubjectClipPlan(LiveSubjectClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -672,7 +571,7 @@ func TestBuildLiveSubjectClipPlanBuildsSinglePartForContinuousIndexes(t *testing
 }
 
 func TestBuildLiveSubjectClipPlanBuildsMultiPartConcatForReorderedIndexes(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveSubjectClipPlan(LiveSubjectClipPlanRequest{
 		VideoPath: "/tmp/live video.mp4",
@@ -724,7 +623,7 @@ func TestBuildLiveSubjectClipPlanBuildsMultiPartConcatForReorderedIndexes(t *tes
 }
 
 func TestBuildLiveSubjectClipPlanConcatListEscapesFFmpegPathsAndUsesPartDir(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveSubjectClipPlan(LiveSubjectClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -769,7 +668,7 @@ func ffmpegConcatFileQuoteForTest(path string) string {
 }
 
 func TestBuildLiveSubjectClipPlanRejectsInvalidCompletions(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	base := LiveSubjectClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
 		OutputDir: "output/live-slice/task",
@@ -836,7 +735,7 @@ func TestBuildLiveSubjectClipPlanRejectsInvalidCompletions(t *testing.T) {
 }
 
 func TestBuildLiveClipManifestSummarizesResults(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	clip := LiveClip{
 		Index:         1,
 		Title:         "产品卖点",
@@ -900,7 +799,7 @@ func TestBuildLiveClipManifestSummarizesResults(t *testing.T) {
 }
 
 func TestBuildLiveClipManifestValidatesOutputPartsAndSummarizesWarnings(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	clip := LiveClip{
 		Index:          1,
 		Title:          "重排脚本",
@@ -963,7 +862,7 @@ func TestBuildLiveClipManifestValidatesOutputPartsAndSummarizesWarnings(t *testi
 }
 
 func TestBuildLiveClipManifestRejectsOutputAndPartResultMismatch(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	clip := LiveClip{
 		Index:    1,
 		Title:    "片段",
@@ -1056,7 +955,7 @@ func TestBuildLiveClipManifestRejectsOutputAndPartResultMismatch(t *testing.T) {
 }
 
 func TestBuildLiveClipManifestRequiresMatchingClipResults(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	clip := LiveClip{Index: 1, Title: "片段", Start: 0, End: 10, Duration: 10, Output: "out.mp4"}
 
 	tests := []struct {
@@ -1107,7 +1006,7 @@ func TestBuildLiveClipManifestRequiresMatchingClipResults(t *testing.T) {
 }
 
 func TestBuildLiveClipManifestRejectsSuccessfulEmptyOutputs(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	clip := LiveClip{Index: 1, Title: "片段", Start: 0, End: 10, Duration: 10, Output: "out.mp4"}
 
 	tests := []struct {
@@ -1157,7 +1056,7 @@ func TestBuildLiveClipManifestRejectsSuccessfulEmptyOutputs(t *testing.T) {
 }
 
 func TestBuildLiveClipManifestRejectsUnmappedTranscript(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	_, err := svc.BuildLiveClipManifest(LiveClipManifestRequest{
 		SourceVideo:  "/tmp/live.mp4",
@@ -1195,29 +1094,6 @@ func TestTaskKeyIncludesUUIDAndIsUnique(t *testing.T) {
 	}
 }
 
-func TestCompleteLiveSubjectParsesJSON(t *testing.T) {
-	llm := &fakeLiveSliceLLM{responses: []string{`{
-		"title":"这杯茶为什么香",
-		"subtitle":"产地和工艺决定香气",
-		"thoughts":"爆点前置，随后解释产地。",
-		"sentences":[{"index":2,"text":"核心产区带来的香气","reason":"解释卖点"}]
-	}`}}
-	svc := NewLiveSliceServiceWithClients(nil, llm, nil, nil)
-
-	completion, err := svc.CompleteLiveSubject(context.Background(), []LiveSentence{
-		{Index: 2, Start: 3, End: 8, Text: "核心产区带来的香气"},
-	}, "做成30秒短视频", "茶香", "讲产地")
-	if err != nil {
-		t.Fatalf("complete subject: %v", err)
-	}
-	if completion.Title != "这杯茶为什么香" || len(completion.Sentences) != 1 {
-		t.Fatalf("completion = %#v", completion)
-	}
-	if completion.Sentences[0].Start != 3 || completion.Sentences[0].End != 8 {
-		t.Fatalf("sentence timing not filled from source: %#v", completion.Sentences[0])
-	}
-}
-
 func TestUploadLiveAudioRejectsLocalStorage(t *testing.T) {
 	tmp := t.TempDir()
 	audio := filepath.Join(tmp, "audio.mp3")
@@ -1228,7 +1104,7 @@ func TestUploadLiveAudioRejectsLocalStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewLiveSliceServiceWithClients(nil, nil, store, nil)
+	svc := NewLiveSliceServiceWithClients(nil, store, nil)
 
 	_, err = svc.UploadLiveAudio(context.Background(), audio, 3600)
 	if err == nil {
@@ -1252,7 +1128,7 @@ func argsHave(args []string, substr string) bool {
 }
 
 func TestBuildLiveClipPlanAccurateArgsIncludeQualityFlags(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath: "/tmp/live.mp4",
@@ -1283,7 +1159,7 @@ func TestBuildLiveClipPlanAccurateArgsIncludeQualityFlags(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanLoudnormDisabled(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	off := false
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath:              "/tmp/live.mp4",
@@ -1302,7 +1178,7 @@ func TestBuildLiveClipPlanLoudnormDisabled(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanVerticalizesLandscapeSource(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath:    "/tmp/live.mp4",
@@ -1341,7 +1217,7 @@ func TestBuildLiveClipPlanVerticalizesLandscapeSource(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanVerticalCropFill(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 
 	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
 		VideoPath:    "/tmp/live.mp4",
@@ -1369,7 +1245,7 @@ func TestBuildLiveClipPlanVerticalCropFill(t *testing.T) {
 }
 
 func TestBuildLiveClipPlanSkipsConversionForAlreadyVerticalAndUnknown(t *testing.T) {
-	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil)
 	base := LiveClipPlanRequest{
 		VideoPath:  "/tmp/live.mp4",
 		OutputDir:  "output/live-slice/task",

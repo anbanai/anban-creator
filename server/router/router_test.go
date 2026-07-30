@@ -64,7 +64,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 		planSvc := service.NewPlanService(repo, &logger)
 		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
-		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
+		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
@@ -248,6 +248,32 @@ func TestBillingRoutes(t *testing.T) {
 	}
 	if resp.StatusCode != fiber.StatusUnauthorized {
 		t.Fatalf("admin billing route status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestViralAnalysisRoutesAreHistoryReadOnly(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config: &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}}, Logger: &logger,
+		ViralAnalysisHandler: handler.NewViralAnalysisHandler(nil, &logger),
+	})
+	want := map[string]bool{
+		http.MethodGet + " /api/v1/viral-analyses/":    false,
+		http.MethodGet + " /api/v1/viral-analyses/:id": false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if route.Method == http.MethodPost && route.Path == "/api/v1/viral-analyses/" {
+			t.Fatalf("legacy write route is still registered: %s", key)
+		}
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing history route %s", route)
+		}
 	}
 }
 

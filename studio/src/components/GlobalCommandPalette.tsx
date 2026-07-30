@@ -16,7 +16,7 @@ import {
 import { allNavItems, type NavItem } from '@/lib/navigation'
 import { commandPaletteStore } from '@/lib/command-palette'
 import { api } from '@/lib/api'
-import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
+import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref } from '@/lib/command-center'
 import { queryKeys } from '@/lib/query-keys'
 
 const shortcutMap: Record<string, string> = {
@@ -73,12 +73,6 @@ export default function GlobalCommandPalette() {
     },
     enabled: open,
   })
-  const { data: modelConfig } = useQuery({
-    queryKey: queryKeys.modelConfig.all,
-    queryFn: () => api.modelConfig.get(),
-    enabled: open,
-  })
-
   const tasks = tasksData?.items ?? []
   const plans = plansData?.items ?? []
   const signals = useMemo(() => buildCommandCenterSignals({
@@ -87,9 +81,8 @@ export default function GlobalCommandPalette() {
     projects,
     billingWallet,
     apiKeysReady: apiKeys.length > 0,
-    modelConfigReady: hasUsableModelConfig(modelConfig),
     localExecutorReady: true,
-  }), [tasks, plans, projects, billingWallet, apiKeys.length, modelConfig])
+  }), [tasks, plans, projects, billingWallet, apiKeys.length])
   const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
   const failedTasks = signals.failedTasks.slice(0, 5)
   const defaultProject = signals.projects[0]

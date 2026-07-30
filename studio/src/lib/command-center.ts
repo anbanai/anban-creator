@@ -14,13 +14,11 @@ export interface CommandCenterReadinessCheck {
 export interface CommandCenterReadiness {
   projectsReady: boolean
   localExecutorKnown: boolean
-  modelConfigKnown: boolean
   apiKeysKnown: boolean
   publishingReady: boolean
   checks: {
     projects: CommandCenterReadinessCheck
     apiKeys: CommandCenterReadinessCheck
-    modelConfig: CommandCenterReadinessCheck
     localExecutor: CommandCenterReadinessCheck
     publishing: CommandCenterReadinessCheck
   }
@@ -53,25 +51,9 @@ export interface BuildCommandCenterSignalsInput {
   plans?: Plan[]
   billingWallet?: BillingWallet | null
   localExecutorKnown?: boolean
-  modelConfigKnown?: boolean
   apiKeysKnown?: boolean
   localExecutorReady?: boolean | null
-  modelConfigReady?: boolean | null
   apiKeysReady?: boolean | null
-}
-
-export interface ModelConfigLike {
-  text?: {
-    endpoint?: string
-    api_key?: string
-    model?: string
-  } | null
-  image?: {
-    provider?: string
-    endpoint?: string
-    api_key?: string
-    model?: string
-  } | null
 }
 
 export interface NextBestAction {
@@ -94,18 +76,6 @@ const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
 const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'montage'])
 const creationIntents = new Set(['new', 'retry', 'schedule'])
-
-export function hasUsableModelConfig(config?: ModelConfigLike | null) {
-  return Boolean(
-    config?.text?.model ||
-    config?.text?.endpoint ||
-    config?.text?.api_key ||
-    config?.image?.provider ||
-    config?.image?.model ||
-    config?.image?.endpoint ||
-    config?.image?.api_key,
-  )
-}
 
 function readinessStatus(ready?: boolean | null, legacyKnown?: boolean): ReadinessStatus {
   if (ready === true) return 'ready'
@@ -248,7 +218,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
   const publishingStatus: ReadinessStatus =
     projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'
   const apiKeysStatus = readinessStatus(input.apiKeysReady, input.apiKeysKnown)
-  const modelConfigStatus = readinessStatus(input.modelConfigReady, input.modelConfigKnown)
   const localExecutorStatus = readinessStatus(input.localExecutorReady, input.localExecutorKnown)
   const checks: CommandCenterReadiness['checks'] = {
     projects: {
@@ -266,17 +235,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
           : apiKeysStatus === 'not_ready'
             ? '需要创建平台密钥'
             : '正在检查密钥状态',
-      href: '/settings',
-    },
-    modelConfig: {
-      status: modelConfigStatus,
-      label: '模型配置',
-      description:
-        modelConfigStatus === 'ready'
-          ? '模型策略已配置'
-          : modelConfigStatus === 'not_ready'
-            ? '需要配置文本或图像模型'
-            : '正在检查模型配置',
       href: '/settings',
     },
     localExecutor: {
@@ -319,7 +277,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     readiness: {
       projectsReady: checks.projects.status === 'ready',
       localExecutorKnown: checks.localExecutor.status !== 'unknown',
-      modelConfigKnown: checks.modelConfig.status === 'ready',
       apiKeysKnown: checks.apiKeys.status === 'ready',
       publishingReady: checks.publishing.status === 'ready',
       checks,
@@ -333,9 +290,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   const approvalTask = signals.pendingApprovalTasks[0]
   const upcomingPlan = signals.upcomingPlans[0]
   const defaultProject = signals.projects[0]
-  const setupNeedsAttention =
-    signals.readiness.checks.apiKeys.status !== 'ready' ||
-    signals.readiness.checks.modelConfig.status !== 'ready'
+  const setupNeedsAttention = signals.readiness.checks.apiKeys.status !== 'ready'
 
   if (failedTask) {
     actions.push({

@@ -1,12 +1,13 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Bookmark,
   ExternalLink,
   Eye,
   Heart,
+  Link2,
   Loader2,
   MessageCircle,
   Share2,
@@ -28,13 +29,15 @@ import type { SeednoteAnalytics, SeednoteTrackingStatus } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 
 interface SeednoteAnalyticsPanelProps {
   taskId: string
 }
 
 const statusCopy: Record<SeednoteTrackingStatus, string> = {
-  waiting_discovery: '明天将从项目主页自动识别这篇笔记',
+  waiting_discovery: '历史记录等待关联',
+  unresolved: '尚未关联公开笔记，请补充笔记链接或 ID',
   tracking: '正在每日采集公开数据',
   stopped: '数据变化已趋缓，已停止自动采集',
   failed: '暂时无法识别或采集这篇笔记',
@@ -42,6 +45,7 @@ const statusCopy: Record<SeednoteTrackingStatus, string> = {
 
 const statusVariant: Record<SeednoteTrackingStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   waiting_discovery: 'outline',
+  unresolved: 'outline',
   tracking: 'default',
   stopped: 'secondary',
   failed: 'destructive',
@@ -118,11 +122,27 @@ export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPane
     )
   }
 
-  return <SeednoteAnalyticsContent analytics={data} />
+  return <SeednoteAnalyticsContent analytics={data} taskId={taskId} />
 }
 
-function SeednoteAnalyticsContent({ analytics }: { analytics: SeednoteAnalytics }) {
+function SeednoteAnalyticsContent({ analytics, taskId }: { analytics: SeednoteAnalytics; taskId: string }) {
   const tracking = analytics.tracking!
+  const queryClient = useQueryClient()
+  const [publicationIdentity, setPublicationIdentity] = useState('')
+  const bindMutation = useMutation({
+    mutationFn: (value: string) => api.tasks.markPublished(
+      taskId,
+      true,
+      value.startsWith('http') ? { note_url: value } : { note_id: value },
+    ),
+    onSuccess: async () => {
+      setPublicationIdentity('')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) }),
+      ])
+    },
+  })
 
   const status = tracking.status as SeednoteTrackingStatus
   const statusText = statusCopy[status] ?? tracking.status
@@ -175,10 +195,31 @@ function SeednoteAnalyticsContent({ analytics }: { analytics: SeednoteAnalytics 
                 <span>最近采集：{formatDateTime(tracking.last_run_at)}</span>
                 <span>下次采集：{formatDateTime(tracking.next_run_at)}</span>
                 <span>采集次数：{tracking.run_count}</span>
-                <span>识别时间：{formatDateTime(tracking.discovered_at)}</span>
+                <span>关联时间：{formatDateTime(tracking.discovered_at)}</span>
               </div>
             </div>
-            {tracking.last_error && (
+            {status === 'unresolved' && (
+              <form
+                className="flex flex-col gap-2 sm:flex-row"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const value = publicationIdentity.trim()
+                  if (value) bindMutation.mutate(value)
+                }}
+              >
+                <Input
+                  aria-label="公开笔记链接或 ID"
+                  placeholder="公开笔记链接或 ID"
+                  value={publicationIdentity}
+                  onChange={(event) => setPublicationIdentity(event.target.value)}
+                />
+                <Button type="submit" disabled={!publicationIdentity.trim() || bindMutation.isPending}>
+                  {bindMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                  {bindMutation.isPending ? '关联中' : '关联公开笔记'}
+                </Button>
+              </form>
+            )}
+            {tracking.last_error && status !== 'unresolved' && (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                 {friendlyTrackingError(tracking.last_error)}
               </div>

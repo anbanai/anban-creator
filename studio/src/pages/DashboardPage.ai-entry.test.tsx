@@ -168,10 +168,6 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.apiKeys,
         list: vi.fn().mockResolvedValue({ items: [{ id: 'key-1' }] }),
       },
-      modelConfig: {
-        ...actual.api.modelConfig,
-        get: vi.fn().mockResolvedValue({ text: { model: 'gpt-5' }, image: null }),
-      },
     },
   }
 })
@@ -256,14 +252,21 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
   })
 
-  it('blocks creation when model configuration is not ready', async () => {
-    vi.mocked(api.modelConfig.get).mockResolvedValueOnce({})
+  it('shows an operator-owned error when the server internal model is unavailable', async () => {
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
+      status: 'needs_configuration',
+      message: 'AI 入口意图解析模型暂不可用，请联系管理员。',
+      action_url: '',
+    })
 
     render(<DashboardPage />)
+    fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '写一篇新品介绍' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
-    expect(await screen.findByText('模型配置未就绪，先选择可用模型。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '去设置' })).toHaveAttribute('href', '/settings#model-key-settings')
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(await screen.findByText('AI 入口意图解析模型暂不可用，请联系管理员。')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '补充配置' })).not.toBeInTheDocument()
   })
 
   it('renders a Codex-style AI entry and submits every shared attachment unchanged', async () => {

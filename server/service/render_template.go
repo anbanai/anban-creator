@@ -115,7 +115,7 @@ func ParseLayoutPlan(raw any) (*LayoutPlan, error) {
 // visual plans, while module-only slots must satisfy required module fields.
 // ---------------------------------------------------------------------------
 
-func (s *WritingService) RenderTemplate(
+func (s *ContentRenderService) RenderTemplate(
 	ctx context.Context,
 	userID, projectID, markdown string,
 	layoutPlan *LayoutPlan,

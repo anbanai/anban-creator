@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -16,51 +14,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Diagnostic LLM mock — still wired through setupConvertTest because the
-// legacy conversion test harness uses it. ConvertMarkdown/RenderTemplate do not call the
-// LLM (deterministic renderer), so the mock's recorded calls stay empty for
-// those paths and the tests below assert on the rendered HTML instead.
-// ---------------------------------------------------------------------------
-
-type llmCall struct {
-	SystemPrompt string
-	UserPrompt   string
-	Timestamp    time.Time
-}
-
-type diagnosticLLM struct {
-	mu          sync.Mutex
-	calls       []llmCall
-	response    string
-	responseErr error
-}
-
-func (d *diagnosticLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.calls = append(d.calls, llmCall{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   userPrompt,
-		Timestamp:    time.Now(),
-	})
-	return d.response, d.responseErr
-}
-
-func (d *diagnosticLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
-	return "", fmt.Errorf("not implemented")
-}
-
-func (d *diagnosticLLM) callCount() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.calls)
-}
-
-// ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, repository.Repository) {
+func setupConvertTest(t *testing.T) (*ContentRenderService, repository.Repository) {
 	t.Helper()
 	db := setupTestDB(t)
 	t.Cleanup(func() {
@@ -72,7 +29,7 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 
-	svc := NewWritingService(repo, llm, "", 0, &logger)
+	svc := NewContentRenderService(repo, &logger)
 	return svc, repo
 }
 
@@ -141,8 +98,7 @@ func logPhase(t *testing.T, phase int, msg string, args ...any) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
-	// The LLM mock is irrelevant for convert now; render is deterministic.
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-trace-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -154,12 +110,6 @@ func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
 	}
 
 	logPhase(t, 1, "Project lookup + deterministic render — OK")
-
-	logPhase(t, 2, "LLM must NOT be called by the convert path")
-	// Deterministic: the LLM mock records zero calls.
-	if got := callCountOf(svc); got != 0 {
-		t.Errorf("[FAIL] ConvertMarkdown invoked the LLM %d time(s) — convert must be LLM-free", got)
-	}
 
 	logPhase(t, 3, "Final result — html_len=%d image_count=%d", len(result.HTML), len(result.Images))
 	t.Logf("  [HTML] first 200 chars: %q", firstN(result.HTML, 200))
@@ -197,7 +147,7 @@ func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-default-001"
 	// Project has EMPTY theme → resolves to autumn-warm.
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
@@ -224,7 +174,7 @@ func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-override-001"
 	// Project has autumn-warm but we override to spring-fresh.
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
@@ -250,7 +200,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_WithImages(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-images-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -302,7 +252,7 @@ func classifyImage(original string) string {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
-	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	svc, repo := setupConvertTest(t)
 	userID := "user-theme-err-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
@@ -321,8 +271,7 @@ func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
-	llm := &diagnosticLLM{response: "should not reach"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t)
 	userID := "user-empty-001"
 	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
@@ -335,9 +284,6 @@ func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 	if !strings.Contains(err.Error(), "markdown") {
 		t.Errorf("[FAIL] Error should mention markdown, got: %v", err)
 	}
-	if llm.callCount() > 0 {
-		t.Error("[FAIL] LLM should not have been called for empty markdown")
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -345,8 +291,7 @@ func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_ProjectNotFound(t *testing.T) {
-	llm := &diagnosticLLM{response: "should not reach"}
-	svc, _ := setupConvertTest(t, llm)
+	svc, _ := setupConvertTest(t)
 
 	_, err := svc.ConvertMarkdown(context.Background(), "user-ghost", "nonexistent-project-id", "# Test", "", "")
 	if err == nil {
@@ -354,9 +299,6 @@ func TestConvertMarkdown_ProjectNotFound(t *testing.T) {
 	}
 	t.Logf("  [NOT FOUND] Error: %v", err)
 
-	if llm.callCount() > 0 {
-		t.Error("[FAIL] LLM should not have been called")
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -364,8 +306,7 @@ func TestConvertMarkdown_ProjectNotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_ProjectOwnershipMismatch(t *testing.T) {
-	llm := &diagnosticLLM{response: "should not reach"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t)
 	ownerID := "user-owner-001"
 	otherID := "user-other-001"
 	projectID := createProjectWithTheme(t, repo, ownerID, model.PlatformArticle, "", "autumn-warm")
@@ -379,23 +320,11 @@ func TestConvertMarkdown_ProjectOwnershipMismatch(t *testing.T) {
 	if !strings.Contains(err.Error(), "project not owned") {
 		t.Errorf("[FAIL] Error should mention ownership, got: %v", err)
 	}
-	if llm.callCount() > 0 {
-		t.Error("[FAIL] LLM should not have been called")
-	}
 }
 
 // ---------------------------------------------------------------------------
 // Small test-only helpers (kept local so assertions read cleanly).
 // ---------------------------------------------------------------------------
-
-// callCountOf inspects the WritingService's underlying diagnostic LLM mock. It
-// panics if the wired client is not the diagnostic mock — acceptable for tests.
-func callCountOf(svc *WritingService) int {
-	if d, ok := svc.llmClient.(*diagnosticLLM); ok {
-		return d.callCount()
-	}
-	return 0
-}
 
 func firstN(s string, n int) string {
 	if len(s) <= n {

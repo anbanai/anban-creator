@@ -160,4 +160,48 @@ describe("buildExecutionEnvironment", () => {
     expect(environment).not.toHaveProperty("CLAUDE_CODE_MAX_OUTPUT_TOKENS");
     expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_THINKING");
   });
+
+  test("removes pinned SDK credential, provider routing, and model inputs inherited from the host", () => {
+    const inherited = Object.fromEntries([
+      "CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+      "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+      "CLAUDE_CODE_HOST_CREDS_FILE",
+      "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+      "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+      "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+      "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+      "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+      "CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
+      "CLAUDE_CODE_SKIP_MANTLE_AUTH",
+      "ANTHROPIC_PROFILE",
+      "ANTHROPIC_IDENTITY_TOKEN",
+      "ANTHROPIC_IDENTITY_TOKEN_FILE",
+      "ANTHROPIC_AWS_API_KEY",
+      "ANTHROPIC_FOUNDRY_API_KEY",
+      "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+      "AWS_BEARER_TOKEN_BEDROCK",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AWS_SHARED_CREDENTIALS_FILE",
+      "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "GOOGLE_CLOUD_QUOTA_PROJECT",
+      "GCE_METADATA_HOST",
+      "ANTHROPIC_SMALL_FAST_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+    ].map((key) => [key, "host-value"]));
+
+    const environment = buildExecutionEnvironment(
+      inherited,
+      { task_type: "article", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "frozen-model" } } },
+      "https://server.example.com",
+      "execution-jwt",
+    );
+
+    for (const key of Object.keys(inherited)) expect(environment).not.toHaveProperty(key);
+    expect(environment.ANTHROPIC_MODEL).toBe("frozen-model");
+  });
 });

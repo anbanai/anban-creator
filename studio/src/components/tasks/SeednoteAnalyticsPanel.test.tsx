@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import SeednoteAnalyticsPanel from './SeednoteAnalyticsPanel'
@@ -11,6 +11,10 @@ vi.mock('@/lib/api', async () => {
     ...actual,
     api: {
       ...actual.api,
+      tasks: {
+        ...actual.api.tasks,
+        markPublished: vi.fn(),
+      },
       seednoteAnalytics: {
         ...actual.api.seednoteAnalytics,
         getByTask: vi.fn(),
@@ -30,5 +34,31 @@ describe('SeednoteAnalyticsPanel', () => {
     expect(await screen.findByText('种草笔记数据')).toBeInTheDocument()
     expect(screen.getByText('暂无公开数据，追踪尚未准备')).toBeInTheDocument()
     expect(screen.queryByText('暂时无法加载种草笔记数据')).not.toBeInTheDocument()
+  })
+
+  it('binds an unresolved publication with an explicit note URL', async () => {
+    vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({
+      tracking: {
+        status: 'unresolved',
+        run_count: 0,
+        last_error: '缺少公开笔记 ID 或链接，尚未建立追踪关联',
+      },
+      series: [],
+    })
+    vi.mocked(api.tasks.markPublished).mockResolvedValue({ published: true })
+
+    render(<SeednoteAnalyticsPanel taskId="task-1" />)
+
+    const input = await screen.findByRole('textbox', { name: '公开笔记链接或 ID' })
+    expect(screen.getByText('尚未关联公开笔记，请补充笔记链接或 ID')).toBeInTheDocument()
+    expect(screen.queryByText(/自动识别|加载中/)).not.toBeInTheDocument()
+    fireEvent.change(input, { target: { value: 'https://www.xiaohongshu.com/explore/note-1' } })
+    fireEvent.click(screen.getByRole('button', { name: '关联公开笔记' }))
+
+    await waitFor(() => {
+      expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true, {
+        note_url: 'https://www.xiaohongshu.com/explore/note-1',
+      })
+    })
   })
 })

@@ -60,6 +60,44 @@ func TestProviderCostCalculatorRejectsNegativeUsageAndCostOverflow(t *testing.T)
 	}
 }
 
+func TestProviderTokenUnreconciledAllowsEmptyTaskWithoutZeroCostReconciliation(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	ctx := context.Background()
+	req := RecordProviderTokenUnreconciledRequest{
+		Provider: "moonshot", Model: "kimi-k2.7-code", ProviderRequestID: "internal:server_internal:test",
+		ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+	}
+
+	event, err := fixture.service.RecordProviderTokenUnreconciled(ctx, req)
+	if err != nil {
+		t.Fatalf("RecordProviderTokenUnreconciled: %v", err)
+	}
+	if event.TaskID != "" || event.Status != model.BillingProviderCostStatusUnreconciled || event.CostMicroCNY != 0 {
+		t.Fatalf("event = %#v", event)
+	}
+	if event.CatalogID != "cost-v1" || event.ProviderRequestID != req.ProviderRequestID {
+		t.Fatalf("event identity = %#v", event)
+	}
+	var evidence struct {
+		Kind       string                               `json:"kind"`
+		ReasonCode model.BillingExecutionCostReasonCode `json:"reason_code"`
+	}
+	if err := json.Unmarshal(event.UsageEvidence, &evidence); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	if evidence.Kind != "token_unreconciled" || evidence.ReasonCode != model.BillingExecutionCostReasonMissingProviderUsage {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+
+	repeated, err := fixture.service.RecordProviderTokenUnreconciled(ctx, req)
+	if err != nil {
+		t.Fatalf("repeat RecordProviderTokenUnreconciled: %v", err)
+	}
+	if repeated.ID != event.ID {
+		t.Fatalf("repeat event ID = %q, want %q", repeated.ID, event.ID)
+	}
+}
+
 func TestProviderCostCalculatorOutputPixelTiersAreExact(t *testing.T) {
 	calculator := NewProviderCostCalculator(providerCostBundleWithPixels().Costs)
 	for _, test := range []struct {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,28 +20,38 @@ import (
 )
 
 const (
-	SeednoteDiscoverTaskType       = "seednote:discover"
 	SeednoteCaptureMetricsTaskType = "seednote:capture_metrics"
 )
 
+const unresolvedSeednoteTrackingMessage = "缺少公开笔记 ID 或链接，尚未建立追踪关联"
+
+var (
+	ErrSeednotePublicationIDInvalid        = errors.New("invalid seednote publication note id")
+	ErrSeednotePublicationURLInvalid       = errors.New("invalid seednote publication note url")
+	ErrSeednotePublicationIdentityMismatch = errors.New("seednote publication identity mismatch")
+	seednotePublicationIDPattern           = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
+)
+
+type SeednotePublicationIdentity struct {
+	NoteID  string `json:"note_id,omitempty"`
+	NoteURL string `json:"note_url,omitempty"`
+}
+
 type SeednotePublicPlatform interface {
-	FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.SeednotePost, error)
 	FetchPostMetrics(ctx context.Context, noteURL string) (*platform.SeednotePostMetrics, error)
 }
 
 type SeednoteTrackingService struct {
 	repo     repository.Repository
 	platform SeednotePublicPlatform
-	llm      LLMClient
 	enqueuer TaskEnqueuer
 	logger   *zerolog.Logger
 }
 
-func NewSeednoteTrackingService(repo repository.Repository, platform SeednotePublicPlatform, llm LLMClient, enqueuer TaskEnqueuer, logger *zerolog.Logger) *SeednoteTrackingService {
+func NewSeednoteTrackingService(repo repository.Repository, platform SeednotePublicPlatform, enqueuer TaskEnqueuer, logger *zerolog.Logger) *SeednoteTrackingService {
 	return &SeednoteTrackingService{
 		repo:     repo,
 		platform: platform,
-		llm:      llm,
 		enqueuer: enqueuer,
 		logger:   logger,
 	}
@@ -90,15 +102,42 @@ type SeednoteMetricSeriesItem struct {
 	ViewCount    *int      `json:"view_count"`
 }
 
-type seednoteAIMatch struct {
-	Matched    bool    `json:"matched"`
-	NoteURL    string  `json:"note_url"`
-	NoteID     string  `json:"note_id"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
+func NormalizeSeednotePublicationIdentity(identity SeednotePublicationIdentity) (SeednotePublicationIdentity, error) {
+	identity.NoteID = strings.TrimSpace(identity.NoteID)
+	identity.NoteURL = strings.TrimSpace(identity.NoteURL)
+	if identity.NoteID != "" && !seednotePublicationIDPattern.MatchString(identity.NoteID) {
+		return SeednotePublicationIdentity{}, ErrSeednotePublicationIDInvalid
+	}
+	if identity.NoteURL != "" {
+		parsed, err := url.Parse(identity.NoteURL)
+		if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" || !isSeednotePublicationHost(parsed.Hostname()) {
+			return SeednotePublicationIdentity{}, ErrSeednotePublicationURLInvalid
+		}
+		urlID := platform.ExtractSeednoteNoteID(parsed.EscapedPath())
+		if !seednotePublicationIDPattern.MatchString(urlID) {
+			return SeednotePublicationIdentity{}, ErrSeednotePublicationURLInvalid
+		}
+		if identity.NoteID != "" && identity.NoteID != urlID {
+			return SeednotePublicationIdentity{}, ErrSeednotePublicationIdentityMismatch
+		}
+		identity.NoteID = urlID
+	}
+	if identity.NoteID != "" && identity.NoteURL == "" {
+		identity.NoteURL = "https://www.xiaohongshu.com/explore/" + url.PathEscape(identity.NoteID)
+	}
+	return identity, nil
 }
 
-func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+func isSeednotePublicationHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "xiaohongshu.com" || strings.HasSuffix(host, ".xiaohongshu.com")
+}
+
+func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
+	identity, err := NormalizeSeednotePublicationIdentity(identity)
+	if err != nil {
+		return err
+	}
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
@@ -117,25 +156,28 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 	if project.UserID != userID {
 		return fmt.Errorf("project does not belong to user")
 	}
-	profileURL := strings.TrimSpace(project.ProfileURL)
-	if profileURL == "" {
-		return s.ensureFailedTracking(ctx, task, userID, "seednote project profile URL is required")
-	}
 
 	now := time.Now()
-	nextRun := now.Add(24 * time.Hour)
+	status := model.SeednoteTrackingStatusUnresolved
+	lastError := unresolvedSeednoteTrackingMessage
+	var trackingStartedAt *time.Time
+	if identity.NoteID != "" {
+		status = model.SeednoteTrackingStatusTracking
+		lastError = ""
+		trackingStartedAt = &now
+	}
 	existing, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, taskID)
 	if err == nil {
-		existing.Status = model.SeednoteTrackingStatusWaitingDiscovery
-		existing.ProfileURL = profileURL
+		existing.Status = status
+		existing.ProfileURL = strings.TrimSpace(project.ProfileURL)
 		existing.PublishedMarkedAt = now
-		existing.NextRunAt = &nextRun
+		existing.NextRunAt = nil
 		existing.LastRunAt = nil
 		existing.DiscoveredAt = nil
-		existing.TrackingStartedAt = nil
+		existing.TrackingStartedAt = trackingStartedAt
 		existing.TrackingStoppedAt = nil
-		existing.NoteID = ""
-		existing.NoteURL = ""
+		existing.NoteID = identity.NoteID
+		existing.NoteURL = identity.NoteURL
 		existing.NoteTitle = ""
 		existing.NoteCoverURL = ""
 		existing.RunCount = 0
@@ -145,11 +187,14 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		existing.MatchConfidence = 0
 		existing.MatchReason = ""
 		existing.StopReason = ""
-		existing.LastError = ""
+		existing.LastError = lastError
 		if updateErr := s.repo.SeednoteTrackings().Update(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update tracking: %w", updateErr)
 		}
-		return s.enqueueDiscover(existing.ID, 24*time.Hour)
+		if status == model.SeednoteTrackingStatusTracking {
+			return s.CaptureMetrics(ctx, existing.ID)
+		}
+		return nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("find tracking: %w", err)
@@ -160,168 +205,21 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		TaskID:            taskID,
 		UserID:            userID,
 		ProjectID:         task.ProjectID,
-		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
-		ProfileURL:        profileURL,
+		Status:            status,
+		ProfileURL:        strings.TrimSpace(project.ProfileURL),
+		NoteID:            identity.NoteID,
+		NoteURL:           identity.NoteURL,
 		PublishedMarkedAt: now,
-		NextRunAt:         &nextRun,
+		TrackingStartedAt: trackingStartedAt,
+		LastError:         lastError,
 	}
 	if err := s.repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
 		return fmt.Errorf("create tracking: %w", err)
 	}
-	return s.enqueueDiscover(tracking.ID, 24*time.Hour)
-}
-
-func (s *SeednoteTrackingService) ensureFailedTracking(ctx context.Context, task *model.Task, userID, lastError string) error {
-	now := time.Now()
-	existing, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, task.ID)
-	if err == nil {
-		existing.UserID = userID
-		existing.ProjectID = task.ProjectID
-		existing.Status = model.SeednoteTrackingStatusFailed
-		existing.ProfileURL = ""
-		existing.PublishedMarkedAt = now
-		existing.NextRunAt = nil
-		existing.LastRunAt = nil
-		existing.DiscoveredAt = nil
-		existing.TrackingStartedAt = nil
-		existing.TrackingStoppedAt = &now
-		existing.NoteID = ""
-		existing.NoteURL = ""
-		existing.NoteTitle = ""
-		existing.NoteCoverURL = ""
-		existing.RunCount = 0
-		existing.ConsecutiveLowGrowthCount = 0
-		existing.FailureCount = 0
-		existing.DiscoveryAttemptCount = 0
-		existing.MatchConfidence = 0
-		existing.MatchReason = ""
-		existing.StopReason = model.SeednoteStopReasonDiscoveryTimeout
-		existing.LastError = lastError
-		if updateErr := s.repo.SeednoteTrackings().Update(ctx, existing); updateErr != nil {
-			return fmt.Errorf("update failed tracking: %w", updateErr)
-		}
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("find tracking: %w", err)
-	}
-	tracking := &model.SeednotePostTracking{
-		ID:                uuid.New().String(),
-		TaskID:            task.ID,
-		UserID:            userID,
-		ProjectID:         task.ProjectID,
-		Status:            model.SeednoteTrackingStatusFailed,
-		PublishedMarkedAt: now,
-		TrackingStoppedAt: &now,
-		StopReason:        model.SeednoteStopReasonDiscoveryTimeout,
-		LastError:         lastError,
-	}
-	if err := s.repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
-		return fmt.Errorf("create failed tracking: %w", err)
+	if status == model.SeednoteTrackingStatusTracking {
+		return s.CaptureMetrics(ctx, tracking.ID)
 	}
 	return nil
-}
-
-func (s *SeednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trackingID string) error {
-	tracking, err := s.repo.SeednoteTrackings().FindByID(ctx, trackingID)
-	if err != nil {
-		return fmt.Errorf("find tracking: %w", err)
-	}
-	if tracking.Status != model.SeednoteTrackingStatusWaitingDiscovery {
-		return nil
-	}
-	tracking.DiscoveryAttemptCount++
-
-	if s.platform == nil {
-		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("seednote platform unavailable"))
-	}
-	posts, err := s.platform.FetchProfilePosts(ctx, tracking.ProfileURL)
-	if err != nil {
-		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("fetch profile posts: %w", err))
-	}
-	task, err := s.repo.Tasks().FindByID(ctx, tracking.TaskID)
-	if err != nil {
-		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("find task: %w", err))
-	}
-	match, err := s.matchPublishedNote(ctx, task, posts)
-	candidate, ok := findMatchedCandidate(match, posts)
-	if err != nil || !validPublishedNoteMatch(match) || !ok {
-		return s.recordDiscoveryMiss(ctx, tracking, err)
-	}
-
-	now := time.Now()
-	tracking.Status = model.SeednoteTrackingStatusTracking
-	tracking.NoteID = candidate.NoteID
-	tracking.NoteURL = candidate.URL
-	tracking.NoteTitle = candidate.Title
-	tracking.NoteCoverURL = candidate.CoverURL
-	tracking.MatchConfidence = match.Confidence
-	tracking.MatchReason = match.Reason
-	tracking.DiscoveredAt = &now
-	tracking.TrackingStartedAt = &now
-	tracking.LastError = ""
-	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
-		return fmt.Errorf("update matched tracking: %w", err)
-	}
-	return s.CaptureMetrics(ctx, tracking.ID)
-}
-
-func (s *SeednoteTrackingService) matchPublishedNote(ctx context.Context, task *model.Task, posts []platform.SeednotePost) (*seednoteAIMatch, error) {
-	if s.llm == nil {
-		return &seednoteAIMatch{Matched: false, Reason: "AI client unavailable"}, nil
-	}
-	payload := map[string]any{
-		"task": map[string]any{
-			"id":     task.ID,
-			"title":  task.Title,
-			"prompt": task.Prompt,
-		},
-		"candidates": posts,
-	}
-	raw, _ := json.Marshal(payload)
-	resp, err := s.llm.Complete(ctx, "你是种草笔记匹配助手，只返回严格 JSON。", string(raw))
-	if err != nil {
-		return nil, err
-	}
-	var match seednoteAIMatch
-	if err := json.Unmarshal([]byte(resp), &match); err != nil {
-		return nil, err
-	}
-	return &match, nil
-}
-
-func validPublishedNoteMatch(match *seednoteAIMatch) bool {
-	return match != nil &&
-		match.Matched &&
-		match.Confidence >= 0.8
-}
-
-func findMatchedCandidate(match *seednoteAIMatch, posts []platform.SeednotePost) (*platform.SeednotePost, bool) {
-	if match == nil {
-		return nil, false
-	}
-	noteID := strings.TrimSpace(match.NoteID)
-	noteURL := strings.TrimSpace(match.NoteURL)
-	if noteID == "" && noteURL == "" {
-		return nil, false
-	}
-	for i := range posts {
-		postID := strings.TrimSpace(posts[i].NoteID)
-		postURL := strings.TrimSpace(posts[i].URL)
-		if noteID != "" && noteURL != "" {
-			if postID == noteID && postURL == noteURL {
-				return &posts[i], true
-			}
-			continue
-		}
-		if noteID != "" && postID == noteID {
-			return &posts[i], true
-		}
-		if noteURL != "" && postURL == noteURL {
-			return &posts[i], true
-		}
-	}
-	return nil, false
 }
 
 func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
@@ -559,32 +457,6 @@ func (s *SeednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, 
 	return analytics, nil
 }
 
-func (s *SeednoteTrackingService) recordDiscoveryMiss(ctx context.Context, tracking *model.SeednotePostTracking, cause error) error {
-	now := time.Now()
-	tracking.LastRunAt = &now
-	if cause != nil {
-		tracking.LastError = cause.Error()
-	} else {
-		tracking.LastError = "published note was not matched"
-	}
-	if tracking.DiscoveryAttemptCount >= model.SeednoteDiscoveryMaxAttempts {
-		tracking.Status = model.SeednoteTrackingStatusFailed
-		tracking.StopReason = model.SeednoteStopReasonDiscoveryTimeout
-		tracking.NextRunAt = nil
-	} else {
-		tracking.Status = model.SeednoteTrackingStatusWaitingDiscovery
-		next := now.Add(24 * time.Hour)
-		tracking.NextRunAt = &next
-	}
-	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
-		return fmt.Errorf("update discovery retry: %w", err)
-	}
-	if tracking.Status == model.SeednoteTrackingStatusWaitingDiscovery {
-		return s.enqueueDiscover(tracking.ID, 24*time.Hour)
-	}
-	return nil
-}
-
 func (s *SeednoteTrackingService) recordTrackingFailure(ctx context.Context, tracking *model.SeednotePostTracking, cause error) error {
 	now := time.Now()
 	tracking.FailureCount++
@@ -601,9 +473,6 @@ func (s *SeednoteTrackingService) recordTrackingFailure(ctx context.Context, tra
 	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update tracking failure: %w", err)
 	}
-	if tracking.Status == model.SeednoteTrackingStatusWaitingDiscovery {
-		return s.enqueueDiscover(tracking.ID, 24*time.Hour)
-	}
 	if tracking.Status == model.SeednoteTrackingStatusTracking {
 		return s.enqueueCapture(tracking.ID, 24*time.Hour)
 	}
@@ -616,14 +485,6 @@ func (s *SeednoteTrackingService) recordEnqueueFailure(ctx context.Context, trac
 		return fmt.Errorf("record enqueue failure: %w", err)
 	}
 	return cause
-}
-
-func (s *SeednoteTrackingService) enqueueDiscover(trackingID string, delay time.Duration) error {
-	if s.enqueuer == nil {
-		return nil
-	}
-	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
-	return s.enqueuer.EnqueueIn(SeednoteDiscoverTaskType, payload, delay)
 }
 
 func (s *SeednoteTrackingService) enqueueCapture(trackingID string, delay time.Duration) error {

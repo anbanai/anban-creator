@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +113,24 @@ func TestModelConfigCompleteImageOverrideApplies(t *testing.T) {
 	}
 	if !svc.HasCompleteImageOverride(ctx, userID) {
 		t.Fatal("HasCompleteImageOverride = false, want true")
+	}
+}
+
+func TestModelConfigResponseContainsOnlyImageOverride(t *testing.T) {
+	svc, _ := setupTestModelConfigService(t)
+	ctx := context.Background()
+	userID := "user-image-only"
+	if err := svc.Update(ctx, userID, &UpdateModelConfigRequest{Image: &ImageConfigDTO{
+		Provider: "openai", Endpoint: "https://custom.example/v1", APIKey: "custom-key", Model: "gpt-image-2",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Get(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Image == nil || got.Image.Provider != "openai" || !strings.HasPrefix(got.Image.APIKey, keepExistingKey) || got.Image.APIKey == "custom-key" {
+		t.Fatalf("response = %#v", got)
 	}
 }
 

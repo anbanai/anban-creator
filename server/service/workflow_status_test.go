@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -119,5 +120,36 @@ func TestBuildWorkflowStatusWarnsOnInvalidReview(t *testing.T) {
 	}
 	if status.Warnings[0].Code != "invalid_review_json" {
 		t.Fatalf("warning code = %q, want invalid_review_json", status.Warnings[0].Code)
+	}
+}
+
+func TestBuildWorkflowStatusViralAnalysisUsesDedicatedStages(t *testing.T) {
+	files := []*model.TaskFile{
+		{FileName: "source-analysis.md", MimeType: "text/markdown", FilePath: "source-analysis.md"},
+		{FileName: "viral-template.json", MimeType: "application/json", FilePath: "viral-template.json"},
+		{FileName: "template-meta.json", MimeType: "application/json", FilePath: "template-meta.json"},
+	}
+	status, err := BuildWorkflowStatus(model.TaskTypeViralAnalysis, files, nil)
+	if err != nil {
+		t.Fatalf("BuildWorkflowStatus: %v", err)
+	}
+	want := []WorkflowStage{
+		{Key: "source_note", Label: "源笔记", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"source-analysis.md"}},
+		{Key: "evidence_analysis", Label: "证据分析", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"source-analysis.md"}},
+		{Key: "template_artifacts", Label: "模板产物", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"template-meta.json", "viral-template.json"}},
+	}
+	if len(status.Stages) != len(want) {
+		t.Fatalf("stages = %#v, want exactly three viral stages", status.Stages)
+	}
+	for i := range want {
+		got := status.Stages[i]
+		if got.Key != want[i].Key || got.Label != want[i].Label || got.Status != want[i].Status || !slices.Equal(got.ArtifactPaths, want[i].ArtifactPaths) {
+			t.Fatalf("stage %d = %#v, want %#v", i, got, want[i])
+		}
+	}
+	for _, stage := range status.Stages {
+		if stage.Label == "排版 HTML" || stage.Label == "发布草稿" {
+			t.Fatalf("viral workflow contains article stage %#v", stage)
+		}
 	}
 }

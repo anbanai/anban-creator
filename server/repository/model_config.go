@@ -38,7 +38,6 @@ func (r *modelConfigRepository) Upsert(ctx context.Context, config *model.UserMo
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"text_config_json",
 			"image_config_json",
 			"updated_at",
 		}),

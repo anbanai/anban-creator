@@ -206,6 +206,9 @@ func parseClaudeDecimal(value string) (int, error) {
 	if value == "" {
 		return 0, fmt.Errorf("empty decimal integer")
 	}
+	if len(value) > 1 && value[0] == '0' {
+		return 0, fmt.Errorf("decimal integer is not canonical")
+	}
 	for i := range len(value) {
 		if value[i] < '0' || value[i] > '9' {
 			return 0, fmt.Errorf("invalid decimal integer")

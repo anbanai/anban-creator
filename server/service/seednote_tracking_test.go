@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -22,29 +21,18 @@ type fakeSeednotePlatform struct {
 	posts        []platform.SeednotePost
 	metrics      platform.SeednotePostMetrics
 	err          error
+	profileCalls int
 	metricsCalls int
 }
 
 func (f *fakeSeednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.SeednotePost, error) {
+	f.profileCalls++
 	return f.posts, f.err
 }
 
 func (f *fakeSeednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.SeednotePostMetrics, error) {
 	f.metricsCalls++
 	return &f.metrics, f.err
-}
-
-type fakeSeednoteLLM struct {
-	response string
-	err      error
-}
-
-func (f *fakeSeednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	return f.response, f.err
-}
-
-func (f *fakeSeednoteLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
-	return "", fmt.Errorf("not implemented")
 }
 
 type fakeTrackingEnqueuer struct {
@@ -88,7 +76,7 @@ func setupSeednoteTrackingServiceTest(t *testing.T) (*SeednoteTrackingService, r
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewSeednoteTrackingService(repo, &fakeSeednotePlatform{}, &fakeSeednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, &fakeSeednotePlatform{}, enq, &logger)
 	return svc, repo, enq
 }
 
@@ -126,210 +114,55 @@ func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (s
 	return userID, projectID, taskID
 }
 
-func TestSeednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
-	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
-	userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
-
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
-		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
+func TestEnsureTrackingForPublishedTaskUsesDeterministicIdentity(t *testing.T) {
+	tests := []struct {
+		name, noteID, noteURL, wantID, wantURL, wantStatus string
+		wantErr, wantEnqueue, wantMetrics                  bool
+	}{
+		{name: "url only", noteURL: "https://www.xiaohongshu.com/explore/note-1?xsec_token=abc", wantID: "note-1", wantURL: "https://www.xiaohongshu.com/explore/note-1?xsec_token=abc", wantStatus: model.SeednoteTrackingStatusTracking, wantEnqueue: true, wantMetrics: true},
+		{name: "id only", noteID: "note-1", wantID: "note-1", wantURL: "https://www.xiaohongshu.com/explore/note-1", wantStatus: model.SeednoteTrackingStatusTracking, wantEnqueue: true, wantMetrics: true},
+		{name: "matching id and url", noteID: "note-1", noteURL: "https://www.xiaohongshu.com/explore/note-1", wantID: "note-1", wantURL: "https://www.xiaohongshu.com/explore/note-1", wantStatus: model.SeednoteTrackingStatusTracking, wantEnqueue: true, wantMetrics: true},
+		{name: "conflicting identity", noteID: "note-2", noteURL: "https://www.xiaohongshu.com/explore/note-1", wantErr: true},
+		{name: "foreign host", noteURL: "https://example.com/explore/note-1", wantErr: true},
+		{name: "note id only in query", noteURL: "https://www.xiaohongshu.com/user/profile/user-1?next=/explore/note-1", wantErr: true},
+		{name: "missing identity", wantStatus: model.SeednoteTrackingStatusUnresolved},
 	}
-
-	tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
-	if err != nil {
-		t.Fatalf("FindByTaskID: %v", err)
-	}
-	if tracking.Status != model.SeednoteTrackingStatusWaitingDiscovery {
-		t.Fatalf("Status = %q", tracking.Status)
-	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != "seednote:discover" {
-		t.Fatalf("delayed jobs = %+v", enq.delayed)
-	}
-}
-
-func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCreatesFailedTracking(t *testing.T) {
-	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
-	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
-	project, err := repo.Projects().FindByID(context.Background(), projectID)
-	if err != nil {
-		t.Fatalf("FindByID project: %v", err)
-	}
-	project.ProfileURL = ""
-	if err := repo.Projects().Update(context.Background(), project); err != nil {
-		t.Fatalf("update project: %v", err)
-	}
-
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
-		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
-	}
-
-	tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
-	if err != nil {
-		t.Fatalf("FindByTaskID: %v", err)
-	}
-	if tracking.Status != model.SeednoteTrackingStatusFailed {
-		t.Fatalf("Status = %q, want failed", tracking.Status)
-	}
-	if tracking.LastError == "" {
-		t.Fatal("LastError should explain missing profile URL")
-	}
-	if tracking.NextRunAt != nil {
-		t.Fatalf("NextRunAt = %v, want nil", tracking.NextRunAt)
-	}
-	if len(enq.delayed) != 0 {
-		t.Fatalf("delayed jobs = %+v, want none", enq.delayed)
-	}
-}
-
-func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
-	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
-	platformFake := &fakeSeednotePlatform{
-		posts: []platform.SeednotePost{
-			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
-		},
-		metrics: platform.SeednotePostMetrics{LikeCount: 10, CollectCount: 3, CommentCount: 1, ShareCount: 0},
-	}
-	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, &fakeTrackingEnqueuer{}, &logger)
-
-	tracking := &model.SeednotePostTracking{
-		ID:                uuid.New().String(),
-		TaskID:            taskID,
-		UserID:            userID,
-		ProjectID:         projectID,
-		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
-		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
-		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
-	}
-	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
-		t.Fatalf("create tracking: %v", err)
-	}
-
-	if err := svc.DiscoverPublishedNote(context.Background(), tracking.ID); err != nil {
-		t.Fatalf("DiscoverPublishedNote: %v", err)
-	}
-
-	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
-	if err != nil {
-		t.Fatalf("FindByID: %v", err)
-	}
-	if updated.Status != model.SeednoteTrackingStatusTracking || updated.NoteID != "note-1" {
-		t.Fatalf("tracking = %+v", updated)
-	}
-	snapshots, err := repo.SeednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
-	if err != nil {
-		t.Fatalf("FindByTaskID snapshots: %v", err)
-	}
-	if len(snapshots) != 1 || snapshots[0].LikeCount != 10 {
-		t.Fatalf("snapshots = %+v", snapshots)
-	}
-}
-
-func TestSeednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifiers(t *testing.T) {
-	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
-	url1 := "https://www.xiaohongshu.com/explore/note-1"
-	url2 := "https://www.xiaohongshu.com/explore/note-2"
-	platformFake := &fakeSeednotePlatform{
-		posts: []platform.SeednotePost{
-			{Title: "早起效率翻倍的方法", URL: url1, NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
-			{Title: "午后精力恢复技巧", URL: url2, NoteID: "note-2", CoverURL: "https://img.example/2.jpg"},
-		},
-		metrics: platform.SeednotePostMetrics{LikeCount: 99, CollectCount: 9, CommentCount: 9, ShareCount: 9},
-	}
-	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-2","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	enq := &fakeTrackingEnqueuer{}
-	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
-
-	tracking := &model.SeednotePostTracking{
-		ID:                uuid.New().String(),
-		TaskID:            taskID,
-		UserID:            userID,
-		ProjectID:         projectID,
-		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
-		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
-		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
-	}
-	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
-		t.Fatalf("create tracking: %v", err)
-	}
-
-	if err := svc.DiscoverPublishedNote(context.Background(), tracking.ID); err != nil {
-		t.Fatalf("DiscoverPublishedNote: %v", err)
-	}
-
-	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
-	if err != nil {
-		t.Fatalf("FindByID: %v", err)
-	}
-	if updated.Status != model.SeednoteTrackingStatusWaitingDiscovery {
-		t.Fatalf("Status = %q, want %q", updated.Status, model.SeednoteTrackingStatusWaitingDiscovery)
-	}
-	if updated.NoteID != "" || updated.NoteURL != "" {
-		t.Fatalf("matched note fields should remain empty, got note_id=%q note_url=%q", updated.NoteID, updated.NoteURL)
-	}
-	snapshots, err := repo.SeednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
-	if err != nil {
-		t.Fatalf("FindByTaskID snapshots: %v", err)
-	}
-	if len(snapshots) != 0 {
-		t.Fatalf("snapshots = %+v, want none", snapshots)
-	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != SeednoteDiscoverTaskType {
-		t.Fatalf("delayed jobs = %+v", enq.delayed)
-	}
-}
-
-func TestSeednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
-	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
-	platformFake := &fakeSeednotePlatform{
-		posts: []platform.SeednotePost{
-			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1"},
-		},
-		metrics: platform.SeednotePostMetrics{LikeCount: 10},
-	}
-	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
-	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	enq := &fakeTrackingEnqueuer{}
-	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
-
-	tracking := &model.SeednotePostTracking{
-		ID:                uuid.New().String(),
-		TaskID:            taskID,
-		UserID:            userID,
-		ProjectID:         projectID,
-		Status:            model.SeednoteTrackingStatusStopped,
-		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
-		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
-		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
-		RunCount:          2,
-	}
-	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
-		t.Fatalf("create tracking: %v", err)
-	}
-
-	if err := svc.DiscoverPublishedNote(context.Background(), tracking.ID); err != nil {
-		t.Fatalf("DiscoverPublishedNote: %v", err)
-	}
-	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
-		t.Fatalf("CaptureMetrics: %v", err)
-	}
-
-	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
-	if err != nil {
-		t.Fatalf("FindByID: %v", err)
-	}
-	if updated.Status != model.SeednoteTrackingStatusStopped || updated.RunCount != 2 {
-		t.Fatalf("tracking changed after stale jobs: %+v", updated)
-	}
-	if platformFake.metricsCalls != 0 {
-		t.Fatalf("metricsCalls = %d, want 0", platformFake.metricsCalls)
-	}
-	if len(enq.delayed) != 0 {
-		t.Fatalf("delayed jobs = %+v, want none", enq.delayed)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, enqueuer := setupSeednoteTrackingServiceTest(t)
+			userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
+			err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: tt.noteID, NoteURL: tt.noteURL})
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected identity error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tracking.NoteID != tt.wantID || tracking.NoteURL != tt.wantURL || tracking.Status != tt.wantStatus {
+				t.Fatalf("tracking = %#v", tracking)
+			}
+			calls := len(enqueuer.now) + len(enqueuer.delayed)
+			if (calls > 0) != tt.wantEnqueue {
+				t.Fatalf("enqueue calls = %d", calls)
+			}
+			platformFake := svc.platform.(*fakeSeednotePlatform)
+			if platformFake.profileCalls != 0 {
+				t.Fatalf("profile calls = %d, want 0", platformFake.profileCalls)
+			}
+			if (platformFake.metricsCalls > 0) != tt.wantMetrics {
+				t.Fatalf("metrics calls = %d", platformFake.metricsCalls)
+			}
+			if tt.wantStatus == model.SeednoteTrackingStatusUnresolved && (tracking.NextRunAt != nil || tracking.LastError == "") {
+				t.Fatalf("unresolved tracking = %#v", tracking)
+			}
+		})
 	}
 }
 
@@ -339,7 +172,7 @@ func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *t
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, enq, &logger)
 	now := time.Now()
 	lastRun := now
 	nextRun := now.Add(time.Hour)
@@ -396,7 +229,7 @@ func TestSeednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLif
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, enq, &logger)
 	now := time.Now()
 	yesterday := now.Add(-24 * time.Hour)
 	tracking := &model.SeednotePostTracking{
@@ -464,7 +297,7 @@ func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueue
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
-	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, enq, &logger)
 	now := time.Now()
 	startedAt := now.Add(-24 * time.Hour)
 	tracking := &model.SeednotePostTracking{
@@ -560,7 +393,7 @@ func TestSeednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.
 		t.Fatalf("create snapshot: %v", err)
 	}
 
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
+	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{}); err != nil {
 		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
 	}
 	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
@@ -588,7 +421,7 @@ func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignPro
 		t.Fatalf("update project: %v", err)
 	}
 
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err == nil {
+	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{}); err == nil {
 		t.Fatal("expected project ownership error")
 	}
 	if _, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {

@@ -1,9 +1,49 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestClaudeEnvironmentKeysToUnsetCoversPinnedSDKCredentialRoutingAndModelInputs(t *testing.T) {
+	got := ClaudeEnvironmentKeysToUnset()
+	for _, key := range []string{
+		"CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+		"CLAUDE_CODE_OAUTH_TOKEN",
+		"CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+		"CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+		"CLAUDE_CODE_HOST_CREDS_FILE",
+		"CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+		"CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+		"CLAUDE_CODE_SKIP_VERTEX_AUTH",
+		"CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+		"CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+		"CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
+		"CLAUDE_CODE_SKIP_MANTLE_AUTH",
+		"ANTHROPIC_PROFILE",
+		"ANTHROPIC_IDENTITY_TOKEN",
+		"ANTHROPIC_IDENTITY_TOKEN_FILE",
+		"ANTHROPIC_AWS_API_KEY",
+		"ANTHROPIC_FOUNDRY_API_KEY",
+		"ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+		"AWS_BEARER_TOKEN_BEDROCK",
+		"AWS_ACCESS_KEY_ID",
+		"AWS_SECRET_ACCESS_KEY",
+		"AWS_SESSION_TOKEN",
+		"AWS_SHARED_CREDENTIALS_FILE",
+		"AWS_CONTAINER_AUTHORIZATION_TOKEN",
+		"GOOGLE_APPLICATION_CREDENTIALS",
+		"GOOGLE_CLOUD_QUOTA_PROJECT",
+		"GCE_METADATA_HOST",
+		"ANTHROPIC_SMALL_FAST_MODEL",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+	} {
+		if !slices.Contains(got, key) {
+			t.Errorf("ClaudeEnvironmentKeysToUnset() does not scrub SDK 0.3.220 key %q", key)
+		}
+	}
+}
 
 func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContractWithoutRewritingValues(t *testing.T) {
 	source := map[string]string{

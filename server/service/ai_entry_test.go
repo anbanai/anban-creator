@@ -12,14 +12,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeAIEntryLLM struct {
-	responses []string
-	calls     []struct {
+	responses    []string
+	usage        srvconfig.TokenUsage
+	missingUsage bool
+	calls        []struct {
 		system string
 		user   string
 	}
@@ -64,21 +67,39 @@ func (r *flakyAIEntryAssetRepository) FindOwnedByID(ctx context.Context, id, use
 	return r.secondAsset, nil
 }
 
-func (f *fakeAIEntryLLM) Complete(_ context.Context, systemPrompt, userPrompt string) (string, error) {
+func (f *fakeAIEntryLLM) CompleteResult(_ context.Context, systemPrompt, userPrompt string) (*LLMResult, error) {
 	f.calls = append(f.calls, struct {
 		system string
 		user   string
 	}{system: systemPrompt, user: userPrompt})
-	if len(f.responses) == 0 {
-		return `{}`, nil
+	usage := f.usage
+	if !f.missingUsage && usage.TotalTokens == 0 && usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		usage = srvconfig.TokenUsage{InputTokens: 10, OutputTokens: 4, TotalTokens: 14}
 	}
-	out := f.responses[0]
+	text := `{}`
+	if len(f.responses) == 0 {
+		return &LLMResult{Text: text, Model: "kimi-k2.7-code", Usage: usage}, nil
+	}
+	text = f.responses[0]
 	f.responses = f.responses[1:]
-	return out, nil
+	return &LLMResult{Text: text, Model: "kimi-k2.7-code", Usage: usage}, nil
 }
 
-func (f *fakeAIEntryLLM) CompleteWithImage(context.Context, string, string, string) (string, error) {
-	return "", nil
+type fakeProviderTokenCostRecorder struct {
+	reconciled   []RecordProviderTokenCostRequest
+	unreconciled []RecordProviderTokenUnreconciledRequest
+}
+
+func (f *fakeProviderTokenCostRecorder) CatalogID() string { return "catalog" }
+
+func (f *fakeProviderTokenCostRecorder) RecordProviderTokenUsage(_ context.Context, req RecordProviderTokenCostRequest) (*model.BillingProviderCostEvent, error) {
+	f.reconciled = append(f.reconciled, req)
+	return &model.BillingProviderCostEvent{}, nil
+}
+
+func (f *fakeProviderTokenCostRecorder) RecordProviderTokenUnreconciled(_ context.Context, req RecordProviderTokenUnreconciledRequest) (*model.BillingProviderCostEvent, error) {
+	f.unreconciled = append(f.unreconciled, req)
+	return &model.BillingProviderCostEvent{}, nil
 }
 
 func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
@@ -90,7 +111,7 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 		`{"prompt":"写一篇新品发布公众号文章","notes":"优先参考第一张图"}`,
 	}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -158,7 +179,7 @@ func TestAIEntryServiceSubmitPropagatesProfileAndSKUErrorsFromTaskCreation(t *te
 				repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
 				logger := zerolog.New(io.Discard)
 				taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
-				entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, &logger)
+				entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
 
 				result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
 					UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
@@ -180,7 +201,7 @@ func TestAIEntryServiceSubmitKeepsUnrelatedTaskCreationFailureAsStatusError(t *t
 	repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
 	logger := zerolog.New(io.Discard)
 	taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
-	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
@@ -229,7 +250,7 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			taskSvc.SetReferenceAssetService(referenceSvc)
 			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}
 			logger := zerolog.New(io.Discard)
-			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
@@ -278,7 +299,7 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, nil, AIEntryModelConfig{}, &logger)
 	entrySvc.SetReferenceAssetService(referenceSvc)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
@@ -319,7 +340,7 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 	referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 	taskSvc.SetReferenceAssetService(referenceSvc)
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write seednote"}`}}, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write seednote"}`}}, nil, AIEntryModelConfig{}, &logger)
 	entrySvc.SetReferenceAssetService(referenceSvc)
 	attachment := model.EntryAttachment{Type: "image", URL: "/api/v1/files/product.png", FileName: "product.png", ContentType: "image/png", Instruction: "keep logo"}
 
@@ -374,7 +395,7 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repo, &logger))
 			referenceSvc := NewReferenceAssetService(repo, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
-			entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}, &logger)
+			entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write content"})
@@ -442,7 +463,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			taskSvc.SetTopicPoolService(NewTopicPoolService(repoWithTopics, &logger))
 			referenceSvc := NewReferenceAssetService(repoWithTopics, store, time.Now)
 			taskSvc.SetReferenceAssetService(referenceSvc)
-			entrySvc := NewAIEntryService(repoWithTopics, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, &logger)
+			entrySvc := NewAIEntryService(repoWithTopics, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
@@ -475,7 +496,7 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 		`{"prompt":"写一篇新品发布文章","image_ratio":"2:1","image_model_key":"custom"}`,
 	}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -510,7 +531,7 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 		`{"prompt":"做一套保温杯电商主图","selling_points":"316 不锈钢，长效保温"}`,
 	}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -544,7 +565,7 @@ func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T)
 	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
 	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"制作保温杯电商主图","selected_modules":{"main_images":1}}`}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 	key := "uploads/pending/" + userID + "/image-upload/product.png"
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
@@ -583,7 +604,7 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 			`{"prompt":"做一套保温杯主图","selected_modules":{"bogus":9,"main_images":0}}`,
 		}}
 		logger := zerolog.New(io.Discard)
-		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+		entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 			UserID:    userID,
@@ -623,7 +644,7 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 			`{"prompt":"做一套保温杯商详","selected_modules":{"detail_page":99,"share_image":2}}`,
 		}}
 		logger := zerolog.New(io.Discard)
-		entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+		entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 			UserID:    userID,
@@ -655,7 +676,7 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 	})
 }
 
-func TestAIEntryServiceSubmitRetriesJSONRepairOnce(t *testing.T) {
+func TestAIEntryRepairsInvalidJSONWithSameServerInternalClient(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -665,7 +686,7 @@ func TestAIEntryServiceSubmitRetriesJSONRepairOnce(t *testing.T) {
 		`{"prompt":"写一篇可露营咖啡壶种草笔记"}`,
 	}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -687,13 +708,13 @@ func TestAIEntryServiceSubmitRetriesJSONRepairOnce(t *testing.T) {
 	}
 }
 
-func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
+func TestAIEntryRequiresServerInternalClientBeforeTaskCreation(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, nil, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, nil, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -704,8 +725,90 @@ func TestAIEntryServiceSubmitRequiresLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusNeedsConfiguration || !strings.Contains(result.Message, "模型") || result.ActionURL == "" {
-		t.Fatalf("result = %#v, want model configuration action", result)
+	if result.Status != AIEntryStatusNeedsConfiguration || result.ActionURL != "" || !strings.Contains(result.Message, "管理员") {
+		t.Fatalf("result = %#v, want an operator-owned server internal configuration error", result)
+	}
+	count, countErr := repo.Tasks().CountByUserID(ctx, userID, "", "")
+	if countErr != nil || count != 0 {
+		t.Fatalf("task count = %d, err=%v", count, countErr)
+	}
+}
+
+func TestAIEntryRecordsEverySuccessfulServerInternalResponse(t *testing.T) {
+	llm := &fakeAIEntryLLM{responses: []string{"not-json", `{"prompt":"整理成文章"}`}}
+	costs := &fakeProviderTokenCostRecorder{}
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	logger := zerolog.New(io.Discard)
+	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs.reconciled) != 2 || len(costs.unreconciled) != 0 {
+		t.Fatalf("costs=%#v/%#v", costs.reconciled, costs.unreconciled)
+	}
+	for _, req := range costs.reconciled {
+		if req.TaskID != "" || req.Provider != "moonshot" || req.Model != "kimi-k2.7-code" || req.Usage.Input != 10 {
+			t.Fatalf("cost request = %#v", req)
+		}
+		if !strings.HasPrefix(req.ProviderRequestID, "internal:server_internal:") || req.IdempotencyKey != req.ProviderRequestID || req.CatalogID != "catalog" {
+			t.Fatalf("cost identity = %#v", req)
+		}
+	}
+	if costs.reconciled[0].ProviderRequestID == costs.reconciled[1].ProviderRequestID {
+		t.Fatalf("provider request IDs must be unique: %#v", costs.reconciled)
+	}
+}
+
+func TestAIEntryRecordsMissingUsageAsUnreconciled(t *testing.T) {
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"整理成文章"}`}, missingUsage: true}
+	costs := &fakeProviderTokenCostRecorder{}
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	logger := zerolog.New(io.Discard)
+	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs.reconciled) != 0 || len(costs.unreconciled) != 1 {
+		t.Fatalf("costs=%#v/%#v", costs.reconciled, costs.unreconciled)
+	}
+	req := costs.unreconciled[0]
+	if req.TaskID != "" || req.Provider != "moonshot" || req.Model != "kimi-k2.7-code" || req.ReasonCode != model.BillingExecutionCostReasonMissingProviderUsage {
+		t.Fatalf("unreconciled request = %#v", req)
+	}
+	if !strings.HasPrefix(req.ProviderRequestID, "internal:server_internal:") {
+		t.Fatalf("provider request ID = %q", req.ProviderRequestID)
+	}
+}
+
+func TestAIEntryRecordsTotalOnlyUsageAsUnreconciled(t *testing.T) {
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"整理成文章"}`}, usage: srvconfig.TokenUsage{TotalTokens: 42}}
+	costs := &fakeProviderTokenCostRecorder{}
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	logger := zerolog.New(io.Discard)
+	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs.reconciled) != 0 || len(costs.unreconciled) != 1 {
+		t.Fatalf("costs=%#v/%#v, want one unreconciled event", costs.reconciled, costs.unreconciled)
 	}
 }
 
@@ -716,7 +819,7 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"生成新品种草图文"}`}}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -762,7 +865,7 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			projectID := createTestProject(t, repo, userID, platform)
 			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"生成内容"}`}}
 			logger := zerolog.New(io.Discard)
-			entrySvc := NewAIEntryService(repo, taskSvc, llm, &logger)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 				UserID:    userID,

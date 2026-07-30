@@ -87,6 +87,27 @@ func TestProviderCostEventSupportsProviderRequestIdentityWithoutExecution(t *tes
 	}
 }
 
+func TestProviderCostEventSupportsUnreconciledTokenEvidenceWithoutTask(t *testing.T) {
+	baseIdentity, err := ProviderCostBaseIdentityKey(BillingProviderCostIdentityProviderRequest, "", "moonshot", "kimi-k2.7-code", "request-1")
+	if err != nil {
+		t.Fatalf("ProviderCostBaseIdentityKey: %v", err)
+	}
+	event := BillingProviderCostEvent{
+		ID: "cost-request-1", EventKind: BillingProviderCostEventKindBase,
+		IdentityKind: BillingProviderCostIdentityProviderRequest, ProviderRequestID: "request-1",
+		Provider: "moonshot", Model: "kimi-k2.7-code", CatalogID: "cost-v1",
+		IdempotencyScope: "provider_cost_base/moonshot", IdempotencyKey: "request-1",
+		BaseIdentityKey:    &baseIdentity,
+		RequestFingerprint: "c63d4dd2bc0bfc97cc4f58cf109f0f9cbde560e75fd3a4fdda4a6086863717ee",
+		Source:             BillingProviderCostSourceProviderResponse, Status: BillingProviderCostStatusUnreconciled,
+		UsageEvidence:       []byte(`{"kind":"token_unreconciled","reason_code":"missing_provider_usage"}`),
+		CalculationSnapshot: []byte(`{"version":1,"reason_code":"missing_provider_usage"}`),
+	}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("valid unreconciled token event without task: %v", err)
+	}
+}
+
 func TestProviderCostBaseIdentityHashDoesNotHaveDelimiterCollisions(t *testing.T) {
 	first, err := ProviderCostBaseIdentityKey(BillingProviderCostIdentityExecutionModel, "a/b", "c", "d", "")
 	if err != nil {

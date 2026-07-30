@@ -130,12 +130,12 @@ func TestValidateClaudeProfileEnvsStrictTypedValues(t *testing.T) {
 		{name: "effort invalid", key: "CLAUDE_CODE_EFFORT_LEVEL", values: []string{"", "LOW", "maximum", " high"}, wantErr: true},
 		{name: "booleans valid", key: "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", values: []string{"true", "false"}},
 		{name: "booleans invalid", key: "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", values: []string{"TRUE", "False", "1", "yes", ""}, wantErr: true},
-		{name: "positive integer valid", key: "CLAUDE_CODE_MAX_CONTEXT_TOKENS", values: []string{"1", "200000", "0001"}},
-		{name: "positive integer invalid", key: "CLAUDE_CODE_MAX_CONTEXT_TOKENS", values: []string{"0", "-1", "+1", "1.0", " 1", "", "9223372036854775808"}, wantErr: true},
+		{name: "positive integer valid", key: "CLAUDE_CODE_MAX_CONTEXT_TOKENS", values: []string{"1", "200000"}},
+		{name: "positive integer invalid", key: "CLAUDE_CODE_MAX_CONTEXT_TOKENS", values: []string{"0", "00", "0001", "-1", "+1", "1.0", " 1", "", "9223372036854775808"}, wantErr: true},
 		{name: "thinking integer valid", key: "MAX_THINKING_TOKENS", values: []string{"0", "1", "32000"}},
-		{name: "thinking integer invalid", key: "MAX_THINKING_TOKENS", values: []string{"-1", "+1", "1.0", " 1", "", "9223372036854775808"}, wantErr: true},
+		{name: "thinking integer invalid", key: "MAX_THINKING_TOKENS", values: []string{"00", "0001", "-1", "+1", "1.0", " 1", "", "9223372036854775808"}, wantErr: true},
 		{name: "percentage valid", key: "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", values: []string{"1", "50", "100"}},
-		{name: "percentage invalid", key: "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", values: []string{"0", "101", "-1", "+1", "1.0", ""}, wantErr: true},
+		{name: "percentage invalid", key: "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", values: []string{"0", "01", "101", "-1", "+1", "1.0", ""}, wantErr: true},
 	}
 	booleanKeys := []string{
 		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",

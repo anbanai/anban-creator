@@ -222,21 +222,28 @@ func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
 
 // TaskTypeToAgent maps server task types to Claude Code agent names.
 func TaskTypeToAgent(taskType string) string {
+	agentName, _ := taskTypeToAgentRoute(taskType)
+	return agentName
+}
+
+func taskTypeToAgentRoute(taskType string) (string, bool) {
 	switch taskType {
 	case model.ScopeArticle:
-		return "article"
+		return "article", true
 	case model.ScopeSeednote:
-		return "seednote"
+		return "seednote", true
 	case model.ScopeMoments:
-		return "moments"
+		return "moments", true
 	case model.ScopeEcommerce:
-		return "ecommerce"
+		return "ecommerce", true
 	case model.ScopeMontage:
-		return "montage"
+		return "montage", true
 	case model.TaskTypeLiveSlicer:
-		return model.TaskTypeLiveSlicer
+		return model.TaskTypeLiveSlicer, true
+	case model.TaskTypeViralAnalysis:
+		return model.PlatformSeednote, true
 	default:
-		return "seednote"
+		return model.PlatformSeednote, false
 	}
 }
 

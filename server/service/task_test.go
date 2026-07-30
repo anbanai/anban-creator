@@ -121,6 +121,31 @@ func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateManualViralAnalysisRequiresSeednoteProject(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	seednoteProjectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	params := CreateManualParams{
+		UserID: userID, ProjectID: seednoteProjectID, RequestedTaskType: model.TaskTypeViralAnalysis,
+		ExecutionProfile: "effective", Prompt: "https://example.com/note/1", Quantity: 1,
+	}
+	tasks, err := svc.CreateManual(ctx, params)
+	if err != nil {
+		t.Fatalf("CreateManual viral analysis: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Type != model.TaskTypeViralAnalysis {
+		t.Fatalf("tasks = %#v, want one viral_analysis task", tasks)
+	}
+
+	articleProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	params.ProjectID = articleProjectID
+	_, err = svc.CreateManual(ctx, params)
+	if !errors.Is(err, ErrViralAnalysisRequiresSeednoteProject) {
+		t.Fatalf("article viral analysis error = %v, want ErrViralAnalysisRequiresSeednoteProject", err)
+	}
+}
+
 func injectTestAgentProfiles(t *testing.T, svc *TaskService) {
 	t.Helper()
 	registry, err := NewAgentProfileRegistry(testAgentProfiles())
@@ -414,17 +439,19 @@ func (s *blockingTaskDeleteStorage) Delete(ctx context.Context, key string) erro
 
 type fakePublishedTrackingService struct {
 	calls []struct {
-		userID string
-		taskID string
+		userID   string
+		taskID   string
+		identity SeednotePublicationIdentity
 	}
 	err error
 }
 
-func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
 	f.calls = append(f.calls, struct {
-		userID string
-		taskID string
-	}{userID: userID, taskID: taskID})
+		userID   string
+		taskID   string
+		identity SeednotePublicationIdentity
+	}{userID: userID, taskID: taskID, identity: identity})
 	return f.err
 }
 
@@ -2607,7 +2634,8 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+	identity := SeednotePublicationIdentity{NoteID: "note-1"}
+	if err := svc.SetPublished(ctx, userID, task.ID, true, identity); err != nil {
 		t.Fatalf("SetPublished: %v", err)
 	}
 
@@ -2616,6 +2644,9 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 	}
 	if trackingSvc.calls[0].userID != userID || trackingSvc.calls[0].taskID != task.ID {
 		t.Fatalf("tracking call = %+v", trackingSvc.calls[0])
+	}
+	if trackingSvc.calls[0].identity.NoteID != "note-1" || trackingSvc.calls[0].identity.NoteURL != "https://www.xiaohongshu.com/explore/note-1" {
+		t.Fatalf("tracking identity = %+v", trackingSvc.calls[0].identity)
 	}
 }
 
@@ -2638,10 +2669,10 @@ func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testi
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, true, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
 		t.Fatalf("SetPublished article: %v", err)
 	}
-	if err := svc.SetPublished(ctx, userID, task.ID, false); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, false, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
 		t.Fatalf("SetPublished false: %v", err)
 	}
 	if len(trackingSvc.calls) != 0 {

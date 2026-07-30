@@ -125,7 +125,9 @@ describe("validateBootstrapResponse", () => {
       ["CLAUDE_CODE_EFFORT_LEVEL", "extreme"],
       ["CLAUDE_CODE_DISABLE_THINKING", "yes"],
       ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "0"],
+      ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "0001"],
       ["MAX_THINKING_TOKENS", "-1"],
+      ["MAX_THINKING_TOKENS", "00"],
       ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "101"],
     ] as const) {
       const response = validResponse();

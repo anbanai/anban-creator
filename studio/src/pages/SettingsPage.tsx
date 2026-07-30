@@ -105,7 +105,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="接入就绪中心" description="按执行、模型、发布和账号安全检查 Studio 是否可以顺畅创作。" />
+      <PageHeader title="接入就绪中心" description="按执行、密钥、发布和账号安全检查 Studio 是否可以顺畅创作。" />
 
       <Card>
         <CardContent>
@@ -170,7 +170,7 @@ export default function SettingsPage() {
       <SettingsGroupTitle
         id="model-key-settings"
         title="模型与密钥"
-        description="模型路由和插件访问密钥。"
+        description="插件访问密钥与自定义图片生成模型覆盖。"
       />
       <ModelConfigSection />
 

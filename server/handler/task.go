@@ -140,6 +140,7 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 
 type createTaskRequest struct {
 	ProjectID          string                           `json:"project_id"`
+	Type               string                           `json:"type"`
 	ExecutionProfile   string                           `json:"execution_profile"`
 	Prompt             string                           `json:"prompt"`
 	Quantity           int                              `json:"quantity"`
@@ -472,6 +473,17 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err != nil {
 		return nil, respondTaskCreationProjectError(c, h.logger, err)
 	}
+	requestedTaskType := strings.TrimSpace(req.Type)
+	switch {
+	case requestedTaskType == "":
+		requestedTaskType = project.Platform
+	case requestedTaskType == model.TaskTypeViralAnalysis:
+		if project.Platform != model.PlatformSeednote {
+			return nil, Error(c, fiber.StatusBadRequest, "viral_analysis requires a Seednote project")
+		}
+	case requestedTaskType != project.Platform:
+		return nil, Error(c, fiber.StatusBadRequest, "type must match project platform")
+	}
 	projectSnapshot := model.SnapshotProject(project)
 
 	var referenceAssetID string
@@ -597,6 +609,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		params: service.CreateManualParams{
 			UserID:                   userID,
 			ProjectID:                req.ProjectID,
+			RequestedTaskType:        requestedTaskType,
 			ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 			Prompt:                   prompt,
 			Quantity:                 quantity,
@@ -628,6 +641,9 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 		return response
 	}
 	if errors.Is(err, service.ErrManagedProfileLocalExecutionUnsupported) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if isReferenceAssetError(err) {
@@ -1442,7 +1458,9 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		Published bool `json:"published"`
+		Published bool   `json:"published"`
+		NoteID    string `json:"note_id,omitempty"`
+		NoteURL   string `json:"note_url,omitempty"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -1455,7 +1473,10 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
-	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
+	if err := h.service.SetPublished(c.Context(), userID, id, body.Published, service.SeednotePublicationIdentity{NoteID: body.NoteID, NoteURL: body.NoteURL}); err != nil {
+		if errors.Is(err, service.ErrSeednotePublicationIDInvalid) || errors.Is(err, service.ErrSeednotePublicationURLInvalid) || errors.Is(err, service.ErrSeednotePublicationIdentityMismatch) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Msg("mark published failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
 	}

@@ -437,7 +437,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ViralAnalysisHandler != nil {
 		viralAnalyses := apiV1.Group("/viral-analyses")
-		viralAnalyses.Post("/", svc.ViralAnalysisHandler.Create)
 		viralAnalyses.Get("/", svc.ViralAnalysisHandler.List)
 		viralAnalyses.Get("/:id", svc.ViralAnalysisHandler.GetByID)
 	}

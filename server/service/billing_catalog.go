@@ -340,7 +340,7 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 	if err != nil {
 		return nil, err
 	}
-	if strings.HasPrefix(req.Operation, "task.") && req.ExecutionProfile == "" && req.Operation != "task.viral_analysis" {
+	if strings.HasPrefix(req.Operation, "task.") && req.ExecutionProfile == "" {
 		return nil, fmt.Errorf("%w: agent task quotes require an execution profile", ErrBillingInvalid)
 	}
 	if existing, err := s.repo.Billing().FindQuoteByKey(ctx, req.IdempotencyScope, req.IdempotencyKey); err == nil {
@@ -504,6 +504,8 @@ func agentTaskOperation(taskType string) (string, bool) {
 	switch taskType {
 	case "article", "seednote", "moments", "ecommerce", "montage":
 		return "task." + taskType, true
+	case model.TaskTypeViralAnalysis:
+		return "task.viral_analysis", true
 	default:
 		return "", false
 	}
