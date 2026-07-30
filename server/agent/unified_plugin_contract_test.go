@@ -62,8 +62,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.0.7" {
-		t.Fatalf("native manifest version = %q, want 4.0.7 for managed image materialization", claudeManifest.Version)
+	if claudeManifest.Version != "4.0.8" {
+		t.Fatalf("native manifest version = %q, want 4.0.8 for managed semantic-analysis boundaries", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
