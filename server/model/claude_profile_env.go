@@ -173,7 +173,7 @@ func validateClaudeBaseURL(value string) error {
 	return nil
 }
 
-func parseClaudeDecimal(value string) (uint64, error) {
+func parseClaudeDecimal(value string) (int, error) {
 	if value == "" {
 		return 0, fmt.Errorf("empty decimal integer")
 	}
@@ -182,7 +182,7 @@ func parseClaudeDecimal(value string) (uint64, error) {
 			return 0, fmt.Errorf("invalid decimal integer")
 		}
 	}
-	return strconv.ParseUint(value, 10, 64)
+	return strconv.Atoi(value)
 }
 
 func RedactClaudeProfileEnvs(envs map[string]string) map[string]string {
