@@ -1031,6 +1031,20 @@ func TestWithEnvIntegration(t *testing.T) {
 	assertOptionsModel(t, options, "claude-3-5-sonnet-20241022")
 }
 
+func TestWithUnsetEnvOptions(t *testing.T) {
+	options := NewOptions(WithUnsetEnv("ANTHROPIC_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "ANTHROPIC_MODEL", ""))
+
+	expected := []string{"ANTHROPIC_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"}
+	if len(options.UnsetEnv) != len(expected) {
+		t.Fatalf("UnsetEnv = %#v, want %#v", options.UnsetEnv, expected)
+	}
+	for i := range expected {
+		if options.UnsetEnv[i] != expected[i] {
+			t.Fatalf("UnsetEnv = %#v, want %#v", options.UnsetEnv, expected)
+		}
+	}
+}
+
 func assertEnvVars(t *testing.T, actual, expected map[string]string) {
 	t.Helper()
 	if len(actual) != len(expected) {

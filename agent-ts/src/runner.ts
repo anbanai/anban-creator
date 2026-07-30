@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 
 import { query, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import type { BootstrapResponse } from "./bootstrap.js";
+import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 
@@ -70,9 +70,10 @@ export function buildExecutionEnvironment(
   serverURL: string,
   token: string,
 ): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
+  for (const key of CLAUDE_PROFILE_ENV_KEYS) delete environment[key];
   return {
-    ...processEnvironment,
-    ...(data.env ?? {}),
+    ...environment,
     ANBAN_API_KEY: token,
     ANBAN_API_URL: serverURL,
     ANBAN_DEFAULT_PROJECT: data.project_id,

@@ -244,6 +244,10 @@ type Options struct {
 	// These are merged with the system environment variables.
 	ExtraEnv map[string]string `json:"extra_env,omitempty"`
 
+	// UnsetEnv specifies inherited environment variables to remove before
+	// ExtraEnv is applied.
+	UnsetEnv []string `json:"unset_env,omitempty"`
+
 	// OutputFormat specifies structured output format with JSON schema.
 	// When set, Claude's response will conform to the provided schema.
 	OutputFormat *OutputFormat `json:"output_format,omitempty"`
@@ -467,6 +471,7 @@ func NewOptions() *Options {
 		Plugins:           []SdkPluginConfig{},
 		ExtraArgs:         make(map[string]*string),
 		ExtraEnv:          make(map[string]string),
+		UnsetEnv:          []string{},
 		SettingSources:    []SettingSource{},
 	}
 }

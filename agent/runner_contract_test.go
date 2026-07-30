@@ -238,6 +238,30 @@ func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecution
 	}
 }
 
+func TestRunnerOptionsRemoveInheritedClaudeEnvironmentBeforeFrozenInjection(t *testing.T) {
+	runner := NewRunner(&Config{
+		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
+		RuntimeEnv: map[string]string{"ANTHROPIC_MODEL": "frozen-model"},
+	}, nil, nil)
+	opts, err := runner.buildSDKOptions(context.Background())
+	if err != nil {
+		t.Fatalf("buildSDKOptions: %v", err)
+	}
+	got := claudecode.NewOptions(opts...)
+	want := serveragent.ClaudeRuntimeEnvKeys()
+	if len(got.UnsetEnv) != len(want) {
+		t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
+	}
+	for i := range want {
+		if got.UnsetEnv[i] != want[i] {
+			t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
+		}
+	}
+	if got.ExtraEnv["ANTHROPIC_MODEL"] != "frozen-model" {
+		t.Fatalf("frozen Claude environment = %#v", got.ExtraEnv)
+	}
+}
+
 func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing.T) {
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
@@ -264,11 +288,12 @@ func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
 		ServerURL: "https://server.example.com", APIKey: "execution-jwt", ProjectID: "project-1",
 		RuntimeEnv: map[string]string{"ANTHROPIC_AUTH_TOKEN": "runtime-token"},
 		Env: map[string]string{
-			"NEW_PROVIDER_TOKEN":    "future-secret",
-			"ANBAN_API_KEY":         "montage-override",
-			"ANBAN_API_URL":         "https://montage.invalid",
-			"ANBAN_DEFAULT_PROJECT": "montage-project",
-			"ANTHROPIC_AUTH_TOKEN":  "montage-token",
+			"NEW_PROVIDER_TOKEN":           "future-secret",
+			"ANBAN_API_KEY":                "montage-override",
+			"ANBAN_API_URL":                "https://montage.invalid",
+			"ANBAN_DEFAULT_PROJECT":        "montage-project",
+			"ANTHROPIC_AUTH_TOKEN":         "montage-token",
+			"CLAUDE_CODE_DISABLE_THINKING": "true",
 		},
 	}, nil, nil)
 	opts, err := runner.buildSDKOptions(context.Background())
@@ -284,6 +309,9 @@ func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
 	}
 	if got["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" {
 		t.Fatalf("Montage env overrode managed Claude runtime: %#v", got)
+	}
+	if _, exists := got["CLAUDE_CODE_DISABLE_THINKING"]; exists {
+		t.Fatalf("Montage env injected an unfrozen Claude control: %#v", got)
 	}
 }
 

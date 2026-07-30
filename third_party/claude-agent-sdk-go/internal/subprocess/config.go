@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/cli"
 	"github.com/severity1/claude-agent-sdk-go/internal/control"
@@ -250,6 +251,20 @@ func (t *Transport) hasSdkMcpServers() bool {
 // buildEnvironment constructs the environment variables for the subprocess.
 func (t *Transport) buildEnvironment() []string {
 	env := os.Environ()
+	if t.options != nil && len(t.options.UnsetEnv) > 0 {
+		unset := make(map[string]struct{}, len(t.options.UnsetEnv))
+		for _, key := range t.options.UnsetEnv {
+			unset[key] = struct{}{}
+		}
+		filtered := make([]string, 0, len(env))
+		for _, entry := range env {
+			key, _, _ := strings.Cut(entry, "=")
+			if _, excluded := unset[key]; !excluded {
+				filtered = append(filtered, entry)
+			}
+		}
+		env = filtered
+	}
 
 	// Set entrypoint to identify SDK to CLI
 	env = append(env, "CLAUDE_CODE_ENTRYPOINT="+t.entrypoint)

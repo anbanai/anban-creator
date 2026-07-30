@@ -408,6 +408,27 @@ func WithEnvVar(key, value string) Option {
 	}
 }
 
+// WithUnsetEnv removes inherited environment variables from the subprocess.
+// Variables explicitly supplied through WithEnv or WithEnvVar are still set.
+func WithUnsetEnv(keys ...string) Option {
+	return func(o *Options) {
+		seen := make(map[string]struct{}, len(o.UnsetEnv)+len(keys))
+		for _, key := range o.UnsetEnv {
+			seen[key] = struct{}{}
+		}
+		for _, key := range keys {
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			o.UnsetEnv = append(o.UnsetEnv, key)
+		}
+	}
+}
+
 // WithBetas sets the SDK beta features to enable.
 // See https://docs.anthropic.com/en/api/beta-headers
 func WithBetas(betas ...SdkBeta) Option {

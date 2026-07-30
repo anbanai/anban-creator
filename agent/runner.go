@@ -243,6 +243,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)),
+		claudecode.WithUnsetEnv(serveragent.ClaudeRuntimeEnvKeys()...),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
 		// workspace (e.g., written by the desktop shell in the future) is picked up
@@ -255,7 +256,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		}),
 	}
 	if r.cfg.TaskType == "montage" && len(r.cfg.Env) > 0 {
-		sdkOpts = append(sdkOpts, claudecode.WithEnv(r.cfg.Env))
+		sdkOpts = append(sdkOpts, claudecode.WithEnv(withoutClaudeRuntimeEnv(r.cfg.Env)))
 	}
 	sdkOpts = append(sdkOpts,
 		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
@@ -304,4 +305,18 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		sdkOpts = append(sdkOpts, claudecode.WithSettings(settings))
 	}
 	return sdkOpts, nil
+}
+
+func withoutClaudeRuntimeEnv(configured map[string]string) map[string]string {
+	excluded := make(map[string]struct{}, len(serveragent.ClaudeRuntimeEnvKeys()))
+	for _, key := range serveragent.ClaudeRuntimeEnvKeys() {
+		excluded[key] = struct{}{}
+	}
+	result := make(map[string]string, len(configured))
+	for key, value := range configured {
+		if _, isClaudeRuntimeEnv := excluded[key]; !isClaudeRuntimeEnv {
+			result[key] = value
+		}
+	}
+	return result
 }

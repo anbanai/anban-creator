@@ -161,6 +161,23 @@ func TestSubprocessEnvironmentVariables(t *testing.T) {
 	}
 }
 
+func TestBuildEnvironmentRemovesOnlyInheritedUnsetVariables(t *testing.T) {
+	t.Setenv("ANBAN_SDK_INHERITED_SECRET", "host-secret")
+	t.Setenv("ANBAN_SDK_EXPLICIT_SECRET", "host-secret")
+	transport := New("echo", &shared.Options{
+		UnsetEnv: []string{"ANBAN_SDK_INHERITED_SECRET", "ANBAN_SDK_EXPLICIT_SECRET"},
+		ExtraEnv: map[string]string{"ANBAN_SDK_EXPLICIT_SECRET": "frozen-secret"},
+	}, true, "sdk-go")
+	env := transport.buildEnvironment()
+
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "ANBAN_SDK_INHERITED_SECRET=") {
+			t.Fatalf("inherited unset variable leaked into subprocess environment: %q", entry)
+		}
+	}
+	assertEnvContains(t, env, "ANBAN_SDK_EXPLICIT_SECRET=frozen-secret")
+}
+
 // TestTransportWorkingDirectory tests that working directory is set via exec.Cmd.Dir
 func TestTransportWorkingDirectory(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
