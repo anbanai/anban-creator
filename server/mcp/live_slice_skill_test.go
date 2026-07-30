@@ -81,6 +81,36 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 	}
 }
 
+func TestLiveSliceSkillOwnsSemanticJSONWithoutGenerativeMCP(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil { t.Fatal(err) }
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	paths := []string{
+		filepath.Join(root, "plugins", "agents", "live-slicer.md"),
+		filepath.Join(root, "plugins", "agents", "live-slicer.toml"),
+		filepath.Join(root, "plugins", "skills", "live-slice", "SKILL.md"),
+	}
+	removed := []string{"recognize_live_subjects", "recognize_live_invalid_sentences", "recognize_live_segments", "complete_live_subject"}
+	required := []string{"output/invalid-sentences.json", "output/segments.json", "output/subjects.json", "output/subject-completions.json", "build_live_clip_plan", "build_live_subject_clip_plan", "analysis.json", "index", "range", "source"}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		for _, old := range removed {
+			if strings.Contains(body, old) {
+				t.Errorf("%s still contains %s", path, old)
+			}
+		}
+		for _, want := range required {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %s", path, want)
+			}
+		}
+	}
+}
+
 func TestLiveSlicerAgentFile(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -111,12 +141,8 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"create_live_analysis_task",
 		"create_live_analysis_task",
 		"query_live_analysis_task",
-		"recognize_live_invalid_sentences",
-		"recognize_live_segments",
 		"build_live_clip_plan",
 		"build_live_clip_manifest",
-		"recognize_live_subjects",
-		"complete_live_subject",
 		"build_live_subject_clip_plan",
 		"ffprobe",
 		"ffmpeg",
@@ -214,8 +240,6 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"build_live_clip_plan",
 		"build_live_clip_manifest",
 		"build_live_subject_clip_plan",
-		"recognize_live_subjects",
-		"complete_live_subject",
 	} {
 		if !strings.Contains(claude, want) {
 			t.Fatalf("claudecode plugin development docs missing %q", want)
