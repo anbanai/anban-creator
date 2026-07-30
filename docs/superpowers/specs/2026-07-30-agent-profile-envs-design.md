@@ -206,6 +206,7 @@ Designer API、图片 SKU 和图片 Provider 不读取 `claude.execution_profile
 MySQL DDL 会隐式提交，因此本次切换不能伪装成一个跨 DDL 和数据回填的大事务。新增：
 
 - `server/migrations/20260730_agent_profile_envs_expand.sql`
+- `server/migrations/20260730_agent_profile_envs_expire_quotes.sql`
 - `server/migrations/20260730_agent_profile_envs_contract.sql`
 - 使用生产 Server 相同 `AgentProfileFingerprint` 实现的一次性 Go backfill 命令
 
@@ -218,7 +219,7 @@ MySQL DDL 会隐式提交，因此本次切换不能伪装成一个跨 DDL 和�
    - `tasks.agent_profile_snapshot` 从 schema v2 转换为 schema v3；从旧 `models` 和 `claude` 生成字符串 `envs`，更新 `profile_id`，删除旧字段和敏感值。
    - 使用应用层规范化函数重新计算 `tasks.agent_profile_fingerprint`，不得使用与 Go 序列化顺序可能不一致的 SQL JSON 哈希。
    - 从任务的 schema v3 快照回填 `task_executions.profile_envs` 和 `profile_fingerprint`，并保持 Provider 与关联任务一致。
-4. **断言与 Contract DDL**：在任务、计划和执行表断言旧 ID、schema v2、空 `profile_envs`、旧 Fingerprint 和快照内 `ANTHROPIC_AUTH_TOKEN` 数量均为零；随后把 `profile_envs` 设为非空，删除 `task_executions.model_matrix` 与 `task_executions.claude_controls`，重建只允许三个新 ID 的约束和索引。
+4. **验证与 Contract DDL**：Go backfill 使用 verify-only 模式逐行重算并核对 Fingerprint；SQL 在任务、计划和执行表断言旧 ID、schema v2、空 `profile_envs` 和快照内 `ANTHROPIC_AUTH_TOKEN` 数量均为零；随后把 `profile_envs` 设为非空，删除 `task_executions.model_matrix` 与 `task_executions.claude_controls`，重建只允许三个新 ID 的约束和索引。
 
 Go backfill 在写入前后都验证快照和 Fingerprint，已是 schema v3 且结果一致的行直接跳过，因此可以从中断处继续。Expand DDL 和 Contract DDL 分别提供独立的前置/后置断言；由于不保留旧应用兼容，Contract DDL 完成后的回滚方式是恢复维护窗口备份，而不是重新启用旧 ID。
 
@@ -230,7 +231,7 @@ Go backfill 在写入前后都验证快照和 Fingerprint，已是 schema v3 且
 2. 暂停新任务创建、计划调度、重试和 Agent 消费。
 3. 确认没有 `starting`、`running` 或待结算执行；未完成任务先排空或明确取消。
 4. 部署包含新配置解析器和迁移代码的 Server 镜像，但保持流量关闭。
-5. 依次执行 Expand DDL、Go backfill、SQL 断言和 Contract DDL；使旧目录所有未消费 Quote 失效。
+5. 依次执行 Expand DDL、Go backfill、verify-only、旧 Quote 失效 SQL、结构断言和 Contract DDL；旧 Quote SQL 只把尚未消费且仍有效的旧目录 Quote 的 `expires_at` 收敛到当前时间，不修改价格、目录或快照。
 6. 发布并导入 `retail-2026-07-30-v7`，挂载只含新 ID 和 `envs` 的生产配置与 Secret，启动 Server 并检查三档能力 API。
 7. 更新并部署 Studio、Miniapp、Go Agent 和 TypeScript Agent 镜像。
 8. 用三个套餐账号分别验证档位权限、Quote、创建、执行、重试、账单明细和累计扣费。
