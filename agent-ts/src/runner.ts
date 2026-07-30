@@ -76,7 +76,7 @@ export function buildExecutionEnvironment(
     ANBAN_API_KEY: token,
     ANBAN_API_URL: serverURL,
     ANBAN_DEFAULT_PROJECT: data.project_id,
-    ...data.execution_profile.runtime_env,
+    ...data.execution_profile.envs,
   };
 }
 

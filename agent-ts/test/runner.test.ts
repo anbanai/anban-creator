@@ -12,14 +12,12 @@ const validBootstrap = () => ({
   prompt: "write",
   artifact_transport: { mode: "stream" },
   execution_profile: {
-    profile_id: "maximum_quality",
+    profile_id: "quality",
     provider: "moonshot",
     protocol: "anthropic",
-    models: { default: "kimi-k3[1m]", opus: "kimi-k3[1m]", fable: "kimi-k3[1m]", sonnet: "kimi-k3[1m]", haiku: "kimi-k3[1m]" },
-    claude: { max_thinking_tokens: 0, enable_tool_search: false },
     display_name: "极致效果",
     profile_fingerprint: "a".repeat(64),
-    runtime_env: {
+    envs: {
       ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic",
       ANTHROPIC_AUTH_TOKEN: "secret",
       ANTHROPIC_MODEL: "kimi-k3[1m]",
@@ -112,7 +110,7 @@ describe("buildExecutionEnvironment", () => {
         },
         project_id: "project-1",
         execution_profile: {
-          runtime_env: {
+          envs: {
             ANTHROPIC_AUTH_TOKEN: "runtime-token",
             ANTHROPIC_BASE_URL: "https://runtime.example.com/anthropic",
             ANTHROPIC_MODEL: "runtime-model",

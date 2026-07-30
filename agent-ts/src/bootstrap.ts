@@ -12,6 +12,8 @@ const MAX_BOOTSTRAP_TURNS = 1000;
 const MAX_BOOTSTRAP_PROMPT_BYTES = 1 << 20;
 const MAX_EXECUTION_TOKEN_BYTES = 16 << 10;
 const MAX_MODEL_USAGE_ALIASES = 128;
+const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
+const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "task_id", "task_type", "project_id", "prompt",
@@ -20,36 +22,12 @@ const BOOTSTRAP_RESPONSE_KEYS = [
 ];
 
 const EXECUTION_PROFILE_KEYS = [
-  "profile_id", "provider", "protocol", "models", "claude", "display_name",
-  "profile_fingerprint", "runtime_env", "model_usage_aliases",
+  "profile_id", "provider", "protocol", "display_name", "profile_fingerprint", "envs", "model_usage_aliases",
 ];
 
-const EXECUTION_PROFILE_IDS = new Set(["cost_effective", "balanced", "maximum_quality"]);
+const EXECUTION_PROFILE_IDS = new Set(["effective", "balanced", "quality"]);
 
-const MODEL_ENV_KEYS: Record<keyof AgentModelMatrix, string> = {
-  default: "ANTHROPIC_MODEL",
-  opus: "ANTHROPIC_DEFAULT_OPUS_MODEL",
-  fable: "ANTHROPIC_DEFAULT_FABLE_MODEL",
-  sonnet: "ANTHROPIC_DEFAULT_SONNET_MODEL",
-  haiku: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-};
-
-const CLAUDE_CONTROL_ENV_KEYS: Record<keyof AgentClaudeControls, string> = {
-  effort_level: "CLAUDE_CODE_EFFORT_LEVEL",
-  always_enable_effort: "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
-  max_context_tokens: "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-  max_output_tokens: "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
-  max_thinking_tokens: "MAX_THINKING_TOKENS",
-  disable_adaptive_thinking: "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
-  disable_thinking: "CLAUDE_CODE_DISABLE_THINKING",
-  auto_compact_window: "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-  autocompact_pct_override: "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-  disable_1m_context: "CLAUDE_CODE_DISABLE_1M_CONTEXT",
-  subagent_model: "CLAUDE_CODE_SUBAGENT_MODEL",
-  enable_tool_search: "ENABLE_TOOL_SEARCH",
-};
-
-const CLAUDE_RUNTIME_ENV_KEYS = new Set([
+export const CLAUDE_PROFILE_ENV_KEYS = new Set([
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -57,8 +35,30 @@ const CLAUDE_RUNTIME_ENV_KEYS = new Set([
   "ANTHROPIC_DEFAULT_FABLE_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-  ...Object.values(CLAUDE_CONTROL_ENV_KEYS),
+  "CLAUDE_CODE_EFFORT_LEVEL",
+  "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+  "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+  "MAX_THINKING_TOKENS",
+  "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
+  "CLAUDE_CODE_DISABLE_THINKING",
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+  "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+  "CLAUDE_CODE_SUBAGENT_MODEL",
+  "ENABLE_TOOL_SEARCH",
 ]);
+
+const REQUIRED_CLAUDE_PROFILE_ENV_KEYS = [
+  "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+] as const;
+
+const MODEL_CLAUDE_PROFILE_ENV_KEYS = [
+  "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
+] as const;
 
 export interface BootstrapFile {
   path: string;
@@ -69,38 +69,13 @@ export interface BootstrapFile {
   max_bytes?: number;
 }
 
-export interface AgentModelMatrix {
-  default: string;
-  opus: string;
-  fable: string;
-  sonnet: string;
-  haiku: string;
-}
-
-export interface AgentClaudeControls {
-  effort_level?: "low" | "medium" | "high" | "max";
-  always_enable_effort?: boolean;
-  max_context_tokens?: number;
-  max_output_tokens?: number;
-  max_thinking_tokens?: number;
-  disable_adaptive_thinking?: boolean;
-  disable_thinking?: boolean;
-  auto_compact_window?: number;
-  autocompact_pct_override?: number;
-  disable_1m_context?: boolean;
-  subagent_model?: string;
-  enable_tool_search?: boolean;
-}
-
 export interface ExecutionProfile {
-  profile_id: string;
+  profile_id: "effective" | "balanced" | "quality";
   provider: string;
-  protocol: string;
-  models: AgentModelMatrix;
-  claude: AgentClaudeControls;
+  protocol: "anthropic";
   display_name: string;
   profile_fingerprint: string;
-  runtime_env: Record<string, string>;
+  envs: Record<string, string>;
   model_usage_aliases: Record<string, { provider: string; model: string }>;
 }
 
@@ -194,56 +169,48 @@ function validateExecutionProfile(input: unknown): asserts input is ExecutionPro
   }
   if (profile.protocol !== "anthropic") throw new Error("bootstrap execution profile protocol is invalid");
   if (!/^[0-9a-f]{64}$/.test(String(profile.profile_fingerprint ?? ""))) throw new Error("bootstrap execution profile fingerprint is invalid");
-  const models = validateModelMatrix(profile.models);
-  const controls = validateClaudeControls(profile.claude);
-  if (!isRecord(profile.runtime_env)) throw new Error("bootstrap execution profile runtime environment is invalid");
-  for (const [key, value] of Object.entries(profile.runtime_env)) {
-    if (!CLAUDE_RUNTIME_ENV_KEYS.has(key)) throw new Error("bootstrap execution profile runtime environment is invalid");
-    validateEnvironmentEntry(key, value, "runtime");
-  }
-  if (!validProviderBaseURL(profile.runtime_env.ANTHROPIC_BASE_URL) || !cleanString(profile.runtime_env.ANTHROPIC_AUTH_TOKEN)) throw new Error("bootstrap execution profile runtime environment is invalid");
-  for (const [role, envKey] of Object.entries(MODEL_ENV_KEYS) as Array<[keyof AgentModelMatrix, string]>) {
-    if (profile.runtime_env[envKey] !== models[role]) throw new Error("bootstrap execution profile runtime model is invalid");
-  }
-  for (const [control, envKey] of Object.entries(CLAUDE_CONTROL_ENV_KEYS) as Array<[keyof AgentClaudeControls, string]>) {
-    const configured = controls[control];
-    const emitted = profile.runtime_env[envKey];
-    if (configured === undefined ? emitted !== undefined : emitted !== String(configured)) {
-      throw new Error("bootstrap execution profile runtime environment is invalid");
-    }
-  }
+  const envs = validateClaudeProfileEnvs(profile.envs);
   const aliases = profile.model_usage_aliases;
-  const requiredAliases = new Set(Object.values(models));
-  if (controls.subagent_model) requiredAliases.add(controls.subagent_model);
+  const requiredAliases = new Set(MODEL_CLAUDE_PROFILE_ENV_KEYS.flatMap((key) => envs[key] ? [envs[key]] : []));
   if (!isRecord(aliases) || Object.keys(aliases).length > MAX_MODEL_USAGE_ALIASES || ![...requiredAliases].every((raw) => isRecord(aliases[raw]))) throw new Error("bootstrap execution profile model usage aliases are invalid");
   if (!Object.entries(aliases).every(([raw, identity]) => isRecord(identity) && hasOnlyKeys(identity, ["provider", "model"]) && validModelUsageAlias(raw, identity.provider, identity.model) && identity.provider === profile.provider)) {
     throw new Error("bootstrap execution profile model usage aliases are invalid");
   }
 }
 
-function validateModelMatrix(input: unknown): AgentModelMatrix {
-  if (!isRecord(input) || !hasOnlyKeys(input, Object.keys(MODEL_ENV_KEYS))) throw new Error("bootstrap execution profile model matrix is invalid");
-  const models = input as Record<keyof AgentModelMatrix, unknown>;
-  for (const role of Object.keys(MODEL_ENV_KEYS) as Array<keyof AgentModelMatrix>) {
-    if (!cleanString(models[role]) || /[\x00\r\n]/.test(models[role])) throw new Error("bootstrap execution profile model matrix is invalid");
+function validateClaudeProfileEnvs(input: unknown): Record<string, string> {
+  if (!isRecord(input)) throw new Error("bootstrap execution profile environment is invalid");
+  let totalBytes = 0;
+  for (const [key, value] of Object.entries(input)) {
+    if (!CLAUDE_PROFILE_ENV_KEYS.has(key) || !cleanString(value) || /[\x00\r\n]/.test(value) || Buffer.byteLength(value) > MAX_CLAUDE_ENV_VALUE_BYTES) {
+      throw new Error("bootstrap execution profile environment is invalid");
+    }
+    totalBytes += Buffer.byteLength(key) + Buffer.byteLength(value);
+    if (totalBytes > MAX_CLAUDE_ENV_TOTAL_BYTES) throw new Error("bootstrap execution profile environment is invalid");
   }
-  return models as AgentModelMatrix;
+  const envs = input as Record<string, string>;
+  if (!REQUIRED_CLAUDE_PROFILE_ENV_KEYS.every((key) => cleanString(envs[key]))) throw new Error("bootstrap execution profile environment is invalid");
+  if (!validProviderBaseURL(envs.ANTHROPIC_BASE_URL)) throw new Error("bootstrap execution profile environment is invalid");
+  if (envs.CLAUDE_CODE_EFFORT_LEVEL !== undefined && !new Set(["low", "medium", "high", "max"]).has(envs.CLAUDE_CODE_EFFORT_LEVEL)) throw new Error("bootstrap execution profile environment is invalid");
+  for (const key of ["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "CLAUDE_CODE_DISABLE_THINKING", "CLAUDE_CODE_DISABLE_1M_CONTEXT", "ENABLE_TOOL_SEARCH"]) {
+    if (envs[key] !== undefined && envs[key] !== "true" && envs[key] !== "false") throw new Error("bootstrap execution profile environment is invalid");
+  }
+  for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"]) {
+    if (envs[key] !== undefined && !validUnsignedInteger(envs[key], false)) throw new Error("bootstrap execution profile environment is invalid");
+  }
+  if (envs.MAX_THINKING_TOKENS !== undefined && !validUnsignedInteger(envs.MAX_THINKING_TOKENS, true)) throw new Error("bootstrap execution profile environment is invalid");
+  if (envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE !== undefined && (!validUnsignedInteger(envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, false) || BigInt(envs.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE) > 100n)) throw new Error("bootstrap execution profile environment is invalid");
+  return envs;
 }
 
-function validateClaudeControls(input: unknown): AgentClaudeControls {
-  if (!isRecord(input) || !hasOnlyKeys(input, Object.keys(CLAUDE_CONTROL_ENV_KEYS))) throw new Error("bootstrap execution profile Claude controls are invalid");
-  const controls = input as Record<string, unknown>;
-  if (controls.effort_level !== undefined && !new Set(["low", "medium", "high", "max"]).has(String(controls.effort_level))) throw new Error("bootstrap execution profile Claude controls are invalid");
-  for (const field of ["always_enable_effort", "disable_adaptive_thinking", "disable_thinking", "disable_1m_context", "enable_tool_search"]) {
-    if (controls[field] !== undefined && typeof controls[field] !== "boolean") throw new Error("bootstrap execution profile Claude controls are invalid");
+function validUnsignedInteger(value: string, allowZero: boolean): boolean {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) return false;
+  try {
+    const parsed = BigInt(value);
+    return (allowZero ? parsed >= 0n : parsed > 0n) && parsed <= 9223372036854775807n;
+  } catch {
+    return false;
   }
-  for (const field of ["max_context_tokens", "max_output_tokens", "auto_compact_window"]) {
-    if (controls[field] !== undefined && (!Number.isInteger(controls[field]) || (controls[field] as number) <= 0)) throw new Error("bootstrap execution profile Claude controls are invalid");
-  }
-  if (controls.max_thinking_tokens !== undefined && (!Number.isInteger(controls.max_thinking_tokens) || (controls.max_thinking_tokens as number) < 0)) throw new Error("bootstrap execution profile Claude controls are invalid");
-  if (controls.autocompact_pct_override !== undefined && (!Number.isInteger(controls.autocompact_pct_override) || (controls.autocompact_pct_override as number) < 1 || (controls.autocompact_pct_override as number) > 100)) throw new Error("bootstrap execution profile Claude controls are invalid");
-  if (controls.subagent_model !== undefined && (!cleanString(controls.subagent_model) || /[\x00\r\n]/.test(controls.subagent_model))) throw new Error("bootstrap execution profile Claude controls are invalid");
-  return controls as AgentClaudeControls;
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
