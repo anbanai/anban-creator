@@ -17,27 +17,23 @@ database:
 jwt:
   secret_key: test-secret
 claude:
-  providers:
-    moonshot:
-      protocol: anthropic
-      base_url: https://api.moonshot.cn/anthropic
-      auth_token: profile-secret-token
   execution_profiles:
-    maximum_quality:
+    quality:
       provider: moonshot
       description: flagship
-      models:
-        default: kimi-k3[1m]
-        opus: kimi-k3[1m]
-        fable: kimi-k3[1m]
-        sonnet: kimi-k3[1m]
-        haiku: kimi-k3[1m]
+      envs:
+        ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic"
+        ANTHROPIC_AUTH_TOKEN: "profile-secret-token"
+        ANTHROPIC_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
+        MAX_THINKING_TOKENS: "0"
+        ENABLE_TOOL_SEARCH: "false"
       model_usage_aliases:
         kimi-k3: kimi-k3
         kimi-k3[1m]: kimi-k3
-      claude:
-        max_thinking_tokens: 0
-        enable_tool_search: false
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
@@ -48,28 +44,24 @@ claude:
 
 func validClaudeConfigForTest() ClaudeConfig {
 	return ClaudeConfig{
-		Providers: map[string]ClaudeProviderConfig{
-			"moonshot": {
-				Protocol: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic",
-				AuthToken: "profile-secret-token",
-			},
-		},
 		ExecutionProfiles: map[string]ClaudeExecutionProfileConfig{
-			"maximum_quality": {
+			"quality": {
 				Provider: "moonshot", Description: "flagship",
-				Models: ClaudeModelMatrixConfig{
-					Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]",
-					Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]",
+				Envs: map[string]string{
+					model.ClaudeEnvBaseURL:           "https://api.moonshot.cn/anthropic",
+					model.ClaudeEnvAuthToken:         "profile-secret-token",
+					model.ClaudeEnvModel:             "kimi-k3[1m]",
+					"ANTHROPIC_DEFAULT_OPUS_MODEL":   "kimi-k3[1m]",
+					"ANTHROPIC_DEFAULT_FABLE_MODEL":  "kimi-k3[1m]",
+					"ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3[1m]",
+					"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "kimi-k3[1m]",
 				},
 				ModelUsageAliases: map[string]string{"kimi-k3": "kimi-k3", "kimi-k3[1m]": "kimi-k3"},
 			},
 		},
-		Executor:             "docker",
-		ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
+		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-			model.PlatformArticle:  "creator-agent-article:latest",
-			model.PlatformSeednote: "creator-agent-seednote:latest",
-			model.PlatformMontage:  "creator-agent-montage:latest",
+			model.PlatformArticle: "creator-agent-article:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest",
 		},
 	}
 }
@@ -83,117 +75,64 @@ func loadClaudeConfigYAML(t *testing.T, body string) (*Config, error) {
 	return NewConfig(path)
 }
 
-func TestClaudeConfigStartsWithoutLegacySingleProviderRuntime(t *testing.T) {
-	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
-	if err != nil {
-		t.Fatalf("profile-only Claude runtime must start without legacy provider config: %v", err)
-	}
-	if cfg.Claude.Executor != "docker" || cfg.Claude.Providers["moonshot"].Protocol != "anthropic" {
-		t.Fatalf("Claude runtime config = %#v", cfg.Claude)
-	}
-}
-
-func TestClaudeControlsPreserveOmittedFalseAndZero(t *testing.T) {
+func TestClaudeConfigAcceptsOnlyProfileEnvs(t *testing.T) {
 	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
 	if err != nil {
 		t.Fatal(err)
 	}
-	controls := cfg.Claude.ExecutionProfiles["maximum_quality"].Claude
-	if controls.MaxThinkingTokens == nil || *controls.MaxThinkingTokens != 0 {
-		t.Fatalf("max_thinking_tokens = %v, want pointer to zero", controls.MaxThinkingTokens)
-	}
-	if controls.EnableToolSearch == nil || *controls.EnableToolSearch {
-		t.Fatalf("enable_tool_search = %v, want pointer to false", controls.EnableToolSearch)
-	}
-	if controls.MaxOutputTokens != nil {
-		t.Fatalf("max_output_tokens = %v, want nil when omitted", controls.MaxOutputTokens)
+	profile := cfg.Claude.ExecutionProfiles["quality"]
+	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
+		t.Fatalf("profile envs = %#v", profile.Envs)
 	}
 }
 
-func TestClaudeConfigAllowsProfileWithUnavailableProvider(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML, "      provider: moonshot", "      provider: not_configured", 1)
-	cfg, err := loadClaudeConfigYAML(t, body)
+func TestClaudeConfigAllowsOptionalProfileEnvsToBeOmitted(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, strings.ReplaceAll(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"\n        ENABLE_TOOL_SEARCH: \"false\"\n", ""))
 	if err != nil {
-		t.Fatalf("provider availability belongs to the profile registry: %v", err)
+		t.Fatal(err)
 	}
-	if got := cfg.Claude.ExecutionProfiles["maximum_quality"].Provider; got != "not_configured" {
-		t.Fatalf("profile provider = %q", got)
+	if _, exists := cfg.Claude.ExecutionProfiles["quality"].Envs["MAX_THINKING_TOKENS"]; exists {
+		t.Fatal("omitted optional env was synthesized")
 	}
 }
 
-func TestClaudeConfigRejectsLegacySingleProviderFields(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		field string
-		value string
-	}{
-		{name: "provider", field: "provider", value: "volcengine_ark"},
-		{name: "base URL", field: "base_url", value: "https://ark.example.com"},
-		{name: "auth token", field: "auth_token", value: "secret"},
-		{name: "models", field: "models", value: "\n    default: old-model"},
-		{name: "usage aliases", field: "model_usage_aliases", value: "\n    old-model: old-model"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  "+test.field+": "+test.value+"\n", 1)
-			_, err := loadClaudeConfigYAML(t, body)
-			if err == nil || !strings.Contains(err.Error(), "claude."+test.field+" is not supported") {
-				t.Fatalf("NewConfig() error = %v", err)
+func TestClaudeConfigRejectsObsoleteProfileSchema(t *testing.T) {
+	tests := []struct{ name, old, replacement, wantPath string }{
+		{name: "providers", old: "claude:\n", replacement: "claude:\n  providers: {}\n", wantPath: `unknown claude config field "providers"`},
+		{name: "models", old: "      envs:\n", replacement: "      models: {}\n      envs:\n", wantPath: "claude.execution_profiles.quality.models"},
+		{name: "claude controls", old: "      envs:\n", replacement: "      claude: {}\n      envs:\n", wantPath: "claude.execution_profiles.quality.claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadClaudeConfigYAML(t, strings.Replace(validClaudeConfigYAML, tt.old, tt.replacement, 1))
+			if err == nil || !strings.Contains(err.Error(), tt.wantPath) {
+				t.Fatalf("NewConfig() error = %v, want path %q", err, tt.wantPath)
 			}
 		})
 	}
 }
 
-func TestClaudeConfigRejectsRemovedEnv(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  env:\n    CLAUDE_CODE_AUTO_COMPACT_WINDOW: 1000\n", 1)
+func TestClaudeProfileConfigRejectsUnknownEnvWithFullPath(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "        ANTHROPIC_MODEL:", "        PATH: \"/tmp\"\n        ANTHROPIC_MODEL:", 1)
 	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), `unknown claude config field "env"`) {
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs.PATH") {
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 }
 
-func TestClaudeProfileConfigRejectsInvalidFields(t *testing.T) {
-	tests := []struct {
-		name        string
-		old         string
-		replacement string
-		wantPath    string
-	}{
-		{name: "empty model role", old: "        default: kimi-k3[1m]", replacement: `        default: ""`, wantPath: "claude.execution_profiles.maximum_quality.models.default"},
-		{name: "invalid effort", old: "        max_thinking_tokens: 0", replacement: "        effort_level: extreme\n        max_thinking_tokens: 0", wantPath: "claude.execution_profiles.maximum_quality.claude.effort_level"},
-		{name: "invalid autocompact percent", old: "        max_thinking_tokens: 0", replacement: "        autocompact_pct_override: 101\n        max_thinking_tokens: 0", wantPath: "claude.execution_profiles.maximum_quality.claude.autocompact_pct_override"},
-		{name: "empty subagent model", old: "        max_thinking_tokens: 0", replacement: "        subagent_model: \"\"\n        max_thinking_tokens: 0", wantPath: "claude.execution_profiles.maximum_quality.claude.subagent_model"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			body := strings.Replace(validClaudeConfigYAML, test.old, test.replacement, 1)
-			_, err := loadClaudeConfigYAML(t, body)
-			if err == nil || !strings.Contains(err.Error(), test.wantPath) {
-				t.Fatalf("NewConfig() error = %v, want field path %q", err, test.wantPath)
-			}
-		})
+func TestClaudeProfileConfigRequiresStringEnvValues(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"", "        MAX_THINKING_TOKENS: 0", 1)
+	_, err := loadClaudeConfigYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs.MAX_THINKING_TOKENS") {
+		t.Fatalf("NewConfig() error = %v", err)
 	}
 }
 
-func TestClaudeProfileConfigRejectsUnknownNestedFields(t *testing.T) {
-	tests := []struct {
-		name        string
-		old         string
-		replacement string
-		wantPath    string
-	}{
-		{name: "provider", old: "      protocol: anthropic", replacement: "      region: cn\n      protocol: anthropic", wantPath: "claude.providers.moonshot.region"},
-		{name: "profile", old: "      provider: moonshot", replacement: "      product_tier: flagship\n      provider: moonshot", wantPath: "claude.execution_profiles.maximum_quality.product_tier"},
-		{name: "models", old: "        default: kimi-k3[1m]", replacement: "        legacy: kimi-k3[1m]\n        default: kimi-k3[1m]", wantPath: "claude.execution_profiles.maximum_quality.models.legacy"},
-		{name: "controls", old: "        max_thinking_tokens: 0", replacement: "        legacy_thinking: true\n        max_thinking_tokens: 0", wantPath: "claude.execution_profiles.maximum_quality.claude.legacy_thinking"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			body := strings.Replace(validClaudeConfigYAML, test.old, test.replacement, 1)
-			_, err := loadClaudeConfigYAML(t, body)
-			if err == nil || !strings.Contains(err.Error(), test.wantPath) {
-				t.Fatalf("NewConfig() error = %v, want field path %q", err, test.wantPath)
-			}
-		})
+func TestClaudeProfileConfigReportsInvalidEnvPath(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "https://api.moonshot.cn/anthropic", "http://api.moonshot.cn/anthropic", 1)
+	_, err := loadClaudeConfigYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs") {
+		t.Fatalf("NewConfig() error = %v", err)
 	}
 }
 
@@ -213,7 +152,7 @@ func TestClaudeConfigRedactsExecutionProfileSecrets(t *testing.T) {
 	}
 }
 
-func TestProductionClaudeConfigUsesExecutionProfilesOnly(t *testing.T) {
+func TestProductionClaudeConfigUsesExecutionProfileEnvsOnly(t *testing.T) {
 	for _, name := range []string{"../config.yaml", "../config.example.yaml"} {
 		raw, err := os.ReadFile(name)
 		if err != nil {
@@ -225,10 +164,10 @@ func TestProductionClaudeConfigUsesExecutionProfilesOnly(t *testing.T) {
 		if start < 0 || end < 0 {
 			t.Fatalf("%s does not contain the expected Claude section", name)
 		}
-		claudeSection := text[start : start+1+end]
-		for _, legacy := range []string{"\n  provider:", "\n  base_url:", "\n  auth_token:", "\n  models:", "\n  model_usage_aliases:", "\n    ANTHROPIC_"} {
-			if strings.Contains(claudeSection, legacy) {
-				t.Fatalf("%s contains legacy Claude provider config %q", name, legacy)
+		section := text[start : start+1+end]
+		for _, obsolete := range []string{"\n  providers:", "\n      models:", "\n      claude:", "cost_effective:", "maximum_quality:"} {
+			if strings.Contains(section, obsolete) {
+				t.Fatalf("%s contains obsolete Claude config %q", name, obsolete)
 			}
 		}
 	}

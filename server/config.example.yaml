@@ -233,78 +233,84 @@ image_presets:
     min_tier: "pro"
 
 claude:
-  providers:
-    deepseek:
-      protocol: "anthropic"
-      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
-      auth_token: "${ANBAN_DEEPSEEK_API_KEY}"
-    volcengine_ark:
-      protocol: "anthropic"
-      base_url: "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}"
-      auth_token: "${ANBAN_DOUBAO_AGENT_API_KEY}"
-    moonshot:
-      protocol: "anthropic"
-      base_url: "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}"
-      auth_token: "${ANBAN_MOONSHOT_API_KEY}"
-    # GLM-5.2 readiness: any profile can select this provider and assign glm-5.2
-    # to its model roles without coupling Zhipu to a fixed product profile.
-    zhipu:
-      protocol: "anthropic"
-      base_url: "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}"
-      auth_token: "${ANBAN_ZHIPU_API_KEY}"
   execution_profiles:
-    cost_effective:
+    effective:
       description: "适合日常创作和批量任务，成本最低"
       provider: "deepseek"
-      models:
-        default: "deepseek-v4-flash"
-        opus: "deepseek-v4-pro"
-        fable: "deepseek-v4-flash"
-        sonnet: "deepseek-v4-pro"
-        haiku: "deepseek-v4-flash"
+      envs:
+        ANTHROPIC_BASE_URL: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
+        ANTHROPIC_AUTH_TOKEN: "${ANBAN_DEEPSEEK_API_KEY}"
+        ANTHROPIC_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
+        CLAUDE_CODE_EFFORT_LEVEL: "medium"
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "393216"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
+        ENABLE_TOOL_SEARCH: "true"
       model_usage_aliases:
         deepseek-v4-flash: "deepseek-v4-flash"
         deepseek-v4-pro: "deepseek-v4-pro"
-      claude:
-        effort_level: "medium"
-        max_context_tokens: 1048576
-        max_output_tokens: 393216
-        auto_compact_window: 1048576
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
       provider: "zhipu"
-      models:
-        default: "glm-5.2"
-        opus: "glm-5.2"
-        fable: "glm-5.2"
-        sonnet: "glm-5.2"
-        haiku: "glm-5.2"
+      envs:
+        ANTHROPIC_BASE_URL: "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}"
+        ANTHROPIC_AUTH_TOKEN: "${ANBAN_ZHIPU_API_KEY}"
+        ANTHROPIC_MODEL: "glm-5.2"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.2"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-5.2"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.2"
+        CLAUDE_CODE_EFFORT_LEVEL: "high"
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        CLAUDE_CODE_SUBAGENT_MODEL: "glm-5.2"
+        ENABLE_TOOL_SEARCH: "true"
       model_usage_aliases:
         glm-5.2: "glm-5.2"
-      claude:
-        effort_level: "high"
-        max_context_tokens: 1048576
-        max_output_tokens: 131072
-        auto_compact_window: 1048576
-    maximum_quality:
+    quality:
       description: "旗舰模型与超长上下文，适合高难度任务"
       provider: "moonshot"
-      models:
-        default: "kimi-k3[1m]"
-        opus: "kimi-k3[1m]"
-        fable: "kimi-k3[1m]"
-        sonnet: "kimi-k3[1m]"
-        haiku: "kimi-k3[1m]"
+      envs:
+        ANTHROPIC_BASE_URL: "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}"
+        ANTHROPIC_AUTH_TOKEN: "${ANBAN_MOONSHOT_API_KEY}"
+        ANTHROPIC_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
+        CLAUDE_CODE_EFFORT_LEVEL: "high"
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "true"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3[1m]"
+        ENABLE_TOOL_SEARCH: "true"
       model_usage_aliases:
         kimi-k3: "kimi-k3"
-        kimi-k3[1m]: "kimi-k3"
-      claude:
-        effort_level: "high"
-        always_enable_effort: true
-        max_context_tokens: 1048576
-        max_output_tokens: 131072
-        auto_compact_window: 1048576
-        subagent_model: "kimi-k3[1m]"
+        "kimi-k3[1m]": "kimi-k3"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
