@@ -154,6 +154,27 @@ type referralCandidate struct {
 }
 
 func (s *BillingReferralService) resolveReferralCandidate(ctx context.Context, inviteeID string) (referralCandidate, error) {
+	var (
+		candidate referralCandidate
+		err       error
+	)
+	for attempt := 0; attempt < 20; attempt++ {
+		candidate, err = s.resolveReferralCandidateOnce(ctx, inviteeID)
+		if err == nil || !isRetryableBillingDBError(err) {
+			return candidate, err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return referralCandidate{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return referralCandidate{}, err
+}
+
+func (s *BillingReferralService) resolveReferralCandidateOnce(ctx context.Context, inviteeID string) (referralCandidate, error) {
 	invitee, err := s.repo.Users().FindByID(ctx, inviteeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
