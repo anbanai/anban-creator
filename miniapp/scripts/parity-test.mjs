@@ -96,20 +96,21 @@ assertContains('src/api/agent-profiles.ts', [
 ])
 
 assertContains('src/types/agent-profile.ts', [
-  "export type AgentExecutionProfileID = 'cost_effective' | 'balanced' | 'maximum_quality'",
+  "export type AgentExecutionProfileID = 'effective' | 'balanced' | 'quality'",
   'display_name: string',
-  'export interface AgentModelMatrix',
-  'export interface AgentClaudeControls',
   'provider: string',
-  'models: AgentModelMatrix',
-  'claude: AgentClaudeControls',
-  'schema_version: 2',
+  'model_name: string',
+  'schema_version: 3',
+  'envs: Record<string, string>',
   "min_tier: 'free' | 'pro' | 'enterprise'",
   'available: boolean',
   'unavailable_reason?: string',
 ])
 assertNotContains('src/types/agent-profile.ts', [
-  'model_name: string',
+  'cost_effective',
+  'maximum_quality',
+  'AgentModelMatrix',
+  'AgentClaudeControls',
   'model_id: string',
   'thinking_required',
   'reasoning_effort',
@@ -131,35 +132,35 @@ const profileCatalog = {
   catalog_id: 'retail-test',
   currency: 'credits',
   skus: [
-    { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'cost_effective', price_credits: 4000, delivery: 'task' },
+    { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'effective', price_credits: 4000, delivery: 'task' },
     { id: 'seednote-balanced', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 5000, delivery: 'task' },
-    { id: 'seednote-max', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'maximum_quality', price_credits: 15000, delivery: 'task' },
+    { id: 'seednote-max', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'quality', price_credits: 15000, delivery: 'task' },
     { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 6000, delivery: 'task' },
   ],
 }
 const profileCapabilities = [
-  { id: 'cost_effective', available: true },
+  { id: 'effective', available: true },
   { id: 'balanced', available: true },
-  { id: 'maximum_quality', available: false, unavailable_reason: '需要企业版' },
+  { id: 'quality', available: false, unavailable_reason: '需要企业版' },
 ]
 
 assert.equal(taskPriceForExecutionProfile(profileCatalog, 'seednote', 'balanced'), 5000)
 assert.equal(taskPriceForExecutionProfile(profileCatalog, 'article', 'balanced'), 6000)
-assert.equal(taskPriceForExecutionProfile(profileCatalog, 'article', 'cost_effective'), undefined)
-assert.equal(cheapestAvailableExecutionProfile(profileCapabilities, profileCatalog, 'seednote'), 'cost_effective')
+assert.equal(taskPriceForExecutionProfile(profileCatalog, 'article', 'effective'), undefined)
+assert.equal(cheapestAvailableExecutionProfile(profileCapabilities, profileCatalog, 'seednote'), 'effective')
 assert.equal(
   resolveExecutionProfileSelection(
-    'maximum_quality',
+    'quality',
     true,
     profileCapabilities,
     profileCatalog,
     'seednote',
   ),
-  'maximum_quality',
+  'quality',
 )
 assert.equal(
   resolveExecutionProfileSelection('', false, profileCapabilities, profileCatalog, 'seednote'),
-  'cost_effective',
+  'effective',
 )
 
 assertContains('src/types/billing.ts', [
@@ -171,9 +172,7 @@ assertContains('src/components/business/ExecutionProfileSelector.vue', [
   'v-for="profile in profiles"',
   'profile.display_name',
   'profile.provider',
-  'profile.models.default',
-  '全部角色',
-  'modelRows(profile)',
+  'profile.model_name',
   'profile.min_tier',
   'profile.available',
   'profile.unavailable_reason',
@@ -182,9 +181,8 @@ assertContains('src/components/business/ExecutionProfileSelector.vue', [
   '最低套餐：Pro 版及以上',
 ])
 assertNotContains('src/components/business/ExecutionProfileSelector.vue', [
-  "'cost_effective'",
-  "'balanced'",
-  "'maximum_quality'",
+  'profile.models',
+  'modelRows(profile)',
   'min_tier ===',
 ])
 
@@ -254,8 +252,18 @@ assertContains('src/pages/tasks/detail.vue', [
   '累计扣费',
   'v-for="(detail, index) in billingDetails"',
   'task.agent_profile_snapshot',
-  'agentModelRows',
-  'agentControlRows',
+  'agentProfileRows',
+])
+assertContains('src/pages/tasks/detail.vue', [
+  "envs.ANTHROPIC_MODEL",
+  "envs.CLAUDE_CODE_EFFORT_LEVEL",
+  "envs.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+  "envs.CLAUDE_CODE_DISABLE_THINKING",
+])
+assertNotContains('src/pages/tasks/detail.vue', [
+  'ANTHROPIC_AUTH_TOKEN',
+  'snapshot.models',
+  'snapshot.claude',
 ])
 
 assertContains('src/types/project.ts', [

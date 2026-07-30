@@ -19,13 +19,7 @@
           <text v-if="!profile.available" class="profile-card__badge">不可用</text>
         </view>
         <text class="profile-card__provider">Provider：{{ profile.provider }}</text>
-        <text
-          v-for="row in modelRows(profile)"
-          :key="row"
-          class="profile-card__model"
-        >
-          {{ row }}
-        </text>
+        <text class="profile-card__model">{{ profile.model_name }}</text>
         <text class="profile-card__tier">{{ tierRequirement(profile.min_tier) }}</text>
         <text class="profile-card__description">
           {{ profile.available ? profile.description : unavailableReason(profile) }}
@@ -39,16 +33,7 @@
 import type {
   AgentExecutionProfileCapability,
   AgentExecutionProfileID,
-  AgentModelMatrix,
 } from '@/types'
-
-const modelRoles: Array<[keyof AgentModelMatrix, string]> = [
-  ['default', '默认'],
-  ['opus', 'Opus'],
-  ['fable', 'Fable'],
-  ['sonnet', 'Sonnet'],
-  ['haiku', 'Haiku'],
-]
 
 const props = withDefaults(defineProps<{
   modelValue: AgentExecutionProfileID | ''
@@ -67,20 +52,6 @@ const emit = defineEmits<{
 function selectProfile(profile: AgentExecutionProfileCapability) {
   if (props.disabled || !profile.available) return
   emit('update:modelValue', profile.id)
-}
-
-function modelRows(profile: AgentExecutionProfileCapability): string[] {
-  const values = [
-    profile.models.default,
-    profile.models.opus,
-    profile.models.fable,
-    profile.models.sonnet,
-    profile.models.haiku,
-  ]
-  if (values.every((model) => model === values[0])) {
-    return [`全部角色：${values[0]}`]
-  }
-  return modelRoles.map(([role, label]) => `${label}：${profile.models[role]}`)
 }
 
 function tierRequirement(tier: AgentExecutionProfileCapability['min_tier']) {

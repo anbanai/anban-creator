@@ -63,16 +63,7 @@
             <text class="agent-profile-details__value">{{ task.agent_profile_snapshot.provider }}</text>
           </view>
           <view
-            v-for="row in agentModelRows"
-            :key="row.label"
-            class="agent-profile-details__item"
-            :class="{ 'agent-profile-details__item--wide': agentModelRows.length === 1 }"
-          >
-            <text class="agent-profile-details__label">{{ row.label }}</text>
-            <text class="agent-profile-details__value agent-profile-details__value--model">{{ row.value }}</text>
-          </view>
-          <view
-            v-for="row in agentControlRows"
+            v-for="row in agentProfileRows"
             :key="row.label"
             class="agent-profile-details__item"
           >
@@ -492,7 +483,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
-import type { AgentClaudeControls, AgentModelMatrix, Project, SeednoteAnalytics, Task, TaskBillingChargeDetail, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
+import type { Project, SeednoteAnalytics, Task, TaskBillingChargeDetail, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { projectsApi } from '@/api/projects'
 import { taskStatusLabel, contentTypeLabel, progressStageLabel } from '@/utils/labels'
@@ -563,51 +554,23 @@ const statusBadgeVariant = computed(() => {
 const billingTotal = computed(() => task.value ? taskBillingTotal(task.value) : undefined)
 const billingDetails = computed<TaskBillingChargeDetail[]>(() => task.value ? taskBillingDetails(task.value) : [])
 
-const agentModelRoles: Array<[keyof AgentModelMatrix, string]> = [
-  ['default', '默认模型'],
-  ['opus', 'Opus 模型'],
-  ['fable', 'Fable 模型'],
-  ['sonnet', 'Sonnet 模型'],
-  ['haiku', 'Haiku 模型'],
-]
-
-const agentControlLabels: Array<[keyof AgentClaudeControls, string]> = [
-  ['effort_level', '推理强度'],
-  ['always_enable_effort', '始终启用推理'],
-  ['max_context_tokens', '最大上下文'],
-  ['max_output_tokens', '最大输出'],
-  ['max_thinking_tokens', '最大思考 Token'],
-  ['disable_adaptive_thinking', '关闭自适应思考'],
-  ['disable_thinking', '关闭思考'],
-  ['auto_compact_window', '自动压缩窗口'],
-  ['autocompact_pct_override', '自动压缩阈值'],
-  ['disable_1m_context', '关闭 1M 上下文'],
-  ['subagent_model', '子 Agent 模型'],
-  ['enable_tool_search', '启用工具搜索'],
-]
-
-const agentModelRows = computed(() => {
-  const models = task.value?.agent_profile_snapshot?.models
-  if (!models) return []
-  const values = Object.values(models)
-  if (values.every((model) => model === values[0])) {
-    return [{ label: '模型矩阵', value: `全部角色：${values[0]}` }]
-  }
-  return agentModelRoles.map(([role, label]) => ({ label, value: models[role] }))
-})
-
-function displayAgentControl(value: string | number | boolean): string {
-  if (typeof value === 'boolean') return value ? '开启' : '关闭'
-  return typeof value === 'number' ? value.toLocaleString() : value
+function formatTokenCount(value: string | undefined): string | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined
+  return BigInt(value).toLocaleString()
 }
 
-const agentControlRows = computed(() => {
-  const controls = task.value?.agent_profile_snapshot?.claude
-  if (!controls) return []
-  return agentControlLabels.flatMap(([key, label]) => {
-    const value = controls[key]
-    return value === undefined ? [] : [{ label, value: displayAgentControl(value) }]
-  })
+const agentProfileRows = computed(() => {
+  const envs = task.value?.agent_profile_snapshot?.envs
+  if (!envs) return []
+  const rows: Array<{ label: string; value: string }> = []
+  if (envs.ANTHROPIC_MODEL) rows.push({ label: '模型', value: envs.ANTHROPIC_MODEL })
+  if (envs.CLAUDE_CODE_EFFORT_LEVEL) rows.push({ label: '推理强度', value: envs.CLAUDE_CODE_EFFORT_LEVEL })
+  const context = formatTokenCount(envs.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+  if (context) rows.push({ label: '最大上下文', value: context })
+  if (envs.CLAUDE_CODE_DISABLE_THINKING === 'true' || envs.CLAUDE_CODE_DISABLE_THINKING === 'false') {
+    rows.push({ label: '思考模式', value: envs.CLAUDE_CODE_DISABLE_THINKING === 'true' ? '关闭' : '开启' })
+  }
+  return rows
 })
 
 const workflowStages = computed<WorkflowStage[]>(() => {
