@@ -637,11 +637,8 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	if errors.Is(err, service.ErrProjectNotFound) || errors.Is(err, service.ErrProjectOwnedByUser) || errors.Is(err, service.ErrTaskCreationProjectInactive) {
 		return respondTaskCreationProjectError(c, h.logger, err)
 	}
-	if errors.Is(err, service.ErrAgentProfileAccessDenied) {
-		return Error(c, fiber.StatusForbidden, err.Error())
-	}
-	if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	if handled, response := respondAgentProfileError(c, err); handled {
+		return response
 	}
 	if errors.Is(err, service.ErrManagedProfileLocalExecutionUnsupported) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -1131,6 +1128,9 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		Files:  files,
 	})
 	if err != nil {
+		if handled, response := respondAgentProfileError(c, err); handled {
+			return response
+		}
 		switch {
 		case errors.Is(err, service.ErrTaskResumeNoInput):
 			return Error(c, fiber.StatusBadRequest, "请填写补充指令或上传补充文件")

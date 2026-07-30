@@ -66,13 +66,13 @@ vi.mock('@/lib/api', async () => {
           skus: [
             { id: 'task.article.cost', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
             { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
+            { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
             { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.seednote.maximum', operation: 'task.seednote', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 8000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
-            { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 3000, delivery: 'montage_artifacts_verified' },
-            { id: 'task.montage.maximum', operation: 'task.montage', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 4500, delivery: 'montage_artifacts_verified' },
+            { id: 'task.seednote.maximum', operation: 'task.seednote', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
+            { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+            { id: 'task.montage.maximum', operation: 'task.montage', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'montage_artifacts_verified' },
           ],
         }),
         wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
@@ -80,9 +80,9 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
-          { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+          { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
     },
@@ -147,9 +147,9 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('button', { name: /性价比/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(await within(dialog).findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText(/4,800 积分/)).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: /平衡型/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -162,7 +162,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
 
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await within(dialog).findByRole('button', { name: /极致效果/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(await within(dialog).findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
@@ -172,9 +172,9 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('blocks plan updates when the stored execution profile is no longer available', async () => {
     vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
-      { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
-      { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
+      { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
+      { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
     ])
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))

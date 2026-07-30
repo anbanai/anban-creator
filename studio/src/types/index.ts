@@ -3,6 +3,8 @@ export type { User, AuthResponse, ApiResponse } from './auth'
 export type {
   AgentExecutionProfileID,
   AgentExecutionProfileCapability,
+  AgentModelMatrix,
+  AgentClaudeControls,
   AgentProfileSnapshot,
 } from './agent-profile'
 

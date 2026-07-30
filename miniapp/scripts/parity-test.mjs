@@ -98,11 +98,22 @@ assertContains('src/api/agent-profiles.ts', [
 assertContains('src/types/agent-profile.ts', [
   "export type AgentExecutionProfileID = 'cost_effective' | 'balanced' | 'maximum_quality'",
   'display_name: string',
-  'model_name: string',
-  'model_id: string',
+  'export interface AgentModelMatrix',
+  'export interface AgentClaudeControls',
+  'provider: string',
+  'models: AgentModelMatrix',
+  'claude: AgentClaudeControls',
+  'schema_version: 2',
   "min_tier: 'free' | 'pro' | 'enterprise'",
   'available: boolean',
   'unavailable_reason?: string',
+])
+assertNotContains('src/types/agent-profile.ts', [
+  'model_name: string',
+  'model_id: string',
+  'thinking_required',
+  'reasoning_effort',
+  'context_window',
 ])
 
 assertContains('src/types/index.ts', [
@@ -122,7 +133,7 @@ const profileCatalog = {
   skus: [
     { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'cost_effective', price_credits: 4000, delivery: 'task' },
     { id: 'seednote-balanced', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 5000, delivery: 'task' },
-    { id: 'seednote-max', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'maximum_quality', price_credits: 3000, delivery: 'task' },
+    { id: 'seednote-max', operation: 'task.seednote', charge_policy: 'task_admission', execution_profile: 'maximum_quality', price_credits: 15000, delivery: 'task' },
     { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', execution_profile: 'balanced', price_credits: 6000, delivery: 'task' },
   ],
 }
@@ -159,8 +170,10 @@ assertFile('src/components/business/ExecutionProfileSelector.vue')
 assertContains('src/components/business/ExecutionProfileSelector.vue', [
   'v-for="profile in profiles"',
   'profile.display_name',
-  'profile.model_name',
-  'profile.model_id',
+  'profile.provider',
+  'profile.models.default',
+  '全部角色',
+  'modelRows(profile)',
   'profile.min_tier',
   'profile.available',
   'profile.unavailable_reason',
@@ -240,6 +253,9 @@ assertContains('src/pages/tasks/detail.vue', [
   '积分明细',
   '累计扣费',
   'v-for="(detail, index) in billingDetails"',
+  'task.agent_profile_snapshot',
+  'agentModelRows',
+  'agentControlRows',
 ])
 
 assertContains('src/types/project.ts', [
@@ -333,6 +349,7 @@ assertContains('src/pages/tasks/create.vue', [
   'form.execution_profile = String(query.execution_profile) as AgentExecutionProfileID',
   'resolveExecutionProfileSelection',
 ])
+assertNotContains('src/pages/tasks/create.vue', ['provider:', 'models:', 'claude:'])
 
 assertContains('src/types/task.ts', [
   'execution_profile: AgentExecutionProfileID',
@@ -355,6 +372,7 @@ assertContains('src/pages/plans/create.vue', [
   'form.executionProfile = plan.execution_profile',
   'resolveExecutionProfileSelection',
 ])
+assertNotContains('src/pages/plans/create.vue', ['provider:', 'models:', 'claude:'])
 
 assertContains('src/types/plan.ts', [
   'execution_profile: AgentExecutionProfileID',

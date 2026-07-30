@@ -18,7 +18,14 @@
           <text class="profile-card__name">{{ profile.display_name }}</text>
           <text v-if="!profile.available" class="profile-card__badge">不可用</text>
         </view>
-        <text class="profile-card__model">{{ profile.model_name }} · {{ profile.model_id }}</text>
+        <text class="profile-card__provider">Provider：{{ profile.provider }}</text>
+        <text
+          v-for="row in modelRows(profile)"
+          :key="row"
+          class="profile-card__model"
+        >
+          {{ row }}
+        </text>
         <text class="profile-card__tier">{{ tierRequirement(profile.min_tier) }}</text>
         <text class="profile-card__description">
           {{ profile.available ? profile.description : unavailableReason(profile) }}
@@ -32,7 +39,16 @@
 import type {
   AgentExecutionProfileCapability,
   AgentExecutionProfileID,
+  AgentModelMatrix,
 } from '@/types'
+
+const modelRoles: Array<[keyof AgentModelMatrix, string]> = [
+  ['default', '默认'],
+  ['opus', 'Opus'],
+  ['fable', 'Fable'],
+  ['sonnet', 'Sonnet'],
+  ['haiku', 'Haiku'],
+]
 
 const props = withDefaults(defineProps<{
   modelValue: AgentExecutionProfileID | ''
@@ -53,6 +69,20 @@ function selectProfile(profile: AgentExecutionProfileCapability) {
   emit('update:modelValue', profile.id)
 }
 
+function modelRows(profile: AgentExecutionProfileCapability): string[] {
+  const values = [
+    profile.models.default,
+    profile.models.opus,
+    profile.models.fable,
+    profile.models.sonnet,
+    profile.models.haiku,
+  ]
+  if (values.every((model) => model === values[0])) {
+    return [`全部角色：${values[0]}`]
+  }
+  return modelRoles.map(([role, label]) => `${label}：${profile.models[role]}`)
+}
+
 function tierRequirement(tier: AgentExecutionProfileCapability['min_tier']) {
   if (tier === 'pro') return '最低套餐：Pro 版及以上'
   if (tier === 'enterprise') return '最低套餐：企业版'
@@ -63,8 +93,9 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
   const reason = profile.unavailable_reason
   if (reason === 'requires_pro') return '需要 Pro 套餐'
   if (reason === 'requires_enterprise') return '需要企业版套餐'
-  if (reason === 'provider_configuration_missing') return '当前模型配置未完成'
-  if (reason === 'provider_configuration_invalid') return '当前模型配置不可用'
+  if (reason === 'profile_configuration_missing') return '当前档位尚未配置'
+  if (reason === 'agent_provider_unavailable') return '当前模型服务不可用'
+  if (reason === 'agent_model_cost_unmapped') return '当前模型尚未配置成本'
   return reason || '当前不可用'
 }
 </script>
@@ -125,6 +156,7 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
     font-size: $ab-text-xs;
   }
 
+  &__provider,
   &__model,
   &__tier,
   &__description {
@@ -137,6 +169,12 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
 
   &__description {
     color: $ab-text-tertiary;
+  }
+
+  &__model {
+    font-family: monospace;
+    font-size: $ab-text-xs;
+    overflow-wrap: anywhere;
   }
 
   &__tier {

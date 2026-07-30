@@ -137,9 +137,9 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'cost_effective', display_name: '性价比', model_name: 'DeepSeek 4 Pro', model_id: 'deepseek-v4-pro', description: '适合日常创作', min_tier: 'free', available: true },
-          { id: 'balanced', display_name: '平衡型', model_name: '豆包 Seed Evolving', model_id: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'maximum_quality', display_name: '极致效果', model_name: 'Kimi K3（1M）', model_id: 'k3', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+          { id: 'cost_effective', display_name: '性价比', provider: 'deepseek', protocol: 'anthropic', models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' }, claude: {}, description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', protocol: 'anthropic', models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' }, claude: {}, description: '质量与速度平衡', min_tier: 'pro', available: true },
+          { id: 'maximum_quality', display_name: '极致效果', provider: 'moonshot', protocol: 'anthropic', models: { default: 'kimi-k3[1m]', opus: 'kimi-k3[1m]', fable: 'kimi-k3[1m]', sonnet: 'kimi-k3[1m]', haiku: 'kimi-k3[1m]' }, claude: { effort_level: 'high' }, description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
     },
@@ -300,7 +300,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
-    fireEvent.click(await screen.findByRole('button', { name: /性价比/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^性价比，/ }))
     expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
     expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
@@ -335,7 +335,7 @@ describe('TasksPage bulk clone execution profile', () => {
       skus: [
         { id: 'task.article.cost-effective.v1', operation: 'task.article', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
         { id: 'task.article.balanced.v1', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-        { id: 'task.article.maximum-quality.v1', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
+        { id: 'task.article.maximum-quality.v1', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
       ],
     })
   })
@@ -365,7 +365,7 @@ describe('TasksPage bulk clone execution profile', () => {
     const dialog = await openBulkCloneDialog()
 
     expect(within(dialog).getByText('执行配置')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /性价比.*DeepSeek 4 Pro/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByRole('button', { name: /^性价比，deepseek，deepseek-v4-flash/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText('预计总计 4,800 积分')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认克隆' }))
@@ -394,7 +394,7 @@ describe('TasksPage bulk clone execution profile', () => {
       ],
     })
     const dialog = await openBulkCloneDialog()
-    const balanced = within(dialog).getByRole('button', { name: /平衡型.*豆包 Seed Evolving/ })
+    const balanced = within(dialog).getByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ })
 
     fireEvent.click(balanced)
 

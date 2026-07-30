@@ -76,6 +76,9 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	if !model.IsTerminalTaskStatus(task.Status) {
 		return nil, ErrTaskResumeNotTerminal
 	}
+	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
+		return nil, err
+	}
 	resumeAttachments, latestBody, err := s.persistResumeInputs(ctx, task, prompt, params.Files)
 	if err != nil {
 		return nil, err

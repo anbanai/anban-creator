@@ -333,6 +333,9 @@ func normalizeRuntimeIdentity(identity *model.RuntimeIdentity) (model.RuntimeIde
 }
 
 func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Task) (*model.TaskExecution, bool, error) {
+	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
+		return nil, false, err
+	}
 	target, err := s.runtimeDispatcherScope()
 	if err != nil {
 		return nil, false, err
@@ -379,7 +382,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if parent != nil {
 			parentExecutionID = parent.ID
 		}
-		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 		execution = &profiledExecution
 		execution.ID = uuid.NewString()
 		execution.TaskID = task.ID
@@ -407,6 +410,17 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		return nil, false, err
 	}
 	return execution, created, nil
+}
+
+func (s *TaskService) validateFrozenTaskProfileRuntime(task *model.Task) error {
+	if task == nil {
+		return fmt.Errorf("%w: task is required", ErrAgentProfileSnapshotInvalid)
+	}
+	if s.agentProfiles == nil {
+		return fmt.Errorf("%w: agent profile registry is unavailable", ErrAgentProviderUnavailable)
+	}
+	_, err := s.agentProfiles.ResolveRuntime(task.ExecutionProfile, task.AgentProfileSnapshot, task.AgentProfileFingerprint)
+	return err
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {

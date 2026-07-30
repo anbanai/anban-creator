@@ -227,31 +227,49 @@ func TestAgentExecutionProfilesMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(raw)
+	historical := model.AgentProfileSnapshot{
+		SchemaVersion: 2, ProfileID: "balanced", DisplayName: "平衡型", Provider: "volcengine_ark", Protocol: "anthropic",
+		Models: model.AgentModelMatrix{Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving", Sonnet: "doubao-seed-evolving", Haiku: "doubao-seed-evolving"},
+		Claude: model.AgentClaudeControls{}, ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
+	}
+	fingerprint, err := model.AgentProfileFingerprint(historical)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, fragment := range []string{
 		"ALTER TABLE `tasks`",
 		"ADD COLUMN `execution_profile` varchar(40) NULL",
 		"ADD COLUMN `agent_profile_snapshot` json NULL",
+		"ADD COLUMN `agent_profile_fingerprint` char(64) NULL",
 		"UPDATE `tasks`",
 		"SET `execution_profile` = 'balanced'",
-		"'model_id', 'doubao-seed-evolving'",
+		"'schema_version', 2",
+		"'models', JSON_OBJECT(",
+		"'default', 'doubao-seed-evolving'",
+		"'claude', JSON_OBJECT()",
+		fingerprint,
 		"MODIFY COLUMN `execution_profile` varchar(40) NOT NULL",
 		"MODIFY COLUMN `agent_profile_snapshot` json NOT NULL",
+		"MODIFY COLUMN `agent_profile_fingerprint` char(64) NOT NULL",
 		"ALTER TABLE `plans`",
 		"UPDATE `plans` SET `execution_profile` = 'balanced'",
 		"ALTER TABLE `task_executions`",
+		"ADD COLUMN `execution_profile` varchar(40) NULL",
 		"ADD COLUMN `provider` varchar(80) NULL",
-		"ADD COLUMN `model_id` varchar(128) NULL",
-		"ADD COLUMN `protocol` varchar(32) NULL",
-		"ADD COLUMN `reasoning_effort` varchar(20) NULL",
-		"ADD COLUMN `context_window` int NULL",
+		"ADD COLUMN `model_matrix` json NULL",
+		"ADD COLUMN `claude_controls` json NULL",
+		"ADD COLUMN `profile_fingerprint` char(64) NULL",
 		"UPDATE `task_executions` AS `execution`",
 		"INNER JOIN `tasks` AS `task` ON `task`.`id` = `execution`.`task_id`",
+		"MODIFY COLUMN `execution_profile` varchar(40) NOT NULL",
 		"MODIFY COLUMN `provider` varchar(80) NOT NULL",
-		"MODIFY COLUMN `model_id` varchar(128) NOT NULL",
-		"MODIFY COLUMN `protocol` varchar(32) NOT NULL",
-		"MODIFY COLUMN `reasoning_effort` varchar(20) NOT NULL",
-		"MODIFY COLUMN `context_window` int NOT NULL",
-		"ADD INDEX `idx_task_executions_provider_model` (`provider`, `model_id`)",
+		"MODIFY COLUMN `model_matrix` json NOT NULL",
+		"MODIFY COLUMN `claude_controls` json NOT NULL",
+		"MODIFY COLUMN `profile_fingerprint` char(64) NOT NULL",
+		"DROP COLUMN `model_id`",
+		"DROP COLUMN `protocol`",
+		"DROP COLUMN `reasoning_effort`",
+		"DROP COLUMN `context_window`",
 		"ALTER TABLE `billing_skus`",
 		"ADD COLUMN `execution_profile` varchar(40) NOT NULL DEFAULT ''",
 		"ADD INDEX `idx_billing_skus_execution_profile` (`execution_profile`)",
@@ -267,6 +285,7 @@ func TestAgentExecutionProfilesMigration(t *testing.T) {
 		"DEFAULT 'cost_effective'",
 		"DEFAULT 'balanced'",
 		"ADD COLUMN `provider` varchar(80) NOT NULL",
+		"SHA2(CAST(agent_profile_snapshot AS CHAR)",
 	} {
 		if strings.Contains(sql, forbidden) {
 			t.Errorf("agent execution profiles migration contains premature/default compatibility fragment %q", forbidden)
@@ -274,5 +293,11 @@ func TestAgentExecutionProfilesMigration(t *testing.T) {
 	}
 	if strings.Index(sql, "UPDATE `tasks`") > strings.Index(sql, "MODIFY COLUMN `execution_profile` varchar(40) NOT NULL") {
 		t.Fatal("tasks are constrained before balanced backfill")
+	}
+	if strings.Index(sql, "UPDATE `task_executions` AS `execution`") > strings.Index(sql, "MODIFY COLUMN `model_matrix` json NOT NULL") {
+		t.Fatal("task executions are constrained before snapshot backfill")
+	}
+	if strings.Index(sql, "MODIFY COLUMN `profile_fingerprint` char(64) NOT NULL") > strings.Index(sql, "DROP COLUMN `model_id`") {
+		t.Fatal("legacy execution columns are dropped before final constraints")
 	}
 }

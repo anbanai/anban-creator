@@ -33,9 +33,9 @@ describe('taskCostFor', () => {
       ],
     }
     const profiles = [
-      { id: 'cost_effective' as const, display_name: '性价比', model_name: 'Model A', model_id: 'a', description: '', min_tier: 'free' as const, available: true },
-      { id: 'balanced' as const, display_name: '平衡型', model_name: 'Model B', model_id: 'b', description: '', min_tier: 'pro' as const, available: true },
-      { id: 'maximum_quality' as const, display_name: '极致效果', model_name: 'Model C', model_id: 'c', description: '', min_tier: 'enterprise' as const, available: true },
+      { id: 'cost_effective' as const, display_name: '性价比', provider: 'provider-a', protocol: 'anthropic' as const, models: { default: 'a', opus: 'a', fable: 'a', sonnet: 'a', haiku: 'a' }, claude: {}, description: '', min_tier: 'free' as const, available: true },
+      { id: 'balanced' as const, display_name: '平衡型', provider: 'provider-b', protocol: 'anthropic' as const, models: { default: 'b', opus: 'b', fable: 'b', sonnet: 'b', haiku: 'b' }, claude: {}, description: '', min_tier: 'pro' as const, available: true },
+      { id: 'maximum_quality' as const, display_name: '极致效果', provider: 'provider-c', protocol: 'anthropic' as const, models: { default: 'c', opus: 'c', fable: 'c', sonnet: 'c', haiku: 'c' }, claude: {}, description: '', min_tier: 'enterprise' as const, available: true },
     ]
 
     expect(cheapestAvailableExecutionProfile(profiles, catalog, 'article')).toBe('balanced')

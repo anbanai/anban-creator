@@ -436,12 +436,11 @@ func billingUserID(c fiber.Ctx) (string, bool) {
 }
 
 func writeBillingServiceError(c fiber.Ctx, err error) error {
+	if handled, response := respondAgentProfileError(c, err); handled {
+		return response
+	}
 	switch {
 	case errors.Is(err, service.ErrBillingInvalid):
-		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
-	case errors.Is(err, service.ErrAgentProfileAccessDenied),
-		errors.Is(err, service.ErrAgentProfileNotFound),
-		errors.Is(err, service.ErrAgentProfileUnavailable):
 		return billingErrorResponse(c, fiber.StatusBadRequest, BillingCodeInvalid, "billing_invalid")
 	case errors.Is(err, service.ErrBillingDebtOutstanding):
 		return billingErrorResponse(c, fiber.StatusPaymentRequired, BillingCodeDebtOutstanding, "billing_debt_outstanding")

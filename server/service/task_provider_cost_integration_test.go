@@ -117,6 +117,37 @@ func TestCompleteLocalTaskMissingUsageMarksUnreconciled(t *testing.T) {
 	}
 }
 
+func TestCompleteLocalTaskUnpricedUsageMarksUnreconciled(t *testing.T) {
+	svc, repo, costRepo := setupLocalProviderCostTest(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	claimed, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || claimed.CurrentExecutionID == nil {
+		t.Fatalf("claimed local task has no durable execution identity: task=%#v err=%v", claimed, err)
+	}
+	costSvc := NewProviderCostService(costRepo, providerCostBundleWithTurbo())
+	svc.SetProviderCostService(costSvc)
+
+	result := &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
+		Provider: "moonshot", Model: "unpriced-model", InputTokens: 1,
+	}}}
+	if err := svc.CompleteLocalTask(ctx, taskID, result); err != nil {
+		t.Fatal(err)
+	}
+	executionID := *claimed.CurrentExecutionID
+	status, err := costRepo.FindExecutionCostStatus(ctx, executionID)
+	if err != nil || status.Status != model.BillingProviderCostStatusUnreconciled || status.ReasonCode != model.BillingExecutionCostReasonInvalidTerminalModelUsage {
+		t.Fatalf("execution cost status = %#v err=%v", status, err)
+	}
+	events, err := costRepo.ListEventsByExecution(ctx, executionID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("provider cost events = %#v err=%v, want none", events, err)
+	}
+}
+
 func TestCompleteLocalTaskCostFailureDoesNotChangeTerminalOutcome(t *testing.T) {
 	svc, repo, baseCostRepo := setupLocalProviderCostTest(t)
 	ctx := context.Background()

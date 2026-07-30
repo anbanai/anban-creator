@@ -88,8 +88,15 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 	enqueuer := &recordingEnqueuer{}
 	taskSvc := service.NewTaskService(repo, enqueuer, nil, &logger, "", nil, nil)
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
-		ID: "cost_effective", DisplayName: "Cost effective", ModelName: "DeepSeek 4 Pro", Description: "fixture",
-		Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic", MinTier: model.TierFree, Available: true,
+		ID: "cost_effective", DisplayName: "Cost effective", Description: "fixture",
+		Provider: "deepseek", Protocol: "anthropic",
+		Models: model.AgentModelMatrix{
+			Default: "deepseek-v4-pro", Opus: "deepseek-v4-pro", Fable: "deepseek-v4-pro",
+			Sonnet: "deepseek-v4-pro", Haiku: "deepseek-v4-pro",
+		},
+		ModelUsageAliases: map[string]string{"deepseek-v4-pro": "deepseek-v4-pro"},
+		BaseURL:           "https://anthropic.example.com", AuthToken: "scheduler-test-token",
+		MinTier: model.TierFree, Available: true,
 	}})
 	if err != nil {
 		t.Fatalf("create profile registry: %v", err)

@@ -186,6 +186,9 @@ func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID
 }
 
 func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, reason string, diagnostics []byte) (*model.TaskExecution, bool, error) {
+	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
+		return nil, false, err
+	}
 	target, err := s.runtimeDispatcherScope()
 	if err != nil {
 		return nil, false, err
@@ -217,7 +220,7 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 		if !won {
 			return errPreStartReplacementContended
 		}
-		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot)
+		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot, currentTask.AgentProfileFingerprint)
 		replacement = &profiledExecution
 		replacement.ID = uuid.NewString()
 		replacement.TaskID = task.ID

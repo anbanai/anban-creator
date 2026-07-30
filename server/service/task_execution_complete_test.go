@@ -36,7 +36,20 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
-	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	profiles, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(profiles)
+	profile, err := profiles.Resolve("cost_effective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +61,11 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	if !started {
 		executionStatus = model.TaskExecutionStarting
 	}
-	execution := &model.TaskExecution{
-		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "docker", Status: executionStatus, Started: started,
-		RuntimeProfile: "article", RuntimeImage: "registry/content@sha256:test",
-	}
+	profiledExecution := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
+	execution := &profiledExecution
+	execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), task.ID, 1
+	execution.Target, execution.Status, execution.Started = "docker", executionStatus, started
+	execution.RuntimeProfile, execution.RuntimeImage = "article", "registry/content@sha256:test"
 	if withArtifact {
 		execution.ManifestStatus = model.TaskExecutionManifestPending
 	}

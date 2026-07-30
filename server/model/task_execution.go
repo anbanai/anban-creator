@@ -15,18 +15,20 @@ type RuntimeIdentity struct {
 
 // TaskExecution is one durable cloud execution attempt for a task.
 type TaskExecution struct {
-	ID                 string         `gorm:"type:char(36);primaryKey" json:"id"`
-	TaskID             string         `gorm:"type:char(36);uniqueIndex:idx_task_attempt,priority:1;index;not null" json:"task_id"`
-	Attempt            int            `gorm:"uniqueIndex:idx_task_attempt,priority:2;not null" json:"attempt"`
-	ParentExecutionID  string         `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
-	ResumeSessionID    string         `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
-	RuntimeProfile     string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
-	RuntimeImage       string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
-	Provider           string         `gorm:"type:varchar(80);not null;index:idx_task_executions_provider_model,priority:1" json:"provider,omitempty"`
-	ModelID            string         `gorm:"column:model_id;type:varchar(128);not null;index:idx_task_executions_provider_model,priority:2" json:"model_id,omitempty"`
-	Protocol           string         `gorm:"type:varchar(32);not null" json:"protocol,omitempty"`
-	ReasoningEffort    string         `gorm:"type:varchar(20);not null" json:"reasoning_effort,omitempty"`
-	ContextWindow      int            `gorm:"column:context_window;not null" json:"context_window,omitempty"`
+	ID                string `gorm:"type:char(36);primaryKey" json:"id"`
+	TaskID            string `gorm:"type:char(36);uniqueIndex:idx_task_attempt,priority:1;index;not null" json:"task_id"`
+	Attempt           int    `gorm:"uniqueIndex:idx_task_attempt,priority:2;not null" json:"attempt"`
+	ParentExecutionID string `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
+	ResumeSessionID   string `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
+	RuntimeProfile    string `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
+	RuntimeImage      string `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
+
+	ExecutionProfile   string              `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
+	Provider           string              `gorm:"type:varchar(80);not null;index" json:"provider"`
+	ModelMatrix        AgentModelMatrix    `gorm:"type:json;serializer:json;not null" json:"model_matrix"`
+	ClaudeControls     AgentClaudeControls `gorm:"type:json;serializer:json;not null" json:"claude_controls"`
+	ProfileFingerprint string              `gorm:"type:char(64);not null;index" json:"profile_fingerprint"`
+
 	Target             string         `gorm:"type:varchar(20);not null" json:"target"`
 	Status             string         `gorm:"type:varchar(20);index;not null" json:"status"`
 	DispatchClaimToken string         `gorm:"type:char(36);index" json:"-"`
@@ -59,13 +61,13 @@ type TaskExecution struct {
 
 // NewTaskExecutionAgentProfile copies a frozen task profile into a durable
 // execution attempt without carrying provider credentials.
-func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot) TaskExecution {
+func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot, fingerprint string) TaskExecution {
 	return TaskExecution{
-		Provider:        snapshot.Provider,
-		ModelID:         snapshot.ModelID,
-		Protocol:        snapshot.Protocol,
-		ReasoningEffort: snapshot.ReasoningEffort,
-		ContextWindow:   snapshot.ContextWindow,
+		ExecutionProfile:   snapshot.ProfileID,
+		Provider:           snapshot.Provider,
+		ModelMatrix:        snapshot.Models,
+		ClaudeControls:     snapshot.Claude,
+		ProfileFingerprint: fingerprint,
 	}
 }
 

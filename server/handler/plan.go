@@ -240,6 +240,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		InputAttachments:         req.InputAttachments,
 	})
 	if err != nil {
+		if handled, response := respondAgentProfileError(c, err); handled {
+			return response
+		}
 		if isReferenceAssetError(err) {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
@@ -248,12 +251,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrAgentProfileAccessDenied) {
-			return Error(c, fiber.StatusForbidden, err.Error())
-		}
-		if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -468,17 +465,14 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 	if err != nil {
+		if handled, response := respondAgentProfileError(c, err); handled {
+			return response
+		}
 		if isReferenceAssetError(err) {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		if errors.Is(err, service.ErrPlanUpdateConflict) {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
-		}
-		if errors.Is(err, service.ErrAgentProfileAccessDenied) {
-			return Error(c, fiber.StatusForbidden, err.Error())
-		}
-		if errors.Is(err, service.ErrAgentProfileNotFound) || errors.Is(err, service.ErrAgentProfileUnavailable) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		if errors.Is(err, service.ErrMontageInput) {

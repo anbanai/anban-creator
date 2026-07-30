@@ -2,6 +2,7 @@ import { Separator } from '@/components/ui/separator'
 import { contentTypeLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
+import type { AgentClaudeControls, AgentModelMatrix } from '@/types'
 
 export interface TaskConfigurationDetailsProps {
   task: Task
@@ -74,6 +75,59 @@ function EcommerceSnapshot({ task, project, hasSnapshot }: SnapshotDetailsProps)
   )
 }
 
+const agentModelRoles: Array<[keyof AgentModelMatrix, string]> = [
+  ['default', '默认'], ['opus', 'Opus'], ['fable', 'Fable'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'],
+]
+
+const claudeControlLabels: Array<[keyof AgentClaudeControls, string]> = [
+  ['effort_level', '推理强度'],
+  ['always_enable_effort', '始终启用推理'],
+  ['max_context_tokens', '最大上下文'],
+  ['max_output_tokens', '最大输出'],
+  ['max_thinking_tokens', '最大思考 Token'],
+  ['disable_adaptive_thinking', '关闭自适应思考'],
+  ['disable_thinking', '关闭思考'],
+  ['auto_compact_window', '自动压缩窗口'],
+  ['autocompact_pct_override', '自动压缩阈值'],
+  ['disable_1m_context', '关闭 1M 上下文'],
+  ['subagent_model', '子 Agent 模型'],
+  ['enable_tool_search', '启用工具搜索'],
+]
+
+function displayControlValue(value: string | number | boolean): string {
+  if (typeof value === 'boolean') return value ? '开启' : '关闭'
+  return typeof value === 'number' ? value.toLocaleString() : value
+}
+
+function AgentProfileDetails({ task }: { task: Task }) {
+  const snapshot = task.agent_profile_snapshot
+  if (!snapshot) return null
+  const models = Object.values(snapshot.models)
+  const uniform = models.every((value) => value === models[0])
+  const configuredControls = claudeControlLabels.flatMap(([key, label]) => {
+    const value = snapshot.claude[key]
+    return value === undefined ? [] : [`${label}：${displayControlValue(value)}`]
+  })
+
+  return (
+    <section aria-labelledby="task-agent-profile" className="flex flex-col gap-3">
+      <h3 id="task-agent-profile" className="text-sm font-semibold">Agent 执行配置</h3>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <Detail label="档位" value={snapshot.display_name} />
+        <Detail label="Provider" value={snapshot.provider} />
+        {uniform ? (
+          <Detail label="模型矩阵" value={`全部角色：${models[0]}`} wide />
+        ) : agentModelRoles.map(([role, label]) => (
+          <Detail key={role} label={`${label}模型`} value={snapshot.models[role]} />
+        ))}
+        {configuredControls.length ? (
+          <Detail label="Claude 参数" value={configuredControls.join('；')} wide />
+        ) : null}
+      </dl>
+    </section>
+  )
+}
+
 export function TaskConfigurationDetails({ task, project }: TaskConfigurationDetailsProps) {
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
@@ -91,6 +145,12 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
 
   return (
     <div className="flex flex-col gap-5">
+      {task.agent_profile_snapshot ? (
+        <>
+          <AgentProfileDetails task={task} />
+          <Separator />
+        </>
+      ) : null}
       <section aria-labelledby="task-project-snapshot" className="flex flex-col gap-3">
         <h3 id="task-project-snapshot" className="text-sm font-semibold">项目快照</h3>
         <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">

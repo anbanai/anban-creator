@@ -159,21 +159,23 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
-		"ANBAN_AGENT_EXECUTOR":            "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL":   "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
-		"ANBAN_AGENT_NAMESPACE":           "${namespace}",
-		"ANBAN_AGENT_IMAGE_ARTICLE":       "${article_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_SEEDNOTE":      "${seednote_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_MONTAGE":       "${montage_agent_image_repo}",
-		"ANBAN_AGENT_SERVICE_ACCOUNT":     "creator-agent-runner",
-		"ANBAN_AGENT_SERVER_CA_SECRET":    "anban-internal-ca",
-		"ANBAN_AGENT_IMAGE_PULL_SECRET":   "${imagePullSecret}",
-		"ANBAN_AGENT_NAS_STORAGE_CLASS":   "nas-sc-creator",
-		"ANBAN_AGENT_PROJECT_MEMORY_SIZE": "1Gi",
-		"ANBAN_AGENT_TASK_WORKSPACE_SIZE": "10Gi",
-		"ANBAN_SERVER_TLS_CERT_FILE":      "/var/run/secrets/anban-server-tls/tls.crt",
-		"ANBAN_SERVER_TLS_KEY_FILE":       "/var/run/secrets/anban-server-tls/tls.key",
-		"SSL_CERT_FILE":                   "/var/run/secrets/anban-internal-ca/ca.crt",
+		"ANBAN_AGENT_EXECUTOR":              "kubernetes",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL":     "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
+		"ANBAN_AGENT_NAMESPACE":             "${namespace}",
+		"ANBAN_AGENT_IMAGE_ARTICLE":         "${article_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE":        "${seednote_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_MONTAGE":         "${montage_agent_image_repo}",
+		"ANBAN_AGENT_SERVICE_ACCOUNT":       "creator-agent-runner",
+		"ANBAN_AGENT_SERVER_CA_SECRET":      "anban-internal-ca",
+		"ANBAN_AGENT_IMAGE_PULL_SECRET":     "${imagePullSecret}",
+		"ANBAN_AGENT_NAS_STORAGE_CLASS":     "nas-sc-creator",
+		"ANBAN_AGENT_PROJECT_MEMORY_SIZE":   "1Gi",
+		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":   "10Gi",
+		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":    "https://open.bigmodel.cn/api/anthropic",
+		"ANBAN_SERVER_TLS_CERT_FILE":        "/var/run/secrets/anban-server-tls/tls.crt",
+		"ANBAN_SERVER_TLS_KEY_FILE":         "/var/run/secrets/anban-server-tls/tls.key",
+		"SSL_CERT_FILE":                     "/var/run/secrets/anban-internal-ca/ca.crt",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
@@ -211,9 +213,13 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL": "deepseek-anthropic-base-url",
 		"ANBAN_DEEPSEEK_API_KEY":            "deepseek-api-key",
 		"ANBAN_DOUBAO_AGENT_API_KEY":        "doubao-api-key",
-		"ANBAN_KIMI_API_KEY":                "kimi-api-key",
+		"ANBAN_MOONSHOT_API_KEY":            "moonshot-api-key",
+		"ANBAN_ZHIPU_API_KEY":               "zhipu-api-key",
 	} {
 		assertOptionalDeploymentSecretEnv(t, deployment, envName, "anban-agent-profile-providers", secretKey)
+	}
+	if _, ok := env["ANBAN_KIMI_API_KEY"]; ok {
+		t.Fatal("server deployment retains removed ANBAN_KIMI_API_KEY")
 	}
 	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
 	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})

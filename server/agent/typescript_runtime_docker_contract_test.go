@@ -34,3 +34,25 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 		t.Fatal("TypeScript anban launcher must exec the compiled Node entrypoint")
 	}
 }
+
+func TestTypeScriptRuntimeDockerfilesShareLockedSDKWithOptionalPackages(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{"Dockerfile.agent-article-ts", "Dockerfile.agent-seednote-ts", "Dockerfile.agent-montage-ts"} {
+		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
+		for _, required := range []string{
+			"COPY agent-ts/package.json agent-ts/package-lock.json ./",
+			"RUN npm ci",
+			"npm prune --omit=dev",
+			"test -d node_modules/@anthropic-ai/claude-agent-sdk",
+		} {
+			if !strings.Contains(body, required) {
+				t.Errorf("%s missing locked SDK install contract %q", name, required)
+			}
+		}
+		for _, forbidden := range []string{"--omit=optional", "--no-optional", "CLAUDE_CODE_VERSION", "@anthropic-ai/claude-agent-sdk@"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s overrides the shared SDK dependency contract with %q", name, forbidden)
+			}
+		}
+	}
+}

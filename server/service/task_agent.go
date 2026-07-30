@@ -267,5 +267,8 @@ func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *mode
 		ExecutionID: executionID, TaskID: task.ID, CatalogID: s.providerCostSvc.catalogID, Entries: entries,
 	}); err != nil {
 		s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("record terminal provider cost; typed evidence remains retryable")
+		if markErr := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage); markErr != nil {
+			s.logger.Error().Err(markErr).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark failed terminal provider cost unreconciled")
+		}
 	}
 }

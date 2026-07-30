@@ -3,25 +3,37 @@
 
 ALTER TABLE `tasks`
   ADD COLUMN `execution_profile` varchar(40) NULL,
-  ADD COLUMN `agent_profile_snapshot` json NULL;
+  ADD COLUMN `agent_profile_snapshot` json NULL,
+  ADD COLUMN `agent_profile_fingerprint` char(64) NULL;
 
 UPDATE `tasks`
 SET `execution_profile` = 'balanced',
     `agent_profile_snapshot` = JSON_OBJECT(
+      'schema_version', 2,
       'profile_id', 'balanced',
+      'display_name', '平衡型',
       'provider', 'volcengine_ark',
-      'model_id', 'doubao-seed-evolving',
       'protocol', 'anthropic',
-      'context_window', 0,
-      'reasoning_effort', '',
-      'thinking_required', false,
-      'display_name', '平衡型'
-    );
+      'models', JSON_OBJECT(
+        'default', 'doubao-seed-evolving',
+        'opus', 'doubao-seed-evolving',
+        'fable', 'doubao-seed-evolving',
+        'sonnet', 'doubao-seed-evolving',
+        'haiku', 'doubao-seed-evolving'
+      ),
+      'claude', JSON_OBJECT(),
+      'model_usage_aliases', JSON_OBJECT(
+        'doubao-seed-evolving', 'doubao-seed-evolving'
+      )
+    ),
+    `agent_profile_fingerprint` = 'c7f2d8997f92b789fe732f3398f16183cdb085eb09e7a1eb8b3480fefcc8fa9d';
 
 ALTER TABLE `tasks`
   MODIFY COLUMN `execution_profile` varchar(40) NOT NULL,
   MODIFY COLUMN `agent_profile_snapshot` json NOT NULL,
-  ADD INDEX `idx_tasks_execution_profile` (`execution_profile`);
+  MODIFY COLUMN `agent_profile_fingerprint` char(64) NOT NULL,
+  ADD INDEX `idx_tasks_execution_profile` (`execution_profile`),
+  ADD INDEX `idx_tasks_agent_profile_fingerprint` (`agent_profile_fingerprint`);
 
 ALTER TABLE `plans`
   ADD COLUMN `execution_profile` varchar(40) NULL;
@@ -33,27 +45,33 @@ ALTER TABLE `plans`
   ADD INDEX `idx_plans_execution_profile` (`execution_profile`);
 
 ALTER TABLE `task_executions`
+  ADD COLUMN `execution_profile` varchar(40) NULL,
   ADD COLUMN `provider` varchar(80) NULL,
-  ADD COLUMN `model_id` varchar(128) NULL,
-  ADD COLUMN `protocol` varchar(32) NULL,
-  ADD COLUMN `reasoning_effort` varchar(20) NULL,
-  ADD COLUMN `context_window` int NULL;
+  ADD COLUMN `model_matrix` json NULL,
+  ADD COLUMN `claude_controls` json NULL,
+  ADD COLUMN `profile_fingerprint` char(64) NULL;
 
 UPDATE `task_executions` AS `execution`
 INNER JOIN `tasks` AS `task` ON `task`.`id` = `execution`.`task_id`
-SET `execution`.`provider` = JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.provider')),
-    `execution`.`model_id` = JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.model_id')),
-    `execution`.`protocol` = JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.protocol')),
-    `execution`.`reasoning_effort` = COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.reasoning_effort')), ''),
-    `execution`.`context_window` = COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.context_window')) AS UNSIGNED), 0);
+SET `execution`.`execution_profile` = `task`.`execution_profile`,
+    `execution`.`provider` = JSON_UNQUOTE(JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.provider')),
+    `execution`.`model_matrix` = JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.models'),
+    `execution`.`claude_controls` = JSON_EXTRACT(`task`.`agent_profile_snapshot`, '$.claude'),
+    `execution`.`profile_fingerprint` = `task`.`agent_profile_fingerprint`;
 
 ALTER TABLE `task_executions`
+  MODIFY COLUMN `execution_profile` varchar(40) NOT NULL,
   MODIFY COLUMN `provider` varchar(80) NOT NULL,
-  MODIFY COLUMN `model_id` varchar(128) NOT NULL,
-  MODIFY COLUMN `protocol` varchar(32) NOT NULL,
-  MODIFY COLUMN `reasoning_effort` varchar(20) NOT NULL,
-  MODIFY COLUMN `context_window` int NOT NULL,
-  ADD INDEX `idx_task_executions_provider_model` (`provider`, `model_id`);
+  MODIFY COLUMN `model_matrix` json NOT NULL,
+  MODIFY COLUMN `claude_controls` json NOT NULL,
+  MODIFY COLUMN `profile_fingerprint` char(64) NOT NULL,
+  ADD INDEX `idx_task_executions_execution_profile` (`execution_profile`),
+  ADD INDEX `idx_task_executions_provider` (`provider`),
+  ADD INDEX `idx_task_executions_profile_fingerprint` (`profile_fingerprint`),
+  DROP COLUMN `model_id`,
+  DROP COLUMN `protocol`,
+  DROP COLUMN `reasoning_effort`,
+  DROP COLUMN `context_window`;
 
 ALTER TABLE `billing_skus`
   ADD COLUMN `execution_profile` varchar(40) NOT NULL DEFAULT '',

@@ -20,13 +20,14 @@ import (
 )
 
 var (
-	ErrBillingConflict        = errors.New("billing idempotency conflict")
-	ErrBillingInvalid         = errors.New("invalid billing request")
-	ErrBillingSKUNotFound     = errors.New("billing SKU not found")
-	ErrBillingCatalogNotFound = errors.New("billing catalog not found")
-	ErrBillingUserNotFound    = errors.New("billing user not found")
-	ErrBillingQuoteExpired    = errors.New("billing quote expired")
-	ErrBillingQuoteConsumed   = errors.New("billing quote already consumed")
+	ErrBillingConflict           = errors.New("billing idempotency conflict")
+	ErrBillingInvalid            = errors.New("invalid billing request")
+	ErrBillingSKUNotFound        = errors.New("billing SKU not found")
+	ErrBillingCatalogNotFound    = errors.New("billing catalog not found")
+	ErrBillingUserNotFound       = errors.New("billing user not found")
+	ErrBillingQuoteExpired       = errors.New("billing quote expired")
+	ErrBillingQuoteConsumed      = errors.New("billing quote already consumed")
+	ErrBillingProfileSKUNotFound = errors.New("billing profile SKU not found")
 )
 
 const defaultBillingQuoteTTL = 5 * time.Minute
@@ -435,12 +436,15 @@ func (s *BillingCatalogService) CreateTaskQuote(ctx context.Context, req TaskQuo
 	if err != nil {
 		return nil, err
 	}
-	profileSnapshot := profile.Snapshot()
+	profileSnapshot, _, err := profile.Freeze()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
+	}
 	quoteRequest.AgentProfileSnapshot = &profileSnapshot
 	resolved, err := s.ResolvePriceForExecutionProfile(ctx, canonical.UserID, "", operation, canonical.ExecutionProfile)
 	if err != nil {
 		if errors.Is(err, ErrBillingSKUNotFound) {
-			return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingInvalid)
+			return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingProfileSKUNotFound)
 		}
 		return nil, err
 	}
@@ -463,7 +467,7 @@ func (s *BillingCatalogService) CreateTaskQuote(ctx context.Context, req TaskQuo
 	}
 	quote, err := s.CreateQuote(ctx, quoteRequest)
 	if errors.Is(err, ErrBillingSKUNotFound) {
-		return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingInvalid)
+		return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingProfileSKUNotFound)
 	}
 	return quote, err
 }

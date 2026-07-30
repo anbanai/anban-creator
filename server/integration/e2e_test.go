@@ -93,8 +93,13 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	planSvc := service.NewPlanService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, &noopEnqueuer{}, nil, &logger, "", nil, nil)
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
-		ID: "balanced", DisplayName: "Balanced", ModelName: "Integration test model",
-		Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic",
+		ID: "balanced", DisplayName: "Balanced", Provider: "volcengine_ark", Protocol: "anthropic",
+		Models: model.AgentModelMatrix{
+			Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving",
+			Sonnet: "doubao-seed-evolving", Haiku: "doubao-seed-evolving",
+		},
+		ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
+		BaseURL:           "https://anthropic.example.com", AuthToken: "integration-token",
 		MinTier: model.TierFree, Available: true,
 	}})
 	if err != nil {

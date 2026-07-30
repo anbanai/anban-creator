@@ -238,21 +238,23 @@ func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecution
 	}
 }
 
-func TestRunnerOptionsApplyFrozenReasoningControls(t *testing.T) {
+func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing.T) {
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
-		Model: "k3", ReasoningEffort: "high", ThinkingRequired: true,
+		Model: "k3", RuntimeEnv: map[string]string{
+			"CLAUDE_CODE_EFFORT_LEVEL": "high", "MAX_THINKING_TOKENS": "0", "ENABLE_TOOL_SEARCH": "false",
+		},
 	}, nil, nil)
 	opts, err := runner.buildSDKOptions(context.Background())
 	if err != nil {
 		t.Fatalf("buildSDKOptions: %v", err)
 	}
 	got := claudecode.NewOptions(opts...)
-	if got.Effort == nil || *got.Effort != string(claudecode.EffortHigh) {
-		t.Fatalf("effort = %#v, want high", got.Effort)
+	if got.Effort != nil || got.ExtraArgs["thinking"] != nil {
+		t.Fatalf("legacy reasoning options = effort %#v, thinking %#v", got.Effort, got.ExtraArgs["thinking"])
 	}
-	if thinking := got.ExtraArgs["thinking"]; thinking == nil || *thinking != "adaptive" {
-		t.Fatalf("thinking = %#v, want adaptive", thinking)
+	if got.ExtraEnv["CLAUDE_CODE_EFFORT_LEVEL"] != "high" || got.ExtraEnv["MAX_THINKING_TOKENS"] != "0" || got.ExtraEnv["ENABLE_TOOL_SEARCH"] != "false" {
+		t.Fatalf("frozen Claude control environment = %#v", got.ExtraEnv)
 	}
 }
 

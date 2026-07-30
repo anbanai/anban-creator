@@ -183,10 +183,13 @@ func TestClaimLocalTaskRejectsManagedProfile(t *testing.T) {
 
 	deadline := time.Now().Add(LocalClaimWindow)
 	task := newLocalSeedTask(t, repo, userID, projectID, &deadline)
-	task.ExecutionProfile = "cost_effective"
-	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
-		ProfileID: "cost_effective", Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic", DisplayName: "Cost effective",
+	snapshot, fingerprint, err := testAgentProfiles()[0].Freeze()
+	if err != nil {
+		t.Fatal(err)
 	}
+	task.ExecutionProfile = snapshot.ProfileID
+	task.AgentProfileSnapshot = snapshot
+	task.AgentProfileFingerprint = fingerprint
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatalf("update task profile: %v", err)
 	}
