@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"time"
 
 	"gorm.io/datatypes"
@@ -65,10 +66,58 @@ func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot, fingerprint str
 	return TaskExecution{
 		ExecutionProfile:   snapshot.ProfileID,
 		Provider:           snapshot.Provider,
-		ModelMatrix:        snapshot.Models,
-		ClaudeControls:     snapshot.Claude,
+		ModelMatrix: AgentModelMatrix{
+			Default: snapshot.Envs[ClaudeEnvModel],
+			Opus:    snapshot.Envs[claudeEnvDefaultOpusModel],
+			Fable:   snapshot.Envs[claudeEnvDefaultFableModel],
+			Sonnet:  snapshot.Envs[claudeEnvDefaultSonnetModel],
+			Haiku:   snapshot.Envs[claudeEnvDefaultHaikuModel],
+		},
+		ClaudeControls: AgentClaudeControls{
+			EffortLevel:             claudeEnvString(snapshot.Envs, claudeEnvEffortLevel),
+			AlwaysEnableEffort:      claudeEnvBool(snapshot.Envs, claudeEnvAlwaysEnableEffort),
+			MaxContextTokens:        claudeEnvInt(snapshot.Envs, claudeEnvMaxContextTokens),
+			MaxOutputTokens:         claudeEnvInt(snapshot.Envs, claudeEnvMaxOutputTokens),
+			MaxThinkingTokens:       claudeEnvInt(snapshot.Envs, claudeEnvMaxThinkingTokens),
+			DisableAdaptiveThinking: claudeEnvBool(snapshot.Envs, claudeEnvDisableAdaptiveThinking),
+			DisableThinking:         claudeEnvBool(snapshot.Envs, claudeEnvDisableThinking),
+			AutoCompactWindow:       claudeEnvInt(snapshot.Envs, claudeEnvAutoCompactWindow),
+			AutocompactPctOverride:  claudeEnvInt(snapshot.Envs, claudeEnvAutocompactPctOverride),
+			Disable1MContext:        claudeEnvBool(snapshot.Envs, claudeEnvDisable1MContext),
+			SubagentModel:           claudeEnvString(snapshot.Envs, claudeEnvSubagentModel),
+			EnableToolSearch:        claudeEnvBool(snapshot.Envs, claudeEnvEnableToolSearch),
+		},
 		ProfileFingerprint: fingerprint,
 	}
+}
+
+func claudeEnvString(envs map[string]string, key string) *string {
+	value, exists := envs[key]
+	if !exists {
+		return nil
+	}
+	return &value
+}
+
+func claudeEnvBool(envs map[string]string, key string) *bool {
+	value, exists := envs[key]
+	if !exists || (value != "true" && value != "false") {
+		return nil
+	}
+	parsed := value == "true"
+	return &parsed
+}
+
+func claudeEnvInt(envs map[string]string, key string) *int {
+	value, exists := envs[key]
+	if !exists {
+		return nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }
 
 const (

@@ -35,30 +35,61 @@ func TestTaskExecutionStoresOnlyFrozenRuntimeIdentity(t *testing.T) {
 			t.Fatalf("TaskExecution must not duplicate task snapshot field %s", redundant)
 		}
 	}
-	disabled := false
-	snapshot := AgentProfileSnapshot{
-		SchemaVersion: 2, ProfileID: "maximum_quality", Provider: "moonshot", Protocol: "anthropic", DisplayName: "Kimi K3（1M）",
-		Models:            AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
-		Claude:            AgentClaudeControls{EnableToolSearch: &disabled},
-		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
-	}
+	snapshot := validAgentProfileSnapshot()
+	snapshot.Envs = withClaudeEnvs(snapshot.Envs, map[string]string{
+		ClaudeEnvAuthToken:                      "must-not-persist",
+		"CLAUDE_CODE_EFFORT_LEVEL":              "high",
+		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":      "true",
+		"MAX_THINKING_TOKENS":                   "0",
+		"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
+		"CLAUDE_CODE_DISABLE_THINKING":          "true",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":        "1000000",
+		"CLAUDE_CODE_MAX_OUTPUT_TOKENS":         "64000",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":       "800000",
+		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":       "80",
+		"CLAUDE_CODE_DISABLE_1M_CONTEXT":        "false",
+		"CLAUDE_CODE_SUBAGENT_MODEL":            "opus-model",
+		"ENABLE_TOOL_SEARCH":                    "false",
+	})
 	execution := NewTaskExecutionAgentProfile(snapshot, strings.Repeat("a", 64))
-	if execution.ExecutionProfile != "maximum_quality" || execution.Provider != "moonshot" || execution.ModelMatrix.Default != "kimi-k3[1m]" || execution.ClaudeControls.EnableToolSearch == nil || *execution.ClaudeControls.EnableToolSearch || execution.ProfileFingerprint != strings.Repeat("a", 64) {
+	if execution.ExecutionProfile != "maximum_quality" || execution.Provider != "moonshot" ||
+		execution.ModelMatrix != (AgentModelMatrix{Default: "default-model", Opus: "opus-model", Fable: "fable-model", Sonnet: "sonnet-model", Haiku: "haiku-model"}) ||
+		execution.ClaudeControls.EffortLevel == nil || *execution.ClaudeControls.EffortLevel != "high" ||
+		execution.ClaudeControls.AlwaysEnableEffort == nil || !*execution.ClaudeControls.AlwaysEnableEffort ||
+		execution.ClaudeControls.MaxThinkingTokens == nil || *execution.ClaudeControls.MaxThinkingTokens != 0 ||
+		execution.ClaudeControls.DisableAdaptiveThinking == nil || *execution.ClaudeControls.DisableAdaptiveThinking ||
+		execution.ClaudeControls.DisableThinking == nil || !*execution.ClaudeControls.DisableThinking ||
+		execution.ClaudeControls.MaxContextTokens == nil || *execution.ClaudeControls.MaxContextTokens != 1000000 ||
+		execution.ClaudeControls.MaxOutputTokens == nil || *execution.ClaudeControls.MaxOutputTokens != 64000 ||
+		execution.ClaudeControls.AutoCompactWindow == nil || *execution.ClaudeControls.AutoCompactWindow != 800000 ||
+		execution.ClaudeControls.AutocompactPctOverride == nil || *execution.ClaudeControls.AutocompactPctOverride != 80 ||
+		execution.ClaudeControls.Disable1MContext == nil || *execution.ClaudeControls.Disable1MContext ||
+		execution.ClaudeControls.SubagentModel == nil || *execution.ClaudeControls.SubagentModel != "opus-model" ||
+		execution.ClaudeControls.EnableToolSearch == nil || *execution.ClaudeControls.EnableToolSearch ||
+		execution.ProfileFingerprint != strings.Repeat("a", 64) {
 		t.Fatalf("execution = %#v", execution)
+	}
+	raw, err := json.Marshal(execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "must-not-persist") || strings.Contains(string(raw), ClaudeEnvAuthToken) {
+		t.Fatalf("execution persisted auth token: %s", raw)
 	}
 }
 
 func TestAgentProfileSnapshotFingerprintIsCanonical(t *testing.T) {
-	disabled := false
-	first := AgentProfileSnapshot{
-		SchemaVersion: 2, ProfileID: "maximum_quality", DisplayName: "极致效果",
-		Provider: "moonshot", Protocol: "anthropic",
-		Models:            AgentModelMatrix{Default: "kimi-k3[1m]", Opus: "kimi-k3[1m]", Fable: "kimi-k3[1m]", Sonnet: "kimi-k3[1m]", Haiku: "kimi-k3[1m]"},
-		Claude:            AgentClaudeControls{EnableToolSearch: &disabled},
-		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3", "kimi-k3": "kimi-k3"},
-	}
+	first := validAgentProfileSnapshot()
 	second := first
-	second.ModelUsageAliases = map[string]string{"kimi-k3": "kimi-k3", "kimi-k3[1m]": "kimi-k3"}
+	second.Envs = map[string]string{
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku-model", "ANTHROPIC_DEFAULT_SONNET_MODEL": "sonnet-model",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL": "fable-model", ClaudeEnvBaseURL: "https://api.example.com/anthropic",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL": "opus-model", ClaudeEnvModel: "default-model",
+	}
+	second.ModelUsageAliases = map[string]string{
+		"sonnet-model": "sonnet", "opus-model": "opus", "haiku-model": "haiku",
+		"fable-model": "fable", "default-model": "default",
+	}
 	a, err := AgentProfileFingerprint(first)
 	if err != nil {
 		t.Fatal(err)
@@ -75,15 +106,76 @@ func TestAgentProfileSnapshotFingerprintIsCanonical(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(raw)
-	for _, required := range []string{`"schema_version":2`, `"models":`, `"claude":`, `"enable_tool_search":false`, `"model_usage_aliases":`} {
+	for _, required := range []string{`"schema_version":3`, `"envs":`, `"ANTHROPIC_BASE_URL":"https://api.example.com/anthropic"`, `"model_usage_aliases":`} {
 		if !strings.Contains(encoded, required) {
 			t.Fatalf("snapshot JSON omitted %q: %s", required, encoded)
 		}
 	}
-	for _, forbidden := range []string{"base_url", "auth_token", "secret", "endpoint"} {
+	for _, forbidden := range []string{"auth_token", "secret-token"} {
 		if strings.Contains(strings.ToLower(encoded), forbidden) {
 			t.Fatalf("snapshot JSON leaked %q: %s", forbidden, encoded)
 		}
+	}
+	changed := first
+	changed.Envs = CloneClaudeProfileEnvs(first.Envs)
+	changed.Envs[ClaudeEnvBaseURL] = "https://other.example.com/anthropic"
+	c, err := AgentProfileFingerprint(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == a {
+		t.Fatal("fingerprint did not change when a redacted env changed")
+	}
+}
+
+func TestAgentProfileSnapshotValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*AgentProfileSnapshot)
+	}{
+		{name: "valid", mutate: func(*AgentProfileSnapshot) {}},
+		{name: "schema v2", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.SchemaVersion = 2 }},
+		{name: "missing profile id", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ProfileID = "" }},
+		{name: "missing display name", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.DisplayName = " " }},
+		{name: "missing provider", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Provider = "" }},
+		{name: "wrong protocol", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Protocol = "openai" }},
+		{name: "auth token", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Envs[ClaudeEnvAuthToken] = "secret-token" }},
+		{name: "invalid env", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Envs["UNKNOWN"] = "value" }},
+		{name: "missing referenced model alias", mutate: func(snapshot *AgentProfileSnapshot) { delete(snapshot.ModelUsageAliases, "opus-model") }},
+		{name: "empty alias source", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases[""] = "default" }},
+		{name: "empty alias target", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases["extra"] = " " }},
+		{name: "alias target contains slash", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases["extra"] = "provider/model" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := validAgentProfileSnapshot()
+			tt.mutate(&snapshot)
+			err := ValidateAgentProfileSnapshot(snapshot)
+			if tt.name == "valid" && err != nil {
+				t.Fatalf("ValidateAgentProfileSnapshot() error = %v", err)
+			}
+			if tt.name != "valid" && err == nil {
+				t.Fatal("ValidateAgentProfileSnapshot() error = nil, want error")
+			}
+		})
+	}
+}
+
+func validAgentProfileSnapshot() AgentProfileSnapshot {
+	return AgentProfileSnapshot{
+		SchemaVersion: ClaudeProfileSchemaV3,
+		ProfileID:     "maximum_quality",
+		DisplayName:   "Maximum quality",
+		Provider:      "moonshot",
+		Protocol:      "anthropic",
+		Envs:          validClaudeProfileEnvs(),
+		ModelUsageAliases: map[string]string{
+			"default-model": "default",
+			"opus-model":    "opus",
+			"fable-model":   "fable",
+			"sonnet-model":  "sonnet",
+			"haiku-model":   "haiku",
+		},
 	}
 }
 
