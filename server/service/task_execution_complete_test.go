@@ -41,7 +41,7 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		t.Fatal(err)
 	}
 	svc.SetAgentProfileRegistry(profiles)
-	profile, err := profiles.Resolve("cost_effective")
+	profile, err := profiles.Resolve("effective")
 	if err != nil {
 		t.Fatal(err)
 	}

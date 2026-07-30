@@ -67,8 +67,7 @@ func applyBootstrapTestProfile(t *testing.T, svc *AgentBootstrapService, task *m
 	profiled := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	execution.ExecutionProfile = profiled.ExecutionProfile
 	execution.Provider = profiled.Provider
-	execution.ModelMatrix = profiled.ModelMatrix
-	execution.ClaudeControls = profiled.ClaudeControls
+	execution.ProfileEnvs = profiled.ProfileEnvs
 	execution.ProfileFingerprint = profiled.ProfileFingerprint
 }
 

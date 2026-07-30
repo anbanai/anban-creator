@@ -113,10 +113,10 @@ func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profiled := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
 		ProfileID: snapshot.ProfileID, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
-		Models: profiled.ModelMatrix, Claude: profiled.ClaudeControls, DisplayName: snapshot.DisplayName,
+		Models: model.AgentModelMatrixFromClaudeProfileEnvs(snapshot.Envs),
+		Claude: model.AgentClaudeControlsFromClaudeProfileEnvs(snapshot.Envs), DisplayName: snapshot.DisplayName,
 		ProfileFingerprint: fingerprint, RuntimeEnv: profile.RuntimeEnv(),
 		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3[1m]": {Provider: "moonshot", Model: "kimi-k3"}},
 	}})
@@ -203,8 +203,10 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	}{
 		{name: "profile id", mutate: func(candidate *model.TaskExecution) { candidate.ExecutionProfile = "balanced" }},
 		{name: "provider", mutate: func(candidate *model.TaskExecution) { candidate.Provider = "other-provider" }},
-		{name: "model matrix", mutate: func(candidate *model.TaskExecution) { candidate.ModelMatrix.Default = "other-model" }},
-		{name: "Claude controls", mutate: func(candidate *model.TaskExecution) { candidate.ClaudeControls = model.AgentClaudeControls{} }},
+		{name: "profile envs", mutate: func(candidate *model.TaskExecution) {
+			candidate.ProfileEnvs = model.CloneClaudeProfileEnvs(candidate.ProfileEnvs)
+			candidate.ProfileEnvs[model.ClaudeEnvModel] = "other-model"
+		}},
 		{name: "fingerprint", mutate: func(candidate *model.TaskExecution) { candidate.ProfileFingerprint = strings.Repeat("f", 64) }},
 	} {
 		t.Run("rejects drifted "+test.name, func(t *testing.T) {

@@ -30,7 +30,7 @@ func TestExecutionProfileColumnsHaveNoDatabaseDefault(t *testing.T) {
 
 func TestTaskExecutionStoresOnlyFrozenRuntimeIdentity(t *testing.T) {
 	executionType := reflect.TypeOf(TaskExecution{})
-	for _, redundant := range []string{"AgentProfileID", "AgentProfileSnapshot", "ModelID", "Protocol", "ReasoningEffort", "ContextWindow"} {
+	for _, redundant := range []string{"AgentProfileID", "AgentProfileSnapshot", "ModelID", "Protocol", "ReasoningEffort", "ContextWindow", "ModelMatrix", "ClaudeControls"} {
 		if _, exists := executionType.FieldByName(redundant); exists {
 			t.Fatalf("TaskExecution must not duplicate task snapshot field %s", redundant)
 		}
@@ -52,22 +52,19 @@ func TestTaskExecutionStoresOnlyFrozenRuntimeIdentity(t *testing.T) {
 		"ENABLE_TOOL_SEARCH":                    "false",
 	})
 	execution := NewTaskExecutionAgentProfile(snapshot, strings.Repeat("a", 64))
-	if execution.ExecutionProfile != "maximum_quality" || execution.Provider != "moonshot" ||
-		execution.ModelMatrix != (AgentModelMatrix{Default: "default-model", Opus: "opus-model", Fable: "fable-model", Sonnet: "sonnet-model", Haiku: "haiku-model"}) ||
-		execution.ClaudeControls.EffortLevel == nil || *execution.ClaudeControls.EffortLevel != "high" ||
-		execution.ClaudeControls.AlwaysEnableEffort == nil || !*execution.ClaudeControls.AlwaysEnableEffort ||
-		execution.ClaudeControls.MaxThinkingTokens == nil || *execution.ClaudeControls.MaxThinkingTokens != 0 ||
-		execution.ClaudeControls.DisableAdaptiveThinking == nil || *execution.ClaudeControls.DisableAdaptiveThinking ||
-		execution.ClaudeControls.DisableThinking == nil || !*execution.ClaudeControls.DisableThinking ||
-		execution.ClaudeControls.MaxContextTokens == nil || *execution.ClaudeControls.MaxContextTokens != 1000000 ||
-		execution.ClaudeControls.MaxOutputTokens == nil || *execution.ClaudeControls.MaxOutputTokens != 64000 ||
-		execution.ClaudeControls.AutoCompactWindow == nil || *execution.ClaudeControls.AutoCompactWindow != 800000 ||
-		execution.ClaudeControls.AutocompactPctOverride == nil || *execution.ClaudeControls.AutocompactPctOverride != 80 ||
-		execution.ClaudeControls.Disable1MContext == nil || *execution.ClaudeControls.Disable1MContext ||
-		execution.ClaudeControls.SubagentModel == nil || *execution.ClaudeControls.SubagentModel != "opus-model" ||
-		execution.ClaudeControls.EnableToolSearch == nil || *execution.ClaudeControls.EnableToolSearch ||
+	if execution.ExecutionProfile != "quality" || execution.Provider != "moonshot" ||
+		execution.ProfileEnvs[ClaudeEnvModel] != "default-model" ||
+		execution.ProfileEnvs["CLAUDE_CODE_EFFORT_LEVEL"] != "high" ||
+		execution.ProfileEnvs["MAX_THINKING_TOKENS"] != "0" ||
 		execution.ProfileFingerprint != strings.Repeat("a", 64) {
 		t.Fatalf("execution = %#v", execution)
+	}
+	if _, ok := execution.ProfileEnvs[ClaudeEnvAuthToken]; ok {
+		t.Fatal("execution profile envs contain auth token")
+	}
+	snapshot.Envs[ClaudeEnvModel] = "changed"
+	if execution.ProfileEnvs[ClaudeEnvModel] == "changed" {
+		t.Fatal("execution profile envs alias task snapshot")
 	}
 	raw, err := json.Marshal(execution)
 	if err != nil {
@@ -164,7 +161,7 @@ func TestAgentProfileSnapshotValidation(t *testing.T) {
 func validAgentProfileSnapshot() AgentProfileSnapshot {
 	return AgentProfileSnapshot{
 		SchemaVersion: ClaudeProfileSchemaV3,
-		ProfileID:     "maximum_quality",
+		ProfileID:     "quality",
 		DisplayName:   "Maximum quality",
 		Provider:      "moonshot",
 		Protocol:      "anthropic",
@@ -196,11 +193,10 @@ func TestAgentExecutionProfileSchemaMatchesMigrationContract(t *testing.T) {
 
 	assertTagContains(t, Task{}, "AgentProfileSnapshot", "type:json", "serializer:json", "not null")
 	assertTagContains(t, Task{}, "AgentProfileFingerprint", "type:char(64)", "not null")
-	for _, fieldName := range []string{"ExecutionProfile", "Provider", "ModelMatrix", "ClaudeControls", "ProfileFingerprint"} {
+	for _, fieldName := range []string{"ExecutionProfile", "Provider", "ProfileEnvs", "ProfileFingerprint"} {
 		assertTagContains(t, TaskExecution{}, fieldName, "not null")
 	}
-	assertTagContains(t, TaskExecution{}, "ModelMatrix", "type:json", "serializer:json")
-	assertTagContains(t, TaskExecution{}, "ClaudeControls", "type:json", "serializer:json")
+	assertTagContains(t, TaskExecution{}, "ProfileEnvs", "type:json", "serializer:json")
 	assertTagContains(t, TaskExecution{}, "ProfileFingerprint", "type:char(64)", "index")
 	assertTagContains(t, BillingSKU{}, "ExecutionProfile", "not null", "default:''", "index:idx_billing_skus_execution_profile", "index:idx_billing_skus_catalog_operation_profile,priority:3")
 	assertTagContains(t, BillingSKU{}, "CatalogID", "index:idx_billing_skus_catalog_operation_profile,priority:1")

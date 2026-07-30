@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -467,7 +468,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		t.Fatal(err)
 	}
 	svc.SetAgentProfileRegistry(profiles)
-	profile, err := profiles.Resolve("cost_effective")
+	profile, err := profiles.Resolve("effective")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -885,7 +886,7 @@ func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t
 		t.Fatalf("createCurrentExecution = %#v, %v, created=%v", execution, err, created)
 	}
 	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
-	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelMatrix != profiled.ModelMatrix || execution.ProfileFingerprint != task.AgentProfileFingerprint {
+	if execution.Provider != task.AgentProfileSnapshot.Provider || !reflect.DeepEqual(execution.ProfileEnvs, profiled.ProfileEnvs) || execution.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("execution profile = %#v, want frozen runtime identity %#v", execution, task.AgentProfileSnapshot)
 	}
 }
@@ -920,7 +921,7 @@ func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t
 		t.Fatalf("replacePreStartExecution = %#v, replaced=%v, err=%v", replacement, replaced, err)
 	}
 	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
-	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelMatrix != profiled.ModelMatrix || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
+	if replacement.Provider != task.AgentProfileSnapshot.Provider || !reflect.DeepEqual(replacement.ProfileEnvs, profiled.ProfileEnvs) || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
 	}
 }

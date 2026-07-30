@@ -24,11 +24,10 @@ type TaskExecution struct {
 	RuntimeProfile    string `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
 	RuntimeImage      string `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
 
-	ExecutionProfile   string              `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
-	Provider           string              `gorm:"type:varchar(80);not null;index" json:"provider"`
-	ModelMatrix        AgentModelMatrix    `gorm:"type:json;serializer:json;not null" json:"model_matrix"`
-	ClaudeControls     AgentClaudeControls `gorm:"type:json;serializer:json;not null" json:"claude_controls"`
-	ProfileFingerprint string              `gorm:"type:char(64);not null;index" json:"profile_fingerprint"`
+	ExecutionProfile   string            `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
+	Provider           string            `gorm:"type:varchar(80);not null;index" json:"provider"`
+	ProfileEnvs        map[string]string `gorm:"type:json;serializer:json;not null" json:"profile_envs"`
+	ProfileFingerprint string            `gorm:"type:char(64);not null;index" json:"profile_fingerprint"`
 
 	Target             string         `gorm:"type:varchar(20);not null" json:"target"`
 	Status             string         `gorm:"type:varchar(20);index;not null" json:"status"`
@@ -66,28 +65,39 @@ func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot, fingerprint str
 	return TaskExecution{
 		ExecutionProfile:   snapshot.ProfileID,
 		Provider:           snapshot.Provider,
-		ModelMatrix: AgentModelMatrix{
-			Default: snapshot.Envs[ClaudeEnvModel],
-			Opus:    snapshot.Envs[claudeEnvDefaultOpusModel],
-			Fable:   snapshot.Envs[claudeEnvDefaultFableModel],
-			Sonnet:  snapshot.Envs[claudeEnvDefaultSonnetModel],
-			Haiku:   snapshot.Envs[claudeEnvDefaultHaikuModel],
-		},
-		ClaudeControls: AgentClaudeControls{
-			EffortLevel:             claudeEnvString(snapshot.Envs, claudeEnvEffortLevel),
-			AlwaysEnableEffort:      claudeEnvBool(snapshot.Envs, claudeEnvAlwaysEnableEffort),
-			MaxContextTokens:        claudeEnvInt(snapshot.Envs, claudeEnvMaxContextTokens),
-			MaxOutputTokens:         claudeEnvInt(snapshot.Envs, claudeEnvMaxOutputTokens),
-			MaxThinkingTokens:       claudeEnvInt(snapshot.Envs, claudeEnvMaxThinkingTokens),
-			DisableAdaptiveThinking: claudeEnvBool(snapshot.Envs, claudeEnvDisableAdaptiveThinking),
-			DisableThinking:         claudeEnvBool(snapshot.Envs, claudeEnvDisableThinking),
-			AutoCompactWindow:       claudeEnvInt(snapshot.Envs, claudeEnvAutoCompactWindow),
-			AutocompactPctOverride:  claudeEnvInt(snapshot.Envs, claudeEnvAutocompactPctOverride),
-			Disable1MContext:        claudeEnvBool(snapshot.Envs, claudeEnvDisable1MContext),
-			SubagentModel:           claudeEnvString(snapshot.Envs, claudeEnvSubagentModel),
-			EnableToolSearch:        claudeEnvBool(snapshot.Envs, claudeEnvEnableToolSearch),
-		},
+		ProfileEnvs:        RedactClaudeProfileEnvs(snapshot.Envs),
 		ProfileFingerprint: fingerprint,
+	}
+}
+
+// AgentModelMatrixFromClaudeProfileEnvs is a temporary Bootstrap bridge while
+// the legacy response contract still exposes role-specific model fields.
+func AgentModelMatrixFromClaudeProfileEnvs(envs map[string]string) AgentModelMatrix {
+	return AgentModelMatrix{
+		Default: envs[ClaudeEnvModel],
+		Opus:    envs[claudeEnvDefaultOpusModel],
+		Fable:   envs[claudeEnvDefaultFableModel],
+		Sonnet:  envs[claudeEnvDefaultSonnetModel],
+		Haiku:   envs[claudeEnvDefaultHaikuModel],
+	}
+}
+
+// AgentClaudeControlsFromClaudeProfileEnvs is the matching temporary bridge
+// for the legacy Bootstrap controls object.
+func AgentClaudeControlsFromClaudeProfileEnvs(envs map[string]string) AgentClaudeControls {
+	return AgentClaudeControls{
+		EffortLevel:             claudeEnvString(envs, claudeEnvEffortLevel),
+		AlwaysEnableEffort:      claudeEnvBool(envs, claudeEnvAlwaysEnableEffort),
+		MaxContextTokens:        claudeEnvInt(envs, claudeEnvMaxContextTokens),
+		MaxOutputTokens:         claudeEnvInt(envs, claudeEnvMaxOutputTokens),
+		MaxThinkingTokens:       claudeEnvInt(envs, claudeEnvMaxThinkingTokens),
+		DisableAdaptiveThinking: claudeEnvBool(envs, claudeEnvDisableAdaptiveThinking),
+		DisableThinking:         claudeEnvBool(envs, claudeEnvDisableThinking),
+		AutoCompactWindow:       claudeEnvInt(envs, claudeEnvAutoCompactWindow),
+		AutocompactPctOverride:  claudeEnvInt(envs, claudeEnvAutocompactPctOverride),
+		Disable1MContext:        claudeEnvBool(envs, claudeEnvDisable1MContext),
+		SubagentModel:           claudeEnvString(envs, claudeEnvSubagentModel),
+		EnableToolSearch:        claudeEnvBool(envs, claudeEnvEnableToolSearch),
 	}
 }
 
