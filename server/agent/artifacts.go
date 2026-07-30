@@ -72,6 +72,11 @@ func isNonSubstantiveTool(name string) bool {
 
 func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful int) ArtifactValidation {
 	result := ArtifactValidation{MeaningfulFileCount: meaningful}
+	if task != nil && (task.Type == model.PlatformSeednote || task.Type == model.TaskTypeViralAnalysis) && files["failure-state.json"] {
+		result.Missing = []string{"successful seednote completion"}
+		result.Reason = "seednote reported a recoverable failure; inspect failure-state.json"
+		return result
+	}
 	if task != nil && task.Type == model.TaskTypeViralAnalysis {
 		var missing []string
 		for _, name := range []string{"source-analysis.md", "viral-template.json", "template-meta.json"} {
@@ -125,12 +130,6 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		}
 		return result
 	}
-	if files["failure-state.json"] {
-		result.Missing = []string{"successful seednote completion"}
-		result.Reason = "seednote reported a recoverable failure; inspect failure-state.json"
-		return result
-	}
-
 	var missing []string
 	for _, name := range []string{
 		"content.md",
