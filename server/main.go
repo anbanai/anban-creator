@@ -314,7 +314,7 @@ func main() {
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var templateSvc *service.TemplateService
-	var viralAnalysisSvc *service.ViralAnalysisService
+	var viralAnalysisHistorySvc *service.ViralAnalysisHistoryService
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
@@ -417,10 +417,9 @@ func main() {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), nil, asynqClient, log)
 		log.Info().Bool("llm_configured", false).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
-			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), nil, asynqClient, log)
-			viralAnalysisSvc.SetBillingServices(fixedBilling.Catalog, fixedBilling.Wallet)
+			viralAnalysisHistorySvc = service.NewViralAnalysisHistoryService(repo)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
-			log.Info().Bool("llm_configured", false).Msg("Viral analysis service initialized")
+			log.Info().Msg("Viral analysis history service initialized")
 		}
 	}
 
@@ -537,8 +536,8 @@ func main() {
 		if store != nil {
 			templateHandler.SetStore(store)
 		}
-		if viralAnalysisSvc != nil {
-			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
+		if viralAnalysisHistorySvc != nil {
+			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisHistorySvc, log)
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
@@ -670,7 +669,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, viralAnalysisSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -688,7 +687,7 @@ func main() {
 	if repo != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
+		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, posterSvc, log)
 	}
 
 	// 15.3 Start the local-claim fallback worker (every 10s). Flips
@@ -1044,7 +1043,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteDiscoverHandler scheduler.SeednoteTrackingHandler
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
@@ -1053,13 +1052,6 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		}
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
 			return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
-		}
-	}
-
-	var viralAnalysisHandler scheduler.ViralAnalysisHandler
-	if viralAnalysisSvc != nil {
-		viralAnalysisHandler = func(ctx context.Context, analysisID string) error {
-			return viralAnalysisSvc.ExecuteAnalysis(ctx, analysisID)
 		}
 	}
 
@@ -1072,7 +1064,6 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		},
 		seednoteDiscoverHandler,
 		seednoteCaptureHandler,
-		viralAnalysisHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
@@ -1112,7 +1103,7 @@ func parseLogLevel(level string) zerolog.Level {
 }
 
 // startPeriodicArtifactCleanup removes expirable derived records without touching NAS task workspaces.
-func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
+func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -1120,11 +1111,6 @@ func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskServ
 		if taskSvc != nil {
 			if _, err := taskSvc.CleanupSupersededTaskFileObjects(ctx, 100); err != nil {
 				log.Error().Err(err).Msg("superseded task file object cleanup failed")
-			}
-		}
-		if viralSvc != nil {
-			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
-				log.Error().Err(err).Msg("viral analysis cleanup failed")
 			}
 		}
 		if posterSvc != nil {

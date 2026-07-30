@@ -177,7 +177,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-28-v5"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-29-v6"); err != nil {
 			t.Fatalf("published production catalog: %v", err)
 		}
 	})
@@ -198,7 +198,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if _, err := buildBillingRuntime(t.Context(), db, repo, cfg, &logger); err != nil {
 			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
 		}
-		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-28-v5"} {
+		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-29-v6"} {
 			if _, err := repo.Billing().FindCatalogVersion(t.Context(), catalogID); err != nil {
 				t.Fatalf("catalog %s not preserved: %v", catalogID, err)
 			}

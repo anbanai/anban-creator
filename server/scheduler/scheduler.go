@@ -19,7 +19,6 @@ const (
 	TypePlanTrigger            = "plan:trigger"
 	TypeSeednoteDiscover       = "seednote:discover"
 	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
-	TypeViralAnalysis          = "viral:analyze"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -114,16 +113,12 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 // SeednoteTrackingHandler is the function signature for SeedNote tracking jobs.
 type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 
-// ViralAnalysisHandler is the function signature for viral analysis jobs.
-type ViralAnalysisHandler func(ctx context.Context, analysisID string) error
-
 // NewTaskProcessor creates a configured Asynq task processor with registered handlers.
 func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
 	seednoteDiscoverHandler SeednoteTrackingHandler,
 	seednoteCaptureHandler SeednoteTrackingHandler,
-	viralAnalysisHandler ViralAnalysisHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
 	concurrency int,
@@ -183,21 +178,6 @@ func NewTaskProcessor(
 			return fmt.Errorf("seednote capture handler unavailable")
 		}
 		return seednoteCaptureHandler(ctx, trackingID)
-	})
-
-	mux.HandleFunc(TypeViralAnalysis, func(ctx context.Context, t *asynq.Task) error {
-		var payload struct {
-			AnalysisID string `json:"analysis_id"`
-		}
-		if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-			logger.Error().Err(err).Msg("failed to unmarshal viral analysis payload")
-			return fmt.Errorf("unmarshal payload: %w", err)
-		}
-		logger.Info().Str("analysis_id", payload.AnalysisID).Msg("processing viral analysis task")
-		if viralAnalysisHandler == nil {
-			return fmt.Errorf("viral analysis handler unavailable")
-		}
-		return viralAnalysisHandler(ctx, payload.AnalysisID)
 	})
 
 	srv := asynq.NewServer(

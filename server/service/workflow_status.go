@@ -13,19 +13,22 @@ import (
 const (
 	WorkflowVersionCreationV1 = "creation_workflow_v1"
 
-	WorkflowStageTopic           = "topic"
-	WorkflowStageOutline         = "outline"
-	WorkflowStageDraft           = "draft"
-	WorkflowStageHumanize        = "humanize"
-	WorkflowStageSEO             = "seo"
-	WorkflowStageCover           = "cover"
-	WorkflowStageHTML            = "html"
-	WorkflowStageDraftPackage    = "draft_package"
-	WorkflowStagePublishOptional = "publish_optional"
-	WorkflowStageReview          = "review"
-	WorkflowStageContentScript   = "content_script"
-	WorkflowStageVisualPlan      = "visual_plan"
-	WorkflowStageImages          = "images"
+	WorkflowStageTopic             = "topic"
+	WorkflowStageOutline           = "outline"
+	WorkflowStageDraft             = "draft"
+	WorkflowStageHumanize          = "humanize"
+	WorkflowStageSEO               = "seo"
+	WorkflowStageCover             = "cover"
+	WorkflowStageHTML              = "html"
+	WorkflowStageDraftPackage      = "draft_package"
+	WorkflowStagePublishOptional   = "publish_optional"
+	WorkflowStageReview            = "review"
+	WorkflowStageContentScript     = "content_script"
+	WorkflowStageVisualPlan        = "visual_plan"
+	WorkflowStageImages            = "images"
+	WorkflowStageSourceNote        = "source_note"
+	WorkflowStageEvidenceAnalysis  = "evidence_analysis"
+	WorkflowStageTemplateArtifacts = "template_artifacts"
 
 	WorkflowStageStatusPending   = "pending"
 	WorkflowStageStatusCompleted = "completed"
@@ -101,6 +104,9 @@ func DetermineWorkflowArtifactRole(fileName, mimeType string) string {
 }
 
 func BuildWorkflowStatus(taskType string, files []*model.TaskFile, reviewJSON []byte) (*WorkflowStatus, error) {
+	if taskType == model.TaskTypeViralAnalysis {
+		return buildViralAnalysisWorkflowStatus(files), nil
+	}
 	artifactPathsByRole := make(map[string][]string)
 	for _, file := range files {
 		role := DetermineWorkflowArtifactRole(file.FileName, file.MimeType)
@@ -134,6 +140,32 @@ func BuildWorkflowStatus(taskType string, files []*model.TaskFile, reviewJSON []
 	}
 
 	return status, nil
+}
+
+func buildViralAnalysisWorkflowStatus(files []*model.TaskFile) *WorkflowStatus {
+	pathsByName := make(map[string][]string)
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		name := strings.ToLower(filepath.Base(file.FileName))
+		path := file.FilePath
+		if path == "" {
+			path = file.FileName
+		}
+		pathsByName[name] = append(pathsByName[name], path)
+	}
+	for name := range pathsByName {
+		sort.Strings(pathsByName[name])
+	}
+	templatePaths := append(copyStrings(pathsByName["template-meta.json"]), pathsByName["viral-template.json"]...)
+	sort.Strings(templatePaths)
+	stages := []WorkflowStage{
+		buildStage(WorkflowStageSourceNote, "源笔记", pathsByName["source-analysis.md"]),
+		buildStage(WorkflowStageEvidenceAnalysis, "证据分析", pathsByName["source-analysis.md"]),
+		buildStage(WorkflowStageTemplateArtifacts, "模板产物", templatePaths),
+	}
+	return &WorkflowStatus{Version: WorkflowVersionCreationV1, CurrentStage: currentWorkflowStage(stages), Stages: stages}
 }
 
 func buildWorkflowStages(taskType string, artifactPathsByRole map[string][]string) []WorkflowStage {

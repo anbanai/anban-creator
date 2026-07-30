@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,7 +68,6 @@ func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 			captured = append(captured, trackingID)
 			return nil
 		},
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -90,6 +90,20 @@ func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 	}
 }
 
+func TestTaskProcessorDoesNotRegisterLegacyViralAnalysisJob(t *testing.T) {
+	logger := zerolog.Nop()
+	processor := NewTaskProcessor(
+		func(context.Context, string, string) error { return nil },
+		func(context.Context, string) error { return nil },
+		nil, nil,
+		"127.0.0.1:6379", "", 0, 1, &logger,
+	)
+	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask("viral:"+"analyze", []byte(`{"analysis_id":"legacy"}`)))
+	if err == nil || !strings.Contains(err.Error(), "handler not found") {
+		t.Fatalf("legacy viral job error = %v, want handler not found", err)
+	}
+}
+
 func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
 	logger := zerolog.Nop()
 	var triggered []string
@@ -99,7 +113,6 @@ func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
 			triggered = append(triggered, planID)
 			return nil
 		},
-		nil,
 		nil,
 		nil,
 		"127.0.0.1:6379",
@@ -126,7 +139,6 @@ func TestTaskProcessor_PlanTriggerHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context, planID string) error { return wantErr },
 		nil,
 		nil,
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -148,7 +160,6 @@ func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context, planID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return wantErr },
-		nil,
 		"127.0.0.1:6379",
 		"",
 		0,

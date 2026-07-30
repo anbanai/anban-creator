@@ -333,8 +333,9 @@ func (s *TaskService) StorageProviderName() string {
 }
 
 var (
-	ErrMontageInput                = errors.New("montage input invalid")
-	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
+	ErrMontageInput                         = errors.New("montage input invalid")
+	ErrTaskCreationProjectInactive          = errors.New("task creation project is not active")
+	ErrViralAnalysisRequiresSeednoteProject = errors.New("viral analysis requires a Seednote project")
 )
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
@@ -346,9 +347,10 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID           string
-	ProjectID        string
-	ExecutionProfile string
+	UserID            string
+	ProjectID         string
+	ExecutionProfile  string
+	RequestedTaskType string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType        string
@@ -519,6 +521,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	taskType := project.Platform
+	if p.RequestedTaskType == model.TaskTypeViralAnalysis {
+		if project.Platform != model.PlatformSeednote {
+			return nil, ErrViralAnalysisRequiresSeednoteProject
+		}
+		taskType = model.TaskTypeViralAnalysis
+	}
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}

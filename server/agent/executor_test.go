@@ -312,6 +312,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
 		{model.TaskTypeLiveSlicer, "live-slicer"},
+		{model.TaskTypeViralAnalysis, "seednote"},
 		{"unknown", "seednote"},
 	}
 
@@ -322,6 +323,15 @@ func TestTaskTypeToAgent(t *testing.T) {
 				t.Errorf("TaskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskTypeToAgentViralAnalysisIsAnExplicitRoute(t *testing.T) {
+	if got, explicit := taskTypeToAgentRoute(model.TaskTypeViralAnalysis); got != "seednote" || !explicit {
+		t.Fatalf("viral analysis route = %q, explicit=%v; want seednote/true", got, explicit)
+	}
+	if got, explicit := taskTypeToAgentRoute("unknown"); got != "seednote" || explicit {
+		t.Fatalf("unknown fallback = %q, explicit=%v; want seednote/false", got, explicit)
 	}
 }
 
@@ -344,6 +354,7 @@ func TestDefaultMaxTurns(t *testing.T) {
 	}{
 		{model.ScopeArticle, 100},
 		{model.ScopeSeednote, 60},
+		{model.TaskTypeViralAnalysis, 60},
 		{"unknown", 40},
 	}
 

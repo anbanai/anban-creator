@@ -251,6 +251,32 @@ func TestBillingRoutes(t *testing.T) {
 	}
 }
 
+func TestViralAnalysisRoutesAreHistoryReadOnly(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config: &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}}, Logger: &logger,
+		ViralAnalysisHandler: handler.NewViralAnalysisHandler(nil, &logger),
+	})
+	want := map[string]bool{
+		http.MethodGet + " /api/v1/viral-analyses/":    false,
+		http.MethodGet + " /api/v1/viral-analyses/:id": false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if route.Method == http.MethodPost && route.Path == "/api/v1/viral-analyses/" {
+			t.Fatalf("legacy write route is still registered: %s", key)
+		}
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing history route %s", route)
+		}
+	}
+}
+
 func TestAgentExecutionProfileRoute(t *testing.T) {
 	app := NewRouter(&Services{
 		Config:              &config.Config{},

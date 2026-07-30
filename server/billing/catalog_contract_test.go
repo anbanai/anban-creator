@@ -389,11 +389,17 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 			}
 		}
 	}
-	want["task.viral-analysis.standard.v1"] = skuSnapshot{
-		operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200,
-		delivery: "viral_analysis_report_verified",
+	for profile, suffix := range map[string]string{
+		"cost_effective":  "cost-effective",
+		"balanced":        "balanced",
+		"maximum_quality": "maximum-quality",
+	} {
+		want["task.viral-analysis."+suffix+".v2"] = skuSnapshot{
+			operation: "task.viral_analysis", executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200,
+			delivery: "viral_analysis_report_verified",
+		}
 	}
-	if catalog.CatalogID != "retail-2026-07-28-v5" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
+	if catalog.CatalogID != "retail-2026-07-29-v6" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))

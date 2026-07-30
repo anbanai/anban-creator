@@ -72,6 +72,21 @@ func isNonSubstantiveTool(name string) bool {
 
 func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful int) ArtifactValidation {
 	result := ArtifactValidation{MeaningfulFileCount: meaningful}
+	if task != nil && task.Type == model.TaskTypeViralAnalysis {
+		var missing []string
+		for _, name := range []string{"source-analysis.md", "viral-template.json", "template-meta.json"} {
+			if !files[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			result.Missing = missing
+			result.Reason = "viral analysis missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
 	if task != nil && task.Type == model.PlatformMoments {
 		var missing []string
 		for _, name := range []string{"material-analysis.md", "content.md", "quality-review.md"} {

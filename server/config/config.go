@@ -722,7 +722,7 @@ type RuntimeImages map[string]string
 
 func canonicalRuntimeProfile(taskType string) string {
 	switch strings.TrimSpace(taskType) {
-	case model.PlatformSeednote:
+	case model.PlatformSeednote, model.TaskTypeViralAnalysis:
 		return model.PlatformSeednote
 	case model.PlatformMontage:
 		return model.PlatformMontage
@@ -1145,11 +1145,10 @@ func (c *Config) applyDefaults() {
 
 	// Claude executor defaults.
 	defaultMaxTurns := map[string]int{
-		"moments":        25,
-		"viral_analysis": 30,
-		"seednote":       50,
-		"article":        60,
-		"ecommerce":      90,
+		"moments":   25,
+		"seednote":  50,
+		"article":   60,
+		"ecommerce": 90,
 	}
 	if c.Claude.MaxTurns == nil {
 		c.Claude.MaxTurns = defaultMaxTurns

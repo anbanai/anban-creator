@@ -121,6 +121,31 @@ func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateManualViralAnalysisRequiresSeednoteProject(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	seednoteProjectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	params := CreateManualParams{
+		UserID: userID, ProjectID: seednoteProjectID, RequestedTaskType: model.TaskTypeViralAnalysis,
+		ExecutionProfile: "cost_effective", Prompt: "https://example.com/note/1", Quantity: 1,
+	}
+	tasks, err := svc.CreateManual(ctx, params)
+	if err != nil {
+		t.Fatalf("CreateManual viral analysis: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Type != model.TaskTypeViralAnalysis {
+		t.Fatalf("tasks = %#v, want one viral_analysis task", tasks)
+	}
+
+	articleProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	params.ProjectID = articleProjectID
+	_, err = svc.CreateManual(ctx, params)
+	if !errors.Is(err, ErrViralAnalysisRequiresSeednoteProject) {
+		t.Fatalf("article viral analysis error = %v, want ErrViralAnalysisRequiresSeednoteProject", err)
+	}
+}
+
 func injectTestAgentProfiles(t *testing.T, svc *TaskService) {
 	t.Helper()
 	registry, err := NewAgentProfileRegistry(testAgentProfiles())

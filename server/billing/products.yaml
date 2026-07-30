@@ -1,4 +1,4 @@
-catalog_id: "retail-2026-07-28-v5"
+catalog_id: "retail-2026-07-29-v6"
 currency: "credits"
 pricing_model: "tier_matrix_v1"
 skus:
@@ -112,8 +112,23 @@ skus:
     tier_prices: { free: 3000, pro: 2700, enterprise: 2400 }
     delivery: "montage_artifacts_verified"
 
-  - id: "task.viral-analysis.standard.v1"
+  - id: "task.viral-analysis.cost-effective.v2"
     operation: "task.viral_analysis"
+    execution_profile: "cost_effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
+    delivery: "viral_analysis_report_verified"
+  - id: "task.viral-analysis.balanced.v2"
+    operation: "task.viral_analysis"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
+    delivery: "viral_analysis_report_verified"
+  - id: "task.viral-analysis.maximum-quality.v2"
+    operation: "task.viral_analysis"
+    execution_profile: "maximum_quality"
     charge_policy: "task_admission"
     price_credits: 1200
     tier_prices: { free: 1200, pro: 1080, enterprise: 960 }

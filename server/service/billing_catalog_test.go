@@ -271,6 +271,66 @@ func TestCreateTaskQuoteRequiresAProfiledCurrentCatalogSKU(t *testing.T) {
 	}
 }
 
+func TestCreateTaskQuoteViralAnalysisRequiresExactExecutionProfileSKU(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle, err := billing.LoadBundle(filepath.Join("..", "billing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{})
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: billingCatalogUserID, PaidCredits: 10_000}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		profile string
+		skuID   string
+	}{
+		{profile: "cost_effective", skuID: "task.viral-analysis.cost-effective.v2"},
+		{profile: "balanced", skuID: "task.viral-analysis.balanced.v2"},
+		{profile: "maximum_quality", skuID: "task.viral-analysis.maximum-quality.v2"},
+	} {
+		t.Run(tt.profile, func(t *testing.T) {
+			quote, err := svc.CreateTaskQuote(ctx, TaskQuoteRequest{
+				UserID: billingCatalogUserID, TaskType: model.TaskTypeViralAnalysis, ExecutionProfile: tt.profile,
+				RequestFingerprint: billingFingerprint("viral-" + tt.profile),
+				IdempotencyScope:   "viral-quote", IdempotencyKey: tt.profile,
+			})
+			if err != nil {
+				t.Fatalf("CreateTaskQuote: %v", err)
+			}
+			if quote.SKUID != tt.skuID {
+				t.Fatalf("SKU = %q, want %q", quote.SKUID, tt.skuID)
+			}
+		})
+	}
+	_, err = svc.CreateTaskQuote(ctx, TaskQuoteRequest{
+		UserID: billingCatalogUserID, TaskType: model.TaskTypeViralAnalysis,
+		RequestFingerprint: billingFingerprint("viral-empty-profile"),
+		IdempotencyScope:   "viral-quote", IdempotencyKey: "empty-profile",
+	})
+	if !errors.Is(err, ErrBillingInvalid) {
+		t.Fatalf("empty execution profile error = %v, want ErrBillingInvalid", err)
+	}
+}
+
 func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *testing.T) {
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)

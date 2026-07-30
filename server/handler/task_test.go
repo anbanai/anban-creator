@@ -30,6 +30,15 @@ import (
 
 type noopTaskEnqueuer struct{}
 
+type capturedTaskEnqueue struct {
+	taskType string
+	payload  []byte
+}
+
+type capturingTaskEnqueuer struct {
+	items []capturedTaskEnqueue
+}
+
 type availableRuntimeDispatcher struct{}
 
 func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
@@ -100,6 +109,19 @@ func (noopTaskEnqueuer) EnqueueUnique(string, []byte, string) (bool, error) {
 	return true, nil
 }
 
+func (e *capturingTaskEnqueuer) Enqueue(taskType string, payload []byte) error {
+	e.items = append(e.items, capturedTaskEnqueue{taskType: taskType, payload: append([]byte(nil), payload...)})
+	return nil
+}
+
+func (e *capturingTaskEnqueuer) EnqueueIn(taskType string, payload []byte, _ time.Duration) error {
+	return e.Enqueue(taskType, payload)
+}
+
+func (e *capturingTaskEnqueuer) EnqueueUnique(taskType string, payload []byte, _ string) (bool, error) {
+	return true, e.Enqueue(taskType, payload)
+}
+
 func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
@@ -161,6 +183,131 @@ func TestCreateTaskRejectsMissingExecutionProfile(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "execution_profile is required") {
 		t.Fatalf("body = %s, want execution_profile validation error", body)
+	}
+}
+
+func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "Viral analysis", Status: model.ProjectStatusActive}
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "viralmanaged"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := billing.LoadBundle("../billing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := catalog.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: userID, PaidCredits: 5_000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateLot(ctx, &model.BillingCreditLot{
+		ID: uuid.NewString(), UserID: userID, Kind: model.BillingCreditLotKindPaid,
+		SourceType: "fixture", SourceID: "viral-managed", CatalogID: bundle.Products.CatalogID,
+		OriginalCredits: 5_000, AvailableCredits: 5_000, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	enqueuer := &capturingTaskEnqueuer{}
+	logger := zerolog.New(io.Discard)
+	taskSvc := newHandlerTaskService(t, repo, enqueuer, nil, &logger, "", nil, nil)
+	taskSvc.SetBillingCatalogService(catalog)
+	taskSvc.SetBillingWalletService(service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{Now: func() time.Time { return now }}))
+	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+	h := NewTaskHandler(taskSvc, &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	body := `{"project_id":"` + project.ID + `","type":"viral_analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","execution_profile":"cost_effective","quantity":1}`
+	resp := postJSON(t, app, "/tasks", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, data)
+	}
+	data := decodeEnvelopeRawData(t, resp)
+	var taskID string
+	if err := json.Unmarshal(data["id"], &taskID); err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Type != model.TaskTypeViralAnalysis || task.ExecutionProfile != "cost_effective" || task.AgentProfileSnapshot.ProfileID != "cost_effective" {
+		t.Fatalf("task contract = %#v", task)
+	}
+	if task.BillingCatalogID != "retail-2026-07-29-v6" || task.BillingSKUID != "task.viral-analysis.cost-effective.v2" {
+		t.Fatalf("task billing = %q/%q", task.BillingCatalogID, task.BillingSKUID)
+	}
+	quote, err := repo.Billing().FindQuoteByKey(ctx, "task-admission-quote", task.ID)
+	if err != nil {
+		t.Fatalf("find task admission quote: %v", err)
+	}
+	var frozenSKU billing.SKUConfig
+	if err := json.Unmarshal(quote.SKUSnapshot, &frozenSKU); err != nil {
+		t.Fatalf("decode task admission SKU: %v", err)
+	}
+	if frozenSKU.Operation != "task.viral_analysis" || frozenSKU.ExecutionProfile != "cost_effective" || frozenSKU.ID != task.BillingSKUID {
+		t.Fatalf("task admission SKU = %#v", frozenSKU)
+	}
+	if len(enqueuer.items) != 1 || enqueuer.items[0].taskType != service.TypeContentGenerate {
+		t.Fatalf("queue = %#v, want one content generate", enqueuer.items)
+	}
+	var queued map[string]string
+	if err := json.Unmarshal(enqueuer.items[0].payload, &queued); err != nil || queued["task_id"] != task.ID || queued["user_id"] != userID {
+		t.Fatalf("queued payload = %#v, %v", queued, err)
+	}
+	if err := taskSvc.HandleExecutionFromPayload(ctx, task.ID, userID); err != nil {
+		t.Fatalf("HandleExecutionFromPayload: %v", err)
+	}
+	if _, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID); err != nil {
+		t.Fatalf("find current task execution: %v", err)
+	}
+}
+
+func TestCreateViralAnalysisTaskValidatesRequestedTypeAgainstProjectPlatform(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		platform string
+		taskType string
+	}{
+		{name: "viral analysis requires seednote", platform: model.PlatformArticle, taskType: model.TaskTypeViralAnalysis},
+		{name: "ordinary type must match project", platform: model.PlatformSeednote, taskType: model.PlatformArticle},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			userID := uuid.NewString()
+			projectID := uuid.NewString()
+			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "typeguard"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Projects().Create(t.Context(), &model.Project{ID: projectID, UserID: userID, Platform: tt.platform, Name: tt.name, Status: model.ProjectStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+			h := NewTaskHandler(taskSvc, &logger)
+			app := fiber.New()
+			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","type":"`+tt.taskType+`","prompt":"source","execution_profile":"cost_effective","quantity":1}`)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, body)
+			}
+		})
 	}
 }
 
