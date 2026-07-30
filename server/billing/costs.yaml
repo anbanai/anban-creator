@@ -1,4 +1,4 @@
-catalog_id: "provider-cost-2026-07-22-v3"
+catalog_id: "provider-cost-2026-07-29-v4"
 currency_rates:
   CNY: "1.00"
   USD: "7.20"
@@ -35,27 +35,71 @@ models:
     operator_evidence: "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13"
     effective_at: "2026-07-13T00:00:00+08:00"
 
-  moonshot/kimi-k2.7-code:
+  deepseek/deepseek-v4-flash:
     pricing_type: "token"
     currency: "USD"
     unit: 1000000
-    input: "0.95"
-    cache_read_input: "0.19"
-    cache_creation_input: "0.95"
-    output: "4.00"
-    operator_evidence: "pricing-snapshot:moonshot:model-token-prices:2026-07-13"
-    effective_at: "2026-07-13T00:00:00+08:00"
+    input: "0.14"
+    cache_read_input: "0.0028"
+    cache_creation_input: "0.14"
+    output: "0.28"
+    operator_evidence: "https://api-docs.deepseek.com/quick_start/pricing/"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  deepseek/deepseek-v4-pro:
+    pricing_type: "token"
+    currency: "USD"
+    unit: 1000000
+    input: "0.435"
+    cache_read_input: "0.003625"
+    cache_creation_input: "0.435"
+    output: "0.87"
+    operator_evidence: "https://api-docs.deepseek.com/quick_start/pricing/"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  moonshot/kimi-k3:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  moonshot/kimi-k2.7-code:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "6.50"
+    cache_read_input: "1.30"
+    cache_creation_input: "6.50"
+    output: "27.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
 
   moonshot/kimi-k2.7-code-highspeed:
     pricing_type: "token"
-    currency: "USD"
+    currency: "CNY"
     unit: 1000000
-    input: "1.90"
-    cache_read_input: "0.38"
-    cache_creation_input: "1.90"
-    output: "8.00"
-    operator_evidence: "pricing-snapshot:moonshot:model-token-prices:2026-07-13"
-    effective_at: "2026-07-13T00:00:00+08:00"
+    input: "13.00"
+    cache_read_input: "2.60"
+    cache_creation_input: "13.00"
+    output: "54.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  zhipu/glm-5.2:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "8.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "8.00"
+    output: "28.00"
+    operator_evidence: "https://open.bigmodel.cn/pricing"
+    effective_at: "2026-07-29T00:00:00+08:00"
 
   volcengine_ark/doubao-seedream-5-0-pro-260628:
     pricing_type: "output_pixel_tier"

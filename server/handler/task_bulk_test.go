@@ -342,11 +342,8 @@ func TestBulkClone_UsesSubmittedProfileForEveryNewTask(t *testing.T) {
 		if cloned.ExecutionProfile != "cost_effective" {
 			t.Fatalf("cloned task %s execution_profile = %q, want cost_effective", cloned.ID, cloned.ExecutionProfile)
 		}
-		if cloned.AgentProfileSnapshot.ProfileID != "cost_effective" || cloned.AgentProfileSnapshot.ModelID != "deepseek-v4-pro" {
+		if cloned.AgentProfileSnapshot.ProfileID != "cost_effective" || cloned.AgentProfileSnapshot.Models.Default != "deepseek-v4-pro" || len(cloned.AgentProfileFingerprint) != 64 {
 			t.Fatalf("cloned task %s snapshot = %#v, want frozen cost_effective profile", cloned.ID, cloned.AgentProfileSnapshot)
-		}
-		if cloned.AgentProfileSnapshot.BaseURL != "" || cloned.AgentProfileSnapshot.AuthToken != "" {
-			t.Fatalf("cloned task %s snapshot leaked credentials: %#v", cloned.ID, cloned.AgentProfileSnapshot)
 		}
 	}
 }

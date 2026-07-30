@@ -35,21 +35,25 @@ type availableRuntimeDispatcher struct{}
 func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
 	t.Helper()
 	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
-		{
-			ID: "cost_effective", DisplayName: "Cost effective", Provider: "deepseek", ModelID: "deepseek-v4-pro",
-			Protocol: "anthropic", BaseURL: "https://deepseek.example.com", AuthToken: "test-token",
-			MinTier: model.TierFree, Available: true,
-		},
-		{
-			ID: "balanced", DisplayName: "Balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving",
-			Protocol: "anthropic", BaseURL: "https://ark.example.com", AuthToken: "test-token",
-			MinTier: model.TierPro, Available: true,
-		},
+		handlerTestProfile("cost_effective", "Cost effective", "", "deepseek", "deepseek-v4-pro", model.TierFree),
+		handlerTestProfile("balanced", "Balanced", "", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
 	})
 	if err != nil {
 		t.Fatalf("NewAgentProfileRegistry: %v", err)
 	}
 	return registry
+}
+
+func freezeHandlerTaskProfile(t *testing.T, task *model.Task) {
+	t.Helper()
+	profile := handlerTestProfile("cost_effective", "Cost effective", "", "deepseek", "deepseek-v4-pro", model.TierFree)
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatalf("freeze handler task profile: %v", err)
+	}
+	task.ExecutionProfile = profile.ID
+	task.AgentProfileSnapshot = snapshot
+	task.AgentProfileFingerprint = fingerprint
 }
 
 func newHandlerTaskService(t *testing.T, repo repository.Repository, enqueuer service.TaskEnqueuer, store storage.Provider, logger *zerolog.Logger, taskLogDir string, pubsub *service.RedisPubSub, publishing *service.PublishingService) *service.TaskService {
@@ -1489,7 +1493,7 @@ func bootstrapClonedSourceAttachment(t *testing.T, fixture *cloneSourceReuseFixt
 	if err := fixture.repo.Tasks().Update(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
-	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, task.ID, 1
 	profiledExecution.Target, profiledExecution.Status = "kubernetes", model.TaskExecutionStarting
 	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload, profiledExecution.RuntimeInstanceID = "anban", "job-1", "pod-uid-1"
@@ -2041,14 +2045,16 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.New().String()
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	task := &model.Task{
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusFailed,
 		Prompt:    "failed task",
-	}); err != nil {
+	}
+	freezeHandlerTaskProfile(t, task)
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	uploadID := "resume-upload"
@@ -2131,7 +2137,9 @@ func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.NewString()
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusFailed}); err != nil {
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusFailed}
+	freezeHandlerTaskProfile(t, task)
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
@@ -2161,6 +2169,52 @@ func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
 	attachments := resumed.InputAttachments.Data()
 	if len(attachments) != 1 || attachments[0].Role != model.EntryAttachmentRoleResumeLatest || !strings.Contains(attachments[0].Text, "继续") {
 		t.Fatalf("resume attachments = %#v, want latest prompt", attachments)
+	}
+}
+
+func TestResumeTask_MapsDeletedFrozenProviderError(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-profile@example.com", Password: "hashed", InviteCode: "resumeprofile"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	frozen := handlerTestProfile("cost_effective", "Cost effective", "", "deleted", "model-v1", model.TierFree)
+	snapshot, fingerprint, err := frozen.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed,
+		ExecutionProfile: frozen.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetNASResumeEnabled(true)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	resp := postJSON(t, app, "/tasks/"+taskID+"/resume", `{"prompt":"continue"}`)
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUnprocessableEntity || body.Code != 46006 || body.Msg != "agent_provider_unavailable" {
+		t.Fatalf("status=%d body=%#v", resp.StatusCode, body)
 	}
 }
 

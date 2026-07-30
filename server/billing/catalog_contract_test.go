@@ -40,13 +40,13 @@ func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 	}
 }
 
-func TestProductionRetailCatalogHasExactInitialCoverage(t *testing.T) {
+func TestAgentProfileCatalogV6(t *testing.T) {
 	if err := initialRetailCatalogContractError(loadProductionBundle(t).Products); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
+func TestProviderCostCatalogV4(t *testing.T) {
 	type expectedCost struct {
 		pricingType string
 		currency    string
@@ -59,8 +59,12 @@ func TestProductionCostCatalogHasExactEvidencedProfiles(t *testing.T) {
 		"volcengine_ark/doubao-seed-evolving":           {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
 		"volcengine_ark/doubao-seed-2-1-pro-260628":     {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
 		"volcengine_ark/doubao-seed-2-1-turbo-260628":   {"token", "CNY", 3_000_000, 600_000, 3_000_000, 15_000_000},
-		"moonshot/kimi-k2.7-code":                       {"token", "USD", 950_000, 190_000, 950_000, 4_000_000},
-		"moonshot/kimi-k2.7-code-highspeed":             {"token", "USD", 1_900_000, 380_000, 1_900_000, 8_000_000},
+		"deepseek/deepseek-v4-flash":                    {"token", "USD", 140_000, 2_800, 140_000, 280_000},
+		"deepseek/deepseek-v4-pro":                      {"token", "USD", 435_000, 3_625, 435_000, 870_000},
+		"moonshot/kimi-k3":                              {"token", "CNY", 20_000_000, 2_000_000, 20_000_000, 100_000_000},
+		"moonshot/kimi-k2.7-code":                       {"token", "CNY", 6_500_000, 1_300_000, 6_500_000, 27_000_000},
+		"moonshot/kimi-k2.7-code-highspeed":             {"token", "CNY", 13_000_000, 2_600_000, 13_000_000, 54_000_000},
+		"zhipu/glm-5.2":                                 {"token", "CNY", 8_000_000, 2_000_000, 8_000_000, 28_000_000},
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
 		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
 	}
@@ -313,7 +317,7 @@ func cloneCatalogMetadataBundle(source *Bundle) Bundle {
 }
 
 func initialCatalogMetadataContractError(bundle *Bundle) error {
-	if bundle.Costs.CatalogID != "provider-cost-2026-07-22-v3" {
+	if bundle.Costs.CatalogID != "provider-cost-2026-07-29-v4" {
 		return fmt.Errorf("cost catalog ID = %q", bundle.Costs.CatalogID)
 	}
 	if bundle.Promotions.CatalogID != "promotion-2026-07-17-v1" {
@@ -323,12 +327,17 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"volcengine_ark/doubao-seed-evolving":           "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
 		"volcengine_ark/doubao-seed-2-1-pro-260628":     "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
 		"volcengine_ark/doubao-seed-2-1-turbo-260628":   "pricing-snapshot:volcengine-ark:model-token-prices:2026-07-13",
-		"moonshot/kimi-k2.7-code":                       "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
-		"moonshot/kimi-k2.7-code-highspeed":             "pricing-snapshot:moonshot:model-token-prices:2026-07-13",
+		"deepseek/deepseek-v4-flash":                    "https://api-docs.deepseek.com/quick_start/pricing/",
+		"deepseek/deepseek-v4-pro":                      "https://api-docs.deepseek.com/quick_start/pricing/",
+		"moonshot/kimi-k3":                              "https://platform.moonshot.cn/docs/pricing/chat",
+		"moonshot/kimi-k2.7-code":                       "https://platform.moonshot.cn/docs/pricing/chat",
+		"moonshot/kimi-k2.7-code-highspeed":             "https://platform.moonshot.cn/docs/pricing/chat",
+		"zhipu/glm-5.2":                                 "https://open.bigmodel.cn/pricing",
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 	}
-	wantEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	newEffectiveAt := time.Date(2026, time.July, 29, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	legacyEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	if len(bundle.Costs.Models) != len(wantEvidence) {
 		return fmt.Errorf("cost model count = %d, want %d evidenced models", len(bundle.Costs.Models), len(wantEvidence))
 	}
@@ -339,6 +348,10 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		}
 		if model.OperatorEvidence != evidence {
 			return fmt.Errorf("models.%s.operator_evidence = %q, want %q", modelID, model.OperatorEvidence, evidence)
+		}
+		wantEffectiveAt := legacyEffectiveAt
+		if strings.HasPrefix(modelID, "deepseek/") || strings.HasPrefix(modelID, "moonshot/") || strings.HasPrefix(modelID, "zhipu/") {
+			wantEffectiveAt = newEffectiveAt
 		}
 		if !model.EffectiveAt.Equal(wantEffectiveAt) {
 			return fmt.Errorf("models.%s.effective_at = %q, want %q", modelID, model.EffectiveAt.Format(time.RFC3339), wantEffectiveAt.Format(time.RFC3339))
@@ -378,7 +391,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 	}{
 		{"cost_effective", "cost-effective", 8},
 		{"balanced", "balanced", 10},
-		{"maximum_quality", "maximum-quality", 15},
+		{"maximum_quality", "maximum-quality", 30},
 	}
 	for _, taskType := range taskTypes {
 		for _, profile := range profiles {
@@ -393,7 +406,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		operation: "task.viral_analysis", chargePolicy: "task_admission", priceCredits: 1200,
 		delivery: "viral_analysis_report_verified",
 	}
-	if catalog.CatalogID != "retail-2026-07-28-v5" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
+	if catalog.CatalogID != "retail-2026-07-29-v6" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
 	}
 	seen := make(map[string]int, len(catalog.SKUs))

@@ -66,6 +66,9 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	}
 	result, err := h.submitter.Submit(c.Context(), req)
 	if err != nil {
+		if handled, response := respondAgentProfileError(c, err); handled {
+			return response
+		}
 		if isReferenceAssetError(err) {
 			return respondReferenceAssetError(c, h.logger, err)
 		}

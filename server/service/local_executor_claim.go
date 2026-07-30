@@ -104,7 +104,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 		if err != nil {
 			return fmt.Errorf("allocate local task execution attempt: %w", err)
 		}
-		profiledExecution := model.NewTaskExecutionAgentProfile(claimed.AgentProfileSnapshot)
+		profiledExecution := model.NewTaskExecutionAgentProfile(claimed.AgentProfileSnapshot, claimed.AgentProfileFingerprint)
 		execution := &profiledExecution
 		execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), claimed.ID, attempt
 		execution.Target, execution.Status = model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning
@@ -140,9 +140,11 @@ func hasManagedAgentProfile(task *model.Task) bool {
 	}
 	snapshot := task.AgentProfileSnapshot
 	return strings.TrimSpace(task.ExecutionProfile) != "" ||
+		strings.TrimSpace(task.AgentProfileFingerprint) != "" ||
+		snapshot.SchemaVersion != 0 ||
 		strings.TrimSpace(snapshot.ProfileID) != "" ||
 		strings.TrimSpace(snapshot.Provider) != "" ||
-		strings.TrimSpace(snapshot.ModelID) != "" ||
+		strings.TrimSpace(snapshot.Models.Default) != "" ||
 		strings.TrimSpace(snapshot.Protocol) != ""
 }
 
@@ -156,7 +158,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		Topic:                    task.Prompt,
 		AgentFlag:                "anban:" + agent.TaskToAgent(task),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
-		Model:                    task.AgentProfileSnapshot.ModelID,
+		Model:                    task.AgentProfileSnapshot.Models.Default,
 		Goal:                     task.Goal,
 		HasContentImage:          task.HasContentImage,
 		HasTailImage:             task.HasTailImage,

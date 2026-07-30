@@ -11,6 +11,30 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
+func testAgentProfiles() []AgentExecutionProfile {
+	return []AgentExecutionProfile{
+		{
+			ID: "cost_effective", DisplayName: "性价比", Provider: "deepseek", Protocol: "anthropic",
+			Models: uniformAgentModelMatrix("deepseek-v4-flash"), ModelUsageAliases: map[string]string{"deepseek-v4-flash": "deepseek-v4-flash"},
+			BaseURL: "https://api.deepseek.example/anthropic", AuthToken: "deepseek-secret", MinTier: model.TierFree, Available: true,
+		},
+		{
+			ID: "balanced", DisplayName: "平衡型", Provider: "volcengine_ark", Protocol: "anthropic",
+			Models: uniformAgentModelMatrix("doubao-seed-evolving"), ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
+			BaseURL: "https://ark.example/anthropic", AuthToken: "doubao-secret", MinTier: model.TierPro, Available: true,
+		},
+		{
+			ID: "maximum_quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic",
+			Models: uniformAgentModelMatrix("kimi-k3[1m]"), ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
+			BaseURL: "https://api.moonshot.example/anthropic", AuthToken: "moonshot-secret", MinTier: model.TierEnterprise, Available: true,
+		},
+	}
+}
+
+func uniformAgentModelMatrix(modelID string) model.AgentModelMatrix {
+	return model.AgentModelMatrix{Default: modelID, Opus: modelID, Fable: modelID, Sonnet: modelID, Haiku: modelID}
+}
+
 func testMatrix(name string) srvconfig.ClaudeModelMatrixConfig {
 	return srvconfig.ClaudeModelMatrixConfig{Default: name, Opus: name, Fable: name, Sonnet: name, Haiku: name}
 }
@@ -82,6 +106,29 @@ func TestAgentProfileRegistryMarksOnlyUnmappedProfileUnavailable(t *testing.T) {
 	}
 }
 
+func TestAgentProfileRegistryMarksProfileUnavailableWhenExtraAliasCostIsUnmapped(t *testing.T) {
+	profiles := testProfileConfig()
+	profiles["maximum_quality"] = srvconfig.ClaudeExecutionProfileConfig{
+		Provider: "moonshot", Description: "maximum", Models: testMatrix("kimi-k3[1m]"),
+		ModelUsageAliases: map[string]string{
+			"kimi-k3[1m]":        "kimi-k3",
+			"kimi-k3":            "kimi-k3",
+			"provider-side-name": "unpriced-model",
+		},
+	}
+	registry, err := NewAgentProfileRegistryFromConfig(testProviderConfig(), profiles, testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := registry.Resolve("maximum_quality")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Available || got.UnavailableReason != "agent_model_cost_unmapped" {
+		t.Fatalf("maximum_quality = %#v", got)
+	}
+}
+
 func TestAgentProfileRegistryConstructionDoesNotProbeProviderNetwork(t *testing.T) {
 	providers := testProviderConfig()
 	providers["deepseek"] = srvconfig.ClaudeProviderConfig{Protocol: "anthropic", BaseURL: "https://127.0.0.1:1/anthropic", AuthToken: "secret"}
@@ -139,9 +186,13 @@ func TestResolveRuntimeRejectsSnapshotAndFingerprintConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot.Models.Default = "drifted"
-	if _, err := registry.ResolveRuntime("balanced", snapshot, fingerprint); !errors.Is(err, ErrAgentProfileSnapshotMismatch) {
-		t.Fatalf("ResolveRuntime conflict = %v", err)
+	invalid := snapshot
+	invalid.Models.Default = "drifted"
+	if _, err := registry.ResolveRuntime("balanced", invalid, fingerprint); !errors.Is(err, ErrAgentProfileSnapshotInvalid) {
+		t.Fatalf("ResolveRuntime invalid snapshot = %v", err)
+	}
+	if _, err := registry.ResolveRuntime("balanced", snapshot, strings.Repeat("f", 64)); !errors.Is(err, ErrAgentProfileSnapshotConflict) {
+		t.Fatalf("ResolveRuntime fingerprint conflict = %v", err)
 	}
 }
 

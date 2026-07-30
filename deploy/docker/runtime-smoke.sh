@@ -337,17 +337,25 @@ montage:
   execution_targets: ["cloud"]
   default_execution_target: "cloud"
 claude:
-  execution_profiles:
-    cost_effective:
-      display_name: "性价比"
-      model_name: "DeepSeek 4 Pro"
-      description: "低成本高效率"
-      provider: "deepseek"
-      model_id: "deepseek-v4-pro"
+  providers:
+    deepseek:
       protocol: "anthropic"
       base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
       auth_token: "${ANBAN_DEEPSEEK_API_KEY}"
-      min_tier: "free"
+  execution_profiles:
+    cost_effective:
+      description: "Runtime smoke DeepSeek V4 Flash"
+      provider: "deepseek"
+      models:
+        default: "deepseek-v4-flash"
+        opus: "deepseek-v4-flash"
+        fable: "deepseek-v4-flash"
+        sonnet: "deepseek-v4-flash"
+        haiku: "deepseek-v4-flash"
+      model_usage_aliases:
+        deepseek-v4-flash: "deepseek-v4-flash"
+      claude:
+        effort_level: "low"
   executor: docker
   runtime_images:
     article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
@@ -508,6 +516,7 @@ runtime_smoke_main() {
   trap 'exit 130' INT TERM
 
   write_server_config
+  printf 'runtime smoke profile: provider=deepseek model=deepseek-v4-flash\n'
   write_compose_config
   chmod 0755 "$SMOKE_DIR"
   chmod 0644 "$CONFIG_FILE" "$COMPOSE_FILE"
@@ -531,7 +540,7 @@ runtime_smoke_main() {
   USER_ID="$(jq -er '.data.user.id' <<<"$registration")"
   catalog="$(api_get /api/v1/billing/catalog)"
   CATALOG_ID="$(jq -er '.data.catalog_id' <<<"$catalog")"
-  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select(.operation == "task.article" or .operation == "task.seednote" or .operation == "task.montage") | .price_credits] | if length == 3 then add else error("managed task billing SKUs are incomplete") end' <<<"$catalog")"
+  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select((.operation == "task.article" or .operation == "task.seednote" or .operation == "task.montage") and .execution_profile == "cost_effective") | .price_credits] | if length == 3 then add else error("cost-effective managed task billing SKUs are incomplete") end' <<<"$catalog")"
   TOP_UP_CREDITS=$((TASK_ADMISSION_CREDITS + 1000))
   TOP_UP_SOURCE="runtime-smoke-$USER_ID"
   top_up_body="$(jq -cn \

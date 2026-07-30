@@ -17,7 +17,18 @@ func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL":            "haiku",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 		"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+		"CLAUDE_CODE_EFFORT_LEVEL":                 "max",
+		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "false",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+		"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "131072",
+		"MAX_THINKING_TOKENS":                      "0",
+		"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+		"CLAUDE_CODE_DISABLE_THINKING":             "false",
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "1000000",
+		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "95",
+		"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+		"CLAUDE_CODE_SUBAGENT_MODEL":               "subagent-model",
+		"ENABLE_TOOL_SEARCH":                       "false",
 		"ANBAN_API_KEY":                            "server-secret",
 		"PATH":                                     "/untrusted/bin",
 		"HOME":                                     "/untrusted/home",
@@ -26,7 +37,7 @@ func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
 	if len(got) != len(claudeRuntimeEnvKeys) || got["ANTHROPIC_AUTH_TOKEN"] != "token" {
 		t.Fatalf("runtime environment = %#v", got)
 	}
-	for _, forbidden := range []string{"ANTHROPIC_API_KEY", "ANBAN_API_KEY", "PATH", "HOME"} {
+	for _, forbidden := range []string{"ANTHROPIC_API_KEY", "ANBAN_API_KEY", "PATH", "HOME", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"} {
 		if _, ok := got[forbidden]; ok {
 			t.Fatalf("protected environment %q was copied", forbidden)
 		}
@@ -34,6 +45,39 @@ func TestClaudeRuntimeEnvCopiesOnlyExplicitClaudeContract(t *testing.T) {
 	got["ANTHROPIC_MODEL"] = "changed"
 	if source["ANTHROPIC_MODEL"] == "changed" {
 		t.Fatal("runtime environment aliases Server config")
+	}
+}
+
+func TestValidateClaudeRuntimeEnvAcceptsAllFrozenClaudeControls(t *testing.T) {
+	runtimeEnv := map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":                  "token",
+		"ANTHROPIC_BASE_URL":                    "https://anthropic.example.com",
+		"ANTHROPIC_MODEL":                       "default-model",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":          "opus-model",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":         "fable-model",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL":        "sonnet-model",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":         "haiku-model",
+		"CLAUDE_CODE_EFFORT_LEVEL":              "max",
+		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":      "false",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":        "1048576",
+		"CLAUDE_CODE_MAX_OUTPUT_TOKENS":         "131072",
+		"MAX_THINKING_TOKENS":                   "0",
+		"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "false",
+		"CLAUDE_CODE_DISABLE_THINKING":          "false",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":       "1000000",
+		"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":       "95",
+		"CLAUDE_CODE_DISABLE_1M_CONTEXT":        "false",
+		"CLAUDE_CODE_SUBAGENT_MODEL":            "subagent-model",
+		"ENABLE_TOOL_SEARCH":                    "false",
+	}
+	if err := ValidateClaudeRuntimeEnv(runtimeEnv); err != nil {
+		t.Fatalf("all frozen Claude controls rejected: %v", err)
+	}
+	got := ClaudeRuntimeEnv(runtimeEnv)
+	for key, want := range runtimeEnv {
+		if got[key] != want {
+			t.Fatalf("runtime environment %q = %q, want %q", key, got[key], want)
+		}
 	}
 }
 

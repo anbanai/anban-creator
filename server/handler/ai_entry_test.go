@@ -83,6 +83,49 @@ func TestAIEntryHandlerMapsAndRedactsReferenceErrors(t *testing.T) {
 	}
 }
 
+func TestAIEntryHandlerMapsAgentProfileErrors(t *testing.T) {
+	tests := []struct {
+		err    error
+		status int
+		code   int
+		msg    string
+	}{
+		{service.ErrAgentProfileNotFound, fiber.StatusBadRequest, 46001, "agent_profile_not_found"},
+		{service.ErrAgentProfileUnavailable, fiber.StatusUnprocessableEntity, 46002, "agent_profile_unavailable"},
+		{service.ErrAgentProfileAccessDenied, fiber.StatusForbidden, 46003, "agent_profile_access_denied"},
+		{service.ErrAgentProfileSnapshotInvalid, fiber.StatusBadRequest, 46004, "agent_profile_snapshot_invalid"},
+		{service.ErrAgentProfileSnapshotConflict, fiber.StatusConflict, 46005, "agent_profile_snapshot_conflict"},
+		{service.ErrAgentProviderUnavailable, fiber.StatusUnprocessableEntity, 46006, "agent_provider_unavailable"},
+		{service.ErrAgentModelCostUnmapped, fiber.StatusUnprocessableEntity, 46007, "agent_model_cost_unmapped"},
+		{service.ErrBillingProfileSKUNotFound, fiber.StatusUnprocessableEntity, 46008, "billing_profile_sku_not_found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.msg, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			h := NewAIEntryHandler(&fakeAIEntrySubmitter{err: fmt.Errorf("submit context: %w", tt.err)}, nil, nil, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","execution_profile":"cost_effective","text":"write"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req, fiber.TestConfig{Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var body Response
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.status || body.Code != tt.code || body.Msg != tt.msg {
+				t.Fatalf("status=%d body=%#v", resp.StatusCode, body)
+			}
+		})
+	}
+}
+
 func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}

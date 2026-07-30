@@ -77,6 +77,7 @@ export interface Task {
   project_id: string
   execution_profile: AgentExecutionProfileID
   agent_profile_snapshot?: AgentProfileSnapshot
+  agent_profile_fingerprint?: string
   result?: string | null
   published: boolean
   published_at: string | null

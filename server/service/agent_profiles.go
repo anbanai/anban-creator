@@ -31,7 +31,8 @@ var (
 	ErrAgentProfileNotFound         = errors.New("agent execution profile not found")
 	ErrAgentProfileUnavailable      = errors.New("agent execution profile unavailable")
 	ErrAgentProfileAccessDenied     = errors.New("agent execution profile access denied")
-	ErrAgentProfileSnapshotMismatch = errors.New("agent execution profile snapshot mismatch")
+	ErrAgentProfileSnapshotInvalid  = errors.New("agent execution profile snapshot invalid")
+	ErrAgentProfileSnapshotConflict = errors.New("agent execution profile snapshot conflict")
 	ErrAgentProviderUnavailable     = errors.New("agent provider unavailable")
 	ErrAgentModelCostUnmapped       = errors.New("agent model cost unmapped")
 )
@@ -169,6 +170,11 @@ func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCat
 			return false
 		}
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
+			return false
+		}
+	}
+	for _, canonical := range profile.ModelUsageAliases {
+		if _, ok := costs.Models[profile.Provider+"/"+strings.TrimSpace(canonical)]; !ok {
 			return false
 		}
 	}
@@ -349,6 +355,12 @@ func (r *AgentProfileRegistry) ResolveForTier(id string, tier model.Tier) (Agent
 		return AgentExecutionProfile{}, err
 	}
 	if !profile.Available {
+		switch profile.UnavailableReason {
+		case "agent_provider_unavailable":
+			return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProviderUnavailable, profile.ID)
+		case "agent_model_cost_unmapped":
+			return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentModelCostUnmapped, profile.ID)
+		}
 		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileUnavailable, profile.ID)
 	}
 	if !tierCanUseProfile(tier, profile.MinTier) {
@@ -363,8 +375,11 @@ func (r *AgentProfileRegistry) ResolveRuntime(id string, snapshot model.AgentPro
 		return AgentExecutionProfile{}, err
 	}
 	actualFingerprint, err := model.AgentProfileFingerprint(snapshot)
-	if err != nil || snapshot.ProfileID != product.ID || actualFingerprint != fingerprint {
-		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotMismatch, id)
+	if err != nil {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotInvalid, id)
+	}
+	if snapshot.ProfileID != product.ID || actualFingerprint != fingerprint {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotConflict, id)
 	}
 	provider, ok := r.providers[snapshot.Provider]
 	if !ok || provider.Protocol != snapshot.Protocol || !validAgentProfileEndpoint(provider.BaseURL) || strings.TrimSpace(provider.AuthToken) == "" {

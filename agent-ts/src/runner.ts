@@ -14,27 +14,8 @@ interface TrackedToolCall { name: string; input: Record<string, unknown>; }
 export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const cwd = data.task_type === "montage" ? `${workspace}/openmontage` : workspace;
-  const options: Options = {
-    abortController: controller,
-    cwd,
-    model: data.execution_profile.model_id,
-    ...executionReasoningOptions(data.execution_profile),
-    maxTurns: data.max_turns,
-    agent: data.agent_flag,
-    resume: data.resume_session_id,
-    permissionMode: "dontAsk",
-    allowedTools,
-    disallowedTools,
-    canUseTool: async (toolName) => isAllowedTool(toolName) ? { behavior: "allow", updatedInput: undefined } : { behavior: "deny", message: `tool ${toolName} is outside the managed Agent SDK allowlist` },
-    plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
-    mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
-    strictMcpConfig: true,
-    env: buildExecutionEnvironment(process.env, data, serverURL, token),
-    includePartialMessages: false,
-    stderr: (line) => void reporter.progress(line.trim()),
-    hooks: data.task_type === "seednote" ? { Stop: [{ hooks: [createSeednoteStopGate(cwd)] }] } : undefined,
-  };
+  const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
+  const cwd = options.cwd!;
   let logText = "";
   let initValidated = false;
   const toolCalls = new Map<string, TrackedToolCall>();
@@ -54,11 +35,33 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   return { success: false, error: "managed agent stream ended without a result message", work_dir: workspace, log_text: logText };
 }
 
-export function executionReasoningOptions(profile: Pick<BootstrapResponse["execution_profile"], "reasoning_effort" | "thinking_required">): Pick<Options, "effort" | "thinking"> {
-  const options: Pick<Options, "effort" | "thinking"> = {};
-  if (profile.reasoning_effort) options.effort = profile.reasoning_effort;
-  if (profile.thinking_required) options.thinking = { type: "adaptive" };
-  return options;
+export function buildQueryOptions(
+  data: BootstrapResponse,
+  workspace: string,
+  serverURL = "https://server.invalid",
+  token = "test-token",
+  reporter: Pick<Reporter, "progress"> = { progress: async () => {} },
+  controller = new AbortController(),
+): Options {
+  const cwd = data.task_type === "montage" ? `${workspace}/openmontage` : workspace;
+  return {
+    abortController: controller,
+    cwd,
+    maxTurns: data.max_turns,
+    agent: data.agent_flag,
+    resume: data.resume_session_id,
+    permissionMode: "dontAsk",
+    allowedTools,
+    disallowedTools,
+    canUseTool: async (toolName) => isAllowedTool(toolName) ? { behavior: "allow", updatedInput: undefined } : { behavior: "deny", message: `tool ${toolName} is outside the managed Agent SDK allowlist` },
+    plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
+    mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
+    strictMcpConfig: true,
+    env: buildExecutionEnvironment(process.env, data, serverURL, token),
+    includePartialMessages: false,
+    stderr: (line) => void reporter.progress(line.trim()),
+    hooks: data.task_type === "seednote" ? { Stop: [{ hooks: [createSeednoteStopGate(cwd)] }] } : undefined,
+  };
 }
 
 export function buildExecutionEnvironment(
@@ -69,11 +72,11 @@ export function buildExecutionEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     ...processEnvironment,
-    ...(data.task_type === "montage" ? data.env : {}),
-    ...data.execution_profile.runtime_env,
+    ...(data.env ?? {}),
     ANBAN_API_KEY: token,
     ANBAN_API_URL: serverURL,
     ANBAN_DEFAULT_PROJECT: data.project_id,
+    ...data.execution_profile.runtime_env,
   };
 }
 
@@ -107,12 +110,12 @@ async function consumeMessage(message: SDKMessage, reporter: Reporter, logText: 
   return { logText };
 }
 
-export function terminalModelUsage(modelUsage: Record<string, Pick<ModelUsage, "inputTokens" | "outputTokens" | "cacheReadInputTokens" | "cacheCreationInputTokens">>, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {
+export function terminalModelUsage(modelUsage: Record<string, unknown>, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {
   const usage: Array<Record<string, string | number>> = [];
   const diagnostics: Array<{ code: string; raw_model?: string }> = [];
   for (const raw of Object.keys(modelUsage).sort()) {
     const tokens = modelUsage[raw];
-    if ([tokens.inputTokens, tokens.outputTokens, tokens.cacheReadInputTokens, tokens.cacheCreationInputTokens].some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    if (!isModelUsageTokens(tokens)) {
       diagnostics.push({ code: "invalid_model_usage_tokens", raw_model: raw });
       continue;
     }
@@ -126,6 +129,13 @@ export function terminalModelUsage(modelUsage: Record<string, Pick<ModelUsage, "
   usage.sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`));
   if (Object.keys(modelUsage).length === 0) diagnostics.push({ code: "missing_terminal_model_usage" });
   return { usage, cost_status: diagnostics.length ? "unreconciled" : "reconciled", cost_diagnostics: diagnostics };
+}
+
+function isModelUsageTokens(value: unknown): value is Pick<ModelUsage, "inputTokens" | "outputTokens" | "cacheReadInputTokens" | "cacheCreationInputTokens"> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const tokens = value as Record<string, unknown>;
+  return [tokens.inputTokens, tokens.outputTokens, tokens.cacheReadInputTokens, tokens.cacheCreationInputTokens]
+    .every((token) => Number.isSafeInteger(token) && (token as number) >= 0);
 }
 
 async function handleToolResults(message: { message: { content?: unknown } }, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal): Promise<void> {

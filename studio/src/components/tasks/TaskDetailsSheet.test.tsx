@@ -510,6 +510,39 @@ describe('TaskDetailsSheet', () => {
 })
 
 describe('TaskConfigurationDetails', () => {
+  it('renders the frozen task profile instead of the current capability catalog', () => {
+    const frozenTask: Task = {
+      ...articleTask,
+      execution_profile: 'maximum_quality',
+      agent_profile_snapshot: {
+        schema_version: 2,
+        profile_id: 'maximum_quality',
+        display_name: '极致效果',
+        provider: 'moonshot',
+        protocol: 'anthropic',
+        models: {
+          default: 'kimi-k2.7-code',
+          opus: 'kimi-k2.7-code',
+          fable: 'kimi-k2.7-code',
+          sonnet: 'kimi-k2.7-code',
+          haiku: 'kimi-k2.7-code',
+        },
+        claude: { effort_level: 'high', max_context_tokens: 262144 },
+        model_usage_aliases: { 'kimi-k2.7-code': 'kimi-k2.7-code' },
+      },
+      agent_profile_fingerprint: 'a'.repeat(64),
+    }
+
+    render(<TaskConfigurationDetails task={frozenTask} project={project} />)
+
+    expect(screen.getByRole('heading', { name: 'Agent 执行配置' })).toBeInTheDocument()
+    expect(screen.getByText('moonshot')).toBeInTheDocument()
+    expect(screen.getByText('全部角色：kimi-k2.7-code')).toBeInTheDocument()
+    expect(screen.getByText('Claude 参数').nextElementSibling).toHaveTextContent('推理强度：high')
+    expect(screen.getByText('Claude 参数').nextElementSibling).toHaveTextContent('最大上下文：262,144')
+    expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
+  })
+
   it('keeps ecommerce task overrides but does not leak current project defaults into a snapshot', () => {
     const ecommerceProject: Project = {
       ...project,

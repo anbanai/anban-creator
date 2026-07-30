@@ -38,7 +38,7 @@ func bootstrapTestProfile(t *testing.T) (AgentExecutionProfile, *AgentProfileReg
 		ID: "cost_effective", DisplayName: "Cost effective",
 		Provider: "deepseek", Protocol: "anthropic", Models: model.AgentModelMatrix{Default: "claude-test", Opus: "claude-test", Fable: "claude-test", Sonnet: "claude-test", Haiku: "claude-test"},
 		ModelUsageAliases: map[string]string{"claude-test": "claude-test"},
-		BaseURL: "https://anthropic.example.com", AuthToken: "test-token",
+		BaseURL:           "https://anthropic.example.com", AuthToken: "test-token",
 		MinTier: model.TierFree, Available: true,
 	}
 	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile})
@@ -369,14 +369,14 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	profile, registry := bootstrapTestProfile(t)
 	task.ExecutionProfile = profile.ID
 	task.AgentProfileSnapshot = profile.Snapshot()
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	resumeSessionID := uuid.NewString()
 	task.AgentProfileFingerprint, err = model.AgentProfileFingerprint(task.AgentProfileSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	resumeSessionID := uuid.NewString()
 	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, taskID, 1
 	profiledExecution.ResumeSessionID, profiledExecution.Target, profiledExecution.Status = resumeSessionID, "docker", model.TaskExecutionStarting

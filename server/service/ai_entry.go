@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -204,6 +205,9 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		if IsReferenceAssetError(err) {
 			return nil, err
 		}
+		if isAIEntryTaskCreationProfileError(err) {
+			return nil, err
+		}
 		return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
 	}
 	if len(tasks) == 0 {
@@ -215,6 +219,24 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		Task:    tasks[0],
 		Message: "已创建任务。",
 	}, nil
+}
+
+func isAIEntryTaskCreationProfileError(err error) bool {
+	for _, target := range []error{
+		ErrAgentProfileNotFound,
+		ErrAgentProfileUnavailable,
+		ErrAgentProfileAccessDenied,
+		ErrAgentProfileSnapshotInvalid,
+		ErrAgentProfileSnapshotConflict,
+		ErrAgentProviderUnavailable,
+		ErrAgentModelCostUnmapped,
+		ErrBillingProfileSKUNotFound,
+	} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AIEntryService) llmForUser(ctx context.Context, userID string) LLMClient {

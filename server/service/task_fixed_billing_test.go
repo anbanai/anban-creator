@@ -237,7 +237,7 @@ func seedHistoricalManagedLocalExecution(t *testing.T, f *billingWalletFixture, 
 	task.ExecutionTarget = model.ExecutionTargetLocalClaimed
 	task.LocalClaimDeadline = nil
 
-	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	execution := &profiledExecution
 	execution.ID = uuid.NewString()
 	execution.TaskID = task.ID

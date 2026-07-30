@@ -31,9 +31,9 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
-		{ID: "cost_effective", DisplayName: "性价比", ModelName: "DeepSeek 4 Pro", Description: "低成本", Provider: "deepseek", ModelID: "deepseek-v4-pro", Protocol: "anthropic", BaseURL: "https://deepseek.example.com", AuthToken: "secret-deepseek", MinTier: model.TierFree, Available: true},
-		{ID: "balanced", DisplayName: "平衡型", ModelName: "豆包", Description: "平衡", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic", BaseURL: "https://ark.example.com", AuthToken: "secret-ark", MinTier: model.TierPro, Available: true},
-		{ID: "maximum_quality", DisplayName: "极致效果", ModelName: "Kimi K3（1M）", Description: "旗舰", Provider: "kimi", ModelID: "k3", Protocol: "anthropic", BaseURL: "https://api.kimi.com/coding/", AuthToken: "secret-kimi", MinTier: model.TierEnterprise, ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true, Available: true},
+		handlerTestProfile("cost_effective", "性价比", "低成本", "deepseek", "deepseek-v4-pro", model.TierFree),
+		handlerTestProfile("balanced", "平衡型", "平衡", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
+		handlerTestProfile("maximum_quality", "极致效果", "旗舰", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,9 +58,14 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
 	}
-	for _, forbidden := range []string{"secret-kimi", "secret-ark", "secret-deepseek", "base_url", "auth_token", "protocol", "provider"} {
+	for _, forbidden := range []string{"test-secret", ".example/anthropic", "base_url", "auth_token", "runtime_env", "model_name", "model_id"} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("response leaked %q: %s", forbidden, raw)
+		}
+	}
+	for _, required := range []string{`"provider"`, `"protocol":"anthropic"`, `"models"`, `"claude"`} {
+		if !strings.Contains(string(raw), required) {
+			t.Fatalf("response omitted %q: %s", required, raw)
 		}
 	}
 	var envelope struct {
@@ -71,5 +76,14 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 	}
 	if len(envelope.Data) != 3 || !envelope.Data[1].Available || envelope.Data[2].Available || envelope.Data[2].UnavailableReason != "requires_enterprise" {
 		t.Fatalf("capabilities = %#v", envelope.Data)
+	}
+}
+
+func handlerTestProfile(id, displayName, description, provider, modelID string, minTier model.Tier) service.AgentExecutionProfile {
+	return service.AgentExecutionProfile{
+		ID: id, DisplayName: displayName, Description: description, Provider: provider, Protocol: "anthropic",
+		Models:            model.AgentModelMatrix{Default: modelID, Opus: modelID, Fable: modelID, Sonnet: modelID, Haiku: modelID},
+		ModelUsageAliases: map[string]string{modelID: modelID}, BaseURL: "https://" + provider + ".example/anthropic",
+		AuthToken: "test-secret", MinTier: minTier, Available: true,
 	}
 }

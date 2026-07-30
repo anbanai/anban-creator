@@ -513,7 +513,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		return nil, err
 	}
 	p.ExecutionProfile = profile.ID
-	profileSnapshot := profile.Snapshot()
+	profileSnapshot, profileFingerprint, err := profile.Freeze()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
+	}
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot, p.allowProjectReferenceAsset); err != nil {
 		return nil, err
 	}
@@ -649,6 +652,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ExecutionTarget:          p.ExecutionTarget,
 			ExecutionProfile:         p.ExecutionProfile,
 			AgentProfileSnapshot:     profileSnapshot,
+			AgentProfileFingerprint:  profileFingerprint,
 		}
 		if p.ProjectSnapshot != nil {
 			task.SetProjectSnapshot(*p.ProjectSnapshot)
@@ -818,6 +822,10 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if err != nil {
 		return nil, err
 	}
+	profileSnapshot, profileFingerprint, err := profile.Freeze()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
+	}
 	taskID := generateTaskID()
 
 	prompt := plan.Prompt
@@ -889,7 +897,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 		ExecutionProfile:         profile.ID,
-		AgentProfileSnapshot:     profile.Snapshot(),
+		AgentProfileSnapshot:     profileSnapshot,
+		AgentProfileFingerprint:  profileFingerprint,
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if model.IsMontagePlatform(taskType) {

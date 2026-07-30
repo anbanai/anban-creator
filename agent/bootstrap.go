@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -432,44 +433,49 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 }
 
 func validateBootstrapExecutionProfile(profile service.AgentRuntimeProfile) error {
-	if strings.TrimSpace(profile.ProfileID) != profile.ProfileID || strings.TrimSpace(profile.DisplayName) != profile.DisplayName ||
-		strings.TrimSpace(profile.ModelID) != profile.ModelID || len(profile.ModelID) > maxBootstrapModelBytes ||
-		profile.ProfileID == "" || profile.DisplayName == "" || profile.ModelID == "" {
+	if !validBootstrapProfileID(profile.ProfileID) || strings.TrimSpace(profile.Provider) != profile.Provider ||
+		strings.TrimSpace(profile.DisplayName) != profile.DisplayName || profile.Provider == "" || profile.DisplayName == "" {
 		return fmt.Errorf("bootstrap execution profile identity is invalid")
 	}
-	wantProvider, wantModel := "", ""
-	switch profile.ProfileID {
-	case "cost_effective":
-		wantProvider, wantModel = "deepseek", "deepseek-v4-pro"
-	case "balanced":
-		wantProvider, wantModel = "volcengine_ark", "doubao-seed-evolving"
-	case "maximum_quality":
-		wantProvider, wantModel = "kimi", "k3"
-	default:
-		return fmt.Errorf("bootstrap execution profile is unknown")
+	if profile.Protocol != "anthropic" {
+		return fmt.Errorf("bootstrap execution profile protocol is invalid")
 	}
-	if profile.Provider != wantProvider || profile.ModelID != wantModel || profile.Protocol != "anthropic" {
-		return fmt.Errorf("bootstrap execution profile provider identity is invalid")
+	if !validBootstrapProfileFingerprint(profile.ProfileFingerprint) {
+		return fmt.Errorf("bootstrap execution profile fingerprint is invalid")
 	}
-	if profile.ContextWindow < 0 || profile.ContextWindow > 1048576 {
-		return fmt.Errorf("bootstrap execution profile context window is invalid")
+	for _, entry := range bootstrapModelMatrixEntries(profile.Models) {
+		if strings.TrimSpace(entry.model) != entry.model || entry.model == "" || len(entry.model) > maxBootstrapModelBytes || strings.ContainsAny(entry.model, "\x00\r\n") {
+			return fmt.Errorf("bootstrap execution profile model matrix is invalid")
+		}
 	}
-	switch profile.ReasoningEffort {
-	case "", "low", "medium", "high":
-	default:
-		return fmt.Errorf("bootstrap execution profile reasoning effort is invalid")
+	canonicalAliases := make(map[string]string, len(profile.ModelUsageAliases))
+	for raw, identity := range profile.ModelUsageAliases {
+		canonicalAliases[raw] = identity.Model
 	}
-	if profile.ThinkingRequired && profile.ReasoningEffort == "" {
-		return fmt.Errorf("bootstrap execution profile thinking requires reasoning effort")
+	snapshot := model.AgentProfileSnapshot{
+		SchemaVersion: 2, ProfileID: profile.ProfileID, DisplayName: profile.DisplayName,
+		Provider: profile.Provider, Protocol: profile.Protocol, Models: profile.Models,
+		Claude: profile.Claude, ModelUsageAliases: canonicalAliases,
 	}
-	if profile.ProfileID == "maximum_quality" && (profile.ContextWindow != 1048576 || profile.ReasoningEffort != "high" || !profile.ThinkingRequired) {
-		return fmt.Errorf("bootstrap maximum quality runtime controls are invalid")
+	if err := model.ValidateAgentProfileSnapshot(snapshot); err != nil {
+		return fmt.Errorf("bootstrap execution profile snapshot is invalid: %w", err)
 	}
 	if err := serveragent.ValidateClaudeRuntimeEnv(profile.RuntimeEnv); err != nil {
 		return fmt.Errorf("bootstrap runtime environment is invalid: %w", err)
 	}
-	if profile.RuntimeEnv["ANTHROPIC_MODEL"] != profile.ModelID {
-		return fmt.Errorf("bootstrap runtime environment model does not match profile")
+	if !validBootstrapProviderBaseURL(profile.RuntimeEnv["ANTHROPIC_BASE_URL"]) {
+		return fmt.Errorf("bootstrap runtime environment provider URL is invalid")
+	}
+	for _, entry := range bootstrapModelMatrixEntries(profile.Models) {
+		if profile.RuntimeEnv[entry.envKey] != entry.model {
+			return fmt.Errorf("bootstrap runtime environment model does not match profile")
+		}
+	}
+	for _, control := range bootstrapClaudeControlEntries(profile.Claude) {
+		emitted, exists := profile.RuntimeEnv[control.envKey]
+		if control.configured != exists || (control.configured && emitted != control.value) {
+			return fmt.Errorf("bootstrap runtime environment controls do not match profile")
+		}
 	}
 	if len(profile.ModelUsageAliases) == 0 {
 		return fmt.Errorf("bootstrap model usage aliases are required")
@@ -477,11 +483,97 @@ func validateBootstrapExecutionProfile(profile service.AgentRuntimeProfile) erro
 	if err := serveragent.ValidateModelUsageAliases(profile.ModelUsageAliases); err != nil {
 		return fmt.Errorf("bootstrap model usage aliases are invalid: %w", err)
 	}
-	identity, ok := profile.ModelUsageAliases[profile.ModelID]
-	if !ok || identity.Provider != profile.Provider || identity.Model != profile.ModelID {
-		return fmt.Errorf("bootstrap model usage alias does not match profile")
+	for _, identity := range profile.ModelUsageAliases {
+		if identity.Provider != profile.Provider {
+			return fmt.Errorf("bootstrap model usage alias provider does not match profile")
+		}
 	}
 	return nil
+}
+
+func validBootstrapProfileID(profileID string) bool {
+	switch profileID {
+	case "cost_effective", "balanced", "maximum_quality":
+		return true
+	default:
+		return false
+	}
+}
+
+func validBootstrapProfileFingerprint(fingerprint string) bool {
+	if len(fingerprint) != sha256.Size*2 {
+		return false
+	}
+	for _, char := range fingerprint {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+type bootstrapModelMatrixEntry struct {
+	envKey string
+	model  string
+}
+
+func bootstrapModelMatrixEntries(models model.AgentModelMatrix) []bootstrapModelMatrixEntry {
+	return []bootstrapModelMatrixEntry{
+		{envKey: "ANTHROPIC_MODEL", model: models.Default},
+		{envKey: "ANTHROPIC_DEFAULT_OPUS_MODEL", model: models.Opus},
+		{envKey: "ANTHROPIC_DEFAULT_FABLE_MODEL", model: models.Fable},
+		{envKey: "ANTHROPIC_DEFAULT_SONNET_MODEL", model: models.Sonnet},
+		{envKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL", model: models.Haiku},
+	}
+}
+
+type bootstrapClaudeControlEntry struct {
+	envKey     string
+	value      string
+	configured bool
+}
+
+func bootstrapClaudeControlEntries(controls model.AgentClaudeControls) []bootstrapClaudeControlEntry {
+	return []bootstrapClaudeControlEntry{
+		bootstrapStringControl("CLAUDE_CODE_EFFORT_LEVEL", controls.EffortLevel),
+		bootstrapBoolControl("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", controls.AlwaysEnableEffort),
+		bootstrapIntControl("CLAUDE_CODE_MAX_CONTEXT_TOKENS", controls.MaxContextTokens),
+		bootstrapIntControl("CLAUDE_CODE_MAX_OUTPUT_TOKENS", controls.MaxOutputTokens),
+		bootstrapIntControl("MAX_THINKING_TOKENS", controls.MaxThinkingTokens),
+		bootstrapBoolControl("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", controls.DisableAdaptiveThinking),
+		bootstrapBoolControl("CLAUDE_CODE_DISABLE_THINKING", controls.DisableThinking),
+		bootstrapIntControl("CLAUDE_CODE_AUTO_COMPACT_WINDOW", controls.AutoCompactWindow),
+		bootstrapIntControl("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", controls.AutocompactPctOverride),
+		bootstrapBoolControl("CLAUDE_CODE_DISABLE_1M_CONTEXT", controls.Disable1MContext),
+		bootstrapStringControl("CLAUDE_CODE_SUBAGENT_MODEL", controls.SubagentModel),
+		bootstrapBoolControl("ENABLE_TOOL_SEARCH", controls.EnableToolSearch),
+	}
+}
+
+func bootstrapStringControl(envKey string, value *string) bootstrapClaudeControlEntry {
+	if value == nil {
+		return bootstrapClaudeControlEntry{envKey: envKey}
+	}
+	return bootstrapClaudeControlEntry{envKey: envKey, value: *value, configured: true}
+}
+
+func bootstrapBoolControl(envKey string, value *bool) bootstrapClaudeControlEntry {
+	if value == nil {
+		return bootstrapClaudeControlEntry{envKey: envKey}
+	}
+	return bootstrapClaudeControlEntry{envKey: envKey, value: strconv.FormatBool(*value), configured: true}
+}
+
+func bootstrapIntControl(envKey string, value *int) bootstrapClaudeControlEntry {
+	if value == nil {
+		return bootstrapClaudeControlEntry{envKey: envKey}
+	}
+	return bootstrapClaudeControlEntry{envKey: envKey, value: strconv.Itoa(*value), configured: true}
+}
+
+func validBootstrapProviderBaseURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && raw != "" && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func validBootstrapTaskType(taskType string) bool {

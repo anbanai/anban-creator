@@ -1046,12 +1046,18 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_DEEPSEEK_API_KEY":             "${ANBAN_DEEPSEEK_API_KEY:-}",
 			"ANBAN_DOUBAO_AGENT_BASE_URL":        "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}",
 			"ANBAN_DOUBAO_AGENT_API_KEY":         "${ANBAN_DOUBAO_AGENT_API_KEY:-}",
-			"ANBAN_KIMI_API_KEY":                 "${ANBAN_KIMI_API_KEY:-}",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":  "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
+			"ANBAN_MOONSHOT_API_KEY":             "${ANBAN_MOONSHOT_API_KEY:-}",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":     "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
+			"ANBAN_ZHIPU_API_KEY":                "${ANBAN_ZHIPU_API_KEY:-}",
 			"MOONSHOT_API_KEY":                   "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
 			}
+		}
+		if _, exists := server.Environment["ANBAN_KIMI_API_KEY"]; exists {
+			t.Fatal("docker-compose.yml retains removed ANBAN_KIMI_API_KEY")
 		}
 		if _, exists := compose.Services["agent"]; exists {
 			t.Fatal("docker-compose.yml must not define a persistent agent service")
@@ -1087,7 +1093,10 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_DEEPSEEK_API_KEY",
 			"ANBAN_DOUBAO_AGENT_BASE_URL",
 			"ANBAN_DOUBAO_AGENT_API_KEY",
-			"ANBAN_KIMI_API_KEY",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL",
+			"ANBAN_MOONSHOT_API_KEY",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL",
+			"ANBAN_ZHIPU_API_KEY",
 			"MOONSHOT_API_KEY",
 			"VOLCENGINE_ARK_API_KEY",
 			"WANGCAI_OPENAI_API_KEY",
@@ -1138,7 +1147,10 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_DEEPSEEK_API_KEY":             "test-deepseek-api-key",
 			"ANBAN_DOUBAO_AGENT_BASE_URL":        "https://ark.example.com/anthropic",
 			"ANBAN_DOUBAO_AGENT_API_KEY":         "test-doubao-api-key",
-			"ANBAN_KIMI_API_KEY":                 "test-kimi-api-key",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":  "https://api.moonshot.cn/anthropic",
+			"ANBAN_MOONSHOT_API_KEY":             "test-moonshot-agent-api-key",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":     "https://open.bigmodel.cn/api/anthropic",
+			"ANBAN_ZHIPU_API_KEY":                "test-zhipu-api-key",
 			"MOONSHOT_API_KEY":                   "test-moonshot-api-key",
 		} {
 			t.Setenv(name, value)
@@ -1151,8 +1163,10 @@ func TestDockerRuntimeContract(t *testing.T) {
 		if cfg.Claude.Executor != "docker" || cfg.Storage.Provider != "oss" || cfg.Storage.Endpoint != "oss-cn-test.aliyuncs.com" {
 			t.Fatalf("loaded Compose config = executor %q storage %q/%q", cfg.Claude.Executor, cfg.Storage.Provider, cfg.Storage.Endpoint)
 		}
-		if cfg.Claude.ExecutionProfiles["cost_effective"].AuthToken == "" || cfg.Claude.ExecutionProfiles["balanced"].AuthToken == "" || cfg.Claude.ExecutionProfiles["maximum_quality"].AuthToken == "" {
-			t.Fatalf("Compose environment did not configure all Agent profiles: %#v", cfg.Claude.ExecutionProfiles)
+		for _, providerID := range []string{"deepseek", "volcengine_ark", "moonshot", "zhipu"} {
+			if cfg.Claude.Providers[providerID].AuthToken == "" {
+				t.Fatalf("Compose environment did not configure Agent provider %q: %#v", providerID, cfg.Claude.Providers)
+			}
 		}
 	})
 
@@ -1170,6 +1184,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 				"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
 				"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
 				"ANBAN_ARTICLE_AGENT_IMAGE",
+				"ANBAN_KIMI_API_KEY",
 			} {
 				if strings.Contains(body, forbidden) {
 					t.Errorf("%s retains obsolete variable %s", path, forbidden)
@@ -1193,6 +1208,10 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"immutable image digests",
 			"VOLCENGINE_ARK_API_KEY",
 			"WANGCAI_OPENAI_API_KEY",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL",
+			"ANBAN_MOONSHOT_API_KEY",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL",
+			"ANBAN_ZHIPU_API_KEY",
 		} {
 			if !strings.Contains(normalizedDocs["README.md"], want) {
 				t.Errorf("README.md missing managed dispatch contract %q", want)

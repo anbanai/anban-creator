@@ -136,6 +136,18 @@ func injectTestAgentProfiles(t *testing.T, svc *TaskService) {
 	injector.SetAgentProfileRegistry(registry)
 }
 
+func freezeTestTaskProfile(t *testing.T, task *model.Task) {
+	t.Helper()
+	profile := testAgentProfiles()[0]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatalf("freeze test task profile: %v", err)
+	}
+	task.ExecutionProfile = profile.ID
+	task.AgentProfileSnapshot = snapshot
+	task.AgentProfileFingerprint = fingerprint
+}
+
 func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	injectTestAgentProfiles(t, svc)
@@ -157,11 +169,8 @@ func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testin
 		t.Fatalf("tasks = %d, want 1", len(tasks))
 	}
 	task := tasks[0]
-	if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.ModelID != "doubao-seed-evolving" {
+	if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Models.Default != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("task profile = %q, snapshot = %#v", task.ExecutionProfile, task.AgentProfileSnapshot)
-	}
-	if task.AgentProfileSnapshot.BaseURL != "" || task.AgentProfileSnapshot.AuthToken != "" {
-		t.Fatalf("task snapshot contains credentials: %#v", task.AgentProfileSnapshot)
 	}
 
 	if _, err := svc.CreateManual(ctx, CreateManualParams{
@@ -190,7 +199,7 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	if err != nil {
 		t.Fatalf("CreateFromPlan: %v", err)
 	}
-	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.ModelID != "doubao-seed-evolving" {
+	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Models.Default != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("plan task profile = %#v", task)
 	}
 }
@@ -1016,6 +1025,49 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := svc.agentProfiles.Resolve("maximum_quality")
+	if err != nil {
+		t.Fatal(err)
+	}
+	historical := current.Snapshot()
+	historical.Models = uniformAgentModelMatrix("kimi-k2.7-code")
+	historical.ModelUsageAliases = map[string]string{"kimi-k2.7-code": "kimi-k2.7-code"}
+	historicalFingerprint, err := model.AgentProfileFingerprint(historical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, Prompt: "historical", ExecutionProfile: current.ID,
+		AgentProfileSnapshot: historical, AgentProfileFingerprint: historicalFingerprint,
+	}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: current.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clones) != 1 || clones[0].AgentProfileSnapshot.Models.Default != "kimi-k3[1m]" || clones[0].AgentProfileFingerprint == historicalFingerprint {
+		t.Fatalf("clone did not freeze current profile: %#v", clones)
+	}
+}
+
 func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1478,6 +1530,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		CompletedAt:    &completedAt,
 		WorkflowStatus: &workflowStatus,
 	}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1548,6 +1601,7 @@ func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID,
 	}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1571,6 +1625,63 @@ func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
 	}
 }
 
+func TestTaskServiceResumeRejectsDeletedFrozenProviderBeforeMutation(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	executionID := uuid.NewString()
+	profile := testAgentProfiles()[0]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, ExecutionProfile: profile.ID,
+		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionFailed,
+		FinalizationStatus: model.TaskExecutionFinalizationDone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{{
+		ID: profile.ID, DisplayName: profile.DisplayName, Provider: profile.Provider, Protocol: profile.Protocol,
+		Models: profile.Models, ModelUsageAliases: profile.ModelUsageAliases, MinTier: profile.MinTier, Available: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "continue"})
+	if resumed != nil || !errors.Is(err, ErrAgentProviderUnavailable) {
+		t.Fatalf("Resume = %#v, %v; want nil/ErrAgentProviderUnavailable", resumed, err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusFailed || found.CurrentExecutionID == nil || *found.CurrentExecutionID != executionID {
+		t.Fatalf("task state mutated: status=%q current_execution_id=%v", found.Status, found.CurrentExecutionID)
+	}
+	if len(found.InputAttachments.Data()) != 0 {
+		t.Fatalf("resume artifacts persisted: %#v", found.InputAttachments.Data())
+	}
+	current, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != model.TaskExecutionFailed || current.FinalizationStatus != model.TaskExecutionFinalizationDone {
+		t.Fatalf("current execution mutated: %#v", current)
+	}
+}
+
 func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1584,6 +1695,7 @@ func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 		TerminalModelUsage: datatypes.NewJSONType([]model.ModelTokenUsage{{Provider: "provider", Model: "old", InputTokens: 9}}),
 		CostStatus:         agent.CostStatusReconciled,
 	}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1635,6 +1747,7 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "finished remotely",
 	}
+	freezeTestTaskProfile(t, task)
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "keep me", FileName: "brief.txt"},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume", FileName: "latest.md"},
@@ -1709,6 +1822,7 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusFailed,
 	}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1755,6 +1869,7 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1795,6 +1910,7 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	freezeTestTaskProfile(t, task)
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "keep"},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old latest"},
@@ -1832,6 +1948,7 @@ func TestTaskService_DeletePreventsConcurrentResumeFromRestoringAuthority(t *tes
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1873,6 +1990,7 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1915,6 +2033,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2136,6 +2255,7 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusFailed,
 	}
+	freezeTestTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

@@ -111,6 +111,51 @@ func TestRuntimeSmokeGeneratedServerConfigIsValid(t *testing.T) {
 	}
 }
 
+func TestRuntimeSmokeGeneratedServerConfigUsesModelMatrixSchema(t *testing.T) {
+	repoRoot := runtimeSmokeRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "runtime-smoke.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, required := range []string{
+		"providers:",
+		"models:",
+		"default:",
+		"opus:",
+		"fable:",
+		"sonnet:",
+		"haiku:",
+		"model_usage_aliases:",
+		"claude:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("runtime smoke config missing %q", required)
+		}
+	}
+	profilesStart := strings.Index(text, "  execution_profiles:\n")
+	if profilesStart < 0 {
+		t.Fatal("runtime smoke execution profile block is missing")
+	}
+	profilesEnd := strings.Index(text[profilesStart:], "  executor: docker\n")
+	if profilesEnd < 0 {
+		t.Fatal("runtime smoke execution profile block is malformed")
+	}
+	profiles := text[profilesStart : profilesStart+profilesEnd]
+	for _, forbidden := range []string{
+		`model_id: "deepseek-v4-pro"`,
+		`base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"`,
+		`auth_token: "${ANBAN_DEEPSEEK_API_KEY}"`,
+	} {
+		if strings.Contains(profiles, forbidden) {
+			t.Errorf("runtime smoke config retains obsolete profile field %q", forbidden)
+		}
+	}
+	if strings.Contains(text, "claude:\n  env:\n") {
+		t.Error("runtime smoke config retains obsolete top-level claude.env")
+	}
+}
+
 func TestRuntimeSmokeCreateTaskUsesCostEffectiveExecutionProfile(t *testing.T) {
 	for _, profile := range []string{"article", "montage"} {
 		t.Run(profile, func(t *testing.T) {
@@ -144,6 +189,18 @@ create_task "$TEST_PROFILE" project-1 marker-1
 				t.Fatalf("execution_profile = %q, want cost_effective", request.ExecutionProfile)
 			}
 		})
+	}
+}
+
+func TestRuntimeSmokeTopUpUsesOnlySelectedExecutionProfilePrices(t *testing.T) {
+	repoRoot := runtimeSmokeRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "runtime-smoke.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `.execution_profile == "cost_effective"`) {
+		t.Fatal("runtime smoke top-up must exclude prices for unselected execution profiles")
 	}
 }
 

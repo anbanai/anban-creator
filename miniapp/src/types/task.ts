@@ -21,6 +21,7 @@ export interface Task {
   type: TaskType
   execution_profile: AgentExecutionProfileID
   agent_profile_snapshot: AgentProfileSnapshot
+  agent_profile_fingerprint: string
   title?: string
   topic?: string
   prompt: string

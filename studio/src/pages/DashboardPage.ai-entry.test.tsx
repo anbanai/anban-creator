@@ -50,8 +50,10 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       {
         id: 'cost_effective',
         display_name: '性价比',
-        model_name: 'DeepSeek 4 Pro',
-        model_id: 'deepseek-v4-pro',
+        provider: 'deepseek',
+        protocol: 'anthropic',
+        models: { default: 'deepseek-v4-flash', opus: 'deepseek-v4-pro', fable: 'deepseek-v4-flash', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' },
+        claude: {},
         description: '适合日常创作和批量任务',
         min_tier: 'free',
         available: true,
@@ -59,8 +61,10 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       {
         id: 'balanced',
         display_name: '平衡型',
-        model_name: '豆包 Seed Evolving',
-        model_id: 'doubao-seed-evolving',
+        provider: 'volcengine_ark',
+        protocol: 'anthropic',
+        models: { default: 'doubao-seed-evolving', opus: 'doubao-seed-evolving', fable: 'doubao-seed-evolving', sonnet: 'doubao-seed-evolving', haiku: 'doubao-seed-evolving' },
+        claude: {},
         description: '兼顾质量与成本',
         min_tier: 'pro',
         available: true,
@@ -199,9 +203,9 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('group', { name: 'Agent 执行配置' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /性价比，DeepSeek 4 Pro/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /^性价比，deepseek，deepseek-v4-flash/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('4,000 积分')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /平衡型，豆包 Seed Evolving/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ }))
     expect(await screen.findByText('6,000 积分')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
@@ -228,7 +232,7 @@ describe('DashboardPage AI entry', () => {
     })
     render(<DashboardPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /平衡型，豆包 Seed Evolving/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ }))
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })

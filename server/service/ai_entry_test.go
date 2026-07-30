@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -30,6 +31,27 @@ type flakyAIEntryAssetRepository struct {
 	secondAsset *model.Asset
 	secondErr   error
 }
+
+type aiEntryProjectErrorRepository struct {
+	repository.ProjectRepository
+	calls int
+	err   error
+}
+
+func (r *aiEntryProjectErrorRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
+	r.calls++
+	if r.calls == 2 {
+		return nil, r.err
+	}
+	return r.ProjectRepository.FindByID(ctx, id)
+}
+
+type aiEntryRepositoryOverride struct {
+	repository.Repository
+	projects repository.ProjectRepository
+}
+
+func (r *aiEntryRepositoryOverride) Projects() repository.ProjectRepository { return r.projects }
 
 func (r *flakyAIEntryAssetRepository) FindOwnedByID(ctx context.Context, id, userID string) (*model.Asset, error) {
 	r.calls++
@@ -105,6 +127,66 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 	if len(llm.calls) != 1 || !strings.Contains(llm.calls[0].user, "帮我写一篇新品发布公众号文章") {
 		t.Fatalf("llm calls = %#v", llm.calls)
+	}
+}
+
+func TestAIEntryServiceSubmitPropagatesProfileAndSKUErrorsFromTaskCreation(t *testing.T) {
+	sentinels := []error{
+		ErrAgentProfileNotFound,
+		ErrAgentProfileUnavailable,
+		ErrAgentProfileAccessDenied,
+		ErrAgentProfileSnapshotInvalid,
+		ErrAgentProfileSnapshotConflict,
+		ErrAgentProviderUnavailable,
+		ErrAgentModelCostUnmapped,
+		ErrBillingProfileSKUNotFound,
+	}
+	for _, sentinel := range sentinels {
+		for _, wrapped := range []bool{false, true} {
+			name := sentinel.Error()
+			injected := sentinel
+			if wrapped {
+				name += "/wrapped"
+				injected = fmt.Errorf("catalog context: %w", sentinel)
+			}
+			t.Run(name, func(t *testing.T) {
+				db := setupTaskTestDB(t)
+				baseRepo := repository.New(db)
+				userID := uuid.NewString()
+				projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+				projects := &aiEntryProjectErrorRepository{ProjectRepository: baseRepo.Projects(), err: injected}
+				repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
+				logger := zerolog.New(io.Discard)
+				taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+				entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, &logger)
+
+				result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
+					UserID: userID, ProjectID: projectID, ExecutionProfile: "cost_effective", Text: "write",
+				})
+				if result != nil || !errors.Is(err, sentinel) {
+					t.Fatalf("Submit = %#v, %v; want nil/%v", result, err, sentinel)
+				}
+			})
+		}
+	}
+}
+
+func TestAIEntryServiceSubmitKeepsUnrelatedTaskCreationFailureAsStatusError(t *testing.T) {
+	db := setupTaskTestDB(t)
+	baseRepo := repository.New(db)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	projects := &aiEntryProjectErrorRepository{ProjectRepository: baseRepo.Projects(), err: errors.New("database unavailable")}
+	repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
+	logger := zerolog.New(io.Discard)
+	taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, &logger)
+
+	result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "cost_effective", Text: "write",
+	})
+	if err != nil || result == nil || result.Status != AIEntryStatusError {
+		t.Fatalf("Submit = %#v, %v; want AIEntryStatusError/nil", result, err)
 	}
 }
 

@@ -147,19 +147,23 @@ configured.
 
 Agent profile credentials are independently optional at Server startup. Set
 `ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL` plus `ANBAN_DEEPSEEK_API_KEY`,
-`ANBAN_DOUBAO_AGENT_API_KEY`, and `ANBAN_KIMI_API_KEY` to enable their
-respective profiles; an incomplete profile is listed as unavailable and is
-never replaced by another model automatically.
+`ANBAN_DOUBAO_AGENT_API_KEY`, `ANBAN_MOONSHOT_ANTHROPIC_BASE_URL` plus
+`ANBAN_MOONSHOT_API_KEY`, and `ANBAN_ZHIPU_ANTHROPIC_BASE_URL` plus
+`ANBAN_ZHIPU_API_KEY` to enable their respective providers. An incomplete
+profile is listed as unavailable and is never replaced by another model
+automatically.
 
 Kubernetes reads the billing and execution-token values from Secret
 `anban-billing-admin-api-key`, key `api-key`, and Secret
 `anban-agent-execution-token`, key `token-secret`, respectively. Configure the
 Agent profile variables through optional Secret `anban-agent-profile-providers`
 using keys `deepseek-anthropic-base-url`, `deepseek-api-key`, `doubao-api-key`,
-and `kimi-api-key`. A missing key keeps only that profile unavailable. Configure
-the remaining `server/config.yaml` environment references through the
-deployment's Secret/config injection. Do not put credentials directly in
-manifests or config files.
+`moonshot-api-key`, and `zhipu-api-key`. The Deployment pins the official
+Moonshot and Zhipu Anthropic-compatible Base URLs as non-secret values. A
+missing key keeps only the affected profile unavailable. Configure the
+remaining `server/config.yaml` environment references through the deployment's
+Secret/config injection. Do not put credentials directly in manifests or
+config files.
 
 Users can configure per-account platform credentials and per-user model settings from Studio.
 

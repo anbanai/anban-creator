@@ -296,12 +296,16 @@ func TestAgentBootstrapArtifactTransportFollowsStorageProvider(t *testing.T) {
 			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
 				Store: &streamArtifactStorage{name: tc.provider}, TokenTTL: time.Hour, Registry: profiles,
 			}, zerolog.Nop())
+			snapshot, fingerprint, err := profile.Freeze()
+			if err != nil {
+				t.Fatal(err)
+			}
 			task := &model.Task{
 				ID: "task-1", UserID: "user-1", ProjectID: "project-1",
 				Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning,
-				ExecutionProfile: profile.ID, AgentProfileSnapshot: profile.Snapshot(),
+				ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 			}
-			execution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot)
+			execution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 			execution.ID = "execution-1"
 			response, err := svc.buildResponse(t.Context(), &execution, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
 			if err != nil {

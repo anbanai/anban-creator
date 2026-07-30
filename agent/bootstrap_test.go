@@ -16,30 +16,34 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-func testModelUsageAliases() map[string]serveragent.ModelUsageIdentity {
-	return map[string]serveragent.ModelUsageIdentity{
-		"sonnet": {Provider: "volcengine_ark", Model: "sonnet"},
-	}
-}
-
 func testClaudeRuntimeEnv() map[string]string {
 	return map[string]string{
 		"ANTHROPIC_AUTH_TOKEN":           "token",
-		"ANTHROPIC_BASE_URL":             "https://ark.cn-beijing.volces.com/api/compatible",
-		"ANTHROPIC_MODEL":                "doubao-seed-evolving",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "doubao-seed-evolving",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "doubao-seed-evolving",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "doubao-seed-evolving",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "doubao-seed-evolving",
+		"ANTHROPIC_BASE_URL":             "https://open.bigmodel.cn/api/anthropic",
+		"ANTHROPIC_MODEL":                "glm-5.2",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "glm-5.2",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "glm-5.2-air",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2-air",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "glm-5.2-flash",
+		"MAX_THINKING_TOKENS":            "0",
+		"ENABLE_TOOL_SEARCH":             "false",
 	}
 }
 
 func testAgentRuntimeProfile() service.AgentRuntimeProfile {
+	maxThinkingTokens := 0
+	enableToolSearch := false
 	return service.AgentRuntimeProfile{
-		ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving",
-		Protocol: "anthropic", DisplayName: "平衡型", RuntimeEnv: testClaudeRuntimeEnv(),
+		ProfileID: "balanced", Provider: "zhipu", Protocol: "anthropic", DisplayName: "平衡型",
+		Models: model.AgentModelMatrix{
+			Default: "glm-5.2", Opus: "glm-5.2", Fable: "glm-5.2-air", Sonnet: "glm-5.2-air", Haiku: "glm-5.2-flash",
+		},
+		Claude:             model.AgentClaudeControls{MaxThinkingTokens: &maxThinkingTokens, EnableToolSearch: &enableToolSearch},
+		ProfileFingerprint: strings.Repeat("a", 64), RuntimeEnv: testClaudeRuntimeEnv(),
 		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{
-			"doubao-seed-evolving": {Provider: "volcengine_ark", Model: "doubao-seed-evolving"},
+			"glm-5.2":       {Provider: "zhipu", Model: "glm-5.2"},
+			"glm-5.2-air":   {Provider: "zhipu", Model: "glm-5.2-air"},
+			"glm-5.2-flash": {Provider: "zhipu", Model: "glm-5.2-flash"},
 		},
 	}
 }
@@ -340,6 +344,7 @@ func TestDecodeBoundedJSONRejectsUnknownFields(t *testing.T) {
 	for _, raw := range []string{
 		`{"code":0,"msg":"ok","data":{},"unexpected":true}`,
 		`{"code":0,"msg":"ok","data":{"unexpected":true}}`,
+		`{"code":0,"msg":"ok","data":{"execution_profile":{"model_id":"legacy"}}}`,
 		`{"code":0,"msg":"ok","data":{"files":[{"path":"a","text":"x","mode":420,"unexpected":true}]}}`,
 	} {
 		var envelope bootstrapEnvelope
@@ -377,7 +382,18 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		}},
 		{"resume session without context", func(r *BootstrapResponse) { r.ResumeSessionID = "bba21f1d-70b8-4157-917b-f9802c2b1740" }},
 		{"foreign resume context", func(r *BootstrapResponse) { r.ResumeContextPath = ".anban-creator/resume/executions/other/latest.md" }},
-		{"long model", func(r *BootstrapResponse) { r.ExecutionProfile.ModelID = strings.Repeat("m", maxBootstrapModelBytes+1) }},
+		{"invalid profile ID", func(r *BootstrapResponse) { r.ExecutionProfile.ProfileID = "custom" }},
+		{"invalid protocol", func(r *BootstrapResponse) { r.ExecutionProfile.Protocol = "openai" }},
+		{"invalid fingerprint", func(r *BootstrapResponse) { r.ExecutionProfile.ProfileFingerprint = "ABC" }},
+		{"missing matrix role", func(r *BootstrapResponse) { r.ExecutionProfile.Models.Haiku = "" }},
+		{"long matrix model", func(r *BootstrapResponse) {
+			r.ExecutionProfile.Models.Haiku = strings.Repeat("m", maxBootstrapModelBytes+1)
+		}},
+		{"runtime matrix mismatch", func(r *BootstrapResponse) { r.ExecutionProfile.RuntimeEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "other" }},
+		{"runtime controls mismatch", func(r *BootstrapResponse) { delete(r.ExecutionProfile.RuntimeEnv, "ENABLE_TOOL_SEARCH") }},
+		{"runtime control without snapshot source", func(r *BootstrapResponse) {
+			r.ExecutionProfile.RuntimeEnv["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+		}},
 		{"unknown runtime environment", func(r *BootstrapResponse) { r.ExecutionProfile.RuntimeEnv = map[string]string{"PATH": "/tmp/bin"} }},
 		{"empty runtime environment value", func(r *BootstrapResponse) {
 			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": ""}
@@ -386,6 +402,10 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 			r.ExecutionProfile.RuntimeEnv = map[string]string{"ANTHROPIC_AUTH_TOKEN": strings.Repeat("x", 16<<10+1)}
 		}},
 		{"missing model usage aliases", func(r *BootstrapResponse) { r.ExecutionProfile.ModelUsageAliases = nil }},
+		{"missing matrix model alias", func(r *BootstrapResponse) { delete(r.ExecutionProfile.ModelUsageAliases, "glm-5.2-flash") }},
+		{"alias provider mismatch", func(r *BootstrapResponse) {
+			r.ExecutionProfile.ModelUsageAliases["glm-5.2"] = serveragent.ModelUsageIdentity{Provider: "other", Model: "glm-5.2"}
+		}},
 		{"invalid model usage alias", func(r *BootstrapResponse) {
 			r.ExecutionProfile.ModelUsageAliases = map[string]serveragent.ModelUsageIdentity{"raw": {Provider: "", Model: "sonnet"}}
 		}},
@@ -404,6 +424,16 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 				t.Fatal("expected rejection")
 			}
 		})
+	}
+}
+
+func TestValidateBootstrapExecutionProfileAcceptsStableIDsWithoutFixedProviderModelTuples(t *testing.T) {
+	for _, profileID := range []string{"cost_effective", "balanced", "maximum_quality"} {
+		profile := testAgentRuntimeProfile()
+		profile.ProfileID = profileID
+		if err := validateBootstrapExecutionProfile(profile); err != nil {
+			t.Fatalf("profile %q with transported provider/model matrix rejected: %v", profileID, err)
+		}
 	}
 }
 

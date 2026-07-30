@@ -462,13 +462,29 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 	dispatcher := &dispatchTestDispatcher{}
 	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetRuntimeDispatcher(dispatcher)
+	profiles, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(profiles)
+	profile, err := profiles.Resolve("cost_effective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
 	task := &model.Task{
-		ID:        uuid.NewString(),
-		UserID:    uuid.NewString(),
-		ProjectID: uuid.NewString(),
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusPending,
-		Prompt:    "dispatch me",
+		ID:                      uuid.NewString(),
+		UserID:                  uuid.NewString(),
+		ProjectID:               uuid.NewString(),
+		Type:                    model.PlatformArticle,
+		Status:                  model.TaskStatusPending,
+		Prompt:                  "dispatch me",
+		ExecutionProfile:        profile.ID,
+		AgentProfileSnapshot:    snapshot,
+		AgentProfileFingerprint: fingerprint,
 	}
 	if err := repo.Projects().Create(context.Background(), &model.Project{
 		ID:       task.ProjectID,
@@ -483,6 +499,22 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		t.Fatalf("create task: %v", err)
 	}
 	return svc, repo, db, dispatcher, task
+}
+
+func TestCreateCurrentExecutionRejectsDeletedFrozenProviderBeforePersistence(t *testing.T) {
+	svc, repo, _, _, task := setupDispatchTest(t)
+	delete(svc.agentProfiles.providers, task.AgentProfileSnapshot.Provider)
+
+	if _, created, err := svc.createCurrentExecution(t.Context(), task); !errors.Is(err, ErrAgentProviderUnavailable) || created {
+		t.Fatalf("createCurrentExecution created=%v err=%v", created, err)
+	}
+	stored, err := repo.Tasks().FindByID(t.Context(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.TaskStatusPending || stored.CurrentExecutionID != nil {
+		t.Fatalf("task mutated before provider validation: %#v", stored)
+	}
 }
 
 func mustCurrentExecution(t *testing.T, repo repository.Repository, taskID string) *model.TaskExecution {
@@ -834,13 +866,14 @@ func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
 	}
 }
 
-func TestCreateCurrentExecutionCopiesFrozenTaskAgentProfileWithoutRegistryLookup(t *testing.T) {
+func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
-	task.ExecutionProfile = "maximum_quality"
-	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
-		ProfileID: "maximum_quality", Provider: "kimi", ModelID: "k3", Protocol: "anthropic",
-		ContextWindow: 1048576, ReasoningEffort: "high", ThinkingRequired: true, DisplayName: "Kimi K3",
+	profile := testAgentProfiles()[2]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
 	}
+	task.ExecutionProfile, task.AgentProfileSnapshot, task.AgentProfileFingerprint = profile.ID, snapshot, fingerprint
 	if err := repo.Tasks().Update(context.Background(), task); err != nil {
 		t.Fatalf("update task profile: %v", err)
 	}
@@ -849,19 +882,21 @@ func TestCreateCurrentExecutionCopiesFrozenTaskAgentProfileWithoutRegistryLookup
 	if err != nil || !created {
 		t.Fatalf("createCurrentExecution = %#v, %v, created=%v", execution, err, created)
 	}
-	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelID != "k3" || execution.Protocol != task.AgentProfileSnapshot.Protocol || execution.ContextWindow != task.AgentProfileSnapshot.ContextWindow {
+	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelMatrix != task.AgentProfileSnapshot.Models || execution.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("execution profile = %#v, want frozen runtime identity %#v", execution, task.AgentProfileSnapshot)
 	}
 }
 
-func TestReplacePreStartExecutionCopiesFrozenTaskProfileInsteadOfResolvingRegistry(t *testing.T) {
+func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
 	ctx := context.Background()
 	task.Status = model.TaskStatusRunning
-	task.ExecutionProfile = "balanced"
-	task.AgentProfileSnapshot = model.AgentProfileSnapshot{
-		ProfileID: "balanced", Provider: "volcengine_ark", ModelID: "doubao-seed-evolving", Protocol: "anthropic", DisplayName: "Balanced",
+	profile := testAgentProfiles()[1]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
 	}
+	task.ExecutionProfile, task.AgentProfileSnapshot, task.AgentProfileFingerprint = profile.ID, snapshot, fingerprint
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -881,7 +916,7 @@ func TestReplacePreStartExecutionCopiesFrozenTaskProfileInsteadOfResolvingRegist
 	if err != nil || !replaced {
 		t.Fatalf("replacePreStartExecution = %#v, replaced=%v, err=%v", replacement, replaced, err)
 	}
-	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelID != task.AgentProfileSnapshot.ModelID || replacement.Protocol != task.AgentProfileSnapshot.Protocol {
+	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelMatrix != task.AgentProfileSnapshot.Models || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
 	}
 }
@@ -1464,7 +1499,12 @@ func TestHandleExecutionFromPayloadWithoutDispatcherReturnsConfigurationError(t 
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+	profile := testAgentProfiles()[0]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1866,7 +1906,12 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+	profile := testAgentProfiles()[0]
+	snapshot, fingerprint, err := profile.Freeze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
