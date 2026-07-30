@@ -64,7 +64,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 		planSvc := service.NewPlanService(repo, &logger)
 		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
-		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
+		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)

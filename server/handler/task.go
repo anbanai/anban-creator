@@ -1458,7 +1458,9 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		Published bool `json:"published"`
+		Published bool   `json:"published"`
+		NoteID    string `json:"note_id,omitempty"`
+		NoteURL   string `json:"note_url,omitempty"`
 	}
 	if err := c.Bind().Body(&body); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -1471,7 +1473,10 @@ func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
-	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
+	if err := h.service.SetPublished(c.Context(), userID, id, body.Published, service.SeednotePublicationIdentity{NoteID: body.NoteID, NoteURL: body.NoteURL}); err != nil {
+		if errors.Is(err, service.ErrSeednotePublicationIDInvalid) || errors.Is(err, service.ErrSeednotePublicationURLInvalid) || errors.Is(err, service.ErrSeednotePublicationIdentityMismatch) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Msg("mark published failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
 	}

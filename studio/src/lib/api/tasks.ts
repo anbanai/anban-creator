@@ -49,8 +49,8 @@ export const tasksApi = {
   bulkDelete: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
 
-  markPublished: (id: string, published: boolean) =>
-    unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
+  markPublished: (id: string, published: boolean, identity?: { note_id?: string; note_url?: string }) =>
+    unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published, ...identity })),
 
   // Publish-approval gate (Batch 4A): resume a held publish (publishes the
   // frozen draft to the WeChat draft box asynchronously) or close the gate

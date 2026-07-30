@@ -17,7 +17,6 @@ import (
 const (
 	TypeContentGenerate        = "content:generate"
 	TypePlanTrigger            = "plan:trigger"
-	TypeSeednoteDiscover       = "seednote:discover"
 	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
 )
 
@@ -117,7 +116,6 @@ type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
-	seednoteDiscoverHandler SeednoteTrackingHandler,
 	seednoteCaptureHandler SeednoteTrackingHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
@@ -152,19 +150,6 @@ func NewTaskProcessor(
 		}
 		logger.Info().Str("plan_id", payload.PlanID).Msg("processing plan trigger")
 		return planHandler(ctx, payload.PlanID)
-	})
-
-	mux.HandleFunc(TypeSeednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
-		trackingID, err := parseSeednoteTrackingPayload(t.Payload())
-		if err != nil {
-			logger.Error().Err(err).Msg("failed to unmarshal seednote discover payload")
-			return err
-		}
-		logger.Info().Str("tracking_id", trackingID).Msg("processing seednote discover task")
-		if seednoteDiscoverHandler == nil {
-			return fmt.Errorf("seednote discover handler unavailable")
-		}
-		return seednoteDiscoverHandler(ctx, trackingID)
 	})
 
 	mux.HandleFunc(TypeSeednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {

@@ -414,8 +414,8 @@ func main() {
 	}
 
 	if repo != nil {
-		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), nil, asynqClient, log)
-		log.Info().Bool("llm_configured", false).Msg("SeedNote tracking service initialized")
+		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
+		log.Info().Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisHistorySvc = service.NewViralAnalysisHistoryService(repo)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
@@ -993,7 +993,7 @@ func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logg
 	if repo == nil {
 		return nil
 	}
-	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, log)
+	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, log)
 	return handler.NewSeednoteAnalyticsHandler(trackingSvc, log)
 }
 
@@ -1044,12 +1044,8 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
 func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
-	var seednoteDiscoverHandler scheduler.SeednoteTrackingHandler
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
-		seednoteDiscoverHandler = func(ctx context.Context, trackingID string) error {
-			return seednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
-		}
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
 			return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
 		}
@@ -1062,7 +1058,6 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		func(ctx context.Context, planID string) error {
 			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
 		},
-		seednoteDiscoverHandler,
 		seednoteCaptureHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,

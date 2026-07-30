@@ -4,6 +4,7 @@ import "time"
 
 const (
 	SeednoteTrackingStatusWaitingDiscovery = "waiting_discovery"
+	SeednoteTrackingStatusUnresolved       = "unresolved"
 	SeednoteTrackingStatusTracking         = "tracking"
 	SeednoteTrackingStatusStopped          = "stopped"
 	SeednoteTrackingStatusFailed           = "failed"

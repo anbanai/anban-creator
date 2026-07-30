@@ -573,6 +573,60 @@ func TestMarkPublishedWorksForCompletedTask(t *testing.T) {
 	}
 }
 
+func TestTaskHandlerMarkPublishedRejectsInvalidSeednoteIdentityWithoutPublishing(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid id", body: `{"published":true,"note_id":"invalid/id"}`},
+		{name: "invalid url", body: `{"published":true,"note_url":"https://example.com/explore/note-1"}`},
+		{name: "conflicting identity", body: `{"published":true,"note_id":"note-2","note_url":"https://www.xiaohongshu.com/explore/note-1"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTaskHandlerTestDB(t)
+			repo := repository.New(db)
+			ctx := context.Background()
+			userID, projectID, taskID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: uuid.NewString()[:12]}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote", Status: model.ProjectStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
+			app := fiber.New()
+			app.Patch("/tasks/:id/published", func(c fiber.Ctx) error {
+				c.Locals("user_id", userID)
+				return h.MarkPublished(c)
+			})
+
+			req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/published", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				data, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, data)
+			}
+			found, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found.Published {
+				t.Fatal("invalid identity must not set published=true")
+			}
+		})
+	}
+}
+
 func TestTaskHandlerProductionDoesNotReferenceLegacyPaymentRequiredColumns(t *testing.T) {
 	raw, err := os.ReadFile("task.go")
 	if err != nil {

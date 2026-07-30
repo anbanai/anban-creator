@@ -430,17 +430,19 @@ func (s *blockingTaskDeleteStorage) Delete(ctx context.Context, key string) erro
 
 type fakePublishedTrackingService struct {
 	calls []struct {
-		userID string
-		taskID string
+		userID   string
+		taskID   string
+		identity SeednotePublicationIdentity
 	}
 	err error
 }
 
-func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
 	f.calls = append(f.calls, struct {
-		userID string
-		taskID string
-	}{userID: userID, taskID: taskID})
+		userID   string
+		taskID   string
+		identity SeednotePublicationIdentity
+	}{userID: userID, taskID: taskID, identity: identity})
 	return f.err
 }
 
@@ -2504,7 +2506,8 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+	identity := SeednotePublicationIdentity{NoteID: "note-1"}
+	if err := svc.SetPublished(ctx, userID, task.ID, true, identity); err != nil {
 		t.Fatalf("SetPublished: %v", err)
 	}
 
@@ -2513,6 +2516,9 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 	}
 	if trackingSvc.calls[0].userID != userID || trackingSvc.calls[0].taskID != task.ID {
 		t.Fatalf("tracking call = %+v", trackingSvc.calls[0])
+	}
+	if trackingSvc.calls[0].identity.NoteID != "note-1" || trackingSvc.calls[0].identity.NoteURL != "https://www.xiaohongshu.com/explore/note-1" {
+		t.Fatalf("tracking identity = %+v", trackingSvc.calls[0].identity)
 	}
 }
 
@@ -2535,10 +2541,10 @@ func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testi
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, true, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
 		t.Fatalf("SetPublished article: %v", err)
 	}
-	if err := svc.SetPublished(ctx, userID, task.ID, false); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, false, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
 		t.Fatalf("SetPublished false: %v", err)
 	}
 	if len(trackingSvc.calls) != 0 {

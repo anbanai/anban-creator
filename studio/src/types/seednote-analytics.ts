@@ -1,4 +1,4 @@
-export type SeednoteTrackingStatus = 'waiting_discovery' | 'tracking' | 'stopped' | 'failed'
+export type SeednoteTrackingStatus = 'waiting_discovery' | 'unresolved' | 'tracking' | 'stopped' | 'failed'
 
 export interface SeednoteTrackingInfo {
   status: SeednoteTrackingStatus | string

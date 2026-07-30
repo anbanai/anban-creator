@@ -49,7 +49,7 @@ func validateAgentExecutionTarget(target string) error {
 }
 
 type PublishedTrackingService interface {
-	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
+	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error
 }
 
 type cloudDraftPublisher interface {
@@ -1546,7 +1546,7 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 }
 
 // SetPublished toggles the published flag on a task.
-func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool) error {
+func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool, identity SeednotePublicationIdentity) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
@@ -1554,17 +1554,25 @@ func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, p
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	return s.setPublishedAndMaybeTrack(ctx, userID, task, published)
+	if published && task.Type == model.PlatformSeednote {
+		identity, err = NormalizeSeednotePublicationIdentity(identity)
+		if err != nil {
+			return err
+		}
+	} else {
+		identity = SeednotePublicationIdentity{}
+	}
+	return s.setPublishedAndMaybeTrack(ctx, userID, task, published, identity)
 }
 
-func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool) error {
+func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool, identity SeednotePublicationIdentity) error {
 	if err := s.repo.Tasks().SetPublished(ctx, task.ID, published); err != nil {
 		return err
 	}
 	if !published || task.Type != model.PlatformSeednote || s.seednoteTrackingSvc == nil {
 		return nil
 	}
-	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID); err != nil {
+	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID, identity); err != nil {
 		return fmt.Errorf("ensure seednote tracking: %w", err)
 	}
 	return nil
