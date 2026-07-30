@@ -1044,21 +1044,21 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ACCESS_KEY_ID":            "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
 			"ANBAN_OSS_ACCESS_KEY_SECRET":        "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
 			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":  "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
-			"ANBAN_DEEPSEEK_API_KEY":             "${ANBAN_DEEPSEEK_API_KEY:-}",
-			"ANBAN_DOUBAO_AGENT_BASE_URL":        "${ANBAN_DOUBAO_AGENT_BASE_URL:-https://ark.cn-beijing.volces.com/api/compatible}",
-			"ANBAN_DOUBAO_AGENT_API_KEY":         "${ANBAN_DOUBAO_AGENT_API_KEY:-}",
+			"ANBAN_DEEPSEEK_API_KEY":             "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
 			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":  "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
-			"ANBAN_MOONSHOT_API_KEY":             "${ANBAN_MOONSHOT_API_KEY:-}",
+			"ANBAN_MOONSHOT_API_KEY":             "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
 			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":     "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
-			"ANBAN_ZHIPU_API_KEY":                "${ANBAN_ZHIPU_API_KEY:-}",
+			"ANBAN_ZHIPU_API_KEY":                "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
 			"MOONSHOT_API_KEY":                   "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
 			}
 		}
-		if _, exists := server.Environment["ANBAN_KIMI_API_KEY"]; exists {
-			t.Fatal("docker-compose.yml retains removed ANBAN_KIMI_API_KEY")
+		for _, obsolete := range []string{"ANBAN_KIMI_API_KEY", "ANBAN_DOUBAO_AGENT_BASE_URL", "ANBAN_DOUBAO_AGENT_API_KEY"} {
+			if _, exists := server.Environment[obsolete]; exists {
+				t.Fatalf("docker-compose.yml retains removed %s", obsolete)
+			}
 		}
 		if _, exists := compose.Services["agent"]; exists {
 			t.Fatal("docker-compose.yml must not define a persistent agent service")
@@ -1092,8 +1092,6 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ACCESS_KEY_SECRET",
 			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL",
 			"ANBAN_DEEPSEEK_API_KEY",
-			"ANBAN_DOUBAO_AGENT_BASE_URL",
-			"ANBAN_DOUBAO_AGENT_API_KEY",
 			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL",
 			"ANBAN_MOONSHOT_API_KEY",
 			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL",
@@ -1146,8 +1144,6 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_OSS_ACCESS_KEY_SECRET":        "test-access-key-secret",
 			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":  "https://deepseek.example.com/anthropic",
 			"ANBAN_DEEPSEEK_API_KEY":             "test-deepseek-api-key",
-			"ANBAN_DOUBAO_AGENT_BASE_URL":        "https://ark.example.com/anthropic",
-			"ANBAN_DOUBAO_AGENT_API_KEY":         "test-doubao-api-key",
 			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":  "https://api.moonshot.cn/anthropic",
 			"ANBAN_MOONSHOT_API_KEY":             "test-moonshot-agent-api-key",
 			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":     "https://open.bigmodel.cn/api/anthropic",
@@ -1186,6 +1182,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 				"ANBAN_CLAUDE_DOCKER_ARTICLE_IMAGE",
 				"ANBAN_ARTICLE_AGENT_IMAGE",
 				"ANBAN_KIMI_API_KEY",
+				"ANBAN_DOUBAO_AGENT_BASE_URL",
+				"ANBAN_DOUBAO_AGENT_API_KEY",
 			} {
 				if strings.Contains(body, forbidden) {
 					t.Errorf("%s retains obsolete variable %s", path, forbidden)

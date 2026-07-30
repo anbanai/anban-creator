@@ -74,19 +74,11 @@ spec:
                 secretKeyRef:
                   name: anban-agent-profile-providers
                   key: deepseek-anthropic-base-url
-                  optional: true
             - name: ANBAN_DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: anban-agent-profile-providers
                   key: deepseek-api-key
-                  optional: true
-            - name: ANBAN_DOUBAO_AGENT_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: anban-agent-profile-providers
-                  key: doubao-api-key
-                  optional: true
             - name: ANBAN_MOONSHOT_ANTHROPIC_BASE_URL
               value: https://api.moonshot.cn/anthropic
             - name: ANBAN_MOONSHOT_API_KEY
@@ -94,7 +86,6 @@ spec:
                 secretKeyRef:
                   name: anban-agent-profile-providers
                   key: moonshot-api-key
-                  optional: true
             - name: ANBAN_ZHIPU_ANTHROPIC_BASE_URL
               value: https://open.bigmodel.cn/api/anthropic
             - name: ANBAN_ZHIPU_API_KEY
@@ -102,7 +93,6 @@ spec:
                 secretKeyRef:
                   name: anban-agent-profile-providers
                   key: zhipu-api-key
-                  optional: true
             - name: ANBAN_BILLING_ADMIN_API_KEY
               valueFrom:
                 secretKeyRef:

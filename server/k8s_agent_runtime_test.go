@@ -212,14 +212,15 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	for envName, secretKey := range map[string]string{
 		"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL": "deepseek-anthropic-base-url",
 		"ANBAN_DEEPSEEK_API_KEY":            "deepseek-api-key",
-		"ANBAN_DOUBAO_AGENT_API_KEY":        "doubao-api-key",
 		"ANBAN_MOONSHOT_API_KEY":            "moonshot-api-key",
 		"ANBAN_ZHIPU_API_KEY":               "zhipu-api-key",
 	} {
-		assertOptionalDeploymentSecretEnv(t, deployment, envName, "anban-agent-profile-providers", secretKey)
+		assertDeploymentSecretEnv(t, deployment, envName, "anban-agent-profile-providers", secretKey)
 	}
-	if _, ok := env["ANBAN_KIMI_API_KEY"]; ok {
-		t.Fatal("server deployment retains removed ANBAN_KIMI_API_KEY")
+	for _, obsolete := range []string{"ANBAN_KIMI_API_KEY", "ANBAN_DOUBAO_AGENT_BASE_URL", "ANBAN_DOUBAO_AGENT_API_KEY"} {
+		if _, ok := env[obsolete]; ok {
+			t.Fatalf("server deployment retains removed %s", obsolete)
+		}
 	}
 	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
 	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})

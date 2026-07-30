@@ -49,9 +49,9 @@ create_project() {
 create_task() {
   local profile="$1" project_id="$2" marker="$3" response task_id body
   if [[ "$profile" == "montage" ]]; then
-    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"cost_effective",montage_input:{brief:("Runtime smoke marker " + $marker),pipeline_key:"cinematic",preferences:{duration_seconds:5}}}')"
+    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"effective",montage_input:{brief:("Runtime smoke marker " + $marker),pipeline_key:"cinematic",preferences:{duration_seconds:5}}}')"
   else
-    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"cost_effective",has_content_image:false,has_tail_image:false,article_with_cover:false,article_with_content_images:false}')"
+    body="$(jq -cn --arg project "$project_id" --arg marker "$marker" '{project_id:$project,prompt:("Execute only the managed runtime smoke marker: " + $marker),quantity:1,execution_profile:"effective",has_content_image:false,has_tail_image:false,article_with_cover:false,article_with_content_images:false}')"
   fi
   response="$(api_post /api/v1/tasks "$body")" || return
   task_id="$(jq -er 'if .code == 0 and (.data.id | type) == "string" and (.data.id | length) > 0 then .data.id else error("task response is missing data.id") end' <<<"$response")" || {
@@ -337,25 +337,21 @@ montage:
   execution_targets: ["cloud"]
   default_execution_target: "cloud"
 claude:
-  providers:
-    deepseek:
-      protocol: "anthropic"
-      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
-      auth_token: "${ANBAN_DEEPSEEK_API_KEY}"
   execution_profiles:
-    cost_effective:
+    effective:
       description: "Runtime smoke DeepSeek V4 Flash"
       provider: "deepseek"
-      models:
-        default: "deepseek-v4-flash"
-        opus: "deepseek-v4-flash"
-        fable: "deepseek-v4-flash"
-        sonnet: "deepseek-v4-flash"
-        haiku: "deepseek-v4-flash"
+      envs:
+        ANTHROPIC_BASE_URL: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
+        ANTHROPIC_AUTH_TOKEN: "${ANBAN_DEEPSEEK_API_KEY}"
+        ANTHROPIC_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
+        CLAUDE_CODE_EFFORT_LEVEL: "low"
       model_usage_aliases:
         deepseek-v4-flash: "deepseek-v4-flash"
-      claude:
-        effort_level: "low"
   executor: docker
   runtime_images:
     article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
@@ -540,7 +536,7 @@ runtime_smoke_main() {
   USER_ID="$(jq -er '.data.user.id' <<<"$registration")"
   catalog="$(api_get /api/v1/billing/catalog)"
   CATALOG_ID="$(jq -er '.data.catalog_id' <<<"$catalog")"
-  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select((.operation == "task.article" or .operation == "task.seednote" or .operation == "task.montage") and .execution_profile == "cost_effective") | .price_credits] | if length == 3 then add else error("cost-effective managed task billing SKUs are incomplete") end' <<<"$catalog")"
+  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select((.operation == "task.article" or .operation == "task.seednote" or .operation == "task.montage") and .execution_profile == "effective") | .price_credits] | if length == 3 then add else error("effective managed task billing SKUs are incomplete") end' <<<"$catalog")"
   TOP_UP_CREDITS=$((TASK_ADMISSION_CREDITS + 1000))
   TOP_UP_SOURCE="runtime-smoke-$USER_ID"
   top_up_body="$(jq -cn \

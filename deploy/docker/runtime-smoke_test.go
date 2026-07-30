@@ -111,7 +111,7 @@ func TestRuntimeSmokeGeneratedServerConfigIsValid(t *testing.T) {
 	}
 }
 
-func TestRuntimeSmokeGeneratedServerConfigUsesModelMatrixSchema(t *testing.T) {
+func TestRuntimeSmokeGeneratedServerConfigUsesProfileEnvs(t *testing.T) {
 	repoRoot := runtimeSmokeRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "runtime-smoke.sh"))
 	if err != nil {
@@ -119,15 +119,13 @@ func TestRuntimeSmokeGeneratedServerConfigUsesModelMatrixSchema(t *testing.T) {
 	}
 	text := string(raw)
 	for _, required := range []string{
-		"providers:",
-		"models:",
-		"default:",
-		"opus:",
-		"fable:",
-		"sonnet:",
-		"haiku:",
+		"effective:",
+		"envs:",
+		"ANTHROPIC_BASE_URL:",
+		"ANTHROPIC_AUTH_TOKEN:",
+		"ANTHROPIC_MODEL:",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL:",
 		"model_usage_aliases:",
-		"claude:",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("runtime smoke config missing %q", required)
@@ -143,6 +141,11 @@ func TestRuntimeSmokeGeneratedServerConfigUsesModelMatrixSchema(t *testing.T) {
 	}
 	profiles := text[profilesStart : profilesStart+profilesEnd]
 	for _, forbidden := range []string{
+		"cost_effective:",
+		"maximum_quality:",
+		"providers:",
+		"models:",
+		"claude:",
 		`model_id: "deepseek-v4-pro"`,
 		`base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"`,
 		`auth_token: "${ANBAN_DEEPSEEK_API_KEY}"`,
@@ -156,7 +159,7 @@ func TestRuntimeSmokeGeneratedServerConfigUsesModelMatrixSchema(t *testing.T) {
 	}
 }
 
-func TestRuntimeSmokeCreateTaskUsesCostEffectiveExecutionProfile(t *testing.T) {
+func TestRuntimeSmokeCreateTaskUsesEffectiveExecutionProfile(t *testing.T) {
 	for _, profile := range []string{"article", "montage"} {
 		t.Run(profile, func(t *testing.T) {
 			requestPath := filepath.Join(t.TempDir(), "create-task.json")
@@ -185,8 +188,8 @@ create_task "$TEST_PROFILE" project-1 marker-1
 			if err := json.Unmarshal(data, &request); err != nil {
 				t.Fatalf("decode create_task request: %v", err)
 			}
-			if request.ExecutionProfile != "cost_effective" {
-				t.Fatalf("execution_profile = %q, want cost_effective", request.ExecutionProfile)
+			if request.ExecutionProfile != "effective" {
+				t.Fatalf("execution_profile = %q, want effective", request.ExecutionProfile)
 			}
 		})
 	}
@@ -199,7 +202,7 @@ func TestRuntimeSmokeTopUpUsesOnlySelectedExecutionProfilePrices(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, `.execution_profile == "cost_effective"`) {
+	if !strings.Contains(text, `.execution_profile == "effective"`) {
 		t.Fatal("runtime smoke top-up must exclude prices for unselected execution profiles")
 	}
 }
