@@ -18,7 +18,7 @@ func TestAgentProfileErrorResponseContract(t *testing.T) {
 		code   int
 		msg    string
 	}{
-		{name: "not found", err: service.ErrAgentProfileNotFound, status: fiber.StatusBadRequest, code: 46001, msg: "agent_profile_not_found"},
+		{name: "invalid profile", err: service.ErrAgentProfileNotFound, status: fiber.StatusBadRequest, code: 46001, msg: "invalid_agent_execution_profile"},
 		{name: "unavailable", err: service.ErrAgentProfileUnavailable, status: fiber.StatusUnprocessableEntity, code: 46002, msg: "agent_profile_unavailable"},
 		{name: "access denied", err: service.ErrAgentProfileAccessDenied, status: fiber.StatusForbidden, code: 46003, msg: "agent_profile_access_denied"},
 		{name: "snapshot invalid", err: service.ErrAgentProfileSnapshotInvalid, status: fiber.StatusBadRequest, code: 46004, msg: "agent_profile_snapshot_invalid"},

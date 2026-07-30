@@ -117,7 +117,7 @@ func TestTaskServiceCreateManualMontageRejectsWhenDisabled(t *testing.T) {
 	userID := "user-om-disabled"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{
@@ -141,7 +141,7 @@ func TestTaskServiceCreateManualMontageRejectsWhenCloudRuntimeMissing(t *testing
 	userID := "user-montage-no-cloud"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{
@@ -164,7 +164,7 @@ func TestTaskServiceCreateManualMontageRejectsConfiguredLocalTarget(t *testing.T
 	userID := "user-om-local"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		MontageInput: &model.MontageInput{

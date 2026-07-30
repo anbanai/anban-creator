@@ -257,7 +257,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 			ctx := context.Background()
 			svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 			projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: test.name, Quantity: 1,
 			})
 			if err != nil {

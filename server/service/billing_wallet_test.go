@@ -542,7 +542,7 @@ func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 			t.Fatal(err)
 		}
 		secondQuote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-			UserID: billingWalletUserID, Operation: "task.article", ExecutionProfile: "cost_effective", RequestFingerprint: quote.RequestFingerprint,
+			UserID: billingWalletUserID, Operation: "task.article", ExecutionProfile: "effective", RequestFingerprint: quote.RequestFingerprint,
 			IdempotencyScope: "quote", IdempotencyKey: "task-identity-second-quote",
 		})
 		if err != nil {
@@ -1875,7 +1875,7 @@ func (f *billingWalletFixture) quote(t *testing.T, userID, operation, route, ide
 	t.Helper()
 	executionProfile := ""
 	if strings.HasPrefix(operation, "task.") && operation != "task.viral_analysis" {
-		executionProfile = "cost_effective"
+		executionProfile = "effective"
 	}
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
 		UserID: userID, Operation: operation, Route: route, ExecutionProfile: executionProfile, RequestFingerprint: billingFingerprint(identity),

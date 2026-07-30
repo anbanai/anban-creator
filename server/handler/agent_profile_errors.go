@@ -29,7 +29,7 @@ func respondAgentProfileError(c fiber.Ctx, err error) (bool, error) {
 	for _, item := range []mapping{
 		{service.ErrAgentProfileAccessDenied, fiber.StatusForbidden, AgentProfileCodeAccessDenied, "agent_profile_access_denied", "Upgrade the account tier or select an accessible execution profile."},
 		{service.ErrAgentProfileSnapshotConflict, fiber.StatusConflict, AgentProfileCodeSnapshotConflict, "agent_profile_snapshot_conflict", "Retry with a newly created task or quote."},
-		{service.ErrAgentProfileNotFound, fiber.StatusBadRequest, AgentProfileCodeNotFound, "agent_profile_not_found", "Select an execution profile returned by the capability API."},
+		{service.ErrAgentProfileNotFound, fiber.StatusBadRequest, AgentProfileCodeNotFound, "invalid_agent_execution_profile", "Select an execution profile returned by the capability API."},
 		{service.ErrAgentProfileSnapshotInvalid, fiber.StatusBadRequest, AgentProfileCodeSnapshotInvalid, "agent_profile_snapshot_invalid", "Create the task again after the profile configuration is corrected."},
 		{service.ErrAgentProfileUnavailable, fiber.StatusUnprocessableEntity, AgentProfileCodeUnavailable, "agent_profile_unavailable", "Select another available execution profile."},
 		{service.ErrAgentProviderUnavailable, fiber.StatusUnprocessableEntity, AgentProfileCodeProviderMissing, "agent_provider_unavailable", "Try again after the configured model provider is available."},

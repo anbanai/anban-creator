@@ -181,7 +181,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-29-v6"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-30-v7"); err != nil {
 			t.Fatalf("published production catalog: %v", err)
 		}
 	})
@@ -202,7 +202,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err != nil {
 			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
 		}
-		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-29-v6"} {
+		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-30-v7"} {
 			if _, err := repo.Billing().FindCatalogVersion(t.Context(), catalogID); err != nil {
 				t.Fatalf("catalog %s not preserved: %v", catalogID, err)
 			}
@@ -218,7 +218,7 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	text := string(source)
 	for _, required := range []string{
 		"serverbilling.LoadBundle(cfg.BillingRuntime.ConfigDir)",
-		"service.NewAgentProfileRegistryFromConfig(cfg.Claude.Providers, cfg.Claude.ExecutionProfiles, billingBundle.Costs)",
+		"service.NewAgentProfileRegistryFromConfig(cfg.Claude.ExecutionProfiles, billingBundle.Costs)",
 		"buildBillingRuntime(context.Background(), mysqlDB, repo, billingBundle, cfg, log)",
 		"service.NewBillingMaintenanceWorker(wallet",
 		"BillingHandler:",

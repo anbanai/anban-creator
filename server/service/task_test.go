@@ -653,7 +653,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: project.ID,
 		Prompt:    "topic",
@@ -708,7 +708,7 @@ func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:          uuid.New().String(),
 		UserID:      userID,
 		ProjectID:   project.ID,
@@ -760,7 +760,7 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	planA := &model.Plan{ExecutionProfile: "cost_effective",
+	planA := &model.Plan{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: project.ID,
@@ -768,7 +768,7 @@ func TestTaskService_ListFiltersByPlanID(t *testing.T) {
 		Status:    model.PlanStatusActive,
 		Prompt:    "计划 A",
 	}
-	planB := &model.Plan{ExecutionProfile: "cost_effective",
+	planB := &model.Plan{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: project.ID,
@@ -805,7 +805,7 @@ func TestTaskService_CreateManualEcommerceTaskForcesSinglePackageWithoutCreditSe
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformEcommerce)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "做一组咖啡杯电商图",
@@ -829,7 +829,7 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 	userID := "user-om"
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,
@@ -862,7 +862,7 @@ func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.
 	userID := "user-om-reject"
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "春季穿搭",
@@ -882,7 +882,7 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -963,7 +963,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{ExecutionProfile: "cost_effective",
+	src := &model.Task{ExecutionProfile: "effective",
 		ID:         uuid.New().String(),
 		UserID:     userID,
 		ProjectID:  projectID,
@@ -1105,7 +1105,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ExecutionProfile: "cost_effective",
+	source := &model.Task{ExecutionProfile: "effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            sourceProjectID,
@@ -1239,7 +1239,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ExecutionProfile: "cost_effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
 	source.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: inherited.ID})
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -1253,7 +1253,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 
 	before := taskCount()
-	if _, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	if _, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: userID, ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: inherited.ID,
 	}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
 		t.Fatalf("direct CreateManual error = %v, want ErrReferenceAssetPurposeMismatch", err)
@@ -1368,7 +1368,7 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 			userID := uuid.NewString()
 			sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
 			destinationProjectID := createTestProject(t, repo, userID, tt.platform)
-			source := &model.Task{ExecutionProfile: "cost_effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+			source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(ctx, source); err != nil {
 				t.Fatalf("create source task: %v", err)
 			}
@@ -1396,7 +1396,7 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{ExecutionProfile: "cost_effective",
+	src := &model.Task{ExecutionProfile: "effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
@@ -1431,7 +1431,7 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	src := &model.Task{ExecutionProfile: "cost_effective",
+	src := &model.Task{ExecutionProfile: "effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
@@ -1465,7 +1465,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	src := &model.Task{ExecutionProfile: "cost_effective",
+	src := &model.Task{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
@@ -2293,7 +2293,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Test topic",
@@ -2324,7 +2324,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 
 func TestTaskService_CreateManual_NoProject(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    "user1",
 		ProjectID: "",
 		Prompt:    "topic",
@@ -2339,7 +2339,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    "wrong-user",
 		ProjectID: projectID,
 		Prompt:    "topic",
@@ -2354,7 +2354,7 @@ func TestTaskService_GetByID(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Find me",
@@ -2383,7 +2383,7 @@ func TestTaskService_Cancel(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Cancel me",
@@ -2417,7 +2417,7 @@ func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 	log := zerolog.Nop()
 	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &log))
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Cancel me",
@@ -2445,12 +2445,12 @@ func TestTaskService_List(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Task 1",
 	})
-	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Task 2",
@@ -2473,7 +2473,7 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "cost_effective",
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    "Pending task",
@@ -2839,7 +2839,7 @@ func TestCreateManualClonesInputAttachments(t *testing.T) {
 		Instruction: "保持包装和 Logo",
 	}}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID:           userID,
 		ProjectID:        projectID,
 		Prompt:           "生成种草图文",
@@ -2879,7 +2879,7 @@ func TestCreateFromPlanClonesAttachmentSnapshotPerTask(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,

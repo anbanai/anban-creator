@@ -28,7 +28,7 @@ func TestTaskServiceGetVisibleFilesForUserChecksTaskOwnership(t *testing.T) {
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: ownerID, ProjectID: projectID, Quantity: 1, Prompt: "topic",
 	})
 	if err != nil {

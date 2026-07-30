@@ -102,7 +102,14 @@ func TestAgentProfileRegistryUsesExactProductsAndTierAccess(t *testing.T) {
 }
 
 func TestAgentProfileRegistryRejectsObsoleteProductIDs(t *testing.T) {
+	registry, err := NewAgentProfileRegistryFromConfig(testProfileConfig(), testCostCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, obsolete := range []string{"cost_effective", "maximum_quality"} {
+		if _, err := registry.ResolveForTier(obsolete, model.TierEnterprise); !errors.Is(err, ErrAgentProfileNotFound) {
+			t.Fatalf("resolve obsolete profile %q error = %v", obsolete, err)
+		}
 		profiles := testProfileConfig()
 		profiles[obsolete] = profiles["effective"]
 		if _, err := NewAgentProfileRegistryFromConfig(profiles, testCostCatalog()); !errors.Is(err, ErrAgentProfileInvalid) {

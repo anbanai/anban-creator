@@ -85,7 +85,7 @@ func (s *IlinkConversationService) handleAIEntryCreate(ctx context.Context, bind
 	result, err := s.aiEntry.Submit(ctx, AIEntrySubmitRequest{
 		UserID:           binding.UserID,
 		ProjectID:        binding.DefaultProjectID,
-		ExecutionProfile: "cost_effective",
+		ExecutionProfile: "effective",
 		Channel:          "ilink",
 		Text:             text,
 	})
@@ -141,7 +141,7 @@ func (s *IlinkConversationService) handleCreate(ctx context.Context, binding *mo
 	tasks, err := s.taskSvc.CreateManual(ctx, CreateManualParams{
 		UserID:           binding.UserID,
 		ProjectID:        binding.DefaultProjectID,
-		ExecutionProfile: "cost_effective",
+		ExecutionProfile: "effective",
 		Prompt:           prompt,
 		Quantity:         1,
 	})

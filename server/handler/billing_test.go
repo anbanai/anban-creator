@@ -509,9 +509,9 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 	bundle := billingHandlerBundle()
 	catalog := service.NewBillingCatalogService(repo, &bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }, QuoteTTL: 5 * time.Minute})
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
-		handlerTestProfile("cost_effective", "性价比", "", "deepseek", "deepseek-v4-pro", model.TierFree),
+		handlerTestProfile("effective", "性价比", "", "deepseek", "deepseek-v4-pro", model.TierFree),
 		handlerTestProfile("balanced", "平衡型", "", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
-		handlerTestProfile("maximum_quality", "极致效果", "", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
+		handlerTestProfile("quality", "极致效果", "", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
 	})
 	if err != nil {
 		t.Fatal(err)

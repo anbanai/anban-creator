@@ -178,7 +178,7 @@ func TestBulk_RequestValidation(t *testing.T) {
 		{"cancel missing field", "/tasks/bulk-cancel", `{}`, fiber.StatusBadRequest},
 		{"clone missing execution profile", "/tasks/bulk-clone", `{"task_ids":["` + uuid.New().String() + `"]}`, fiber.StatusBadRequest},
 		{"clone empty execution profile", "/tasks/bulk-clone", `{"task_ids":["` + uuid.New().String() + `"],"execution_profile":"  "}`, fiber.StatusBadRequest},
-		{"clone bad uuid", "/tasks/bulk-clone", `{"task_ids":["not-a-uuid"],"execution_profile":"cost_effective"}`, fiber.StatusBadRequest},
+		{"clone bad uuid", "/tasks/bulk-clone", `{"task_ids":["not-a-uuid"],"execution_profile":"effective"}`, fiber.StatusBadRequest},
 		{"delete over 100", "/tasks/bulk-delete", `{"task_ids":["` + strings.Repeat(uuid.New().String()+`","`, 101) + `"]}`, fiber.StatusBadRequest},
 	}
 	for _, tt := range tests {
@@ -303,7 +303,7 @@ func TestBulkClone_StatusGatingOnly(t *testing.T) {
 	foreignFailed := seedBulkTask(t, repo, uuid.New().String(), projectID, model.TaskStatusFailed)
 	missingID := uuid.New().String()
 
-	res := callBulkClone(t, app, []string{pending, running, completed, foreignFailed, missingID}, "cost_effective")
+	res := callBulkClone(t, app, []string{pending, running, completed, foreignFailed, missingID}, "effective")
 	if res.Succeeded != 0 || res.Skipped != 5 {
 		t.Fatalf("succeeded/skipped = %d/%d, want 0/5", res.Succeeded, res.Skipped)
 	}
@@ -327,7 +327,7 @@ func TestBulkClone_UsesSubmittedProfileForEveryNewTask(t *testing.T) {
 	first := seedBulkTask(t, repo, userID, projectID, model.TaskStatusFailed)
 	second := seedBulkTask(t, repo, userID, projectID, model.TaskStatusCancelled)
 
-	res := callBulkClone(t, app, []string{first, second}, "cost_effective")
+	res := callBulkClone(t, app, []string{first, second}, "effective")
 	if res.Succeeded != 2 || res.Skipped != 0 {
 		t.Fatalf("succeeded/skipped = %d/%d, want 2/0: %#v", res.Succeeded, res.Skipped, res)
 	}
@@ -339,11 +339,11 @@ func TestBulkClone_UsesSubmittedProfileForEveryNewTask(t *testing.T) {
 		if err != nil {
 			t.Fatalf("find cloned task %s: %v", result.NewTaskID, err)
 		}
-		if cloned.ExecutionProfile != "cost_effective" {
-			t.Fatalf("cloned task %s execution_profile = %q, want cost_effective", cloned.ID, cloned.ExecutionProfile)
+		if cloned.ExecutionProfile != "effective" {
+			t.Fatalf("cloned task %s execution_profile = %q, want effective", cloned.ID, cloned.ExecutionProfile)
 		}
 		if cloned.AgentProfileSnapshot.ProfileID != "effective" || cloned.AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "deepseek-v4-pro" || len(cloned.AgentProfileFingerprint) != 64 {
-			t.Fatalf("cloned task %s snapshot = %#v, want frozen cost_effective profile", cloned.ID, cloned.AgentProfileSnapshot)
+			t.Fatalf("cloned task %s snapshot = %#v, want frozen effective profile", cloned.ID, cloned.AgentProfileSnapshot)
 		}
 	}
 }

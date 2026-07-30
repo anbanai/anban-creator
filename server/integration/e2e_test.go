@@ -93,14 +93,15 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	planSvc := service.NewPlanService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, &noopEnqueuer{}, nil, &logger, "", nil, nil)
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
-		ID: "balanced", DisplayName: "Balanced", Provider: "volcengine_ark", Protocol: "anthropic",
-		Models: model.AgentModelMatrix{
-			Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving",
-			Sonnet: "doubao-seed-evolving", Haiku: "doubao-seed-evolving",
+		ID: "effective", DisplayName: "Effective", Provider: "volcengine_ark", Protocol: "anthropic",
+		Envs: map[string]string{
+			model.ClaudeEnvBaseURL: "https://anthropic.example.com", model.ClaudeEnvAuthToken: "integration-token",
+			model.ClaudeEnvModel: "doubao-seed-evolving", "ANTHROPIC_DEFAULT_OPUS_MODEL": "doubao-seed-evolving",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL": "doubao-seed-evolving", "ANTHROPIC_DEFAULT_SONNET_MODEL": "doubao-seed-evolving",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL": "doubao-seed-evolving",
 		},
 		ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
-		BaseURL:           "https://anthropic.example.com", AuthToken: "integration-token",
-		MinTier: model.TierFree, Available: true,
+		MinTier:           model.TierFree, Available: true,
 	}})
 	if err != nil {
 		t.Fatalf("create agent profile registry: %v", err)
@@ -213,7 +214,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
 		"prompt":            "TestTopic",
-		"execution_profile": "balanced",
+		"execution_profile": "effective",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -344,7 +345,7 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 		"project_id":        testProject.ID,
 		"cron_expr":         "0 9 * * *",
 		"prompt":            "spring fashion",
-		"execution_profile": "balanced",
+		"execution_profile": "effective",
 	})
 	createReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -575,7 +576,7 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
 		"prompt":            "User1 Article",
-		"execution_profile": "balanced",
+		"execution_profile": "effective",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -663,7 +664,7 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 		"project_id":        testProject.ID,
 		"cron_expr":         "0 10 * * *",
 		"prompt":            "daily inspiration",
-		"execution_profile": "balanced",
+		"execution_profile": "effective",
 	})
 	planReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	planReq.Header.Set("Content-Type", "application/json")
@@ -760,7 +761,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			name:       "create task with non-existent project_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"project_id":"nonexistent-id","prompt":"test","execution_profile":"balanced"}`,
+			body:       `{"project_id":"nonexistent-id","prompt":"test","execution_profile":"effective"}`,
 			auth:       true,
 			wantStatus: fiber.StatusNotFound,
 		},
@@ -831,7 +832,7 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
 		"prompt":            "Runner1 Task",
-		"execution_profile": "balanced",
+		"execution_profile": "effective",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")

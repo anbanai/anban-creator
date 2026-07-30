@@ -69,7 +69,7 @@ func TestAIEntryHandlerMapsAndRedactsReferenceErrors(t *testing.T) {
 				c.Locals("user_id", "user-1")
 				return h.Submit(c)
 			})
-			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","execution_profile":"cost_effective","text":"write"}`))
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","execution_profile":"effective","text":"write"}`))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
@@ -90,7 +90,7 @@ func TestAIEntryHandlerMapsAgentProfileErrors(t *testing.T) {
 		code   int
 		msg    string
 	}{
-		{service.ErrAgentProfileNotFound, fiber.StatusBadRequest, 46001, "agent_profile_not_found"},
+		{service.ErrAgentProfileNotFound, fiber.StatusBadRequest, 46001, "invalid_agent_execution_profile"},
 		{service.ErrAgentProfileUnavailable, fiber.StatusUnprocessableEntity, 46002, "agent_profile_unavailable"},
 		{service.ErrAgentProfileAccessDenied, fiber.StatusForbidden, 46003, "agent_profile_access_denied"},
 		{service.ErrAgentProfileSnapshotInvalid, fiber.StatusBadRequest, 46004, "agent_profile_snapshot_invalid"},
@@ -108,7 +108,7 @@ func TestAIEntryHandlerMapsAgentProfileErrors(t *testing.T) {
 				c.Locals("user_id", "user-1")
 				return h.Submit(c)
 			})
-			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","execution_profile":"cost_effective","text":"write"}`))
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{"project_id":"project-1","execution_profile":"effective","text":"write"}`))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req, fiber.TestConfig{Timeout: time.Second})
 			if err != nil {
@@ -147,7 +147,7 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	body := `{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"帮我写文章",
 		"execution_target":"local",
 		"attachments":[{
@@ -224,7 +224,7 @@ func TestAIEntryHandlerSubmitFinalizesUploadSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{
 			"type":"image",
@@ -264,7 +264,7 @@ func TestAIEntryHandlerSubmitRejectsInvalidAttachmentURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 		"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{"type":"image","url":"file:///etc/passwd","file_name":"x.png"}]
 	}`))
@@ -297,7 +297,7 @@ func TestAIEntryHandlerSubmitRedactsAttachmentRepositoryErrors(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 		"project_id":"project-1",
-		"execution_profile":"cost_effective",
+		"execution_profile":"effective",
 		"text":"写文章",
 		"attachments":[{
 			"type":"image",
@@ -359,7 +359,7 @@ func TestAIEntryHandlerSubmitClassifiesStorageStatErrors(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 					"project_id":"project-1",
-					"execution_profile":"cost_effective",
+					"execution_profile":"effective",
 					"text":"write",
 				"attachments":[{"type":"image","upload_id":"upload-1","key":"uploads/pending/user-1/upload-1/ref.png"}]
 			}`))
@@ -398,7 +398,7 @@ func TestAIEntryHandlerSubmitRejectsExternalAttachmentURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{"type":"image","url":"https://example.com/ref.png","file_name":"ref.png","content_type":"image/png"}]
 	}`))
@@ -428,7 +428,7 @@ func TestAIEntryHandlerSubmitRejectsExternalStagingLookingAttachmentURLWithoutUp
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{"type":"image","url":"https://example.com/uploads/pending/user-1/upload-1/ref.png","file_name":"ref.png","content_type":"image/png"}]
 	}`))
@@ -458,7 +458,7 @@ func TestAIEntryHandlerSubmitRejectsMalformedUploadSessionAttachmentURL(t *testi
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{"type":"image","url":"https://example.com/uploads/pending/user-only","file_name":"ref.png","content_type":"image/png"}]
 	}`))
@@ -488,7 +488,7 @@ func TestAIEntryHandlerSubmitRejectsUnsupportedAttachmentMetadata(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(`{
 			"channel":"studio",
 			"project_id":"project-1",
-			"execution_profile":"cost_effective",
+			"execution_profile":"effective",
 			"text":"写文章",
 		"attachments":[{"type":"document","url":"https://cdn.example.com/tool.exe","file_name":"tool.exe","content_type":"application/x-msdownload","size":1}]
 	}`))

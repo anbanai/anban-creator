@@ -135,7 +135,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -219,7 +219,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
-		"execution_profile":"cost_effective","project_id": "`+projectID+`",
+		"execution_profile":"effective","project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "每天剪一条发布会短片",
@@ -296,7 +296,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	})
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
-		"execution_profile":"cost_effective","project_id": "`+projectID+`",
+		"execution_profile":"effective","project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "错误平台",
@@ -355,7 +355,7 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
+	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -419,7 +419,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("create "+tt.name, func(t *testing.T) {
-			body := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
+			body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -430,7 +430,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	createBody := `{"execution_profile":"cost_effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
+	createBody := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
 		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
 		`{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},` +
 		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
@@ -460,7 +460,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
-	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","prompt":"updated"}`))
+	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","prompt":"updated"}`))
 	omitReq.Header.Set("Content-Type", "application/json")
 	omitResp, err := app.Test(omitReq)
 	if err != nil {
@@ -479,7 +479,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("update "+tt.name, func(t *testing.T) {
-			body := `{"execution_profile":"cost_effective","input_attachments":` + tt.attachments + `}`
+			body := `{"execution_profile":"effective","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -494,7 +494,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","input_attachments":[]}`))
+	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":[]}`))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearResp, err := app.Test(clearReq)
 	if err != nil {
@@ -511,7 +511,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
 	}
 
-	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"cost_effective","input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
 	replaceReq.Header.Set("Content-Type", "application/json")
 	replaceResp, err := app.Test(replaceReq)
 	if err != nil || replaceResp.StatusCode != fiber.StatusOK {
@@ -566,7 +566,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -626,7 +626,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "must-not-write"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "must-not-write"})
 	if resp.StatusCode != fiber.StatusConflict {
 		t.Fatalf("status=%d want 409 body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -668,7 +668,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, base, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "cost_effective", "prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}

@@ -88,15 +88,16 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 	enqueuer := &recordingEnqueuer{}
 	taskSvc := service.NewTaskService(repo, enqueuer, nil, &logger, "", nil, nil)
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{
-		ID: "cost_effective", DisplayName: "Cost effective", Description: "fixture",
+		ID: "effective", DisplayName: "Cost effective", Description: "fixture",
 		Provider: "deepseek", Protocol: "anthropic",
-		Models: model.AgentModelMatrix{
-			Default: "deepseek-v4-pro", Opus: "deepseek-v4-pro", Fable: "deepseek-v4-pro",
-			Sonnet: "deepseek-v4-pro", Haiku: "deepseek-v4-pro",
+		Envs: map[string]string{
+			model.ClaudeEnvBaseURL: "https://anthropic.example.com", model.ClaudeEnvAuthToken: "scheduler-test-token",
+			model.ClaudeEnvModel: "deepseek-v4-pro", "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL": "deepseek-v4-pro", "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-pro",
 		},
 		ModelUsageAliases: map[string]string{"deepseek-v4-pro": "deepseek-v4-pro"},
-		BaseURL:           "https://anthropic.example.com", AuthToken: "scheduler-test-token",
-		MinTier: model.TierFree, Available: true,
+		MinTier:           model.TierFree, Available: true,
 	}})
 	if err != nil {
 		t.Fatalf("create profile registry: %v", err)
@@ -136,7 +137,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatalf("create reference asset: %v", err)
 	}
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
@@ -211,7 +212,7 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		CronExpr: "0 * * * *", Status: model.PlanStatusActive, NextRunAt: &nextRun,
 		ReferenceImageAssetID: "missing-asset",
@@ -243,7 +244,7 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 func TestAdvancePlanNextRunDoesNotOverwriteConcurrentReferenceUpdate(t *testing.T) {
 	base, _, _, _ := setupPlanCheckerTest(t)
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
@@ -291,7 +292,7 @@ func TestAdvancePlanNextRunSkipsConcurrentNextRunUpdate(t *testing.T) {
 	base, _, _, _ := setupPlanCheckerTest(t)
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	concurrentNext := oldNext.Add(30 * time.Minute)
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
@@ -337,7 +338,7 @@ func TestTriggerPlanNowSkipsInactivePlanWithoutRetryableError(t *testing.T) {
 	repo, taskSvc, enqueuer, logger := setupPlanCheckerTest(t)
 	ctx := context.Background()
 
-	plan := &model.Plan{ExecutionProfile: "cost_effective",
+	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:       uuid.New().String(),
 		UserID:   uuid.New().String(),
 		Type:     model.PlatformSeednote,

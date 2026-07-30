@@ -107,7 +107,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	schedulerNext := oldNext.Add(time.Hour)
 	plan := &model.Plan{
 		ID: "plan-editable", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle,
-		ExecutionProfile: "cost_effective", Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
+		ExecutionProfile: "effective", Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 		NextRunAt: &oldNext, CreatedAt: createdAt,
 	}
 	if err := repo.Plans().Create(t.Context(), plan); err != nil {

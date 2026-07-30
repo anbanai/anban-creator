@@ -170,7 +170,7 @@ func TestProjectDeleteBlocksConcurrentTaskAndPlanCreation(t *testing.T) {
 			name: "manual task",
 			create: func(ctx context.Context, repo repository.Repository, userID, projectID string, logger *zerolog.Logger) error {
 				svc := newTestTaskService(repo, &mockEnqueuer{}, nil, logger, "", nil, nil)
-				_, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, Prompt: "concurrent task"})
+				_, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Prompt: "concurrent task"})
 				return err
 			},
 			count: func(ctx context.Context, repo repository.Repository, userID, projectID string) (int64, error) {
@@ -181,7 +181,7 @@ func TestProjectDeleteBlocksConcurrentTaskAndPlanCreation(t *testing.T) {
 			name: "plan",
 			create: func(ctx context.Context, repo repository.Repository, userID, projectID string, logger *zerolog.Logger) error {
 				svc := NewPlanService(repo, logger)
-				_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "cost_effective", UserID: userID, ProjectID: projectID, CronExpr: "0 9 * * *", Prompt: "concurrent plan"})
+				_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, CronExpr: "0 9 * * *", Prompt: "concurrent plan"})
 				return err
 			},
 			count: func(ctx context.Context, repo repository.Repository, userID, projectID string) (int64, error) {
