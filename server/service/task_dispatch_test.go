@@ -503,7 +503,9 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 
 func TestCreateCurrentExecutionRejectsDeletedFrozenProviderBeforePersistence(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
-	delete(svc.agentProfiles.providers, task.AgentProfileSnapshot.Provider)
+	profile := svc.agentProfiles.profiles[task.ExecutionProfile]
+	delete(profile.Envs, model.ClaudeEnvAuthToken)
+	svc.agentProfiles.profiles[task.ExecutionProfile] = profile
 
 	if _, created, err := svc.createCurrentExecution(t.Context(), task); !errors.Is(err, ErrAgentProviderUnavailable) || created {
 		t.Fatalf("createCurrentExecution created=%v err=%v", created, err)
@@ -882,7 +884,8 @@ func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t
 	if err != nil || !created {
 		t.Fatalf("createCurrentExecution = %#v, %v, created=%v", execution, err, created)
 	}
-	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelMatrix != task.AgentProfileSnapshot.Models || execution.ProfileFingerprint != task.AgentProfileFingerprint {
+	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
+	if execution.Provider != task.AgentProfileSnapshot.Provider || execution.ModelMatrix != profiled.ModelMatrix || execution.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("execution profile = %#v, want frozen runtime identity %#v", execution, task.AgentProfileSnapshot)
 	}
 }
@@ -916,7 +919,8 @@ func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t
 	if err != nil || !replaced {
 		t.Fatalf("replacePreStartExecution = %#v, replaced=%v, err=%v", replacement, replaced, err)
 	}
-	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelMatrix != task.AgentProfileSnapshot.Models || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
+	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
+	if replacement.Provider != task.AgentProfileSnapshot.Provider || replacement.ModelMatrix != profiled.ModelMatrix || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
 	}
 }

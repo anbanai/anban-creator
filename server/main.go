@@ -91,7 +91,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("load billing bundle")
 	}
-	agentProfiles, err := service.NewAgentProfileRegistryFromConfig(cfg.Claude.Providers, cfg.Claude.ExecutionProfiles, billingBundle.Costs)
+	agentProfiles, err := service.NewAgentProfileRegistryFromConfig(cfg.Claude.ExecutionProfiles, billingBundle.Costs)
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid agent execution profile configuration")
 	}

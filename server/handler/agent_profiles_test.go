@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
+func TestAgentProfileHandlerListsCapabilitiesWithoutRuntimeConfiguration(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -31,9 +31,9 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
-		handlerTestProfile("cost_effective", "性价比", "低成本", "deepseek", "deepseek-v4-pro", model.TierFree),
+		handlerTestProfile("effective", "性价比", "低成本", "deepseek", "deepseek-v4-pro", model.TierFree),
 		handlerTestProfile("balanced", "平衡型", "平衡", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
-		handlerTestProfile("maximum_quality", "极致效果", "旗舰", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
+		handlerTestProfile("quality", "极致效果", "旗舰", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,14 +58,36 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
 	}
-	for _, forbidden := range []string{"test-secret", ".example/anthropic", "base_url", "auth_token", "runtime_env", "model_name", "model_id"} {
+	for _, forbidden := range []string{"test-secret", ".example/anthropic", "base_url", "auth_token", "runtime_env", "envs", "model_id", "models", "claude", "protocol", "model_usage_aliases"} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("response leaked %q: %s", forbidden, raw)
 		}
 	}
-	for _, required := range []string{`"provider"`, `"protocol":"anthropic"`, `"models"`, `"claude"`} {
+	for _, required := range []string{`"provider"`, `"model_name":"doubao-seed-evolving"`} {
 		if !strings.Contains(string(raw), required) {
 			t.Fatalf("response omitted %q: %s", required, raw)
+		}
+	}
+	var rawEnvelope struct {
+		Data []map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &rawEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{
+		"id": true, "display_name": true, "description": true, "provider": true,
+		"model_name": true, "min_tier": true, "available": true, "unavailable_reason": true,
+	}
+	for index, item := range rawEnvelope.Data {
+		for key := range item {
+			if !allowed[key] {
+				t.Fatalf("capability %d exposed unsupported field %q: %s", index, key, raw)
+			}
+		}
+		for _, required := range []string{"id", "display_name", "description", "provider", "model_name", "min_tier", "available"} {
+			if _, ok := item[required]; !ok {
+				t.Fatalf("capability %d omitted field %q: %s", index, required, raw)
+			}
 		}
 	}
 	var envelope struct {
@@ -82,8 +104,15 @@ func TestAgentProfileHandlerListsAllProfilesWithoutSecrets(t *testing.T) {
 func handlerTestProfile(id, displayName, description, provider, modelID string, minTier model.Tier) service.AgentExecutionProfile {
 	return service.AgentExecutionProfile{
 		ID: id, DisplayName: displayName, Description: description, Provider: provider, Protocol: "anthropic",
-		Models:            model.AgentModelMatrix{Default: modelID, Opus: modelID, Fable: modelID, Sonnet: modelID, Haiku: modelID},
-		ModelUsageAliases: map[string]string{modelID: modelID}, BaseURL: "https://" + provider + ".example/anthropic",
-		AuthToken: "test-secret", MinTier: minTier, Available: true,
+		Envs: map[string]string{
+			model.ClaudeEnvBaseURL:           "https://" + provider + ".example/anthropic",
+			model.ClaudeEnvAuthToken:         "test-secret",
+			model.ClaudeEnvModel:             modelID,
+			"ANTHROPIC_DEFAULT_OPUS_MODEL":   modelID,
+			"ANTHROPIC_DEFAULT_FABLE_MODEL":  modelID,
+			"ANTHROPIC_DEFAULT_SONNET_MODEL": modelID,
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL":  modelID,
+		},
+		ModelUsageAliases: map[string]string{modelID: modelID}, MinTier: minTier, Available: true,
 	}
 }

@@ -336,11 +336,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
+	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
 			ProfileID: profile.ID, Provider: profile.Provider, Protocol: profile.Protocol,
-			Models: profile.Models, Claude: cloneAgentClaudeControls(profile.Claude), DisplayName: profile.DisplayName,
+			Models: profiled.ModelMatrix, Claude: profiled.ClaudeControls, DisplayName: profile.DisplayName,
 			ProfileFingerprint: task.AgentProfileFingerprint, RuntimeEnv: runtimeEnv, ModelUsageAliases: aliases,
 		},
 		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
@@ -357,9 +358,10 @@ func (s *AgentBootstrapService) resolveExecutionProfile(execution *model.TaskExe
 		return AgentExecutionProfile{}, fmt.Errorf("%w: task execution profile is required", ErrAgentBootstrapConflict)
 	}
 	snapshot := task.AgentProfileSnapshot
+	profiled := model.NewTaskExecutionAgentProfile(snapshot, task.AgentProfileFingerprint)
 	if execution.ExecutionProfile != task.ExecutionProfile || task.ExecutionProfile != snapshot.ProfileID ||
-		execution.Provider != snapshot.Provider || !reflect.DeepEqual(execution.ModelMatrix, snapshot.Models) ||
-		!reflect.DeepEqual(execution.ClaudeControls, snapshot.Claude) || execution.ProfileFingerprint != task.AgentProfileFingerprint {
+		execution.Provider != snapshot.Provider || !reflect.DeepEqual(execution.ModelMatrix, profiled.ModelMatrix) ||
+		!reflect.DeepEqual(execution.ClaudeControls, profiled.ClaudeControls) || execution.ProfileFingerprint != task.AgentProfileFingerprint {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: execution profile identity does not match task snapshot", ErrAgentBootstrapConflict)
 	}
 	profile, err := s.cfg.Registry.ResolveRuntime(task.ExecutionProfile, snapshot, task.AgentProfileFingerprint)

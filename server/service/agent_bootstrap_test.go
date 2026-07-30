@@ -35,11 +35,15 @@ type bootstrapSecurityStore struct {
 func bootstrapTestProfile(t *testing.T) (AgentExecutionProfile, *AgentProfileRegistry) {
 	t.Helper()
 	profile := AgentExecutionProfile{
-		ID: "cost_effective", DisplayName: "Cost effective",
-		Provider: "deepseek", Protocol: "anthropic", Models: model.AgentModelMatrix{Default: "claude-test", Opus: "claude-test", Fable: "claude-test", Sonnet: "claude-test", Haiku: "claude-test"},
+		ID: "effective", DisplayName: "Cost effective",
+		Provider: "deepseek", Protocol: "anthropic", Envs: map[string]string{
+			model.ClaudeEnvBaseURL: "https://anthropic.example.com", model.ClaudeEnvAuthToken: "test-token",
+			model.ClaudeEnvModel: "claude-test", "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-test",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-test", "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-test",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-test",
+		},
 		ModelUsageAliases: map[string]string{"claude-test": "claude-test"},
-		BaseURL:           "https://anthropic.example.com", AuthToken: "test-token",
-		MinTier: model.TierFree, Available: true,
+		MinTier:           model.TierFree, Available: true,
 	}
 	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{profile})
 	if err != nil {

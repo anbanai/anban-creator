@@ -169,13 +169,13 @@ func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testin
 		t.Fatalf("tasks = %d, want 1", len(tasks))
 	}
 	task := tasks[0]
-	if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Models.Default != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
+	if task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("task profile = %q, snapshot = %#v", task.ExecutionProfile, task.AgentProfileSnapshot)
 	}
 
 	if _, err := svc.CreateManual(ctx, CreateManualParams{
 		UserID: userID, ProjectID: projectID, Prompt: "denied", Quantity: 1,
-		ExecutionProfile: "maximum_quality",
+		ExecutionProfile: "quality",
 	}); !errors.Is(err, ErrAgentProfileAccessDenied) {
 		t.Fatalf("enterprise profile error = %v, want ErrAgentProfileAccessDenied", err)
 	}
@@ -199,7 +199,7 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	if err != nil {
 		t.Fatalf("CreateFromPlan: %v", err)
 	}
-	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Models.Default != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
+	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("plan task profile = %#v", task)
 	}
 }
@@ -1039,12 +1039,17 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	current, err := svc.agentProfiles.Resolve("maximum_quality")
+	current, err := svc.agentProfiles.Resolve("quality")
 	if err != nil {
 		t.Fatal(err)
 	}
 	historical := current.Snapshot()
-	historical.Models = uniformAgentModelMatrix("kimi-k2.7-code")
+	for _, key := range []string{
+		model.ClaudeEnvModel, "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
+	} {
+		historical.Envs[key] = "kimi-k2.7-code"
+	}
 	historical.ModelUsageAliases = map[string]string{"kimi-k2.7-code": "kimi-k2.7-code"}
 	historicalFingerprint, err := model.AgentProfileFingerprint(historical)
 	if err != nil {
@@ -1063,7 +1068,7 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(clones) != 1 || clones[0].AgentProfileSnapshot.Models.Default != "kimi-k3[1m]" || clones[0].AgentProfileFingerprint == historicalFingerprint {
+	if len(clones) != 1 || clones[0].AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || clones[0].AgentProfileFingerprint == historicalFingerprint {
 		t.Fatalf("clone did not freeze current profile: %#v", clones)
 	}
 }
@@ -1650,9 +1655,12 @@ func TestTaskServiceResumeRejectsDeletedFrozenProviderBeforeMutation(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
+	unavailableEnvs := model.CloneClaudeProfileEnvs(profile.Envs)
+	delete(unavailableEnvs, model.ClaudeEnvAuthToken)
 	registry, err := NewAgentProfileRegistry([]AgentExecutionProfile{{
 		ID: profile.ID, DisplayName: profile.DisplayName, Provider: profile.Provider, Protocol: profile.Protocol,
-		Models: profile.Models, ModelUsageAliases: profile.ModelUsageAliases, MinTier: profile.MinTier, Available: true,
+		Envs: unavailableEnvs, ModelUsageAliases: profile.ModelUsageAliases, MinTier: profile.MinTier, Available: false,
+		UnavailableReason: "agent_provider_unavailable",
 	}})
 	if err != nil {
 		t.Fatal(err)

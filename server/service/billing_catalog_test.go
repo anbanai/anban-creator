@@ -339,7 +339,7 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 	if err := json.Unmarshal(quote.AgentProfileSnapshot, &profileSnapshot); err != nil {
 		t.Fatalf("decode quote profile snapshot: %v", err)
 	}
-	if profileSnapshot.ProfileID != "balanced" || profileSnapshot.Provider != "volcengine_ark" || profileSnapshot.Models.Default != "doubao-seed-evolving" || profileSnapshot.Protocol != "anthropic" {
+	if profileSnapshot.ProfileID != "balanced" || profileSnapshot.Provider != "volcengine_ark" || profileSnapshot.Envs[model.ClaudeEnvModel] != "doubao-seed-evolving" || profileSnapshot.Protocol != "anthropic" {
 		t.Fatalf("quote profile snapshot = %#v", profileSnapshot)
 	}
 

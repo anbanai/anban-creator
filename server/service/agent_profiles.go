@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/billing"
@@ -41,22 +39,22 @@ var agentProfileProducts = map[string]struct {
 	DisplayName string
 	MinTier     model.Tier
 }{
-	"cost_effective":  {DisplayName: "性价比", MinTier: model.TierFree},
-	"balanced":        {DisplayName: "平衡型", MinTier: model.TierPro},
-	"maximum_quality": {DisplayName: "极致效果", MinTier: model.TierEnterprise},
+	"effective": {DisplayName: "性价比", MinTier: model.TierFree},
+	"balanced":  {DisplayName: "平衡型", MinTier: model.TierPro},
+	"quality":   {DisplayName: "极致效果", MinTier: model.TierEnterprise},
 }
 
+var agentProfileOrder = []string{"effective", "balanced", "quality"}
+
 type AgentProfileCapability struct {
-	ID                string                    `json:"id"`
-	DisplayName       string                    `json:"display_name"`
-	Description       string                    `json:"description"`
-	Provider          string                    `json:"provider"`
-	Protocol          string                    `json:"protocol"`
-	Models            model.AgentModelMatrix    `json:"models"`
-	Claude            model.AgentClaudeControls `json:"claude"`
-	MinTier           model.Tier                `json:"min_tier"`
-	Available         bool                      `json:"available"`
-	UnavailableReason string                    `json:"unavailable_reason,omitempty"`
+	ID                string     `json:"id"`
+	DisplayName       string     `json:"display_name"`
+	Description       string     `json:"description"`
+	Provider          string     `json:"provider"`
+	ModelName         string     `json:"model_name"`
+	MinTier           model.Tier `json:"min_tier"`
+	Available         bool       `json:"available"`
+	UnavailableReason string     `json:"unavailable_reason,omitempty"`
 }
 
 type AgentExecutionProfile struct {
@@ -65,66 +63,46 @@ type AgentExecutionProfile struct {
 	Description       string
 	Provider          string
 	Protocol          string
-	Models            model.AgentModelMatrix
-	Claude            model.AgentClaudeControls
+	Envs              map[string]string
 	ModelUsageAliases map[string]string
-	BaseURL           string
-	AuthToken         string
 	MinTier           model.Tier
 	Available         bool
 	UnavailableReason string
 }
 
 type AgentProfileRegistry struct {
-	profiles  map[string]AgentExecutionProfile
-	providers map[string]srvconfig.ClaudeProviderConfig
+	profiles map[string]AgentExecutionProfile
 }
 
-func NewAgentProfileRegistryFromConfig(providers map[string]srvconfig.ClaudeProviderConfig, configured map[string]srvconfig.ClaudeExecutionProfileConfig, costs billing.CostCatalog) (*AgentProfileRegistry, error) {
+func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExecutionProfileConfig, costs billing.CostCatalog) (*AgentProfileRegistry, error) {
 	for id := range configured {
 		if _, ok := agentProfileProducts[id]; !ok {
 			return nil, fmt.Errorf("%w: unsupported profile %q", ErrAgentProfileInvalid, id)
 		}
 	}
-	providerSnapshot := cloneClaudeProviders(providers)
-	for id, provider := range providerSnapshot {
-		if strings.TrimSpace(id) == "" {
-			return nil, fmt.Errorf("%w: provider id is required", ErrAgentProfileInvalid)
-		}
-		if strings.TrimSpace(provider.Protocol) != "anthropic" {
-			return nil, fmt.Errorf("%w: provider %q must use the anthropic protocol", ErrAgentProfileInvalid, id)
-		}
-	}
 
 	profiles := make([]AgentExecutionProfile, 0, len(agentProfileProducts))
-	for _, id := range []string{"cost_effective", "balanced", "maximum_quality"} {
+	for _, id := range agentProfileOrder {
 		product := agentProfileProducts[id]
-		item, configuredProfile := configured[id]
-		profile := AgentExecutionProfile{ID: id, DisplayName: product.DisplayName, MinTier: product.MinTier}
-		if !configuredProfile {
+		item, exists := configured[id]
+		profile := AgentExecutionProfile{
+			ID: id, DisplayName: product.DisplayName, MinTier: product.MinTier, Protocol: "anthropic",
+		}
+		if !exists {
 			profile.UnavailableReason = "profile_configuration_missing"
 			profiles = append(profiles, profile)
 			continue
 		}
-		if err := validateConfiguredAgentProfile(id, item); err != nil {
-			return nil, err
-		}
 		profile.Description = strings.TrimSpace(item.Description)
 		profile.Provider = strings.TrimSpace(item.Provider)
-		profile.Models = modelMatrixFromConfig(item.Models)
-		profile.Claude = claudeControlsFromConfig(item.Claude)
+		profile.Envs = model.CloneClaudeProfileEnvs(item.Envs)
 		profile.ModelUsageAliases = cloneModelUsageAliasTargets(item.ModelUsageAliases)
 
-		provider, providerExists := providerSnapshot[profile.Provider]
-		if !providerExists || !validAgentProfileEndpoint(provider.BaseURL) || strings.TrimSpace(provider.AuthToken) == "" {
-			profile.Protocol = "anthropic"
+		if profile.Provider == "" || model.ValidateClaudeProfileEnvs(profile.Envs, true) != nil {
 			profile.UnavailableReason = "agent_provider_unavailable"
 			profiles = append(profiles, profile)
 			continue
 		}
-		profile.Protocol = provider.Protocol
-		profile.BaseURL = strings.TrimSpace(provider.BaseURL)
-		profile.AuthToken = strings.TrimSpace(provider.AuthToken)
 		if !profileModelsHaveCosts(profile, costs) {
 			profile.UnavailableReason = "agent_model_cost_unmapped"
 			profiles = append(profiles, profile)
@@ -133,74 +111,40 @@ func NewAgentProfileRegistryFromConfig(providers map[string]srvconfig.ClaudeProv
 		profile.Available = true
 		profiles = append(profiles, profile)
 	}
-	return newAgentProfileRegistry(profiles, providerSnapshot)
-}
-
-func validateConfiguredAgentProfile(id string, profile srvconfig.ClaudeExecutionProfileConfig) error {
-	models := modelMatrixFromConfig(profile.Models)
-	for _, field := range []struct{ role, value string }{
-		{role: "default", value: models.Default}, {role: "opus", value: models.Opus},
-		{role: "fable", value: models.Fable}, {role: "sonnet", value: models.Sonnet}, {role: "haiku", value: models.Haiku},
-	} {
-		if strings.TrimSpace(field.value) == "" {
-			return fmt.Errorf("%w: profile %q models.%s is required", ErrAgentProfileInvalid, id, field.role)
-		}
-	}
-	for raw, canonical := range profile.ModelUsageAliases {
-		if strings.TrimSpace(raw) == "" || strings.TrimSpace(canonical) == "" || strings.Contains(canonical, "/") {
-			return fmt.Errorf("%w: profile %q has an invalid model usage alias", ErrAgentProfileInvalid, id)
-		}
-	}
-	return nil
+	return newAgentProfileRegistry(profiles)
 }
 
 func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCatalog) bool {
-	models := []string{profile.Models.Default, profile.Models.Opus, profile.Models.Fable, profile.Models.Sonnet, profile.Models.Haiku}
-	if profile.Claude.SubagentModel != nil {
-		models = append(models, *profile.Claude.SubagentModel)
-	}
-	seen := make(map[string]struct{}, len(models))
-	for _, raw := range models {
-		if _, ok := seen[raw]; ok {
-			continue
-		}
-		seen[raw] = struct{}{}
+	for _, raw := range model.ClaudeProfileReferencedModels(profile.Envs) {
 		canonical := strings.TrimSpace(profile.ModelUsageAliases[raw])
-		if canonical == "" {
+		if canonical == "" || strings.Contains(canonical, "/") {
 			return false
 		}
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}
 	}
-	for _, canonical := range profile.ModelUsageAliases {
-		if _, ok := costs.Models[profile.Provider+"/"+strings.TrimSpace(canonical)]; !ok {
+	for raw, canonical := range profile.ModelUsageAliases {
+		canonical = strings.TrimSpace(canonical)
+		if strings.TrimSpace(raw) == "" || canonical == "" || strings.Contains(canonical, "/") {
+			return false
+		}
+		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}
 	}
 	return true
 }
 
-func validAgentProfileEndpoint(endpoint string) bool {
-	endpoint = strings.TrimSpace(endpoint)
-	parsed, err := url.Parse(endpoint)
-	return err == nil && endpoint != "" && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == ""
-}
-
 func NewAgentProfileRegistry(profiles []AgentExecutionProfile) (*AgentProfileRegistry, error) {
-	providers := make(map[string]srvconfig.ClaudeProviderConfig)
-	for _, profile := range profiles {
-		if profile.Provider != "" {
-			providers[profile.Provider] = srvconfig.ClaudeProviderConfig{Protocol: profile.Protocol, BaseURL: profile.BaseURL, AuthToken: profile.AuthToken}
-		}
-	}
-	return newAgentProfileRegistry(profiles, providers)
+	return newAgentProfileRegistry(profiles)
 }
 
-func newAgentProfileRegistry(profiles []AgentExecutionProfile, providers map[string]srvconfig.ClaudeProviderConfig) (*AgentProfileRegistry, error) {
-	registry := &AgentProfileRegistry{profiles: make(map[string]AgentExecutionProfile, len(profiles)), providers: cloneClaudeProviders(providers)}
+func newAgentProfileRegistry(profiles []AgentExecutionProfile) (*AgentProfileRegistry, error) {
+	registry := &AgentProfileRegistry{profiles: make(map[string]AgentExecutionProfile, len(profiles))}
 	for _, profile := range profiles {
-		if strings.TrimSpace(profile.ID) == "" || strings.TrimSpace(profile.DisplayName) == "" || !model.ValidTiers[profile.MinTier] {
+		product, validProduct := agentProfileProducts[profile.ID]
+		if !validProduct || strings.TrimSpace(profile.DisplayName) == "" || profile.MinTier != product.MinTier {
 			return nil, fmt.Errorf("%w: profile product identity is invalid", ErrAgentProfileInvalid)
 		}
 		if profile.Available {
@@ -220,60 +164,21 @@ func newAgentProfileRegistry(profiles []AgentExecutionProfile, providers map[str
 }
 
 func (p AgentExecutionProfile) RuntimeEnv() map[string]string {
-	env := map[string]string{
-		"ANTHROPIC_BASE_URL": p.BaseURL, "ANTHROPIC_AUTH_TOKEN": p.AuthToken,
-		"ANTHROPIC_MODEL": p.Models.Default, "ANTHROPIC_DEFAULT_OPUS_MODEL": p.Models.Opus,
-		"ANTHROPIC_DEFAULT_FABLE_MODEL": p.Models.Fable, "ANTHROPIC_DEFAULT_SONNET_MODEL": p.Models.Sonnet,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL": p.Models.Haiku,
-	}
-	if p.Claude.EffortLevel != nil {
-		env["CLAUDE_CODE_EFFORT_LEVEL"] = *p.Claude.EffortLevel
-	}
-	if p.Claude.AlwaysEnableEffort != nil {
-		env["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"] = strconv.FormatBool(*p.Claude.AlwaysEnableEffort)
-	}
-	if p.Claude.MaxContextTokens != nil {
-		env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(*p.Claude.MaxContextTokens)
-	}
-	if p.Claude.MaxOutputTokens != nil {
-		env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = strconv.Itoa(*p.Claude.MaxOutputTokens)
-	}
-	if p.Claude.MaxThinkingTokens != nil {
-		env["MAX_THINKING_TOKENS"] = strconv.Itoa(*p.Claude.MaxThinkingTokens)
-	}
-	if p.Claude.DisableAdaptiveThinking != nil {
-		env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = strconv.FormatBool(*p.Claude.DisableAdaptiveThinking)
-	}
-	if p.Claude.DisableThinking != nil {
-		env["CLAUDE_CODE_DISABLE_THINKING"] = strconv.FormatBool(*p.Claude.DisableThinking)
-	}
-	if p.Claude.AutoCompactWindow != nil {
-		env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = strconv.Itoa(*p.Claude.AutoCompactWindow)
-	}
-	if p.Claude.AutocompactPctOverride != nil {
-		env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = strconv.Itoa(*p.Claude.AutocompactPctOverride)
-	}
-	if p.Claude.Disable1MContext != nil {
-		env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = strconv.FormatBool(*p.Claude.Disable1MContext)
-	}
-	if p.Claude.SubagentModel != nil {
-		env["CLAUDE_CODE_SUBAGENT_MODEL"] = *p.Claude.SubagentModel
-	}
-	if p.Claude.EnableToolSearch != nil {
-		env["ENABLE_TOOL_SEARCH"] = strconv.FormatBool(*p.Claude.EnableToolSearch)
-	}
-	return env
+	return model.CloneClaudeProfileEnvs(p.Envs)
 }
 
 func (p AgentExecutionProfile) Snapshot() model.AgentProfileSnapshot {
 	return model.AgentProfileSnapshot{
-		SchemaVersion: 2, ProfileID: p.ID, DisplayName: p.DisplayName,
-		Provider: p.Provider, Protocol: p.Protocol, Models: p.Models,
-		Claude: cloneAgentClaudeControls(p.Claude), ModelUsageAliases: cloneModelUsageAliasTargets(p.ModelUsageAliases),
+		SchemaVersion: model.ClaudeProfileSchemaV3,
+		ProfileID:     p.ID, DisplayName: p.DisplayName, Provider: p.Provider, Protocol: p.Protocol,
+		Envs: model.RedactClaudeProfileEnvs(p.Envs), ModelUsageAliases: cloneModelUsageAliasTargets(p.ModelUsageAliases),
 	}
 }
 
 func (p AgentExecutionProfile) Freeze() (model.AgentProfileSnapshot, string, error) {
+	if err := model.ValidateClaudeProfileEnvs(p.Envs, true); err != nil {
+		return model.AgentProfileSnapshot{}, "", fmt.Errorf("profile envs are invalid: %w", err)
+	}
 	snapshot := p.Snapshot()
 	fingerprint, err := model.AgentProfileFingerprint(snapshot)
 	return snapshot, fingerprint, err
@@ -290,52 +195,10 @@ func cloneModelUsageAliasTargets(source map[string]string) map[string]string {
 	return result
 }
 
-func cloneClaudeProviders(source map[string]srvconfig.ClaudeProviderConfig) map[string]srvconfig.ClaudeProviderConfig {
-	result := make(map[string]srvconfig.ClaudeProviderConfig, len(source))
-	for id, provider := range source {
-		result[id] = provider
-	}
-	return result
-}
-
-func cloneAgentClaudeControls(source model.AgentClaudeControls) model.AgentClaudeControls {
-	return model.AgentClaudeControls{
-		EffortLevel: clonePointer(source.EffortLevel), AlwaysEnableEffort: clonePointer(source.AlwaysEnableEffort),
-		MaxContextTokens: clonePointer(source.MaxContextTokens), MaxOutputTokens: clonePointer(source.MaxOutputTokens),
-		MaxThinkingTokens: clonePointer(source.MaxThinkingTokens), DisableAdaptiveThinking: clonePointer(source.DisableAdaptiveThinking),
-		DisableThinking: clonePointer(source.DisableThinking), AutoCompactWindow: clonePointer(source.AutoCompactWindow),
-		AutocompactPctOverride: clonePointer(source.AutocompactPctOverride), Disable1MContext: clonePointer(source.Disable1MContext),
-		SubagentModel: clonePointer(source.SubagentModel), EnableToolSearch: clonePointer(source.EnableToolSearch),
-	}
-}
-
 func cloneAgentExecutionProfile(profile AgentExecutionProfile) AgentExecutionProfile {
+	profile.Envs = model.CloneClaudeProfileEnvs(profile.Envs)
 	profile.ModelUsageAliases = cloneModelUsageAliasTargets(profile.ModelUsageAliases)
-	profile.Claude = cloneAgentClaudeControls(profile.Claude)
 	return profile
-}
-
-func modelMatrixFromConfig(source srvconfig.ClaudeModelMatrixConfig) model.AgentModelMatrix {
-	return model.AgentModelMatrix{Default: source.Default, Opus: source.Opus, Fable: source.Fable, Sonnet: source.Sonnet, Haiku: source.Haiku}
-}
-
-func claudeControlsFromConfig(source srvconfig.ClaudeControlsConfig) model.AgentClaudeControls {
-	return model.AgentClaudeControls{
-		EffortLevel: clonePointer(source.EffortLevel), AlwaysEnableEffort: clonePointer(source.AlwaysEnableEffort),
-		MaxContextTokens: clonePointer(source.MaxContextTokens), MaxOutputTokens: clonePointer(source.MaxOutputTokens),
-		MaxThinkingTokens: clonePointer(source.MaxThinkingTokens), DisableAdaptiveThinking: clonePointer(source.DisableAdaptiveThinking),
-		DisableThinking: clonePointer(source.DisableThinking), AutoCompactWindow: clonePointer(source.AutoCompactWindow),
-		AutocompactPctOverride: clonePointer(source.AutocompactPctOverride), Disable1MContext: clonePointer(source.Disable1MContext),
-		SubagentModel: clonePointer(source.SubagentModel), EnableToolSearch: clonePointer(source.EnableToolSearch),
-	}
-}
-
-func clonePointer[T any](source *T) *T {
-	if source == nil {
-		return nil
-	}
-	value := *source
-	return &value
 }
 
 func (r *AgentProfileRegistry) Resolve(id string) (AgentExecutionProfile, error) {
@@ -370,25 +233,31 @@ func (r *AgentProfileRegistry) ResolveForTier(id string, tier model.Tier) (Agent
 }
 
 func (r *AgentProfileRegistry) ResolveRuntime(id string, snapshot model.AgentProfileSnapshot, fingerprint string) (AgentExecutionProfile, error) {
-	product, err := r.Resolve(id)
-	if err != nil {
-		return AgentExecutionProfile{}, err
-	}
 	actualFingerprint, err := model.AgentProfileFingerprint(snapshot)
 	if err != nil {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotInvalid, id)
 	}
-	if snapshot.ProfileID != product.ID || actualFingerprint != fingerprint {
+	if strings.TrimSpace(id) != snapshot.ProfileID || actualFingerprint != fingerprint {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProfileSnapshotConflict, id)
 	}
-	provider, ok := r.providers[snapshot.Provider]
-	if !ok || provider.Protocol != snapshot.Protocol || !validAgentProfileEndpoint(provider.BaseURL) || strings.TrimSpace(provider.AuthToken) == "" {
+	current, err := r.Resolve(id)
+	if err != nil {
+		return AgentExecutionProfile{}, err
+	}
+	if current.Provider != snapshot.Provider || current.Protocol != snapshot.Protocol {
+		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProviderUnavailable, snapshot.Provider)
+	}
+	token := current.Envs[model.ClaudeEnvAuthToken]
+	runtimeEnvs := model.CloneClaudeProfileEnvs(snapshot.Envs)
+	runtimeEnvs[model.ClaudeEnvAuthToken] = token
+	if err := model.ValidateClaudeProfileEnvs(runtimeEnvs, true); err != nil {
 		return AgentExecutionProfile{}, fmt.Errorf("%w: %s", ErrAgentProviderUnavailable, snapshot.Provider)
 	}
 	return AgentExecutionProfile{
-		ID: snapshot.ProfileID, DisplayName: snapshot.DisplayName, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
-		Models: snapshot.Models, Claude: cloneAgentClaudeControls(snapshot.Claude), ModelUsageAliases: cloneModelUsageAliasTargets(snapshot.ModelUsageAliases),
-		BaseURL: strings.TrimSpace(provider.BaseURL), AuthToken: strings.TrimSpace(provider.AuthToken), MinTier: product.MinTier, Available: true,
+		ID: snapshot.ProfileID, DisplayName: snapshot.DisplayName, Description: current.Description,
+		Provider: snapshot.Provider, Protocol: snapshot.Protocol, Envs: runtimeEnvs,
+		ModelUsageAliases: cloneModelUsageAliasTargets(snapshot.ModelUsageAliases),
+		MinTier:           current.MinTier, Available: true,
 	}, nil
 }
 
@@ -398,7 +267,7 @@ func (r *AgentProfileRegistry) CapabilitiesForTier(tier model.Tier) []AgentProfi
 	for _, profile := range profiles {
 		capability := AgentProfileCapability{
 			ID: profile.ID, DisplayName: profile.DisplayName, Description: profile.Description,
-			Provider: profile.Provider, Protocol: profile.Protocol, Models: profile.Models, Claude: cloneAgentClaudeControls(profile.Claude),
+			Provider: profile.Provider, ModelName: strings.TrimSpace(profile.Envs[model.ClaudeEnvModel]),
 			MinTier: profile.MinTier, Available: profile.Available, UnavailableReason: profile.UnavailableReason,
 		}
 		if capability.Available && !tierCanUseProfile(tier, profile.MinTier) {
@@ -463,11 +332,11 @@ func tierRank(tier model.Tier) int {
 
 func profileOrder(id string) int {
 	switch id {
-	case "cost_effective":
+	case "effective":
 		return 1
 	case "balanced":
 		return 2
-	case "maximum_quality":
+	case "quality":
 		return 3
 	default:
 		return 100

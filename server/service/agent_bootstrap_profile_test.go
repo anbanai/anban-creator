@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,17 +14,49 @@ import (
 )
 
 func profileWithControls(controls model.AgentClaudeControls) AgentExecutionProfile {
+	envs := map[string]string{
+		model.ClaudeEnvBaseURL:           "https://api.moonshot.cn/anthropic",
+		model.ClaudeEnvAuthToken:         "moonshot-secret",
+		model.ClaudeEnvModel:             "kimi-default",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "kimi-opus",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "kimi-fable",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-sonnet",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "kimi-haiku",
+	}
+	setString := func(key string, value *string) {
+		if value != nil {
+			envs[key] = *value
+		}
+	}
+	setBool := func(key string, value *bool) {
+		if value != nil {
+			envs[key] = strconv.FormatBool(*value)
+		}
+	}
+	setInt := func(key string, value *int) {
+		if value != nil {
+			envs[key] = strconv.Itoa(*value)
+		}
+	}
+	setString("CLAUDE_CODE_EFFORT_LEVEL", controls.EffortLevel)
+	setBool("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", controls.AlwaysEnableEffort)
+	setInt("CLAUDE_CODE_MAX_CONTEXT_TOKENS", controls.MaxContextTokens)
+	setInt("CLAUDE_CODE_MAX_OUTPUT_TOKENS", controls.MaxOutputTokens)
+	setInt("MAX_THINKING_TOKENS", controls.MaxThinkingTokens)
+	setBool("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", controls.DisableAdaptiveThinking)
+	setBool("CLAUDE_CODE_DISABLE_THINKING", controls.DisableThinking)
+	setInt("CLAUDE_CODE_AUTO_COMPACT_WINDOW", controls.AutoCompactWindow)
+	setInt("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", controls.AutocompactPctOverride)
+	setBool("CLAUDE_CODE_DISABLE_1M_CONTEXT", controls.Disable1MContext)
+	setString("CLAUDE_CODE_SUBAGENT_MODEL", controls.SubagentModel)
+	setBool("ENABLE_TOOL_SEARCH", controls.EnableToolSearch)
 	return AgentExecutionProfile{
-		ID: "maximum_quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic",
-		Models: model.AgentModelMatrix{
-			Default: "kimi-default", Opus: "kimi-opus", Fable: "kimi-fable",
-			Sonnet: "kimi-sonnet", Haiku: "kimi-haiku",
-		},
-		Claude: controls, ModelUsageAliases: map[string]string{
+		ID: "quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic", Envs: envs,
+		ModelUsageAliases: map[string]string{
 			"kimi-default": "kimi-k3", "kimi-opus": "kimi-k3", "kimi-fable": "kimi-k3",
 			"kimi-sonnet": "kimi-k3", "kimi-haiku": "kimi-k3",
 		},
-		BaseURL: "https://api.moonshot.cn/anthropic", AuthToken: "moonshot-secret", MinTier: model.TierEnterprise, Available: true,
+		MinTier: model.TierEnterprise, Available: true,
 	}
 }
 
@@ -80,9 +113,10 @@ func TestAgentBootstrapJSONUsesMatrixContractOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	profiled := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
 		ProfileID: snapshot.ProfileID, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
-		Models: snapshot.Models, Claude: snapshot.Claude, DisplayName: snapshot.DisplayName,
+		Models: profiled.ModelMatrix, Claude: profiled.ClaudeControls, DisplayName: snapshot.DisplayName,
 		ProfileFingerprint: fingerprint, RuntimeEnv: profile.RuntimeEnv(),
 		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3[1m]": {Provider: "moonshot", Model: "kimi-k3"}},
 	}})

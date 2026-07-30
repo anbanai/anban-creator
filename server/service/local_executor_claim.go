@@ -144,7 +144,7 @@ func hasManagedAgentProfile(task *model.Task) bool {
 		snapshot.SchemaVersion != 0 ||
 		strings.TrimSpace(snapshot.ProfileID) != "" ||
 		strings.TrimSpace(snapshot.Provider) != "" ||
-		strings.TrimSpace(snapshot.Models.Default) != "" ||
+		strings.TrimSpace(snapshot.Envs[model.ClaudeEnvModel]) != "" ||
 		strings.TrimSpace(snapshot.Protocol) != ""
 }
 
@@ -158,7 +158,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		Topic:                    task.Prompt,
 		AgentFlag:                "anban:" + agent.TaskToAgent(task),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
-		Model:                    task.AgentProfileSnapshot.Models.Default,
+		Model:                    task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel],
 		Goal:                     task.Goal,
 		HasContentImage:          task.HasContentImage,
 		HasTailImage:             task.HasTailImage,
