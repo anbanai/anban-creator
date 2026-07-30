@@ -345,7 +345,6 @@ claude:
         limits: { cpu: "4", memory: "7Gi" }
   max_turns:
     moments: 25
-    viral_analysis: 30
     # 热门内容研究、多图生成与交付需要更完整的 Agent 工具调用预算。
     seednote: 100
     article: 60
