@@ -216,15 +216,7 @@ func TestAgentExecutionProfilesMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(raw)
-	historical := model.AgentProfileSnapshot{
-		SchemaVersion: 2, ProfileID: "balanced", DisplayName: "平衡型", Provider: "volcengine_ark", Protocol: "anthropic",
-		Models: model.AgentModelMatrix{Default: "doubao-seed-evolving", Opus: "doubao-seed-evolving", Fable: "doubao-seed-evolving", Sonnet: "doubao-seed-evolving", Haiku: "doubao-seed-evolving"},
-		Claude: model.AgentClaudeControls{}, ModelUsageAliases: map[string]string{"doubao-seed-evolving": "doubao-seed-evolving"},
-	}
-	fingerprint, err := model.AgentProfileFingerprint(historical)
-	if err != nil {
-		t.Fatal(err)
-	}
+	const fingerprint = "c7f2d8997f92b789fe732f3398f16183cdb085eb09e7a1eb8b3480fefcc8fa9d"
 	for _, fragment := range []string{
 		"ALTER TABLE `tasks`",
 		"ADD COLUMN `execution_profile` varchar(40) NULL",
@@ -288,5 +280,70 @@ func TestAgentExecutionProfilesMigration(t *testing.T) {
 	}
 	if strings.Index(sql, "MODIFY COLUMN `profile_fingerprint` char(64) NOT NULL") > strings.Index(sql, "DROP COLUMN `model_id`") {
 		t.Fatal("legacy execution columns are dropped before final constraints")
+	}
+}
+
+func TestAgentProfileEnvsMigrationContracts(t *testing.T) {
+	expandRaw, err := os.ReadFile("20260730_agent_profile_envs_expand.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expand := string(expandRaw)
+	for _, required := range []string{"ALTER TABLE `task_executions`", "ADD COLUMN `profile_envs` json NULL"} {
+		if !strings.Contains(expand, required) {
+			t.Fatalf("expand migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"DROP COLUMN", "NOT NULL", "UPDATE `", "DELETE FROM"} {
+		if strings.Contains(strings.ToUpper(expand), strings.ToUpper(forbidden)) {
+			t.Fatalf("expand migration contains %q", forbidden)
+		}
+	}
+
+	contractRaw, err := os.ReadFile("20260730_agent_profile_envs_contract.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(contractRaw)
+	for _, required := range []string{
+		"SIGNAL SQLSTATE '45000'", "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`agent_profile_snapshot`, '$.schema_version')), '') <> '3'", "$.envs", "$.ANTHROPIC_AUTH_TOKEN",
+		"MODIFY COLUMN `profile_envs` json NOT NULL", "DROP COLUMN `model_matrix`", "DROP COLUMN `claude_controls`",
+	} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("contract migration missing %q", required)
+		}
+	}
+	if strings.Index(contract, "SIGNAL SQLSTATE '45000'") > strings.Index(contract, "MODIFY COLUMN `profile_envs` json NOT NULL") {
+		t.Fatal("contract migration changes schema before preflight assertions")
+	}
+
+	for name, raw := range map[string]string{"expand": expand, "contract": contract} {
+		for _, forbidden := range []string{"UPDATE `billing_skus`", "UPDATE `billing_quotes`", "UPDATE `billing_charges`", "UPDATE `billing_wallet_entries`"} {
+			if strings.Contains(raw, forbidden) {
+				t.Fatalf("%s migration mutates billing history with %s", name, forbidden)
+			}
+		}
+	}
+}
+
+func TestAgentProfileEnvsQuoteExpiryIsNarrow(t *testing.T) {
+	raw, err := os.ReadFile("20260730_agent_profile_envs_expire_quotes.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"UPDATE `billing_quotes`", "SET `expires_at` = CURRENT_TIMESTAMP(3)",
+		"WHERE `consumed_at` IS NULL", "AND `expires_at` > CURRENT_TIMESTAMP(3)",
+		"JSON_UNQUOTE(JSON_EXTRACT(`agent_profile_snapshot`, '$.schema_version')) = '2'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("quote expiry migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"billing_skus", "billing_charges", "billing_wallet_entries", "DELETE", "consumed_at` IS NOT NULL"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Fatalf("quote expiry migration contains %q", forbidden)
+		}
 	}
 }
