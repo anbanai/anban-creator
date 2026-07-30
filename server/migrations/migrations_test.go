@@ -308,6 +308,10 @@ func TestAgentProfileEnvsMigrationContracts(t *testing.T) {
 	for _, required := range []string{
 		"SIGNAL SQLSTATE '45000'", "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`agent_profile_snapshot`, '$.schema_version')), '') <> '3'", "$.envs", "$.ANTHROPIC_AUTH_TOKEN",
 		"MODIFY COLUMN `profile_envs` json NOT NULL", "DROP COLUMN `model_matrix`", "DROP COLUMN `claude_controls`",
+		"DROP PROCEDURE IF EXISTS `assert_agent_profile_envs_contract_ready`",
+		"CONSTRAINT `chk_tasks_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
+		"CONSTRAINT `chk_plans_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
+		"CONSTRAINT `chk_task_executions_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
 	} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("contract migration missing %q", required)

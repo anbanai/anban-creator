@@ -1,4 +1,6 @@
 -- Run agent-profile-envs-backfill -verify-only immediately before this file.
+DROP PROCEDURE IF EXISTS `assert_agent_profile_envs_contract_ready`;
+
 DELIMITER //
 
 CREATE PROCEDURE `assert_agent_profile_envs_contract_ready`()
@@ -41,4 +43,11 @@ DROP PROCEDURE `assert_agent_profile_envs_contract_ready`;
 ALTER TABLE `task_executions`
   MODIFY COLUMN `profile_envs` json NOT NULL,
   DROP COLUMN `model_matrix`,
-  DROP COLUMN `claude_controls`;
+  DROP COLUMN `claude_controls`,
+  ADD CONSTRAINT `chk_task_executions_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'));
+
+ALTER TABLE `tasks`
+  ADD CONSTRAINT `chk_tasks_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'));
+
+ALTER TABLE `plans`
+  ADD CONSTRAINT `chk_plans_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'));
