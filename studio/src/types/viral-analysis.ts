@@ -91,8 +91,3 @@ export interface ViralAnalysis {
   created_at: string
   updated_at: string
 }
-
-export interface CreateViralAnalysisRequest {
-  source_type: ViralAnalysisSourceType
-  source_url: string
-}

@@ -61,6 +61,12 @@ export interface TaskFormDialogProps {
 
 function createInitialDefaults(project?: Project, initialType?: TaskType): TaskFormDefaults {
   const defaults = createTaskFormDefaults(project)
+  if (initialType === 'viral_analysis') {
+    return {
+      ...createTaskFormDefaults(project?.platform === 'seednote' ? project : undefined),
+      type: 'viral_analysis',
+    }
+  }
   if (project || !initialType || initialType === defaults.type) return defaults
   return {
     ...defaults,
@@ -140,9 +146,14 @@ export function TaskFormDialog({
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage'
+  const isViralAnalysisTask = watchedType === 'viral_analysis'
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const availableProjects = useMemo(
+    () => isViralAnalysisTask ? projects.filter((project) => project.platform === 'seednote') : projects,
+    [isViralAnalysisTask, projects],
+  )
   const selectedProject = projectMap.get(watchedProjectId ?? '')
   const imageModelOptionsForValue = useMemo(() => {
     if (!watchedImageModelKey || imageModelOptions.some((option) => option.key === watchedImageModelKey)) {
@@ -158,7 +169,7 @@ export function TaskFormDialog({
       },
     ]
   }, [imageModelOptions, watchedImageModelKey])
-  const imageModelUnavailable = Boolean(watchedImageModelKey)
+  const imageModelUnavailable = !isViralAnalysisTask && Boolean(watchedImageModelKey)
     && !imageModelsLoading
     && !imageModelsError
     && !imageModelOptions.some((option) => option.key === watchedImageModelKey)
@@ -339,7 +350,34 @@ export function TaskFormDialog({
                     ? { message: '电商出图需要先上传产品图。', href: '' }
                     : null
 
-  const promptComposer = (
+  const projectContextBar = (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <ProjectContextControl
+        mode="select"
+        projects={availableProjects}
+        value={watchedProjectId || null}
+        allowNoProject={false}
+        loading={projectsLoading}
+        placeholder="选择项目"
+        createProjectHref={projectsReturnHref({ type: isViralAnalysisTask ? 'seednote' : watchedType, intent: 'new' })}
+        onValueChange={changeProject}
+      />
+      <Badge variant="secondary">{contentTypeLabel[watchedType] || watchedType}</Badge>
+    </div>
+  )
+
+  const promptComposer = isViralAnalysisTask ? (
+    <div data-slot="viral-analysis-prompt" className="space-y-2">
+      {projectContextBar}
+      <Textarea
+        aria-label="源笔记链接或分享文本"
+        value={watchedPrompt}
+        onChange={(event) => setFormValue('prompt', event.target.value)}
+        placeholder="粘贴种草笔记链接或分享文本..."
+        className="min-h-32 resize-y"
+      />
+    </div>
+  ) : (
     <AgentPromptInput
       value={{ prompt: watchedPrompt, attachments: attachmentController.attachments }}
       onChange={(value) => {
@@ -356,21 +394,7 @@ export function TaskFormDialog({
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
       submitDisabled={Boolean(creationBlocker)}
-      contextBar={(
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <ProjectContextControl
-            mode="select"
-            projects={projects}
-            value={watchedProjectId || null}
-            allowNoProject={false}
-            loading={projectsLoading}
-            placeholder="选择项目"
-            createProjectHref={projectsReturnHref({ type: watchedType, intent: 'new' })}
-            onValueChange={changeProject}
-          />
-          <Badge variant="secondary">{contentTypeLabel[watchedType] || watchedType}</Badge>
-        </div>
-      )}
+      contextBar={projectContextBar}
     />
   )
 
@@ -429,9 +453,9 @@ export function TaskFormDialog({
               </div>
 
               <div className="space-y-4 pt-1">
-                <p className="text-xs font-medium uppercase text-muted-foreground">图片/高级</p>
+                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">图片/高级</p> : null}
 
-                {watchedType !== 'ecommerce' && !isMontageTask ? (
+                {watchedType !== 'ecommerce' && !isMontageTask && !isViralAnalysisTask ? (
                   <div className="space-y-2">
                     <FormLabel>数量</FormLabel>
                     <div className="flex gap-2">
@@ -450,7 +474,7 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
-                {!isMontageTask ? (
+                {!isMontageTask && !isViralAnalysisTask ? (
                   <div className="grid gap-4 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
                     {watchedType !== 'ecommerce' ? (
                       <FormField control={form.control} name="image_ratio" render={({ field }) => (
@@ -483,7 +507,7 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
-                {!isMontageTask ? (
+                {!isMontageTask && !isViralAnalysisTask ? (
                   <FormField control={form.control} name="reference_image" render={({ field }) => (
                     <FormItem>
                       <FormLabel>任务参考图</FormLabel>
@@ -509,7 +533,7 @@ export function TaskFormDialog({
                   />
                 ) : null}
 
-                {!isMontageTask ? (
+                {!isMontageTask && !isViralAnalysisTask ? (
                   <button
                     type="button"
                     onClick={() => setFormValue('watermark', !watermark)}
@@ -685,7 +709,7 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
-                {watchedType !== 'ecommerce' && !isMontageTask ? (
+                {watchedType !== 'ecommerce' && !isMontageTask && !isViralAnalysisTask ? (
                   <div className={`rounded-lg border p-3 transition-colors ${goalMode ? 'border-primary bg-primary/5' : 'border-border'}`}>
                     <div className="flex w-full items-start gap-3">
                       <label htmlFor="task-goal-mode" className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left">

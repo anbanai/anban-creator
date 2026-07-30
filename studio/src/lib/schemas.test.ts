@@ -120,9 +120,18 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('accepts viral analysis without a project when prompt contains a note URL', () => {
+  it('rejects viral analysis without a seednote project', () => {
     const result = createTaskSchema.safeParse({
       project_id: '',
+      type: 'viral_analysis',
+      prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts viral analysis with a seednote project and note URL', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'seednote-project',
       type: 'viral_analysis',
       prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
     })
@@ -177,7 +186,7 @@ describe('createTaskSchema', () => {
   it('accepts all valid content types', () => {
     for (const type of ['seednote', 'article', 'moments', 'viral_analysis'] as const) {
       expect(createTaskSchema.safeParse({
-        project_id: type === 'viral_analysis' ? '' : 'ch-1',
+        project_id: type === 'viral_analysis' ? 'seednote-project' : 'ch-1',
         type,
         prompt: type === 'viral_analysis' ? 'https://www.xiaohongshu.com/explore/mock' : '测试',
       }).success).toBe(true)

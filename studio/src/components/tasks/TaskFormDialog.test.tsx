@@ -181,6 +181,9 @@ beforeEach(() => {
       { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 9000, delivery: 'article_artifacts_verified' },
       { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
       { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
+      { id: 'task.viral-analysis.cost-effective.v2', operation: 'task.viral_analysis', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.viral-analysis.balanced.v2', operation: 'task.viral_analysis', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.viral-analysis.maximum-quality.v2', operation: 'task.viral_analysis', execution_profile: 'maximum_quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
       { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'cost_effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
     ],
   })
@@ -209,6 +212,38 @@ beforeEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('creates viral analysis through the task API with only Seednote projects', async () => {
+    renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: '项目上下文' }))
+    expect(await screen.findByRole('option', { name: '种草项目' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '公众号项目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '剪辑项目' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: '种草项目' }))
+
+    expect(within(dialog).queryByText('封面比例')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('图像模型')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('任务参考图')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('水印')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('数量')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('粘贴种草笔记链接或分享文本...'), {
+      target: { value: 'https://www.xiaohongshu.com/explore/note-1' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith({
+      type: 'viral_analysis',
+      execution_profile: 'cost_effective',
+      prompt: 'https://www.xiaohongshu.com/explore/note-1',
+      project_id: 'seednote-project',
+      quantity: 1,
+      input_attachments: [],
+    }))
+  })
+
   it('requires a server-backed execution profile and submits the selected exact-price profile', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog')
