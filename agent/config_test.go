@@ -41,6 +41,19 @@ func TestParseConfigRejectsInvalidModelUsageAlias(t *testing.T) {
 	}
 }
 
+func TestRunCommandDoesNotExposeLegacyModelOverride(t *testing.T) {
+	cmd := newAgentCommand(nil, nil, func(context.Context, *Config) error { return nil })
+	run := cmd.Command("run")
+	if run == nil {
+		t.Fatal("run command is missing")
+	}
+	for _, name := range run.FlagNames() {
+		if name == "model" {
+			t.Fatal("run command exposes legacy model override")
+		}
+	}
+}
+
 func TestConfigUserPrompt_ArticleImageFlagsDefaultOn(t *testing.T) {
 	cfg := &Config{
 		TaskID:                   "task-1",

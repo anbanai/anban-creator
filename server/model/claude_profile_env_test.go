@@ -79,6 +79,9 @@ func TestValidateClaudeProfileEnvs(t *testing.T) {
 		{name: "value contains nul", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvModel, "bad\x00model"), wantErr: true},
 		{name: "value contains line feed", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvModel, "bad\nmodel"), wantErr: true},
 		{name: "value contains carriage return", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvModel, "bad\rmodel"), wantErr: true},
+		{name: "non token value has leading whitespace", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvModel, " model"), wantErr: true},
+		{name: "non token value has trailing whitespace", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvModel, "model "), wantErr: true},
+		{name: "auth token preserves surrounding whitespace", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvAuthToken, " token "), requireAuth: true},
 		{name: "value at sixteen kibibytes", envs: withClaudeEnv(validClaudeProfileEnvs(), "CLAUDE_CODE_SUBAGENT_MODEL", strings.Repeat("a", 16*1024))},
 		{name: "value over sixteen kibibytes", envs: withClaudeEnv(validClaudeProfileEnvs(), "CLAUDE_CODE_SUBAGENT_MODEL", strings.Repeat("a", 16*1024+1)), wantErr: true},
 		{name: "aggregate values over thirty two kibibytes", envs: withClaudeEnvs(validClaudeProfileEnvs(), map[string]string{

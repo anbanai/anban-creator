@@ -312,9 +312,24 @@ func TestAgentProfileEnvsMigrationContracts(t *testing.T) {
 		"CONSTRAINT `chk_tasks_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
 		"CONSTRAINT `chk_plans_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
 		"CONSTRAINT `chk_task_executions_execution_profile_v3` CHECK (`execution_profile` IN ('effective', 'balanced', 'quality'))",
+		"information_schema.COLUMNS", "information_schema.TABLE_CONSTRAINTS",
+		"IF EXISTS (", "IF NOT EXISTS (",
+		"DROP PROCEDURE IF EXISTS `apply_agent_profile_envs_contract_schema`",
 	} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("contract migration missing %q", required)
+		}
+	}
+	for _, guardedChange := range []string{
+		"MODIFY COLUMN `profile_envs` json NOT NULL",
+		"DROP COLUMN `model_matrix`",
+		"DROP COLUMN `claude_controls`",
+		"ADD CONSTRAINT `chk_task_executions_execution_profile_v3`",
+		"ADD CONSTRAINT `chk_tasks_execution_profile_v3`",
+		"ADD CONSTRAINT `chk_plans_execution_profile_v3`",
+	} {
+		if strings.Count(contract, guardedChange) != 1 {
+			t.Fatalf("contract migration change %q must appear exactly once", guardedChange)
 		}
 	}
 	if strings.Index(contract, "SIGNAL SQLSTATE '45000'") > strings.Index(contract, "MODIFY COLUMN `profile_envs` json NOT NULL") {

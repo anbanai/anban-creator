@@ -8,6 +8,34 @@ import type { ExecutionResult, Reporter } from "./reporter.js";
 
 const allowedTools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite", "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*"];
 const disallowedTools = ["Agent", "ScheduleWakeup", "AskUserQuestion"];
+const CLAUDE_ENVIRONMENT_KEYS_TO_UNSET = new Set([
+  ...CLAUDE_PROFILE_ENV_KEYS,
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "ANTHROPIC_UNIX_SOCKET",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_AWS_BASE_URL",
+  "ANTHROPIC_AWS_WORKSPACE_ID",
+  "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+  "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+  "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+  "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+  "ANTHROPIC_VERTEX_BASE_URL",
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE",
+  "CLAUDE_CODE_API_BASE_URL",
+  "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+  "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+  "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_USE_GATEWAY",
+  "CLAUDE_CODE_USE_MANTLE",
+  "CLAUDE_CODE_USE_VERTEX",
+  "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
 
@@ -71,7 +99,7 @@ export function buildExecutionEnvironment(
   token: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
-  for (const key of CLAUDE_PROFILE_ENV_KEYS) delete environment[key];
+  for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
   return {
     ...environment,
     ANBAN_API_KEY: token,

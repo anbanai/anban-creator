@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -248,13 +249,18 @@ func TestRunnerOptionsRemoveInheritedClaudeEnvironmentBeforeFrozenInjection(t *t
 		t.Fatalf("buildSDKOptions: %v", err)
 	}
 	got := claudecode.NewOptions(opts...)
-	want := serveragent.ClaudeRuntimeEnvKeys()
+	want := serveragent.ClaudeEnvironmentKeysToUnset()
 	if len(got.UnsetEnv) != len(want) {
 		t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
 	}
 	for i := range want {
 		if got.UnsetEnv[i] != want[i] {
 			t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
+		}
+	}
+	for _, key := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} {
+		if !slices.Contains(got.UnsetEnv, key) {
+			t.Fatalf("inherited Claude routing key %q was not unset: %#v", key, got.UnsetEnv)
 		}
 	}
 	if got.ExtraEnv["ANTHROPIC_MODEL"] != "frozen-model" {
@@ -265,8 +271,8 @@ func TestRunnerOptionsRemoveInheritedClaudeEnvironmentBeforeFrozenInjection(t *t
 func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing.T) {
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
-		Model: "k3", RuntimeEnv: map[string]string{
-			"CLAUDE_CODE_EFFORT_LEVEL": "high", "MAX_THINKING_TOKENS": "0", "ENABLE_TOOL_SEARCH": "false",
+		RuntimeEnv: map[string]string{
+			"ANTHROPIC_MODEL": "k3", "CLAUDE_CODE_EFFORT_LEVEL": "high", "MAX_THINKING_TOKENS": "0", "ENABLE_TOOL_SEARCH": "false",
 		},
 	}, nil, nil)
 	opts, err := runner.buildSDKOptions(context.Background())
@@ -274,8 +280,8 @@ func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing
 		t.Fatalf("buildSDKOptions: %v", err)
 	}
 	got := claudecode.NewOptions(opts...)
-	if got.Effort != nil || got.ExtraArgs["thinking"] != nil {
-		t.Fatalf("legacy reasoning options = effort %#v, thinking %#v", got.Effort, got.ExtraArgs["thinking"])
+	if got.Model != nil || got.Effort != nil || got.ExtraArgs["thinking"] != nil {
+		t.Fatalf("legacy SDK controls = model %#v, effort %#v, thinking %#v", got.Model, got.Effort, got.ExtraArgs["thinking"])
 	}
 	if got.ExtraEnv["CLAUDE_CODE_EFFORT_LEVEL"] != "high" || got.ExtraEnv["MAX_THINKING_TOKENS"] != "0" || got.ExtraEnv["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("frozen Claude control environment = %#v", got.ExtraEnv)

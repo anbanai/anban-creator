@@ -236,14 +236,10 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 		return nil, fmt.Errorf("materialize runtime home template: %w", err)
 	}
 	extraArgs := map[string]*string{"agent": &r.cfg.AgentFlag}
-	if r.cfg.ThinkingRequired {
-		thinking := "adaptive"
-		extraArgs["thinking"] = &thinking
-	}
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)),
-		claudecode.WithUnsetEnv(serveragent.ClaudeRuntimeEnvKeys()...),
+		claudecode.WithUnsetEnv(serveragent.ClaudeEnvironmentKeysToUnset()...),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
 		// workspace (e.g., written by the desktop shell in the future) is picked up
@@ -288,15 +284,6 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	if model.IsMontagePlatform(strings.TrimSpace(r.cfg.TaskType)) {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(serveragent.MontageSubmoduleEnvName, montageRuntimePath(r.cfg.Workspace)))
 	}
-	if r.cfg.Model != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
-		if r.reporter != nil {
-			_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
-		}
-	}
-	if r.cfg.ReasoningEffort != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithEffort(claudecode.EffortLevel(r.cfg.ReasoningEffort)))
-	}
 	if r.cfg.AutoMemoryDirectory != "" {
 		settings, err := serveragent.BuildAutoMemorySettingsJSON(r.cfg.AutoMemoryDirectory)
 		if err != nil {
@@ -308,8 +295,8 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 }
 
 func withoutClaudeRuntimeEnv(configured map[string]string) map[string]string {
-	excluded := make(map[string]struct{}, len(serveragent.ClaudeRuntimeEnvKeys()))
-	for _, key := range serveragent.ClaudeRuntimeEnvKeys() {
+	excluded := make(map[string]struct{}, len(serveragent.ClaudeEnvironmentKeysToUnset()))
+	for _, key := range serveragent.ClaudeEnvironmentKeysToUnset() {
 		excluded[key] = struct{}{}
 	}
 	result := make(map[string]string, len(configured))

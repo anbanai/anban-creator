@@ -68,15 +68,8 @@ func ValidateAgentProfileSnapshot(snapshot AgentProfileSnapshot) error {
 	if err := ValidateClaudeProfileEnvs(snapshot.Envs, false); err != nil {
 		return fmt.Errorf("agent profile snapshot envs are invalid: %w", err)
 	}
-	for _, model := range ClaudeProfileReferencedModels(snapshot.Envs) {
-		if strings.TrimSpace(snapshot.ModelUsageAliases[model]) == "" {
-			return fmt.Errorf("agent profile snapshot model_usage_aliases.%s is required", model)
-		}
-	}
-	for raw, canonical := range snapshot.ModelUsageAliases {
-		if strings.TrimSpace(raw) == "" || strings.TrimSpace(canonical) == "" || strings.Contains(canonical, "/") {
-			return fmt.Errorf("agent profile snapshot model_usage_aliases contains an invalid mapping")
-		}
+	if err := ValidateClaudeProfileModelUsageAliases(snapshot.Provider, snapshot.Envs, snapshot.ModelUsageAliases); err != nil {
+		return fmt.Errorf("agent profile snapshot model_usage_aliases are invalid: %w", err)
 	}
 	return nil
 }

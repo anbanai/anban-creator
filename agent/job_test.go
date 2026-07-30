@@ -76,7 +76,7 @@ func TestJobCommandBootstrapsBeforeRunAndMapsConfig(t *testing.T) {
 	}
 	run := func(_ context.Context, cfg *Config) error {
 		order = append(order, "run")
-		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || cfg.RuntimeEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] != "glm-5.2-flash" || cfg.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || cfg.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" || len(cfg.RuntimeEnv) != 9 || cfg.ModelUsageAliases["glm-5.2"].Provider != "zhipu" || cfg.Model != "glm-5.2" || cfg.ReasoningEffort != "" || cfg.ContextWindow != 0 || cfg.ThinkingRequired {
+		if cfg.APIKey != "jwt" || cfg.ExecutionID != "execution-1" || cfg.TaskID != "task-1" || cfg.Topic != "write" || cfg.ResumeSessionID != "bba21f1d-70b8-4157-917b-f9802c2b1740" || cfg.ResumeContextPath != ".anban-creator/resume/executions/execution-1/latest.md" || cfg.ArtifactUploadMode != ArtifactUploadDirect || cfg.RuntimeEnv["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || cfg.RuntimeEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] != "glm-5.2-flash" || cfg.RuntimeEnv["MAX_THINKING_TOKENS"] != "0" || cfg.RuntimeEnv["ENABLE_TOOL_SEARCH"] != "false" || len(cfg.RuntimeEnv) != 9 || cfg.ModelUsageAliases["glm-5.2"].Provider != "zhipu" {
 			t.Fatalf("runtime config=%+v", cfg)
 		}
 		return nil

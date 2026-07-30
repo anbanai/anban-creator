@@ -19,12 +19,6 @@ type Config struct {
 	Topic                    string
 	Goal                     string
 	Workspace                string
-	Model                    string
-	Provider                 string
-	Protocol                 string
-	ContextWindow            int
-	ReasoningEffort          string
-	ThinkingRequired         bool
 	AgentFlag                string
 	AutoMemoryDirectory      string
 	MaxTurns                 int
@@ -56,7 +50,6 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "topic", Usage: "task topic/prompt", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "goal", Usage: "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
-		&cli.StringFlag{Name: "model", Usage: "Claude model override", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringSliceFlag{Name: "model-usage-alias", Usage: "exact raw=provider/model terminal usage identity"},
 		&cli.StringFlag{Name: "agent-flag", Usage: "Claude Code --agent flag", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "auto-memory-directory", Usage: "Claude Code auto memory directory", Config: cli.StringConfig{TrimSpace: true}},
@@ -81,7 +74,6 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		Topic:                    cmd.String("topic"),
 		Goal:                     cmd.String("goal"),
 		Workspace:                cmd.String("workspace"),
-		Model:                    cmd.String("model"),
 		AgentFlag:                cmd.String("agent-flag"),
 		AutoMemoryDirectory:      cmd.String("auto-memory-directory"),
 		MaxTurns:                 cmd.Int("max-turns"),

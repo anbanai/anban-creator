@@ -20,22 +20,22 @@ const (
 )
 
 const (
-	claudeEnvDefaultOpusModel            = "ANTHROPIC_DEFAULT_OPUS_MODEL"
-	claudeEnvDefaultFableModel           = "ANTHROPIC_DEFAULT_FABLE_MODEL"
-	claudeEnvDefaultSonnetModel          = "ANTHROPIC_DEFAULT_SONNET_MODEL"
-	claudeEnvDefaultHaikuModel           = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
-	claudeEnvEffortLevel                 = "CLAUDE_CODE_EFFORT_LEVEL"
-	claudeEnvAlwaysEnableEffort          = "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"
-	claudeEnvMaxThinkingTokens           = "MAX_THINKING_TOKENS"
-	claudeEnvDisableAdaptiveThinking     = "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"
-	claudeEnvDisableThinking             = "CLAUDE_CODE_DISABLE_THINKING"
-	claudeEnvMaxContextTokens            = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
-	claudeEnvMaxOutputTokens             = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
-	claudeEnvAutoCompactWindow           = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
-	claudeEnvAutocompactPctOverride      = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
-	claudeEnvDisable1MContext            = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
-	claudeEnvSubagentModel               = "CLAUDE_CODE_SUBAGENT_MODEL"
-	claudeEnvEnableToolSearch            = "ENABLE_TOOL_SEARCH"
+	claudeEnvDefaultOpusModel        = "ANTHROPIC_DEFAULT_OPUS_MODEL"
+	claudeEnvDefaultFableModel       = "ANTHROPIC_DEFAULT_FABLE_MODEL"
+	claudeEnvDefaultSonnetModel      = "ANTHROPIC_DEFAULT_SONNET_MODEL"
+	claudeEnvDefaultHaikuModel       = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+	claudeEnvEffortLevel             = "CLAUDE_CODE_EFFORT_LEVEL"
+	claudeEnvAlwaysEnableEffort      = "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"
+	claudeEnvMaxThinkingTokens       = "MAX_THINKING_TOKENS"
+	claudeEnvDisableAdaptiveThinking = "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"
+	claudeEnvDisableThinking         = "CLAUDE_CODE_DISABLE_THINKING"
+	claudeEnvMaxContextTokens        = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
+	claudeEnvMaxOutputTokens         = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+	claudeEnvAutoCompactWindow       = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+	claudeEnvAutocompactPctOverride  = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+	claudeEnvDisable1MContext        = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
+	claudeEnvSubagentModel           = "CLAUDE_CODE_SUBAGENT_MODEL"
+	claudeEnvEnableToolSearch        = "ENABLE_TOOL_SEARCH"
 )
 
 var claudeProfileEnvKeys = []string{
@@ -95,6 +95,9 @@ func ValidateClaudeProfileEnvs(envs map[string]string, requireAuthToken bool) er
 		}
 		if strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("claude profile env %s contains a forbidden control character", key)
+		}
+		if key != ClaudeEnvAuthToken && strings.TrimSpace(value) != value {
+			return fmt.Errorf("claude profile env %s must not contain surrounding whitespace", key)
 		}
 		if len(value) > claudeProfileEnvValueMaxBytes {
 			return fmt.Errorf("claude profile env %s exceeds %d bytes", key, claudeProfileEnvValueMaxBytes)
@@ -160,6 +163,32 @@ func ValidateClaudeProfileEnvs(envs map[string]string, requireAuthToken bool) er
 		if err != nil || parsed < 1 || parsed > 100 {
 			return fmt.Errorf("claude profile env %s must be a decimal integer from 1 through 100", claudeEnvAutocompactPctOverride)
 		}
+	}
+	return nil
+}
+
+func ValidateClaudeProfileModelUsageAliases(provider string, envs, aliases map[string]string) error {
+	if err := ValidateClaudeProfileModelUsageAliasMappings(provider, aliases); err != nil {
+		return err
+	}
+	for _, referenced := range ClaudeProfileReferencedModels(envs) {
+		if _, exists := aliases[referenced]; !exists {
+			return fmt.Errorf("claude profile model usage alias %q is required", referenced)
+		}
+	}
+	return nil
+}
+
+func ValidateClaudeProfileModelUsageAliasMappings(provider string, aliases map[string]string) error {
+	identities := make(map[string]ModelUsageIdentity, len(aliases))
+	for raw, canonical := range aliases {
+		if strings.Contains(canonical, "/") {
+			return fmt.Errorf("claude profile model usage alias %q contains an invalid model", raw)
+		}
+		identities[raw] = ModelUsageIdentity{Provider: provider, Model: canonical}
+	}
+	if err := ValidateModelUsageAliases(identities); err != nil {
+		return err
 	}
 	return nil
 }

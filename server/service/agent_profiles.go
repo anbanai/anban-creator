@@ -98,7 +98,8 @@ func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExe
 		profile.Envs = model.CloneClaudeProfileEnvs(item.Envs)
 		profile.ModelUsageAliases = cloneModelUsageAliasTargets(item.ModelUsageAliases)
 
-		if profile.Provider == "" || model.ValidateClaudeProfileEnvs(profile.Envs, true) != nil {
+		if profile.Provider == "" || model.ValidateClaudeProfileEnvs(profile.Envs, true) != nil ||
+			model.ValidateClaudeProfileModelUsageAliasMappings(profile.Provider, profile.ModelUsageAliases) != nil {
 			profile.UnavailableReason = "agent_provider_unavailable"
 			profiles = append(profiles, profile)
 			continue
@@ -116,19 +117,12 @@ func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExe
 
 func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCatalog) bool {
 	for _, raw := range model.ClaudeProfileReferencedModels(profile.Envs) {
-		canonical := strings.TrimSpace(profile.ModelUsageAliases[raw])
-		if canonical == "" || strings.Contains(canonical, "/") {
-			return false
-		}
+		canonical := profile.ModelUsageAliases[raw]
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}
 	}
-	for raw, canonical := range profile.ModelUsageAliases {
-		canonical = strings.TrimSpace(canonical)
-		if strings.TrimSpace(raw) == "" || canonical == "" || strings.Contains(canonical, "/") {
-			return false
-		}
+	for _, canonical := range profile.ModelUsageAliases {
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}

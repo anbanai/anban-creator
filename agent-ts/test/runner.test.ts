@@ -96,7 +96,14 @@ describe("buildQueryOptions", () => {
 describe("buildExecutionEnvironment", () => {
   test("applies frozen runtime environment after execution identity", () => {
     expect(buildExecutionEnvironment(
-      { ANTHROPIC_MODEL: "process-model", CLAUDE_CODE_MAX_OUTPUT_TOKENS: "999999", PATH: "/usr/bin" },
+      {
+        ANTHROPIC_MODEL: "process-model",
+        ANTHROPIC_API_KEY: "inherited-api-key",
+        CLAUDE_CODE_USE_BEDROCK: "true",
+        CLAUDE_CODE_USE_VERTEX: "true",
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "999999",
+        PATH: "/usr/bin",
+      },
       {
         task_type: "montage",
         env: {
@@ -130,6 +137,15 @@ describe("buildExecutionEnvironment", () => {
       ANTHROPIC_MODEL: "runtime-model",
       PATH: "/usr/bin",
     }));
+    const isolated = buildExecutionEnvironment(
+      { ANTHROPIC_API_KEY: "inherited-api-key", CLAUDE_CODE_USE_BEDROCK: "true", CLAUDE_CODE_USE_VERTEX: "true" },
+      { task_type: "article", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },
+      "https://server.example.com",
+      "execution-jwt",
+    );
+    expect(isolated).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(isolated).not.toHaveProperty("CLAUDE_CODE_USE_BEDROCK");
+    expect(isolated).not.toHaveProperty("CLAUDE_CODE_USE_VERTEX");
     const environment = buildExecutionEnvironment(
       { CLAUDE_CODE_MAX_OUTPUT_TOKENS: "999999" },
       {

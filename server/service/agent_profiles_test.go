@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -166,6 +167,43 @@ func TestAgentProfileRegistryMarksModelAliasAndCostMismatchUnavailable(t *testin
 			}
 			if _, err := registry.ResolveForTier("balanced", model.TierEnterprise); !errors.Is(err, ErrAgentModelCostUnmapped) {
 				t.Fatalf("ResolveForTier = %v", err)
+			}
+		})
+	}
+}
+
+func TestAgentProfileRegistryMarksBootstrapInvalidAliasesUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*srvconfig.ClaudeExecutionProfileConfig)
+	}{
+		{name: "raw alias has whitespace", mutate: func(profile *srvconfig.ClaudeExecutionProfileConfig) {
+			profile.ModelUsageAliases[" glm-5.2"] = "glm-5.2"
+		}},
+		{name: "canonical alias has whitespace", mutate: func(profile *srvconfig.ClaudeExecutionProfileConfig) {
+			profile.ModelUsageAliases["glm-5.2"] = "glm-5.2 "
+		}},
+		{name: "alias count exceeds bootstrap limit", mutate: func(profile *srvconfig.ClaudeExecutionProfileConfig) {
+			for i := 0; i < 128; i++ {
+				profile.ModelUsageAliases[fmt.Sprintf("extra-%03d", i)] = "glm-5.2"
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profiles := testProfileConfig()
+			profile := profiles["balanced"]
+			tc.mutate(&profile)
+			profiles["balanced"] = profile
+			registry, err := NewAgentProfileRegistryFromConfig(profiles, testCostCatalog())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := registry.Resolve("balanced")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Available || got.UnavailableReason != "agent_provider_unavailable" {
+				t.Fatalf("balanced = %#v", got)
 			}
 		})
 	}
