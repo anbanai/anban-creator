@@ -16,8 +16,10 @@ import (
 // the user ID, user object, and role in Fiber locals.
 func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger *zerolog.Logger) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Skip JWT validation for agent communication endpoints (use API key auth instead).
-		if strings.HasPrefix(c.Path(), "/api/v1/agent/") {
+		// Agent communication uses API-key or execution-token authentication. Keep
+		// the bypass to its POST endpoints so user-facing GET routes under /agent
+		// still receive the Studio user's JWT claims.
+		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/api/v1/agent/") {
 			return c.Next()
 		}
 

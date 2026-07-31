@@ -290,6 +290,82 @@ func TestAgentExecutionProfileRoute(t *testing.T) {
 	t.Fatal("GET /api/v1/agent/execution-profiles is not registered")
 }
 
+func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+
+	userID := uuid.NewString()
+	if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Tier: model.TierPro}); err != nil {
+		t.Fatal(err)
+	}
+	jwtSvc, err := auth.NewJWTService("agent-profile-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
+		routerTestAgentProfile("effective", "性价比", "deepseek", "deepseek-v4-flash", model.TierFree),
+		routerTestAgentProfile("balanced", "平衡型", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
+		routerTestAgentProfile("quality", "极致效果", "moonshot", "kimi-k3", model.TierEnterprise),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	agentHandler := handler.NewAgentHandler(nil, nil, nil, "", &logger)
+	executionTokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentHandler.SetExecutionTokenService(executionTokens)
+	app := NewRouter(&Services{
+		Config:              &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}},
+		Logger:              &logger,
+		Repo:                repo,
+		JWTService:          jwtSvc,
+		AgentHandler:        agentHandler,
+		AgentProfileHandler: handler.NewAgentProfileHandler(repo, profiles, &logger),
+	})
+
+	token, err := jwtSvc.GenerateAccessToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/execution-profiles", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("authenticated profile request status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func routerTestAgentProfile(id, displayName, provider, modelName string, minTier model.Tier) service.AgentExecutionProfile {
+	return service.AgentExecutionProfile{
+		ID: id, DisplayName: displayName, Provider: provider, Protocol: "anthropic", MinTier: minTier, Available: true,
+		Envs: map[string]string{
+			model.ClaudeEnvBaseURL:           "https://" + provider + ".example/anthropic",
+			model.ClaudeEnvAuthToken:         "test-secret",
+			model.ClaudeEnvModel:             modelName,
+			"ANTHROPIC_DEFAULT_OPUS_MODEL":   modelName,
+			"ANTHROPIC_DEFAULT_FABLE_MODEL":  modelName,
+			"ANTHROPIC_DEFAULT_SONNET_MODEL": modelName,
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL":  modelName,
+		},
+		ModelUsageAliases: map[string]string{modelName: modelName},
+	}
+}
+
 // TestPublicAuthEndpoints tests that public auth endpoints are accessible
 // without authentication.
 func TestPublicAuthEndpoints(t *testing.T) {

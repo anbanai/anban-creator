@@ -186,14 +186,16 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.AgentHandler != nil {
 		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
 		app.Post("/api/v1/agent/bootstrap", agentLimiter, svc.AgentHandler.WorkloadAuthMiddleware, svc.AgentHandler.Bootstrap)
-		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
-		agentAPI.Post("/upload", svc.AgentHandler.Upload)
-		agentAPI.Post("/artifacts/prepare", svc.AgentHandler.PrepareArtifactUpload)
-		agentAPI.Post("/artifacts/content", svc.AgentHandler.StreamArtifactContent)
-		agentAPI.Post("/artifacts/manifest", svc.AgentHandler.ReportArtifactManifest)
-		agentAPI.Post("/progress", svc.AgentHandler.Progress)
-		agentAPI.Post("/claim", svc.AgentHandler.Claim)
-		agentAPI.Post("/complete", svc.AgentHandler.Complete)
+		// Register each Agent route explicitly. A prefix group here also applies its
+		// execution-token middleware to user-facing GET routes under /agent, such
+		// as the execution-profile capability endpoint below.
+		app.Post("/api/v1/agent/upload", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Upload)
+		app.Post("/api/v1/agent/artifacts/prepare", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.PrepareArtifactUpload)
+		app.Post("/api/v1/agent/artifacts/content", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.StreamArtifactContent)
+		app.Post("/api/v1/agent/artifacts/manifest", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.ReportArtifactManifest)
+		app.Post("/api/v1/agent/progress", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Progress)
+		app.Post("/api/v1/agent/claim", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Claim)
+		app.Post("/api/v1/agent/complete", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Complete)
 		adminAgentLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
 		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
