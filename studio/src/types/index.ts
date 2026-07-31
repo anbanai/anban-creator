@@ -75,6 +75,9 @@ export type {
   BillingTransactions,
   BillingSKU,
   BillingCatalog,
+  BillingTimeWindow,
+  TaskTimePricing,
+  ScheduleRecommendation,
   BillingReferralProgram,
   BillingReferral,
 } from './billing'

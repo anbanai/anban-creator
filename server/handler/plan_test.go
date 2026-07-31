@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -91,6 +93,33 @@ func TestCreatePlanRejectsMissingExecutionProfile(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "execution_profile is required") {
 		t.Fatalf("body = %s, want execution_profile validation error", body)
+	}
+}
+
+func TestPlanHandlerScheduleRecommendation(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	repo := repository.New(setupTaskHandlerTestDB(t))
+	rule := serverbilling.TaskTimePricing{Timezone: "Asia/Shanghai", OffPeakWindows: []serverbilling.TimeWindow{{Start: "12:00", End: "13:00"}}, OffPeakRatePercent: 80}
+	h := NewPlanHandler(nil, &logger)
+	h.SetScheduleRecommendationService(service.NewScheduleRecommendationService(repo, "retail-test", rule, &logger))
+	app := fiber.New()
+	app.Get("/plans/schedule-recommendation", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-a")
+		return h.ScheduleRecommendation(c)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/plans/schedule-recommendation", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Data service.ScheduleRecommendation `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || payload.Data.Time == "" || payload.Data.Timezone != "Asia/Shanghai" || payload.Data.GranularityMinutes != 15 || !payload.Data.LoadBalanced {
+		t.Fatalf("status=%d recommendation=%#v", resp.StatusCode, payload.Data)
 	}
 }
 

@@ -104,29 +104,35 @@ type BillingQuoteResponse struct {
 }
 
 type BillingCatalogSKUResponse struct {
-	ID               string `json:"id"`
-	Operation        string `json:"operation"`
-	ExecutionProfile string `json:"execution_profile,omitempty"`
-	ChargePolicy     string `json:"charge_policy"`
-	PricingTier      string `json:"pricing_tier"`
-	ListPriceCredits int64  `json:"list_price_credits"`
-	PriceCredits     int64  `json:"price_credits"`
-	DiscountCredits  int64  `json:"discount_credits"`
-	Route            string `json:"route,omitempty"`
-	Delivery         string `json:"delivery"`
+	ID                  string `json:"id"`
+	Operation           string `json:"operation"`
+	ExecutionProfile    string `json:"execution_profile,omitempty"`
+	ChargePolicy        string `json:"charge_policy"`
+	PricingTier         string `json:"pricing_tier"`
+	ListPriceCredits    int64  `json:"list_price_credits"`
+	PriceCredits        int64  `json:"price_credits"`
+	PeakPriceCredits    *int64 `json:"peak_price_credits,omitempty"`
+	OffPeakPriceCredits *int64 `json:"off_peak_price_credits,omitempty"`
+	DiscountCredits     int64  `json:"discount_credits"`
+	Route               string `json:"route,omitempty"`
+	Delivery            string `json:"delivery"`
 }
 
 type BillingCatalogResponse struct {
-	CatalogID   string                      `json:"catalog_id"`
-	Currency    string                      `json:"currency"`
-	PricingTier string                      `json:"pricing_tier"`
-	SKUs        []BillingCatalogSKUResponse `json:"skus"`
+	CatalogID       string                        `json:"catalog_id"`
+	Currency        string                        `json:"currency"`
+	PricingTier     string                        `json:"pricing_tier"`
+	TaskTimePricing service.TaskTimePricingStatus `json:"task_time_pricing"`
+	SKUs            []BillingCatalogSKUResponse   `json:"skus"`
 }
 
 func NewBillingHandler(repo repository.Repository, catalog *service.BillingCatalogService, referrals *service.BillingReferralService, bundle *serverbilling.Bundle, opts BillingHandlerOptions, logger *zerolog.Logger) *BillingHandler {
 	var snapshot serverbilling.Bundle
 	if bundle != nil {
 		snapshot = *bundle
+		snapshot.Products.SKUs = append([]serverbilling.SKUConfig(nil), bundle.Products.SKUs...)
+		snapshot.Products.TaskTimePricing.PeakWindows = append([]serverbilling.TimeWindow(nil), bundle.Products.TaskTimePricing.PeakWindows...)
+		snapshot.Products.TaskTimePricing.OffPeakWindows = append([]serverbilling.TimeWindow(nil), bundle.Products.TaskTimePricing.OffPeakWindows...)
 		snapshot.Promotions.Programs = append([]serverbilling.ReferralProgram(nil), bundle.Promotions.Programs...)
 	}
 	return &BillingHandler{
@@ -164,29 +170,38 @@ func (h *BillingHandler) Catalog(c fiber.Ctx) error {
 		return billingErrorResponse(c, fiber.StatusUnauthorized, BillingCodeUnauthorized, "billing_unauthorized")
 	}
 	skus := make([]BillingCatalogSKUResponse, 0, len(h.bundle.Products.SKUs))
+	timePricing, err := h.catalog.CurrentTaskTimePricing()
+	if err != nil {
+		return writeBillingServiceError(c, err)
+	}
 	pricingTier := ""
 	for _, configured := range h.bundle.Products.SKUs {
 		var resolved *service.ResolvedSKUPrice
 		var err error
 		if configured.ExecutionProfile != "" {
-			resolved, err = h.catalog.ResolvePriceForExecutionProfile(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.ExecutionProfile)
+			resolved, err = h.catalog.ResolvePriceForExecutionProfileAt(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.ExecutionProfile, timePricing.ServerTime)
 		} else {
-			resolved, err = h.catalog.ResolvePrice(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.Route)
+			resolved, err = h.catalog.ResolvePriceAt(c.Context(), userID, h.bundle.Products.CatalogID, configured.Operation, configured.Route, timePricing.ServerTime)
 		}
 		if err != nil {
 			return writeBillingServiceError(c, err)
 		}
 		pricingTier = string(resolved.PricingTier)
-		skus = append(skus, BillingCatalogSKUResponse{
+		item := BillingCatalogSKUResponse{
 			ID: configured.ID, Operation: configured.Operation, ExecutionProfile: configured.ExecutionProfile, ChargePolicy: configured.ChargePolicy,
 			PricingTier: pricingTier, ListPriceCredits: resolved.ListPriceCredits,
 			PriceCredits: resolved.PriceCredits, DiscountCredits: resolved.DiscountCredits,
 			Route: configured.Route, Delivery: configured.Delivery,
-		})
+		}
+		if resolved.TaskTimePriced {
+			item.PeakPriceCredits = &resolved.PeakPriceCredits
+			item.OffPeakPriceCredits = &resolved.OffPeakPriceCredits
+		}
+		skus = append(skus, item)
 	}
 	return Success(c, BillingCatalogResponse{
 		CatalogID: h.bundle.Products.CatalogID, Currency: h.bundle.Products.Currency,
-		PricingTier: pricingTier, SKUs: skus,
+		PricingTier: pricingTier, TaskTimePricing: timePricing, SKUs: skus,
 	})
 }
 

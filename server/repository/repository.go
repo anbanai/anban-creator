@@ -73,6 +73,7 @@ type PlanRepository interface {
 	UpdateNextRunAtIf(ctx context.Context, id string, nextRunAt, expectedNextRunAt *time.Time) (bool, error)
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
+	ListActiveNextRunAt(ctx context.Context) ([]time.Time, error)
 	ListActiveByUserID(ctx context.Context, userID string, projectID string) ([]*model.Plan, error)
 	ListDue(ctx context.Context, now time.Time) ([]*model.Plan, error)
 	CountByUserID(ctx context.Context, userID string, projectID string) (int64, error)

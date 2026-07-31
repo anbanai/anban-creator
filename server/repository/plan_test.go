@@ -229,3 +229,25 @@ func TestPlanUpdateNextRunAtIfDoesNotOverwriteConcurrentFields(t *testing.T) {
 		t.Fatal("stale next_run_at CAS updated")
 	}
 }
+
+func TestPlanListActiveNextRunAtProjectsOnlyScheduledActivePlans(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	next := time.Now().Add(time.Hour).Truncate(time.Second)
+	for _, plan := range []*model.Plan{
+		{ID: "active-next", UserID: "user-1", Type: model.PlatformArticle, ExecutionProfile: "balanced", Status: model.PlanStatusActive, NextRunAt: &next},
+		{ID: "active-nil", UserID: "user-1", Type: model.PlatformArticle, ExecutionProfile: "balanced", Status: model.PlanStatusActive},
+		{ID: "paused-next", UserID: "user-1", Type: model.PlatformArticle, ExecutionProfile: "balanced", Status: model.PlanStatusPaused, NextRunAt: &next},
+	} {
+		if err := repo.Plans().Create(t.Context(), plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.Plans().ListActiveNextRunAt(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].Equal(next) {
+		t.Fatalf("next runs = %#v", got)
+	}
+}

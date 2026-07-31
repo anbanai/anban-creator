@@ -5,6 +5,7 @@ import TimePicker from '@/components/TimePicker'
 interface SchedulePickerProps {
   value: string          // cron expression, e.g. "0 9 * * 1,3,5"
   onChange: (cron: string) => void
+  onInteraction?: () => void
 }
 
 type Frequency = 'daily' | 'weekly'
@@ -23,8 +24,10 @@ function parseCron(cron: string): { frequency: Frequency; days: number[]; hour: 
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return { frequency: 'daily', days: [], hour: 9, minute: 0 }
   const [min, hourStr, , , weekday] = parts
-  const hour = parseInt(hourStr) || 9
-  const minute = parseInt(min) || 0
+  const parsedHour = Number.parseInt(hourStr, 10)
+  const parsedMinute = Number.parseInt(min, 10)
+  const hour = Number.isNaN(parsedHour) ? 9 : parsedHour
+  const minute = Number.isNaN(parsedMinute) ? 0 : parsedMinute
   if (weekday === '*') {
     return { frequency: 'daily', days: [], hour, minute }
   }
@@ -44,11 +47,18 @@ function toCron(frequency: Frequency, days: number[], hour: number, minute: numb
   return `${minute} ${hour} * * ${sortedDays.join(',')}`
 }
 
-export default function SchedulePicker({ value, onChange }: SchedulePickerProps) {
+export default function SchedulePicker({ value, onChange, onInteraction }: SchedulePickerProps) {
   const parsed = parseCron(value)
   const [frequency, setFrequency] = useState<Frequency>(parsed.frequency)
   const [days, setDays] = useState<number[]>(parsed.days)
   const [time, setTime] = useState(`${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`)
+
+  useEffect(() => {
+    const next = parseCron(value)
+    setFrequency(next.frequency)
+    setDays(next.days)
+    setTime(`${String(next.hour).padStart(2, '0')}:${String(next.minute).padStart(2, '0')}`)
+  }, [value])
 
   useEffect(() => {
     const [h, m] = time.split(':').map(Number)
@@ -56,16 +66,18 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
   }, [frequency, days, time, onChange])
 
   function handleFrequencyChange(val: string[]) {
+    onInteraction?.()
     const freq = (val[0] || 'daily') as Frequency
     setFrequency(freq)
     if (freq === 'daily') setDays([])
   }
 
   function handleDaysChange(val: string[]) {
+    onInteraction?.()
     setDays(val.map(Number))
   }
 
-  const dayLabels = days
+  const dayLabels = [...days]
     .sort((a, b) => a - b)
     .map(d => WEEK_DAYS.find(w => w.value === d)?.label)
     .filter(Boolean)
@@ -105,7 +117,7 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
       {/* Time selection */}
       <div className="flex items-center gap-2">
         <label className="text-sm text-muted-foreground">时间</label>
-        <TimePicker value={time} onChange={setTime} />
+        <TimePicker value={time} onChange={(next) => { onInteraction?.(); setTime(next) }} />
       </div>
 
       {/* Preview */}

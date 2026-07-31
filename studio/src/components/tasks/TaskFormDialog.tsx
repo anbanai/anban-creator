@@ -39,6 +39,7 @@ import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, 
 import type { CreateTaskRequest, Project, Task, TaskType } from '@/types'
 import { ImageAspectRatioField } from './ImageAspectRatioField'
 import { ExecutionProfileSelector } from './ExecutionProfileSelector'
+import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
   allowedTypes: ['image'],
@@ -100,9 +101,11 @@ export function TaskFormDialog({
     queryKey: queryKeys.billing.wallet,
     queryFn: () => api.billing.wallet(),
   })
-  const { data: billingCatalog } = useQuery({
+  const { data: billingCatalog, refetch: refetchBillingCatalog } = useQuery({
     queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
+    enabled: open,
+    staleTime: 0,
   })
   const executionProfilesQuery = useAgentExecutionProfiles()
   const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageCapabilities()
@@ -133,6 +136,18 @@ export function TaskFormDialog({
   const watchedPrompt = useWatch({ control: form.control, name: 'prompt' }) ?? ''
   const watchedImageModelKey = useWatch({ control: form.control, name: 'image_model_key' }) ?? ''
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
+
+  useEffect(() => {
+    const transition = billingCatalog?.task_time_pricing?.next_transition_at
+    if (!open || !transition) return
+    const delay = new Date(transition).getTime() - Date.now() + 250
+    if (delay <= 0) {
+      void refetchBillingCatalog()
+      return
+    }
+    const timer = window.setTimeout(() => { void refetchBillingCatalog() }, delay)
+    return () => window.clearTimeout(timer)
+  }, [billingCatalog?.task_time_pricing?.next_transition_at, open, refetchBillingCatalog])
   const watermark = useWatch({ control: form.control, name: 'watermark' }) ?? false
   const goalMode = useWatch({ control: form.control, name: 'goal_mode' }) ?? false
   const goal = useWatch({ control: form.control, name: 'goal' }) ?? ''
@@ -433,6 +448,12 @@ export function TaskFormDialog({
                   <FormMessage />
                 </FormItem>
               )} />
+
+              <TaskTimePricingNotice
+                catalog={billingCatalog}
+                taskType={watchedType}
+                executionProfile={watchedExecutionProfile || undefined}
+              />
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
