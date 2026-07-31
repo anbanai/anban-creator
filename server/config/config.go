@@ -593,18 +593,17 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	ExecutionProfileEnvDefaults map[string]string                       `yaml:"execution_profile_env_defaults" json:"-"`
-	ExecutionProfiles           map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
-	Executor                    string                                  `yaml:"executor"` // "docker" or "kubernetes"
-	RuntimeImages               RuntimeImages                           `yaml:"runtime_images"`
-	ExecutionTokenSecret        string                                  `yaml:"execution_token_secret" json:"-"`
-	PluginDir                   string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox                     bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker                      DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes                  KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns                    map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir                  string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL              string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
+	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
+	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes           KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns             map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir           string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 type ClaudeExecutionProfileConfig struct {
@@ -616,7 +615,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profile_env_defaults": true, "execution_profiles": true, "executor": true, "runtime_images": true,
+		"execution_profiles": true, "executor": true, "runtime_images": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -637,30 +636,10 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode((*plain)(c)); err != nil {
 		return err
 	}
-	if err := validateClaudeExecutionProfileEnvDefaults(c.ExecutionProfileEnvDefaults); err != nil {
-		return fmt.Errorf("claude.execution_profile_env_defaults: %w", err)
-	}
-	c.ExecutionProfileEnvDefaults = model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
-	for name, profile := range c.ExecutionProfiles {
-		merged := model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
-		if merged == nil {
-			merged = make(map[string]string, len(profile.Envs))
-		}
-		for key, value := range profile.Envs {
-			merged[key] = value
-		}
-		profile.Envs = merged
-		c.ExecutionProfiles[name] = profile
-	}
 	return nil
 }
 
 func validateClaudeNestedFields(value *yaml.Node) error {
-	if defaults := yamlMappingValue(value, "execution_profile_env_defaults"); defaults != nil {
-		if err := validateClaudeEnvFields(defaults, "claude.execution_profile_env_defaults"); err != nil {
-			return err
-		}
-	}
 	profiles := yamlMappingValue(value, "execution_profiles")
 	if profiles == nil {
 		return nil
@@ -683,40 +662,6 @@ func validateClaudeNestedFields(value *yaml.Node) error {
 		}
 	}
 	return nil
-}
-
-func validateClaudeExecutionProfileEnvDefaults(defaults map[string]string) error {
-	if defaults == nil {
-		return nil
-	}
-	profileOwned := map[string]struct{}{
-		model.ClaudeEnvBaseURL:           {},
-		model.ClaudeEnvAuthToken:         {},
-		model.ClaudeEnvModel:             {},
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   {},
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  {},
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": {},
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  {},
-		"CLAUDE_CODE_SUBAGENT_MODEL":     {},
-	}
-	for key := range defaults {
-		if _, owned := profileOwned[key]; owned {
-			return fmt.Errorf("claude profile env %s must be configured per profile", key)
-		}
-	}
-	validationEnv := map[string]string{
-		model.ClaudeEnvBaseURL:           "https://defaults-validation.invalid/anthropic",
-		model.ClaudeEnvAuthToken:         "defaults-validation-token",
-		model.ClaudeEnvModel:             "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "defaults-validation-model",
-	}
-	for key, value := range defaults {
-		validationEnv[key] = value
-	}
-	return model.ValidateClaudeProfileEnvs(validationEnv, true)
 }
 
 func validateClaudeEnvFields(node *yaml.Node, path string) error {
