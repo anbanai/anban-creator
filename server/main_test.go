@@ -119,6 +119,28 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	}
 }
 
+func TestMainMigratesPlanReferencesAfterAutoMigrateAndFailsFast(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	src := string(raw)
+	autoMigrate := strings.Index(src, "migrateModels(mysqlDB, model.AutoMigrate)")
+	planMigration := strings.Index(src, "service.MigratePlanReferenceAttachments(context.Background(), mysqlDB, log)")
+	nextMigration := strings.Index(src, "// 6.1 One-time backfill")
+	repositoryStartup := strings.Index(src, "// 7. Create repository.")
+	if autoMigrate < 0 || planMigration <= autoMigrate || nextMigration <= planMigration || repositoryStartup <= nextMigration {
+		t.Fatalf("plan reference migration order invalid: auto_migrate=%d plan_migration=%d next_migration=%d repository_startup=%d", autoMigrate, planMigration, nextMigration, repositoryStartup)
+	}
+	section := src[planMigration:nextMigration]
+	if !strings.Contains(section, `log.Fatal().Err(err).Msg("failed to migrate plan reference attachments")`) {
+		t.Fatal("plan reference migration errors must terminate startup")
+	}
+	if strings.Contains(section, "log.Error()") {
+		t.Fatal("plan reference migration errors must not log and continue startup")
+	}
+}
+
 func TestBuildBillingRuntime(t *testing.T) {
 	catalogDir, err := filepath.Abs("billing")
 	if err != nil {
