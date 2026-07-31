@@ -50,7 +50,8 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 		t.Fatal(err)
 	}
 	bundle := serverbilling.Bundle{
-		Policy: serverbilling.PolicyCatalog{
+		Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000},
+		Policy: serverbilling.PolicySnapshot{
 			AcceptedTask:        serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TaskFailureReversal: serverbilling.TaskFailureReversalPolicy{Enabled: true, Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"}},
 		},

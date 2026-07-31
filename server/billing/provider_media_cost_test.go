@@ -3,8 +3,7 @@ package billing
 import "testing"
 
 func TestLoadBundleProviderCostOpenAIImageUsage(t *testing.T) {
-	costs := `catalog_id: provider-cost-v1
-currency_rates:
+	costs := `currency_rates:
   CNY: "1.00"
   USD: "7.20"
 models:

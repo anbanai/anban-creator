@@ -499,7 +499,10 @@ describe('task form mapping', () => {
       article_with_cover: false,
       article_with_content_images: false,
       reference_image: { asset_id: 'asset-1' },
-      input_attachments: [{ type: 'document', key: 'keep', role: 'brief', instruction: 'use this' }],
+      input_attachments: [
+        { type: 'image', asset_id: 'asset-1', file_name: 'reference.png', content_type: 'image/png', size: 10 },
+        { type: 'document', key: 'keep', role: 'brief', instruction: 'use this' },
+      ],
       ...platformFields,
     })
 

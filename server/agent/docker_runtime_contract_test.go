@@ -422,7 +422,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
-		"COPY --from=builder /build/server/billing/policy.yaml /app/conf/billing/policy.yaml",
+		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
 		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",
 		"COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml",
 		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
@@ -443,6 +443,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY plugins/",
 		"COPY third_party/OpenMontage/",
 		"COPY third_party/Agent-Reach/",
+		"/build/server/billing/policy.yaml",
 		"AGENT_REACH_VENV",
 		"CLAUDE_PLUGIN_ROOT",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
@@ -982,7 +983,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		}
 	}
 
-	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
+	for _, configPath := range []string{"server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
@@ -1125,7 +1126,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 	})
 
 	t.Run("repository config loads with the documented Compose environment", func(t *testing.T) {
-		configPath := filepath.Join(root, "server", "config.yaml")
+		configPath := filepath.Join(root, "server", "config.example.yaml")
 		configBody := readTextFile(t, configPath)
 		envReference := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 		for _, match := range envReference.FindAllStringSubmatch(configBody, -1) {

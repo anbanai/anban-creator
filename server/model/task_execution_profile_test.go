@@ -169,8 +169,9 @@ func TestAgentProfileSnapshotValidation(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*AgentProfileSnapshot)
+		valid  bool
 	}{
-		{name: "valid", mutate: func(*AgentProfileSnapshot) {}},
+		{name: "valid", mutate: func(*AgentProfileSnapshot) {}, valid: true},
 		{name: "schema v2", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.SchemaVersion = 2 }},
 		{name: "missing profile id", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ProfileID = "" }},
 		{name: "missing display name", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.DisplayName = " " }},
@@ -178,7 +179,7 @@ func TestAgentProfileSnapshotValidation(t *testing.T) {
 		{name: "wrong protocol", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Protocol = "openai" }},
 		{name: "auth token", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Envs[ClaudeEnvAuthToken] = "secret-token" }},
 		{name: "invalid env", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.Envs["UNKNOWN"] = "value" }},
-		{name: "missing referenced model alias", mutate: func(snapshot *AgentProfileSnapshot) { delete(snapshot.ModelUsageAliases, "opus-model") }},
+		{name: "missing referenced model alias uses identity", mutate: func(snapshot *AgentProfileSnapshot) { delete(snapshot.ModelUsageAliases, "opus-model") }, valid: true},
 		{name: "empty alias source", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases[""] = "default" }},
 		{name: "empty alias target", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases["extra"] = " " }},
 		{name: "alias target contains slash", mutate: func(snapshot *AgentProfileSnapshot) { snapshot.ModelUsageAliases["extra"] = "provider/model" }},
@@ -188,10 +189,10 @@ func TestAgentProfileSnapshotValidation(t *testing.T) {
 			snapshot := validAgentProfileSnapshot()
 			tt.mutate(&snapshot)
 			err := ValidateAgentProfileSnapshot(snapshot)
-			if tt.name == "valid" && err != nil {
+			if tt.valid && err != nil {
 				t.Fatalf("ValidateAgentProfileSnapshot() error = %v", err)
 			}
-			if tt.name != "valid" && err == nil {
+			if !tt.valid && err == nil {
 				t.Fatal("ValidateAgentProfileSnapshot() error = nil, want error")
 			}
 		})

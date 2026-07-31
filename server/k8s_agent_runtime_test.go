@@ -229,16 +229,11 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config example: %v", err)
 	}
-	configYAML, err := os.ReadFile("config.yaml")
-	if err != nil {
-		t.Fatalf("read config yaml: %v", err)
-	}
 	for _, body := range []struct {
 		name string
 		text string
 	}{
 		{name: "config.example.yaml", text: string(configExample)},
-		{name: "config.yaml", text: string(configYAML)},
 	} {
 		for _, want := range []string{
 			`executor: "${ANBAN_AGENT_EXECUTOR}"`,
@@ -255,7 +250,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds"} {
-		if strings.Contains(string(configExample), forbidden) || strings.Contains(string(configYAML), forbidden) {
+		if strings.Contains(string(configExample), forbidden) {
 			t.Fatalf("obsolete reusable-Pod config key %q remains", forbidden)
 		}
 	}

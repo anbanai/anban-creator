@@ -470,7 +470,7 @@ describe('TasksPage Seednote reference materials', () => {
     })
   })
 
-  it('creates a task with a reference session and no legacy URL field', async () => {
+  it('creates a task with an ordered image attachment and no legacy reference field', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
     let resolveReferenceUpload!: (value: unknown) => void
     uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => {
@@ -480,7 +480,7 @@ describe('TasksPage Seednote reference materials', () => {
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
     await screen.findByRole('dialog', { name: '新建任务' })
-    fireEvent.change(screen.getByLabelText('参考图文件'), {
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'task-reference.png', { type: 'image/png' })] },
     })
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
@@ -504,13 +504,17 @@ describe('TasksPage Seednote reference materials', () => {
 
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
     const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
-    expect(payload.reference_image).toEqual({
-      upload_session_id: '33333333-3333-4333-8333-333333333333',
-    })
+    expect(payload.input_attachments).toEqual([expect.objectContaining({
+      type: 'image',
+      upload_id: 'upload-task-reference',
+      key: 'uploads/pending/task-reference.png',
+      file_name: 'task-reference.png',
+    })])
+    expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
-  it('keeps the reference selection open when task finalization fails', async () => {
+  it('keeps the ordered image attachment open when task creation fails', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
     uploadToOSSMock.mockResolvedValueOnce({
       uploadSessionId: '77777777-7777-4777-8777-777777777777',
@@ -527,10 +531,10 @@ describe('TasksPage Seednote reference materials', () => {
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
     await screen.findByRole('dialog', { name: '新建任务' })
-    fireEvent.change(screen.getByLabelText('参考图文件'), {
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'expired-task.png', { type: 'image/png' })] },
     })
-    const preview = await screen.findByRole('img', { name: '参考图' })
+    const preview = await screen.findByRole('button', { name: '预览 expired-task.png' })
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
@@ -538,9 +542,13 @@ describe('TasksPage Seednote reference materials', () => {
     expect(screen.getByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
     expect(preview).toBeInTheDocument()
     const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
-    expect(payload.reference_image).toEqual({
-      upload_session_id: '77777777-7777-4777-8777-777777777777',
-    })
+    expect(payload.input_attachments).toEqual([expect.objectContaining({
+      type: 'image',
+      upload_id: 'upload-expired-task-reference',
+      key: 'uploads/pending/expired-task-reference.png',
+      file_name: 'expired-task.png',
+    })])
+    expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 

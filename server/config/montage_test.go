@@ -179,7 +179,7 @@ func TestMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
 }
 
 func TestMontageConfigFilesDoNotDeclareRunnerImage(t *testing.T) {
-	for _, path := range []string{"../config.yaml", "../config.example.yaml"} {
+	for _, path := range []string{"../config.example.yaml"} {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)

@@ -148,7 +148,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(dialog).getByText(/4,800 积分/)).toBeInTheDocument()
+    expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
@@ -263,6 +263,13 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
 
 describe('PlansPage Seednote reference snapshots', () => {
+  const savedReferenceAttachment: InputAttachment = {
+    type: 'image',
+    asset_id: '22222222-2222-4222-8222-222222222222',
+    file_name: 'plan-reference.png',
+    content_type: 'image/png',
+    size: 9,
+  }
   const savedAttachment: InputAttachment = {
     type: 'image',
     url: '/saved-product.png',
@@ -304,15 +311,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: seednoteProject.id,
     execution_profile: 'effective',
-    reference_image: {
-      asset_id: '22222222-2222-4222-8222-222222222222',
-      file_name: 'plan-reference.png',
-      content_type: 'image/png',
-      size: 9,
-      download_url: 'https://signed.example/plan-reference.png',
-      download_expires_at: '2026-07-17T12:00:00Z',
-    },
-    input_attachments: [savedAttachment],
+    input_attachments: [savedReferenceAttachment, savedAttachment],
     created_at: '2025-01-10T00:00:00Z',
     updated_at: '2025-01-10T00:00:00Z',
   } as Plan
@@ -365,36 +364,40 @@ describe('PlansPage Seednote reference snapshots', () => {
     })
   })
 
-  it('omits an untouched plan reference asset from the update payload', async () => {
+  it('omits untouched ordered plan materials from the update payload', async () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    expect(await screen.findByRole('img', { name: '参考图' })).toHaveAttribute(
-      'src',
-      'https://signed.example/plan-reference.png',
-    )
+    expect(await screen.findByRole('button', { name: '预览 plan-reference.png' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
+    expect(payload).not.toHaveProperty('input_attachments')
     expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
-  it('sends null only when the plan reference is explicitly cleared', async () => {
+  it('removes an ordered plan image only when it is explicitly deleted', async () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.reference_image).toBeNull()
+    expect(payload.input_attachments).toEqual([expect.objectContaining({
+      type: 'image',
+      upload_id: 'upload-saved',
+      key: 'uploads/saved-product.png',
+      file_name: 'saved-product.png',
+    })])
+    expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
-  it('replaces a plan asset with an upload session selection', async () => {
+  it('replaces an ordered plan image with an uploaded attachment', async () => {
     uploadToOSSMock.mockResolvedValueOnce({
       uploadSessionId: '55555555-5555-4555-8555-555555555555',
       uploadId: 'upload-plan-reference',
@@ -407,8 +410,8 @@ describe('PlansPage Seednote reference snapshots', () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
-    fireEvent.change(screen.getByLabelText('参考图文件'), {
+    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['replacement'], 'plan-replacement.png', { type: 'image/png' })] },
     })
     await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
@@ -416,13 +419,20 @@ describe('PlansPage Seednote reference snapshots', () => {
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.reference_image).toEqual({
-      upload_session_id: '55555555-5555-4555-8555-555555555555',
-    })
+    expect(payload.input_attachments).toEqual([
+      expect.objectContaining({ upload_id: 'upload-saved', key: 'uploads/saved-product.png' }),
+      expect.objectContaining({
+        type: 'image',
+        upload_id: 'upload-plan-reference',
+        key: 'uploads/pending/plan-reference.png',
+        file_name: 'plan-replacement.png',
+      }),
+    ])
+    expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
-  it('keeps a replacement selection open when plan finalization fails', async () => {
+  it('keeps a replacement attachment open when plan update fails', async () => {
     uploadToOSSMock.mockResolvedValueOnce({
       uploadSessionId: '66666666-6666-4666-8666-666666666666',
       uploadId: 'upload-expired-plan-reference',
@@ -438,11 +448,11 @@ describe('PlansPage Seednote reference snapshots', () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
-    fireEvent.change(screen.getByLabelText('参考图文件'), {
+    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['replacement'], 'expired.png', { type: 'image/png' })] },
     })
-    const preview = await screen.findByRole('img', { name: '参考图' })
+    const preview = await screen.findByRole('button', { name: '预览 expired.png' })
     await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
 
@@ -450,13 +460,20 @@ describe('PlansPage Seednote reference snapshots', () => {
     expect(screen.getByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
     expect(preview).toBeInTheDocument()
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.reference_image).toEqual({
-      upload_session_id: '66666666-6666-4666-8666-666666666666',
-    })
+    expect(payload.input_attachments).toEqual([
+      expect.objectContaining({ upload_id: 'upload-saved', key: 'uploads/saved-product.png' }),
+      expect.objectContaining({
+        type: 'image',
+        upload_id: 'upload-expired-plan-reference',
+        key: 'uploads/pending/expired-plan-reference.png',
+        file_name: 'expired.png',
+      }),
+    ])
+    expect(payload).not.toHaveProperty('reference_image')
     expect(payload).not.toHaveProperty('reference_image_url')
   })
 
-  it('hydrates edit snapshots and preserves omit, clear, and replace update semantics', async () => {
+  it('hydrates edit snapshots without marking ordered materials as changed', async () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
@@ -466,34 +483,6 @@ describe('PlansPage Seednote reference snapshots', () => {
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
     expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByRole('button', { name: '预览 saved-product.png' })
-    fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
-      input_attachments: [],
-    }))
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByRole('button', { name: '预览 saved-product.png' })
-    fireEvent.click(screen.getByRole('button', { name: '删除 saved-product.png' }))
-    const replacementFile = new File(['replacement'], 'replacement.png', { type: 'image/png' })
-    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [replacementFile] } })
-    await screen.findByRole('button', { name: '预览 replacement.png' })
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(api.plans.update).mock.calls[2][1]).toEqual(expect.objectContaining({
-      input_attachments: [{
-        type: 'image',
-        upload_id: 'upload-replacement.png',
-        key: 'uploads/pending/user/replacement.png',
-        file_name: 'replacement.png',
-        content_type: 'image/png',
-        size: replacementFile.size,
-      }],
-    }))
   })
 
   it('guards native form submit until plan reference uploads finish', async () => {

@@ -15,6 +15,10 @@ export function prepareReusableInputAttachments(
   const prepared: InputAttachment[] = []
   for (const attachment of attachments) {
     const name = attachment.file_name || '未命名附件'
+    if (attachment.asset_id?.trim()) {
+      prepared.push(attachment)
+      continue
+    }
     const hasUploadId = Boolean(attachment.upload_id)
     const hasKey = Boolean(attachment.key)
     const url = attachment.url?.trim() || ''

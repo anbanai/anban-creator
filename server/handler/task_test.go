@@ -2231,8 +2231,8 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 	}
 
 	bundle := billing.Bundle{
-		Policy: billing.PolicyCatalog{
-			Version:       "2026-07-22",
+		Economics: billing.EconomicsConfig{CreditsPerCNY: 1_000},
+		Policy: billing.PolicySnapshot{
 			TaskAdmission: billing.TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
 			AcceptedTask:  billing.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         billing.TopUpPolicy{RepayDebtFirst: true},

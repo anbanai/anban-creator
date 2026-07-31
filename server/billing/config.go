@@ -40,43 +40,46 @@ func (e *ConfigError) Unwrap() error { return e.Err }
 func (e *ConfigError) Is(target error) bool { return target == ErrInvalidConfig }
 
 type Bundle struct {
-	Policy     PolicyCatalog
+	Economics  EconomicsConfig
+	Policy     PolicySnapshot
 	Products   ProductCatalog
 	Costs      CostCatalog
 	Promotions PromotionCatalog
 }
 
-type PolicyCatalog struct {
-	Version             string                    `yaml:"version"`
-	CreditsPerCNY       int64                     `yaml:"credits_per_cny"`
-	TaskAdmission       TaskAdmissionPolicy       `yaml:"task_admission"`
-	AcceptedTask        AcceptedTaskPolicy        `yaml:"accepted_task"`
-	TopUp               TopUpPolicy               `yaml:"top_up"`
-	Promotions          PromotionsPolicy          `yaml:"promotions"`
-	TaskFailureReversal TaskFailureReversalPolicy `yaml:"task_failure_reversal"`
+type EconomicsConfig struct {
+	CreditsPerCNY int64 `yaml:"credits_per_cny" json:"credits_per_cny"`
+}
+
+type PolicySnapshot struct {
+	TaskAdmission       TaskAdmissionPolicy       `json:"task_admission"`
+	AcceptedTask        AcceptedTaskPolicy        `json:"accepted_task"`
+	TopUp               TopUpPolicy               `json:"top_up"`
+	Promotions          PromotionsPolicy          `json:"promotions"`
+	TaskFailureReversal TaskFailureReversalPolicy `json:"task_failure_reversal"`
 }
 
 type TaskAdmissionPolicy struct {
-	RequireZeroDebt  bool `yaml:"require_zero_debt"`
-	RequireFullPrice bool `yaml:"require_full_price"`
+	RequireZeroDebt  bool `json:"require_zero_debt"`
+	RequireFullPrice bool `json:"require_full_price"`
 }
 
 type AcceptedTaskPolicy struct {
-	ContinueWhenBalanceNegative  bool `yaml:"continue_when_balance_negative"`
-	OperationChargeMayCreateDebt bool `yaml:"operation_charge_may_create_debt"`
+	ContinueWhenBalanceNegative  bool `json:"continue_when_balance_negative"`
+	OperationChargeMayCreateDebt bool `json:"operation_charge_may_create_debt"`
 }
 
 type TopUpPolicy struct {
-	RepayDebtFirst bool `yaml:"repay_debt_first"`
+	RepayDebtFirst bool `json:"repay_debt_first"`
 }
 
 type PromotionsPolicy struct {
-	MayRepayDebt bool `yaml:"may_repay_debt"`
+	MayRepayDebt bool `json:"may_repay_debt"`
 }
 
 type TaskFailureReversalPolicy struct {
-	Enabled bool     `yaml:"enabled"`
-	Reasons []string `yaml:"reasons"`
+	Enabled bool     `json:"enabled"`
+	Reasons []string `json:"reasons"`
 }
 
 type ProductCatalog struct {
@@ -117,7 +120,6 @@ func (c ProductCatalog) PriceForTier(listPrice int64, tier string) (int64, bool)
 var RequiredPricingTiers = []string{"free", "pro", "enterprise"}
 
 type rawCostCatalog struct {
-	CatalogID     string                    `yaml:"catalog_id"`
 	CurrencyRates map[string]decimalString  `yaml:"currency_rates"`
 	Models        map[string]rawModelConfig `yaml:"models"`
 }
@@ -175,8 +177,7 @@ type CostTier struct {
 }
 
 type rawPromotionCatalog struct {
-	CatalogID string               `yaml:"catalog_id"`
-	Programs  []rawReferralProgram `yaml:"programs"`
+	Programs []rawReferralProgram `yaml:"programs"`
 }
 
 type rawReferralProgram struct {
@@ -187,7 +188,6 @@ type rawReferralProgram struct {
 	InviteeCredits    int64         `yaml:"invitee_credits"`
 	ExpiresAfter      string        `yaml:"expires_after"`
 	MaxInviterRewards int64         `yaml:"max_inviter_rewards"`
-	CanRepayDebt      bool          `yaml:"can_repay_debt"`
 }
 
 type PromotionCatalog struct {
@@ -203,8 +203,9 @@ type ReferralProgram struct {
 	InviteeCredits    int64
 	ExpiresAfter      time.Duration
 	MaxInviterRewards int64
-	CanRepayDebt      bool
 }
+
+const ReferralFirstTopUpProgramID = "referral-first-topup-v1"
 
 type decimalString string
 
@@ -217,10 +218,19 @@ func (d *decimalString) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func LoadBundle(dir string) (*Bundle, error) {
-	var policy PolicyCatalog
-	if err := decodeRequired(filepath.Join(dir, "policy.yaml"), &policy); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "policy.yaml")); err == nil {
+		return nil, configError("policy.yaml", "", errors.New("is no longer supported; use economics.yaml"))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, configError("policy.yaml", "", err)
+	}
+	var economics EconomicsConfig
+	if err := decodeRequired(filepath.Join(dir, "economics.yaml"), &economics); err != nil {
 		return nil, err
 	}
+	if err := validateEconomics(economics); err != nil {
+		return nil, err
+	}
+	policy := fixedPolicySnapshot()
 	var products ProductCatalog
 	if err := decodeRequired(filepath.Join(dir, "products.yaml"), &products); err != nil {
 		return nil, err
@@ -238,15 +248,28 @@ func LoadBundle(dir string) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	promotions, err := validatePromotions(rawPromotions)
+	promotions, err := validatePromotions(rawPromotions, economics, policy)
 	if err != nil {
 		return nil, err
 	}
-	bundle := &Bundle{Policy: policy, Products: products, Costs: costs, Promotions: promotions}
+	bundle := &Bundle{Economics: economics, Policy: policy, Products: products, Costs: costs, Promotions: promotions}
 	if err := validateBundle(bundle); err != nil {
 		return nil, err
 	}
 	return bundle, nil
+}
+
+func fixedPolicySnapshot() PolicySnapshot {
+	return PolicySnapshot{
+		TaskAdmission: TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
+		AcceptedTask:  AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
+		TopUp:         TopUpPolicy{RepayDebtFirst: true},
+		Promotions:    PromotionsPolicy{MayRepayDebt: false},
+		TaskFailureReversal: TaskFailureReversalPolicy{
+			Enabled: true,
+			Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"},
+		},
+	}
 }
 
 func decodeRequired(path string, destination any) error {
@@ -275,65 +298,6 @@ func decodeRequired(path string, destination any) error {
 }
 
 func validateBundle(bundle *Bundle) error {
-	bundle.Policy.Version = strings.TrimSpace(bundle.Policy.Version)
-	if bundle.Policy.Version == "" {
-		return configError("policy.yaml", "version", errors.New("is required"))
-	}
-	if bundle.Policy.CreditsPerCNY <= 0 {
-		return configError("policy.yaml", "credits_per_cny", errors.New("must be positive"))
-	}
-	if 1_000_000%bundle.Policy.CreditsPerCNY != 0 {
-		return configError("policy.yaml", "credits_per_cny", errors.New("must divide 1000000 exactly for micro-CNY accounting"))
-	}
-	if !bundle.Policy.TaskAdmission.RequireZeroDebt {
-		return configError("policy.yaml", "task_admission.require_zero_debt", errors.New("must be true"))
-	}
-	if !bundle.Policy.TaskAdmission.RequireFullPrice {
-		return configError("policy.yaml", "task_admission.require_full_price", errors.New("must be true"))
-	}
-	if !bundle.Policy.AcceptedTask.ContinueWhenBalanceNegative {
-		return configError("policy.yaml", "accepted_task.continue_when_balance_negative", errors.New("must be true"))
-	}
-	if !bundle.Policy.AcceptedTask.OperationChargeMayCreateDebt {
-		return configError("policy.yaml", "accepted_task.operation_charge_may_create_debt", errors.New("must be true"))
-	}
-	if !bundle.Policy.TopUp.RepayDebtFirst {
-		return configError("policy.yaml", "top_up.repay_debt_first", errors.New("must be true"))
-	}
-	if bundle.Policy.Promotions.MayRepayDebt {
-		return configError("policy.yaml", "promotions.may_repay_debt", errors.New("must be false"))
-	}
-	if !bundle.Policy.TaskFailureReversal.Enabled {
-		return configError("policy.yaml", "task_failure_reversal.enabled", errors.New("must be true"))
-	}
-	if len(bundle.Policy.TaskFailureReversal.Reasons) == 0 {
-		return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must not be empty"))
-	}
-	allowedReversalReasons := map[string]struct{}{
-		"platform_error":           {},
-		"provider_error":           {},
-		"execution_timeout":        {},
-		"infrastructure_cancelled": {},
-	}
-	if len(bundle.Policy.TaskFailureReversal.Reasons) != len(allowedReversalReasons) {
-		return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must equal the approved set: platform_error, provider_error, execution_timeout, infrastructure_cancelled"))
-	}
-	seenReasons := make(map[string]struct{}, len(bundle.Policy.TaskFailureReversal.Reasons))
-	for index, reason := range bundle.Policy.TaskFailureReversal.Reasons {
-		reason = strings.TrimSpace(reason)
-		bundle.Policy.TaskFailureReversal.Reasons[index] = reason
-		if reason == "" {
-			return configError("policy.yaml", "task_failure_reversal.reasons", errors.New("must not contain an empty reason"))
-		}
-		if _, exists := seenReasons[reason]; exists {
-			return configError("policy.yaml", "task_failure_reversal.reasons", fmt.Errorf("duplicate reason %q", reason))
-		}
-		if _, allowed := allowedReversalReasons[reason]; !allowed {
-			return configError("policy.yaml", "task_failure_reversal.reasons", fmt.Errorf("unsupported reversal reason %q", reason))
-		}
-		seenReasons[reason] = struct{}{}
-	}
-
 	bundle.Products.Currency = strings.TrimSpace(bundle.Products.Currency)
 	if bundle.Products.Currency != "credits" {
 		return configError("products.yaml", "currency", errors.New("must be credits"))
@@ -423,16 +387,21 @@ func validateBundle(bundle *Bundle) error {
 		}
 		seenBillableIdentities[identity] = sku.ID
 	}
-	for index, program := range bundle.Promotions.Programs {
-		if program.CanRepayDebt {
-			return configError("promotions.yaml", fmt.Sprintf("programs[%d].can_repay_debt", index), errors.New("can_repay_debt must be false"))
-		}
-	}
 	catalogID, err := retailCatalogID(bundle)
 	if err != nil {
 		return configError("products.yaml", "", err)
 	}
 	bundle.Products.CatalogID = catalogID
+	return nil
+}
+
+func validateEconomics(economics EconomicsConfig) error {
+	if economics.CreditsPerCNY <= 0 {
+		return configError("economics.yaml", "credits_per_cny", errors.New("must be positive"))
+	}
+	if 1_000_000%economics.CreditsPerCNY != 0 {
+		return configError("economics.yaml", "credits_per_cny", errors.New("must divide 1000000 exactly for micro-CNY accounting"))
+	}
 	return nil
 }
 
@@ -450,45 +419,29 @@ func hasVersionSuffix(value string) bool {
 }
 
 func retailCatalogID(bundle *Bundle) (string, error) {
-	definition := struct {
+	type retailProductsSnapshot struct {
 		Currency         string           `json:"currency"`
 		TierRatesPercent map[string]int64 `json:"tier_rates_percent"`
 		SKUs             []SKUConfig      `json:"skus"`
-		Policy           struct {
-			Version             string                    `json:"version"`
-			CreditsPerCNY       int64                     `json:"credits_per_cny"`
-			TaskAdmission       TaskAdmissionPolicy       `json:"task_admission"`
-			AcceptedTask        AcceptedTaskPolicy        `json:"accepted_task"`
-			TopUp               TopUpPolicy               `json:"top_up"`
-			Promotions          PromotionsPolicy          `json:"promotions"`
-			TaskFailureReversal TaskFailureReversalPolicy `json:"task_failure_reversal"`
-		} `json:"policy"`
+	}
+	snapshot := struct {
+		Products  retailProductsSnapshot `json:"products"`
+		Economics EconomicsConfig        `json:"economics"`
+		Policy    PolicySnapshot         `json:"policy"`
 	}{
-		Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs,
+		Products: retailProductsSnapshot{
+			Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs,
+		},
+		Economics: bundle.Economics,
+		Policy:    bundle.Policy,
 	}
-	definition.Policy.Version = bundle.Policy.Version
-	definition.Policy.CreditsPerCNY = bundle.Policy.CreditsPerCNY
-	definition.Policy.TaskAdmission = bundle.Policy.TaskAdmission
-	definition.Policy.AcceptedTask = bundle.Policy.AcceptedTask
-	definition.Policy.TopUp = bundle.Policy.TopUp
-	definition.Policy.Promotions = bundle.Policy.Promotions
-	definition.Policy.TaskFailureReversal = bundle.Policy.TaskFailureReversal
-	encoded, err := json.Marshal(definition)
-	if err != nil {
-		return "", fmt.Errorf("marshal retail catalog definition: %w", err)
-	}
-	sum := sha256.Sum256(encoded)
-	return "retail-sha256-" + hex.EncodeToString(sum[:]), nil
+	return canonicalSnapshotID("retail-sha256-", snapshot)
 }
 
 func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 	costs := CostCatalog{
-		CatalogID:     strings.TrimSpace(raw.CatalogID),
 		CurrencyRates: make(map[string]MicroCNY, len(raw.CurrencyRates)),
 		Models:        make(map[string]ModelCostConfig, len(raw.Models)),
-	}
-	if costs.CatalogID == "" {
-		return costs, configError("costs.yaml", "catalog_id", errors.New("is required"))
 	}
 	for currency, value := range raw.CurrencyRates {
 		canonicalCurrency := strings.TrimSpace(currency)
@@ -498,7 +451,7 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		if _, exists := costs.CurrencyRates[canonicalCurrency]; exists {
 			return costs, configError("costs.yaml", "currency_rates", fmt.Errorf("duplicate canonical currency %q", canonicalCurrency))
 		}
-		parsed, err := ParseMicroCNY(string(value))
+		parsed, err := ParseMicroCNY(strings.TrimSpace(string(value)))
 		if err != nil || parsed <= 0 {
 			if err == nil {
 				err = errors.New("must be positive")
@@ -530,14 +483,14 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 		if strings.TrimSpace(rawModel.OperatorEvidence) == "" {
 			return costs, configError("costs.yaml", field+".operator_evidence", errors.New("operator_evidence is required"))
 		}
-		effectiveAt, err := time.Parse(time.RFC3339, rawModel.EffectiveAt)
+		effectiveAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(rawModel.EffectiveAt))
 		if err != nil {
 			return costs, configError("costs.yaml", field+".effective_at", errors.New("effective_at must be RFC3339"))
 		}
 		pricingType := strings.TrimSpace(rawModel.PricingType)
 		model := ModelCostConfig{
 			PricingType: pricingType, Currency: canonicalCurrency, Unit: rawModel.Unit,
-			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt,
+			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt.UTC(),
 		}
 		prices := []struct {
 			name  string
@@ -558,7 +511,7 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 			if price.raw == "" {
 				continue
 			}
-			parsed, err := ParseMicroCNY(string(price.raw))
+			parsed, err := ParseMicroCNY(strings.TrimSpace(string(price.raw)))
 			if err != nil {
 				return costs, configError("costs.yaml", field+"."+price.name, err)
 			}
@@ -578,7 +531,7 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 			}
 			var previousMaxPixels int64
 			for index, rawTier := range rawModel.Tiers {
-				parsed, err := ParseMicroCNY(string(rawTier.Price))
+				parsed, err := ParseMicroCNY(strings.TrimSpace(string(rawTier.Price)))
 				if err != nil {
 					return costs, configError("costs.yaml", fmt.Sprintf("%s.tiers[%d].price", field, index), err)
 				}
@@ -619,15 +572,18 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 	if len(costs.Models) == 0 {
 		return costs, configError("costs.yaml", "models", errors.New("must not be empty"))
 	}
+	catalogID, err := costCatalogID(costs)
+	if err != nil {
+		return costs, configError("costs.yaml", "", err)
+	}
+	costs.CatalogID = catalogID
 	return costs, nil
 }
 
-func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
-	promotions := PromotionCatalog{CatalogID: strings.TrimSpace(raw.CatalogID), Programs: make([]ReferralProgram, 0, len(raw.Programs))}
-	if promotions.CatalogID == "" {
-		return promotions, configError("promotions.yaml", "catalog_id", errors.New("is required"))
-	}
+func validatePromotions(raw rawPromotionCatalog, economics EconomicsConfig, policy PolicySnapshot) (PromotionCatalog, error) {
+	promotions := PromotionCatalog{Programs: make([]ReferralProgram, 0, len(raw.Programs))}
 	seen := make(map[string]struct{}, len(raw.Programs))
+	seenTriggers := make(map[string]struct{}, len(raw.Programs))
 	for index, rawProgram := range raw.Programs {
 		field := fmt.Sprintf("programs[%d]", index)
 		programID := strings.TrimSpace(rawProgram.ID)
@@ -642,14 +598,21 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 		if trigger != "invitee_first_paid_topup" {
 			return promotions, configError("promotions.yaml", field+".trigger", fmt.Errorf("unsupported value %q", trigger))
 		}
-		minimum, err := ParseMicroCNY(string(rawProgram.MinimumTopUpCNY))
+		if _, exists := seenTriggers[trigger]; exists {
+			return promotions, configError("promotions.yaml", field+".trigger", fmt.Errorf("duplicate trigger %q", trigger))
+		}
+		seenTriggers[trigger] = struct{}{}
+		if programID != ReferralFirstTopUpProgramID {
+			return promotions, configError("promotions.yaml", field+".id", fmt.Errorf("must equal %q for stable referral history", ReferralFirstTopUpProgramID))
+		}
+		minimum, err := ParseMicroCNY(strings.TrimSpace(string(rawProgram.MinimumTopUpCNY)))
 		if err != nil {
 			return promotions, configError("promotions.yaml", field+".minimum_topup_cny", err)
 		}
 		if minimum <= 0 {
 			return promotions, configError("promotions.yaml", field+".minimum_topup_cny", errors.New("must be positive"))
 		}
-		expiresAfter, err := parseCatalogDuration(rawProgram.ExpiresAfter)
+		expiresAfter, err := parseCatalogDuration(strings.TrimSpace(rawProgram.ExpiresAfter))
 		if err != nil || expiresAfter <= 0 {
 			return promotions, configError("promotions.yaml", field+".expires_after", errors.New("must be a positive duration"))
 		}
@@ -666,10 +629,95 @@ func validatePromotions(raw rawPromotionCatalog) (PromotionCatalog, error) {
 			ID: programID, Trigger: trigger, MinimumTopUpCNY: minimum,
 			InviterCredits: rawProgram.InviterCredits, InviteeCredits: rawProgram.InviteeCredits,
 			ExpiresAfter: expiresAfter, MaxInviterRewards: rawProgram.MaxInviterRewards,
-			CanRepayDebt: rawProgram.CanRepayDebt,
 		})
 	}
+	catalogID, err := promotionCatalogID(promotions, economics, policy)
+	if err != nil {
+		return promotions, configError("promotions.yaml", "", err)
+	}
+	promotions.CatalogID = catalogID
 	return promotions, nil
+}
+
+type costTierSnapshot struct {
+	MaxPixels int64    `json:"max_pixels"`
+	Price     MicroCNY `json:"price_micro_cny"`
+}
+
+type costModelSnapshot struct {
+	PricingType        string             `json:"pricing_type"`
+	Currency           string             `json:"currency"`
+	Unit               int64              `json:"unit"`
+	Input              MicroCNY           `json:"input_micro_cny"`
+	CacheReadInput     MicroCNY           `json:"cache_read_input_micro_cny"`
+	CacheCreationInput MicroCNY           `json:"cache_creation_input_micro_cny"`
+	Output             MicroCNY           `json:"output_micro_cny"`
+	TextInput          MicroCNY           `json:"text_input_micro_cny"`
+	TextCachedInput    MicroCNY           `json:"text_cached_input_micro_cny"`
+	ImageInput         MicroCNY           `json:"image_input_micro_cny"`
+	ImageCachedInput   MicroCNY           `json:"image_cached_input_micro_cny"`
+	ImageOutput        MicroCNY           `json:"image_output_micro_cny"`
+	Tiers              []costTierSnapshot `json:"tiers"`
+	OperatorEvidence   string             `json:"operator_evidence"`
+	EffectiveAt        string             `json:"effective_at"`
+}
+
+func costCatalogID(costs CostCatalog) (string, error) {
+	models := make(map[string]costModelSnapshot, len(costs.Models))
+	for modelID, model := range costs.Models {
+		tiers := make([]costTierSnapshot, len(model.Tiers))
+		for index, tier := range model.Tiers {
+			tiers[index] = costTierSnapshot{MaxPixels: tier.MaxPixels, Price: tier.Price}
+		}
+		models[modelID] = costModelSnapshot{
+			PricingType: model.PricingType, Currency: model.Currency, Unit: model.Unit,
+			Input: model.Input, CacheReadInput: model.CacheReadInput, CacheCreationInput: model.CacheCreationInput, Output: model.Output,
+			TextInput: model.TextInput, TextCachedInput: model.TextCachedInput, ImageInput: model.ImageInput,
+			ImageCachedInput: model.ImageCachedInput, ImageOutput: model.ImageOutput, Tiers: tiers,
+			OperatorEvidence: model.OperatorEvidence, EffectiveAt: model.EffectiveAt.UTC().Format(time.RFC3339Nano),
+		}
+	}
+	snapshot := struct {
+		CurrencyRates map[string]MicroCNY          `json:"currency_rates_micro_cny"`
+		Models        map[string]costModelSnapshot `json:"models"`
+	}{CurrencyRates: costs.CurrencyRates, Models: models}
+	return canonicalSnapshotID("provider-cost-sha256-", snapshot)
+}
+
+type promotionProgramSnapshot struct {
+	ID                     string   `json:"id"`
+	Trigger                string   `json:"trigger"`
+	MinimumTopUpMicroCNY   MicroCNY `json:"minimum_top_up_micro_cny"`
+	InviterCredits         int64    `json:"inviter_credits"`
+	InviteeCredits         int64    `json:"invitee_credits"`
+	ExpiresAfterNanosecond int64    `json:"expires_after_nanoseconds"`
+	MaxInviterRewards      int64    `json:"max_inviter_rewards"`
+}
+
+func promotionCatalogID(promotions PromotionCatalog, economics EconomicsConfig, policy PolicySnapshot) (string, error) {
+	programs := make([]promotionProgramSnapshot, len(promotions.Programs))
+	for index, program := range promotions.Programs {
+		programs[index] = promotionProgramSnapshot{
+			ID: program.ID, Trigger: program.Trigger, MinimumTopUpMicroCNY: program.MinimumTopUpCNY,
+			InviterCredits: program.InviterCredits, InviteeCredits: program.InviteeCredits,
+			ExpiresAfterNanosecond: int64(program.ExpiresAfter), MaxInviterRewards: program.MaxInviterRewards,
+		}
+	}
+	snapshot := struct {
+		Programs   []promotionProgramSnapshot `json:"programs"`
+		Economics  EconomicsConfig            `json:"economics"`
+		Promotions PromotionsPolicy           `json:"promotions_policy"`
+	}{Programs: programs, Economics: economics, Promotions: policy.Promotions}
+	return canonicalSnapshotID("promotion-sha256-", snapshot)
+}
+
+func canonicalSnapshotID(prefix string, snapshot any) (string, error) {
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("marshal canonical snapshot: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return prefix + hex.EncodeToString(sum[:]), nil
 }
 
 func configError(file, field string, err error) error {

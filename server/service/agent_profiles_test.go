@@ -132,16 +132,28 @@ func TestAgentProfileRegistryDoesNotHardCodeProviderIdentity(t *testing.T) {
 	}
 }
 
+func TestAgentProfileRegistryUsesModelIdentityWhenAliasIsOmitted(t *testing.T) {
+	costs := billing.CostCatalog{Models: map[string]billing.ModelCostConfig{"zhipu/glm-5.2": {PricingType: "token"}}}
+	configured := configuredAgentProfile("zhipu", "balanced", "https://open.bigmodel.cn/api/anthropic", "secret", "glm-5.2", "glm-5.2")
+	configured.ModelUsageAliases = nil
+	registry, err := NewAgentProfileRegistryFromConfig(map[string]srvconfig.ClaudeExecutionProfileConfig{"effective": configured}, costs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := registry.ResolveForTier("effective", model.TierFree)
+	if err != nil || !got.Available {
+		t.Fatalf("identity-mapped profile = %#v, %v", got, err)
+	}
+	if canonical := got.ModelUsageAliases["glm-5.2"]; canonical != "glm-5.2" {
+		t.Fatalf("derived identity alias = %q, want glm-5.2", canonical)
+	}
+}
+
 func TestAgentProfileRegistryMarksModelAliasAndCostMismatchUnavailable(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(map[string]srvconfig.ClaudeExecutionProfileConfig, *billing.CostCatalog)
 	}{
-		{name: "referenced model has no alias", mutate: func(profiles map[string]srvconfig.ClaudeExecutionProfileConfig, _ *billing.CostCatalog) {
-			profile := profiles["balanced"]
-			profile.ModelUsageAliases = map[string]string{}
-			profiles["balanced"] = profile
-		}},
 		{name: "referenced model cost missing", mutate: func(_ map[string]srvconfig.ClaudeExecutionProfileConfig, costs *billing.CostCatalog) {
 			delete(costs.Models, "zhipu/glm-5.2")
 		}},

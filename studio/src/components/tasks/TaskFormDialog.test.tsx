@@ -314,7 +314,7 @@ describe('TaskFormDialog', () => {
     fireEvent.click(imageModelSelector!)
     expect(await screen.findByPlaceholderText('搜索模型...')).toBeInTheDocument()
     fireEvent.click(imageModelSelector!)
-    expect(within(dialog).getByText('任务参考图')).toBeInTheDocument()
+    expect(within(dialog).queryByText('任务参考图')).not.toBeInTheDocument()
     expect(within(dialog).getByText('水印')).toBeInTheDocument()
     expect(within(dialog).getByText('强目标模式')).toBeInTheDocument()
     expect(within(dialog).getByText('正文配图')).toBeInTheDocument()
@@ -378,10 +378,9 @@ describe('TaskFormDialog', () => {
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
     expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '预览 reference.png' })).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
     expect(within(dialog).queryByText('resume.txt')).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('img', { name: '参考图' })).toHaveAttribute('src', 'https://cdn.example/reference.png')
-    expect(within(dialog).getByRole('button', { name: '移除参考图' })).toBeInTheDocument()
     expect(within(dialog).getByText('仅生成正文配图；发布草稿不设封面')).toBeInTheDocument()
     expect(within(dialog).getByDisplayValue('必须包含三个案例')).toBeInTheDocument()
   })
@@ -407,8 +406,14 @@ describe('TaskFormDialog', () => {
       goal: '必须包含三个案例',
       article_with_cover: false,
       article_with_content_images: true,
-      reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' },
-      input_attachments: [expect.objectContaining({ upload_id: 'keep-upload', key: 'uploads/pending/keep.pdf' })],
+      input_attachments: [
+        expect.objectContaining({
+          type: 'image',
+          asset_id: '11111111-1111-4111-8111-111111111111',
+          file_name: 'reference.png',
+        }),
+        expect.objectContaining({ upload_id: 'keep-upload', key: 'uploads/pending/keep.pdf' }),
+      ],
     })))
     expect(onCreated).toHaveBeenCalledWith(fixtures.createdTask, 1)
     expect(onOpenChange).toHaveBeenCalledWith(false)

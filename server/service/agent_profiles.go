@@ -97,6 +97,14 @@ func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExe
 		profile.Provider = strings.TrimSpace(item.Provider)
 		profile.Envs = model.CloneClaudeProfileEnvs(item.Envs)
 		profile.ModelUsageAliases = cloneModelUsageAliasTargets(item.ModelUsageAliases)
+		if profile.ModelUsageAliases == nil {
+			profile.ModelUsageAliases = make(map[string]string)
+		}
+		for _, raw := range model.ClaudeProfileReferencedModels(profile.Envs) {
+			if _, configured := profile.ModelUsageAliases[raw]; !configured {
+				profile.ModelUsageAliases[raw] = raw
+			}
+		}
 
 		if profile.Provider == "" || model.ValidateClaudeProfileEnvs(profile.Envs, true) != nil ||
 			model.ValidateClaudeProfileModelUsageAliasMappings(profile.Provider, profile.ModelUsageAliases) != nil {
@@ -117,7 +125,10 @@ func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExe
 
 func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCatalog) bool {
 	for _, raw := range model.ClaudeProfileReferencedModels(profile.Envs) {
-		canonical := profile.ModelUsageAliases[raw]
+		canonical := raw
+		if configured, ok := profile.ModelUsageAliases[raw]; ok {
+			canonical = configured
+		}
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}

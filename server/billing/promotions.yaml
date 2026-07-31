@@ -1,4 +1,3 @@
-catalog_id: "promotion-2026-07-17-v1"
 programs:
   - id: "referral-first-topup-v1"
     trigger: "invitee_first_paid_topup"
@@ -7,4 +6,3 @@ programs:
     invitee_credits: 1000
     expires_after: "30d"
     max_inviter_rewards: 10
-    can_repay_debt: false

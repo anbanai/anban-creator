@@ -16,7 +16,7 @@ func TestAgentProfilesUseCompleteClaudeEnvs(t *testing.T) {
 	wantKeys := model.ClaudeProfileEnvKeys()
 	sort.Strings(wantKeys)
 
-	for _, name := range []string{"config.yaml", "config.example.yaml"} {
+	for _, name := range []string{"config.example.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join("..", name))
 			if err != nil {
@@ -53,7 +53,7 @@ func TestAgentProfilesUseCompleteClaudeEnvs(t *testing.T) {
 				t.Fatalf("effective profile = %#v", effective)
 			}
 			balanced := configured.Claude.ExecutionProfiles["balanced"]
-			if balanced.Provider != "zhipu" || balanced.Envs[model.ClaudeEnvModel] != "glm-5.2" || balanced.ModelUsageAliases["glm-5.2"] != "glm-5.2" {
+			if balanced.Provider != "zhipu" || balanced.Envs[model.ClaudeEnvModel] != "glm-5.2" || len(balanced.ModelUsageAliases) != 0 {
 				t.Fatalf("balanced profile = %#v", balanced)
 			}
 			quality := configured.Claude.ExecutionProfiles["quality"]

@@ -123,7 +123,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image_generation.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
 			{ID: "image.content", Operation: "mcp.generate_image", Route: "image_generation.content", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
 		},
-	}, Policy: serverbilling.PolicyCatalog{AcceptedTask: serverbilling.AcceptedTaskPolicy{
+	}, Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000}, Policy: serverbilling.PolicySnapshot{AcceptedTask: serverbilling.AcceptedTaskPolicy{
 		ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true,
 	}}}
 	catalog := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{})

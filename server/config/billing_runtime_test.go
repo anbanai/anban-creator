@@ -94,12 +94,12 @@ func TestNewConfigLoadsConfiguredBillingBundleStrictly(t *testing.T) {
 	dir := t.TempDir()
 	catalogDir := filepath.Join(dir, "catalogs")
 	writeBillingRuntimeFixture(t, catalogDir)
-	policyPath := filepath.Join(catalogDir, "policy.yaml")
-	policy, err := os.ReadFile(policyPath)
+	economicsPath := filepath.Join(catalogDir, "economics.yaml")
+	economics, err := os.ReadFile(economicsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(policyPath, append(policy, []byte("unknown: true\n")...), 0o600); err != nil {
+	if err := os.WriteFile(economicsPath, append(economics, []byte("unknown: true\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	root := `database:
@@ -179,27 +179,19 @@ func writeBillingRuntimeFixture(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"policy.yaml": `version: v1
-credits_per_cny: 1000
-task_admission: {require_zero_debt: true, require_full_price: true}
-accepted_task: {continue_when_balance_negative: true, operation_charge_may_create_debt: true}
-top_up: {repay_debt_first: true}
-promotions: {may_repay_debt: false}
-task_failure_reversal: {enabled: true, reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]}
+		"economics.yaml": `credits_per_cny: 1000
 `,
 		"products.yaml": `currency: credits
 tier_rates_percent: {free: 100, pro: 90, enterprise: 80}
 skus:
   - {id: task.article.effective, operation: task.article, execution_profile: effective, charge_policy: task_admission, price_credits: 1000, delivery: verified}
 `,
-		"costs.yaml": `catalog_id: costs-v1
-currency_rates: {CNY: "1.00"}
+		"costs.yaml": `currency_rates: {CNY: "1.00"}
 models:
   provider/model: {pricing_type: token, currency: CNY, unit: 1000000, input: "1.00", cache_read_input: "0.20", cache_creation_input: "1.00", output: "2.00", operator_evidence: test-fixture, effective_at: "2026-07-17T00:00:00Z"}
 `,
-		"promotions.yaml": `catalog_id: promotions-v1
-programs:
-  - {id: referral-v1, trigger: invitee_first_paid_topup, minimum_topup_cny: "10.00", inviter_credits: 100, invitee_credits: 100, expires_after: 24h, max_inviter_rewards: 1, can_repay_debt: false}
+		"promotions.yaml": `programs:
+  - {id: referral-first-topup-v1, trigger: invitee_first_paid_topup, minimum_topup_cny: "10.00", inviter_credits: 100, invitee_credits: 100, expires_after: 24h, max_inviter_rewards: 1}
 `,
 	}
 	for name, value := range files {

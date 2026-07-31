@@ -121,7 +121,11 @@ Canonical Creation Workflow v1 artifacts include:
 
 ## Configuration
 
-Server configuration lives in `server/config.yaml`; use `server/config.example.yaml` as a starting point.
+Server configuration lives in the local, gitignored `server/config.yaml`. Create it from the tracked example before first run:
+
+```bash
+cp server/config.example.yaml server/config.yaml
+```
 
 Important sections:
 

@@ -171,6 +171,8 @@ model_routes:
       model: doubao-seedream-5-0-pro-260628
     designer:
       seedream:
+        selection_key: volcengine-standard
+        min_tier: free
         alias: Doubao Seedream
         provider: volcengine_ark
         model: doubao-seedream-5-0-pro-260628
@@ -188,6 +190,8 @@ model_routes:
           has_compression: false
           watermark: true
       gpt_image_2:
+        selection_key: openai-standard
+        min_tier: pro
         alias: GPT Image 2
         provider: wangcai_openai
         model: gpt-image-2
@@ -205,11 +209,6 @@ model_routes:
           output_formats: [png, jpeg, webp]
           has_background: true
           has_compression: true
-image_presets:
-  - key: openai-standard
-    display_name: GPT Image 2
-    provider_route: image_generation.designer.gpt_image_2
-    min_tier: pro
 claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
@@ -242,7 +241,7 @@ claude:
 	if cfg.ImageAPI.Cover == nil || cfg.ImageAPI.Cover.Provider != "volcengine" || cfg.ImageAPI.Cover.Model != "doubao-seedream-5-0-pro-260628" {
 		t.Fatalf("derived image cover config = %#v", cfg.ImageAPI.Cover)
 	}
-	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
+	if len(cfg.ImagePresets) != 2 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)
 	}
 	preset := cfg.ImagePresets[0]
@@ -376,6 +375,8 @@ model_routes:
   image_generation:
     designer:
       gpt_image_2:
+        selection_key: openai-standard
+        min_tier: pro
         alias: GPT Image 2
         provider: wangcai_openai
         model: gpt-image-2
@@ -417,6 +418,8 @@ model_routes:
   image_generation:
     designer:
       gpt_image_2:
+        selection_key: openai-standard
+        min_tier: pro
         alias: GPT Image 2
         provider: wangcai_openai
         model: gpt-image-2

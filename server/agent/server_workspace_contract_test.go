@@ -12,7 +12,6 @@ import (
 func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		"server/config.yaml",
 		"server/config.example.yaml",
 		"plugins/agents/seednote.md",
 		"plugins/agents/ecommerce.md",

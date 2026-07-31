@@ -237,7 +237,7 @@ func TestBillingHandler(t *testing.T) {
 			t.Fatalf("referral link response = %#v", referral)
 		}
 		program := referral["program"].(map[string]any)
-		if program["id"] != "referral-handler-v1" || referral["status"] != "issued" {
+		if program["id"] != serverbilling.ReferralFirstTopUpProgramID || referral["status"] != "issued" {
 			t.Fatalf("referral summary = %#v", referral)
 		}
 
@@ -431,7 +431,7 @@ func TestBillingHandler(t *testing.T) {
 	t.Run("capped referral summary is read only", func(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		if err := f.repo.Billing().CreateReferralIssue(context.Background(), &model.BillingReferralIssue{
-			ID: uuid.NewString(), ProgramID: "referral-handler-v1", CatalogID: "promotion-handler-v1",
+			ID: uuid.NewString(), ProgramID: serverbilling.ReferralFirstTopUpProgramID, CatalogID: "promotion-handler-v1",
 			InviteeUserID: f.inviteeID, InviterUserID: billingHandlerInviterID, QualifyingTopUpEntryID: uuid.NewString(),
 			RequestFingerprint: strings.Repeat("e", 64), Status: model.BillingReferralStatusCapped,
 		}); err != nil {
@@ -546,8 +546,8 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 
 func billingHandlerBundle() serverbilling.Bundle {
 	return serverbilling.Bundle{
-		Policy: serverbilling.PolicyCatalog{
-			Version: "2026-07-19", CreditsPerCNY: 1_000,
+		Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000},
+		Policy: serverbilling.PolicySnapshot{
 			TaskAdmission: serverbilling.TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
 			AcceptedTask:  serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         serverbilling.TopUpPolicy{RepayDebtFirst: true}, Promotions: serverbilling.PromotionsPolicy{MayRepayDebt: false},
@@ -557,7 +557,7 @@ func billingHandlerBundle() serverbilling.Bundle {
 			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
 		}},
 		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{
-			ID: "referral-handler-v1", Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: 10_000_000,
+			ID: serverbilling.ReferralFirstTopUpProgramID, Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: 10_000_000,
 			InviterCredits: 1_000, InviteeCredits: 1_000, ExpiresAfter: 30 * 24 * time.Hour, MaxInviterRewards: 10,
 		}}},
 	}
