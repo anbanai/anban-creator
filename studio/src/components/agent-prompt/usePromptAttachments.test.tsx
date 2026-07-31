@@ -65,6 +65,47 @@ function controlledAttachment(overrides: Partial<PromptAttachment> = {}): Prompt
 }
 
 describe('usePromptAttachments', () => {
+  it('hydrates and serializes asset-backed materials without upload identity', () => {
+    const inherited: InputAttachment = {
+      type: 'image',
+      asset_id: 'asset-final-image',
+      file_name: 'reference.png',
+      content_type: 'image/png',
+      size: 42,
+      instruction: '使用构图',
+    }
+    const { result } = renderHook(() => usePromptAttachments({
+      adapter: { mode: 'direct' },
+      policy,
+      initialAttachments: [inherited],
+      createId: idSequence(),
+    }))
+    expect(result.current.attachments[0]).toEqual(expect.objectContaining({
+      assetId: 'asset-final-image',
+      status: 'uploaded',
+    }))
+    expect(result.current.toInputAttachments()).toEqual([inherited])
+  })
+
+  it('moves materials immutably and serializes the new order', () => {
+    const first: InputAttachment = { type: 'document', key: 'a', file_name: 'a.pdf' }
+    const second: InputAttachment = { type: 'image', key: 'b', file_name: 'b.png' }
+    const third: InputAttachment = { type: 'image', key: 'c', file_name: 'c.png' }
+    const { result } = renderHook(() => usePromptAttachments({
+      adapter: { mode: 'direct' },
+      policy,
+      initialAttachments: [first, second, third],
+      createId: idSequence(),
+    }))
+    const original = result.current.attachments
+    act(() => result.current.move('attachment-3', 0))
+    expect(result.current.attachments.map((item) => item.fileName)).toEqual(['c.png', 'a.pdf', 'b.png'])
+    expect(result.current.attachments[0]).toBe(original[2])
+    expect(result.current.toInputAttachments().map((item) => item.file_name)).toEqual(['c.png', 'a.pdf', 'b.png'])
+    act(() => result.current.move('attachment-1', 99))
+    expect(result.current.attachments.map((item) => item.fileName)).toEqual(['c.png', 'b.png', 'a.pdf'])
+  })
+
   it('hydrates finalized attachments without File or preview URL and serializes key identity only', () => {
     const inherited: InputAttachment = {
       type: 'image',
