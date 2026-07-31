@@ -29,6 +29,7 @@ type InputAttachmentValidationOptions struct {
 	MaxCount             int
 	MaxBytes             int64
 	AllowedTypes         map[string]bool
+	AllowedAssetPurposes []string
 	normalizeExistingKey func(model.EntryAttachment) (model.EntryAttachment, error)
 }
 
@@ -91,7 +92,30 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 		if utf8.RuneCountInString(a.Instruction) > inputAttachmentInstructionMaxRunes {
 			return nil, inputAttachmentValidationErrorf("attachment instruction must not exceed %d characters", inputAttachmentInstructionMaxRunes)
 		}
-		if a.UploadID == "" && a.Key != "" {
+		if a.AssetID != "" {
+			if a.URL != "" || a.Key != "" || a.UploadID != "" {
+				return nil, inputAttachmentValidationErrorf("attachment %d: asset_id cannot be combined with url, key, or upload_id", i+1)
+			}
+			asset, err := service.NewReferenceAssetService(repo, nil, nil).RequireOwned(ctx, userID, a.AssetID, options.AllowedAssetPurposes)
+			if err != nil {
+				if errors.Is(err, service.ErrReferenceAssetForbidden) || errors.Is(err, service.ErrReferenceAssetPurposeMismatch) || errors.Is(err, service.ErrReferenceAssetInvalidMetadata) {
+					return nil, inputAttachmentValidationErrorf("attachment %d: asset attachment is invalid: %v", i+1, err)
+				}
+				return nil, fmt.Errorf("attachment %d: resolve asset attachment: %w", i+1, err)
+			}
+			a = model.EntryAttachment{
+				AssetID:     asset.ID,
+				Type:        "image",
+				Key:         asset.StorageKey,
+				FileName:    asset.FileName,
+				ContentType: asset.ContentType,
+				Size:        asset.Size,
+				Instruction: a.Instruction,
+			}
+			if options.MaxBytes > 0 && a.Size > options.MaxBytes {
+				return nil, inputAttachmentValidationErrorf("attachment %d exceeds the %d MB limit", i+1, options.MaxBytes/(1024*1024))
+			}
+		} else if a.UploadID == "" && a.Key != "" {
 			if options.normalizeExistingKey == nil {
 				return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 			}
@@ -150,6 +174,7 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 }
 
 func normalizeHandlerEntryAttachment(a model.EntryAttachment) model.EntryAttachment {
+	a.AssetID = strings.TrimSpace(a.AssetID)
 	a.Type = strings.TrimSpace(a.Type)
 	a.URL = strings.TrimSpace(a.URL)
 	a.Text = strings.TrimSpace(a.Text)

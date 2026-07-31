@@ -32,6 +32,111 @@ func TestValidateInputAttachmentsRequiresUploadIDForGenericExistingKey(t *testin
 	}
 }
 
+func TestValidateInputAttachmentsAcceptsOwnedAssetAndPreservesOrder(t *testing.T) {
+	repo := uploadRepositoryFromSessions(t)
+	ownedReference := &model.Asset{
+		ID:          "owned-reference",
+		UserID:      "user-1",
+		Purpose:     service.DirectUploadPurposeTaskReference,
+		StorageKey:  "assets/users/user-1/owned-reference/reference.png",
+		FileName:    "reference.png",
+		ContentType: "image/png",
+		Size:        2048,
+		ETag:        "etag-owned-reference",
+	}
+	if err := repo.Assets().Create(t.Context(), ownedReference); err != nil {
+		t.Fatalf("create owned asset: %v", err)
+	}
+
+	got, err := validateInputAttachments(t.Context(), nil, repo, "user-1", []model.EntryAttachment{
+		{Type: "text", Text: "first", FileName: "brief.txt"},
+		{
+			AssetID:     ownedReference.ID,
+			Type:        "video",
+			FileName:    "forged.mp4",
+			ContentType: "video/mp4",
+			Size:        1,
+			Instruction: " use this composition ",
+		},
+	}, InputAttachmentValidationOptions{
+		AllowedTypes:         allAgentAttachmentTypes,
+		AllowedAssetPurposes: []string{service.DirectUploadPurposeTaskReference},
+	})
+	if err != nil {
+		t.Fatalf("validate asset attachment: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("attachments = %#v, want two", got)
+	}
+	if got[0].FileName != "brief.txt" {
+		t.Fatalf("first attachment = %#v, want brief.txt first", got[0])
+	}
+	if got[1].AssetID != ownedReference.ID || got[1].Type != "image" || got[1].Key != ownedReference.StorageKey ||
+		got[1].FileName != ownedReference.FileName || got[1].ContentType != ownedReference.ContentType || got[1].Size != ownedReference.Size {
+		t.Fatalf("asset attachment = %#v, want server-owned metadata from %#v", got[1], ownedReference)
+	}
+	if got[1].Instruction != "use this composition" {
+		t.Fatalf("instruction = %q, want normalized caller instruction", got[1].Instruction)
+	}
+}
+
+func TestValidateInputAttachmentsRejectsInvalidAssetIdentity(t *testing.T) {
+	repo := uploadRepositoryFromSessions(t)
+	assets := []*model.Asset{
+		{
+			ID: "foreign-reference", UserID: "user-2", Purpose: service.DirectUploadPurposeTaskReference,
+			StorageKey: "assets/users/user-2/foreign-reference/reference.png", FileName: "reference.png",
+			ContentType: "image/png", Size: 1024, ETag: "etag-foreign-reference",
+		},
+		{
+			ID: "document-reference", UserID: "user-1", Purpose: service.DirectUploadPurposeTaskReference,
+			StorageKey: "assets/users/user-1/document-reference/brief.pdf", FileName: "brief.pdf",
+			ContentType: "application/pdf", Size: 1024, ETag: "etag-document-reference",
+		},
+		{
+			ID: "project-reference", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference,
+			StorageKey: "assets/users/user-1/project-reference/reference.png", FileName: "reference.png",
+			ContentType: "image/png", Size: 1024, ETag: "etag-project-reference",
+		},
+		{
+			ID: "owned-reference", UserID: "user-1", Purpose: service.DirectUploadPurposeTaskReference,
+			StorageKey: "assets/users/user-1/owned-reference/reference.png", FileName: "reference.png",
+			ContentType: "image/png", Size: 1024, ETag: "etag-owned-reference",
+		},
+	}
+	for _, asset := range assets {
+		if err := repo.Assets().Create(t.Context(), asset); err != nil {
+			t.Fatalf("create asset %s: %v", asset.ID, err)
+		}
+	}
+
+	tests := []struct {
+		name       string
+		attachment model.EntryAttachment
+		wantErr    string
+	}{
+		{name: "another user's asset", attachment: model.EntryAttachment{AssetID: "foreign-reference"}, wantErr: "reference asset identity is forbidden"},
+		{name: "missing asset", attachment: model.EntryAttachment{AssetID: "missing-reference"}, wantErr: "reference asset identity is forbidden"},
+		{name: "non-image asset", attachment: model.EntryAttachment{AssetID: "document-reference"}, wantErr: "reference asset metadata is invalid"},
+		{name: "disallowed purpose", attachment: model.EntryAttachment{AssetID: "project-reference"}, wantErr: "reference asset purpose is not allowed"},
+		{name: "asset id with url", attachment: model.EntryAttachment{AssetID: "owned-reference", URL: "/api/v1/files/forged.png"}, wantErr: "asset_id cannot be combined with url, key, or upload_id"},
+		{name: "asset id with key", attachment: model.EntryAttachment{AssetID: "owned-reference", Key: "assets/users/user-1/forged.png"}, wantErr: "asset_id cannot be combined with url, key, or upload_id"},
+		{name: "asset id with upload id", attachment: model.EntryAttachment{AssetID: "owned-reference", UploadID: "upload-1"}, wantErr: "asset_id cannot be combined with url, key, or upload_id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateInputAttachments(t.Context(), nil, repo, "user-1", []model.EntryAttachment{tt.attachment}, InputAttachmentValidationOptions{
+				AllowedTypes:         allAgentAttachmentTypes,
+				AllowedAssetPurposes: []string{service.DirectUploadPurposeTaskReference},
+			})
+			if err == nil || !errors.Is(err, errInputAttachmentValidation) || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want input attachment validation error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	const key = "uploads/pending/user-1/upload-1/product.png"
 	session := &model.UploadSession{
