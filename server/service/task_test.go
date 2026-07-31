@@ -1150,6 +1150,46 @@ func TestCloneKeepsProjectSnapshotReferenceOutOfAttachments(t *testing.T) {
 	}
 }
 
+func TestCloneEditableOverridesConvertReferenceToPrependedAttachment(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+	}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{
+		ExecutionProfile: source.ExecutionProfile,
+		Overrides: &CloneTaskOverrides{
+			ProjectID: projectID, Quantity: 1, ReferenceImageAssetID: asset.ID,
+			InputAttachments: []model.EntryAttachment{
+				{Type: "document", Text: "brief", FileName: "brief.pdf"},
+				{Type: "text", Text: "notes", FileName: "notes.txt"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Clone editable task: %v", err)
+	}
+	clone := clones[0]
+	attachments := clone.InputAttachments.Data()
+	if clone.ReferenceImageAssetID != "" {
+		t.Fatalf("clone reference asset = %q, want empty", clone.ReferenceImageAssetID)
+	}
+	if len(attachments) != 3 || attachments[0].AssetID != asset.ID || attachments[0].Type != "image" || attachments[1].FileName != "brief.pdf" || attachments[2].FileName != "notes.txt" {
+		t.Fatalf("clone attachments = %#v", attachments)
+	}
+}
+
 func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1285,7 +1325,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if task.Prompt != "edited prompt" || task.ImageRatio != "1:1" || task.ImageModelKey != "gemini-pro" {
 			t.Fatalf("editable fields = prompt %q ratio %q model %q", task.Prompt, task.ImageRatio, task.ImageModelKey)
 		}
-		if !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+		if !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || !task.Watermark {
 			t.Fatalf("reference/watermark fields = skip %v asset %q watermark %v", task.SkipReferenceImage, task.ReferenceImageAssetID, task.Watermark)
 		}
 		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage {
@@ -1297,8 +1337,8 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline %v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
-		if got := task.InputAttachments.Data(); len(got) != 1 || got[0] != attachments[0] {
-			t.Fatalf("attachments = %#v, want %#v", got, attachments)
+		if got := task.InputAttachments.Data(); len(got) != 2 || got[0].AssetID != referenceAsset.ID || got[1] != attachments[0] {
+			t.Fatalf("attachments = %#v, want reference then %#v", got, attachments)
 		}
 		if task.InputSourceTaskID != "root-source-task" || task.InputSourceProjectID != "root-source-project" {
 			t.Fatalf("root provenance = %q/%q", task.InputSourceTaskID, task.InputSourceProjectID)
@@ -1393,7 +1433,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 		}})
 	}
 	clones, err := clone(inherited.ID)
-	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != inherited.ID {
+	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != "" || len(clones[0].InputAttachments.Data()) != 0 {
 		t.Fatalf("trusted inherited clone = %#v, %v", clones, err)
 	}
 	firstClone := clones[0]
@@ -1401,8 +1441,8 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
 		t.Fatalf("complete first clone: %v", err)
 	}
-	if exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
-		t.Fatalf("exact clone-of-clone = %#v, %v; want project reference purpose rejection", exactClones, err)
+	if exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile}); err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != "" || len(exactClones[0].InputAttachments.Data()) != 0 {
+		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
 	}
 
 	for _, test := range []struct {
@@ -1425,7 +1465,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 
 	normalClones, err := clone(taskReference.ID)
-	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != taskReference.ID {
+	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != "" || len(normalClones[0].InputAttachments.Data()) != 1 || normalClones[0].InputAttachments.Data()[0].AssetID != taskReference.ID {
 		t.Fatalf("normal task-reference clone = %#v, %v", normalClones, err)
 	}
 }
