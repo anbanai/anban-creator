@@ -89,7 +89,7 @@ func NewMarginService(repo repository.BillingMarginRepository, appRepo repositor
 	}
 	creditsPerCNY := int64(0)
 	if bundle != nil {
-		creditsPerCNY = bundle.Policy.CreditsPerCNY
+		creditsPerCNY = bundle.Economics.CreditsPerCNY
 	}
 	return &MarginService{repo: repo, appRepo: appRepo, creditsPerCNY: creditsPerCNY, now: now}
 }

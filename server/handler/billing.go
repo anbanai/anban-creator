@@ -333,7 +333,7 @@ func (h *BillingHandler) Referral(c fiber.Ctx) error {
 	}
 	response["program"] = fiber.Map{
 		"id": program.ID, "catalog_id": h.bundle.Promotions.CatalogID,
-		"minimum_topup_credits": minimumReferralCredits(program.MinimumTopUpCNY, h.bundle.Policy.CreditsPerCNY),
+		"minimum_topup_credits": minimumReferralCredits(program.MinimumTopUpCNY, h.bundle.Economics.CreditsPerCNY),
 		"inviter_credits":       program.InviterCredits, "invitee_credits": program.InviteeCredits,
 		"expires_after_seconds": int64(program.ExpiresAfter / time.Second), "max_inviter_rewards": program.MaxInviterRewards,
 	}

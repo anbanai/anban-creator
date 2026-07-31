@@ -522,25 +522,20 @@ func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 }
 
 func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
+	type productsSnapshot struct {
+		Currency         string              `json:"currency"`
+		TierRatesPercent map[string]int64    `json:"tier_rates_percent"`
+		SKUs             []billing.SKUConfig `json:"skus"`
+	}
 	snapshot := struct {
-		Products billing.ProductCatalog `json:"products"`
-		Policy   struct {
-			Version             string                            `json:"version"`
-			CreditsPerCNY       int64                             `json:"credits_per_cny"`
-			TaskAdmission       billing.TaskAdmissionPolicy       `json:"task_admission"`
-			AcceptedTask        billing.AcceptedTaskPolicy        `json:"accepted_task"`
-			TopUp               billing.TopUpPolicy               `json:"top_up"`
-			Promotions          billing.PromotionsPolicy          `json:"promotions"`
-			TaskFailureReversal billing.TaskFailureReversalPolicy `json:"task_failure_reversal"`
-		} `json:"policy"`
-	}{Products: bundle.Products}
-	snapshot.Policy.Version = bundle.Policy.Version
-	snapshot.Policy.CreditsPerCNY = bundle.Policy.CreditsPerCNY
-	snapshot.Policy.TaskAdmission = bundle.Policy.TaskAdmission
-	snapshot.Policy.AcceptedTask = bundle.Policy.AcceptedTask
-	snapshot.Policy.TopUp = bundle.Policy.TopUp
-	snapshot.Policy.Promotions = bundle.Policy.Promotions
-	snapshot.Policy.TaskFailureReversal = bundle.Policy.TaskFailureReversal
+		Products  productsSnapshot        `json:"products"`
+		Economics billing.EconomicsConfig `json:"economics"`
+		Policy    billing.PolicySnapshot  `json:"policy"`
+	}{
+		Products:  productsSnapshot{Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs},
+		Economics: bundle.Economics,
+		Policy:    bundle.Policy,
+	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("marshal retail billing catalog: %w", err)

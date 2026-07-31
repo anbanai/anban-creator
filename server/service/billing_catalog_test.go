@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -116,16 +118,16 @@ func TestBillingCatalogPublishesImmutableSnapshot(t *testing.T) {
 		t.Fatalf("idempotent Publish = %+v, %v; first = %+v", second, err, first)
 	}
 	var publishedSnapshot struct {
-		Policy struct {
-			CreditsPerCNY       int64                             `json:"credits_per_cny"`
+		Economics billing.EconomicsConfig `json:"economics"`
+		Policy    struct {
 			TaskFailureReversal billing.TaskFailureReversalPolicy `json:"task_failure_reversal"`
 		} `json:"policy"`
 	}
 	if err := json.Unmarshal(first.Snapshot, &publishedSnapshot); err != nil {
 		t.Fatalf("decode published catalog snapshot: %v", err)
 	}
-	if publishedSnapshot.Policy.CreditsPerCNY != bundle.Policy.CreditsPerCNY {
-		t.Fatalf("published credits_per_cny = %d, want %d", publishedSnapshot.Policy.CreditsPerCNY, bundle.Policy.CreditsPerCNY)
+	if publishedSnapshot.Economics.CreditsPerCNY != bundle.Economics.CreditsPerCNY {
+		t.Fatalf("published credits_per_cny = %d, want %d", publishedSnapshot.Economics.CreditsPerCNY, bundle.Economics.CreditsPerCNY)
 	}
 	if !publishedSnapshot.Policy.TaskFailureReversal.Enabled || len(publishedSnapshot.Policy.TaskFailureReversal.Reasons) != len(bundle.Policy.TaskFailureReversal.Reasons) {
 		t.Fatalf("published reversal policy = %#v", publishedSnapshot.Policy.TaskFailureReversal)
@@ -142,6 +144,22 @@ func TestBillingCatalogPublishesImmutableSnapshot(t *testing.T) {
 	persisted, err := repo.Billing().FindSKU(ctx, bundle.Products.CatalogID, bundle.Products.SKUs[0].ID)
 	if err != nil || persisted.PriceCredits != bundle.Products.SKUs[0].PriceCredits {
 		t.Fatalf("immutable persisted SKU = %+v, %v", persisted, err)
+	}
+}
+
+func TestPublishedRetailSnapshotMatchesContentAddress(t *testing.T) {
+	bundle, err := billing.LoadBundle(filepath.Join("..", "billing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newBillingServiceRepository(t)
+	published, err := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{}).Publish(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(published.Snapshot)
+	if want := "retail-sha256-" + fmt.Sprintf("%x", sum); published.CatalogID != want {
+		t.Fatalf("published catalog ID = %q, want snapshot hash %q", published.CatalogID, want)
 	}
 }
 
@@ -783,8 +801,8 @@ func newBillingServiceRepositoryWithDB(t *testing.T) (repository.Repository, *go
 
 func testBillingBundle() billing.Bundle {
 	return billing.Bundle{
-		Policy: billing.PolicyCatalog{
-			Version:       "2026-07-17",
+		Economics: billing.EconomicsConfig{CreditsPerCNY: 1_000},
+		Policy: billing.PolicySnapshot{
 			TaskAdmission: billing.TaskAdmissionPolicy{RequireZeroDebt: true, RequireFullPrice: true},
 			AcceptedTask:  billing.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         billing.TopUpPolicy{RepayDebtFirst: true},

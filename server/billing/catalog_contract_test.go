@@ -13,10 +13,10 @@ import (
 
 func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 	bundle := loadProductionBundle(t)
-	policy := bundle.Policy
-	if policy.Version != "2026-07-17" || policy.CreditsPerCNY != 1000 {
-		t.Fatalf("policy identity = version %q credits/CNY %d", policy.Version, policy.CreditsPerCNY)
+	if bundle.Economics.CreditsPerCNY != 1000 {
+		t.Fatalf("economics credits/CNY = %d", bundle.Economics.CreditsPerCNY)
 	}
+	policy := bundle.Policy
 	if !policy.TaskAdmission.RequireZeroDebt || !policy.TaskAdmission.RequireFullPrice {
 		t.Fatalf("task admission policy = %#v", policy.TaskAdmission)
 	}
@@ -113,7 +113,7 @@ func TestProductionPromotionsContainOnlyFirstPaidTopUpReferral(t *testing.T) {
 		t.Fatalf("promotion programs = %#v, want exactly one referral", programs)
 	}
 	program := programs[0]
-	if program.ID != "referral-first-topup-v1" || program.Trigger != "invitee_first_paid_topup" || program.MinimumTopUpCNY != 10_000_000 || program.InviterCredits != 1000 || program.InviteeCredits != 1000 || program.ExpiresAfter != 30*24*time.Hour || program.MaxInviterRewards != 10 || program.CanRepayDebt {
+	if program.ID != ReferralFirstTopUpProgramID || program.Trigger != "invitee_first_paid_topup" || program.MinimumTopUpCNY != 10_000_000 || program.InviterCredits != 1000 || program.InviteeCredits != 1000 || program.ExpiresAfter != 30*24*time.Hour || program.MaxInviterRewards != 10 {
 		t.Fatalf("referral program = %#v", program)
 	}
 }
@@ -292,7 +292,7 @@ func readProductionCatalog(t *testing.T, name string) string {
 func writeProductionBundle(t *testing.T, overrides map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, name := range []string{"policy.yaml", "products.yaml", "costs.yaml", "promotions.yaml"} {
+	for _, name := range []string{"economics.yaml", "products.yaml", "costs.yaml", "promotions.yaml"} {
 		contents := readProductionCatalog(t, name)
 		if override, ok := overrides[name]; ok {
 			contents = override
@@ -314,10 +314,10 @@ func cloneCatalogMetadataBundle(source *Bundle) Bundle {
 }
 
 func initialCatalogMetadataContractError(bundle *Bundle) error {
-	if bundle.Costs.CatalogID != "provider-cost-2026-07-29-v4" {
+	if !strings.HasPrefix(bundle.Costs.CatalogID, "provider-cost-sha256-") || len(bundle.Costs.CatalogID) != len("provider-cost-sha256-")+64 {
 		return fmt.Errorf("cost catalog ID = %q", bundle.Costs.CatalogID)
 	}
-	if bundle.Promotions.CatalogID != "promotion-2026-07-17-v1" {
+	if !strings.HasPrefix(bundle.Promotions.CatalogID, "promotion-sha256-") || len(bundle.Promotions.CatalogID) != len("promotion-sha256-")+64 {
 		return fmt.Errorf("promotion catalog ID = %q", bundle.Promotions.CatalogID)
 	}
 	wantEvidence := map[string]string{

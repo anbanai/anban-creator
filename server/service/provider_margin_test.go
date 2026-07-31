@@ -17,7 +17,7 @@ func TestMarginReconciliationProjectsRevenueReceivablesCostAndAdjustments(t *tes
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
 	bundle := testBillingBundle()
-	bundle.Policy.CreditsPerCNY = 1_000
+	bundle.Economics.CreditsPerCNY = 1_000
 	userID, taskID := uuid.NewString(), uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@margin.test", Password: "x", InviteCode: "MARGIN01"}); err != nil {
 		t.Fatal(err)

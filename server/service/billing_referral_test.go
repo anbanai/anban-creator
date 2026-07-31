@@ -43,7 +43,7 @@ func TestBillingReferral(t *testing.T) {
 		if err != nil || first.Referral == nil || first.Referral.Status != BillingReferralStatusIssued {
 			t.Fatalf("qualifying TopUp = %+v, %v; want issued referral", first, err)
 		}
-		if first.Referral.ProgramID != "referral-test-v1" || first.Referral.CatalogID != "promotion-test-v1" ||
+		if first.Referral.ProgramID != billing.ReferralFirstTopUpProgramID || first.Referral.CatalogID != "promotion-test-v1" ||
 			first.Referral.InviterUserID != billingReferralInviterID || first.Referral.InviteeUserID != billingReferralInviteeID {
 			t.Fatalf("referral identity = %+v", first.Referral)
 		}
@@ -175,6 +175,96 @@ func TestBillingReferral(t *testing.T) {
 		f.assertAccount(t, billingReferralInviteeID, 10_000, 1_000, 0)
 		f.assertRewardEntryCount(t, billingReferralInviterID, 1)
 		f.assertRewardEntryCount(t, billingReferralInviteeID, 1)
+	})
+
+	t.Run("historical issue survives catalog and threshold changes", func(t *testing.T) {
+		f := newBillingReferralFixture(t, 10)
+		f.createUser(t, billingReferralInviterID, "")
+		f.createUser(t, billingReferralInviteeID, billingReferralInviterID)
+		exact := f.topUpRequest(billingReferralInviteeID, 10_000, "historical-exact")
+		first, err := f.referrals.TopUp(context.Background(), exact)
+		if err != nil || first.Referral == nil {
+			t.Fatalf("initial referral = %+v, %v", first, err)
+		}
+
+		f.bundle.Promotions.CatalogID = "promotion-sha256-current"
+		f.bundle.Promotions.Programs[0].MinimumTopUpCNY = billing.MicroCNY(20_000_000)
+		f.wallet = NewBillingWalletService(f.repo, &f.bundle, BillingWalletOptions{Now: func() time.Time { return f.now }})
+		f.referrals = NewBillingReferralService(f.repo, f.wallet, &f.bundle, BillingReferralOptions{Now: func() time.Time { return f.now }})
+
+		replay, err := f.referrals.TopUp(context.Background(), exact)
+		if err != nil || replay.Referral == nil || replay.Referral.ID != first.Referral.ID || replay.Referral.CatalogID != first.Referral.CatalogID {
+			t.Fatalf("historical exact replay = %+v, %v; want issue %s catalog %s", replay, err, first.Referral.ID, first.Referral.CatalogID)
+		}
+		nonqualifying, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeID, 15_000, "historical-below-current"))
+		if err != nil || nonqualifying.Referral != nil {
+			t.Fatalf("nonqualifying later topup = %+v, %v; want ordinary topup", nonqualifying, err)
+		}
+		qualifying, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeID, 20_000, "historical-current"))
+		if err != nil || qualifying.Referral == nil || qualifying.Referral.ID != first.Referral.ID {
+			t.Fatalf("qualifying later topup = %+v, %v; want historical issue %s", qualifying, err, first.Referral.ID)
+		}
+	})
+
+	t.Run("disabled promotions still replay the exact historical issue", func(t *testing.T) {
+		f := newBillingReferralFixture(t, 10)
+		f.createUser(t, billingReferralInviterID, "")
+		f.createUser(t, billingReferralInviteeID, billingReferralInviterID)
+		exact := f.topUpRequest(billingReferralInviteeID, 10_000, "disabled-exact")
+		first, err := f.referrals.TopUp(context.Background(), exact)
+		if err != nil || first.Referral == nil {
+			t.Fatalf("initial referral = %+v, %v", first, err)
+		}
+		f.bundle.Promotions = billing.PromotionCatalog{CatalogID: "promotion-sha256-disabled", Programs: []billing.ReferralProgram{}}
+		f.referrals = NewBillingReferralService(f.repo, f.wallet, &f.bundle, BillingReferralOptions{Now: func() time.Time { return f.now }})
+		replay, err := f.referrals.TopUp(context.Background(), exact)
+		if err != nil || replay.Referral == nil || replay.Referral.ID != first.Referral.ID {
+			t.Fatalf("disabled exact replay = %+v, %v; want historical issue %s", replay, err, first.Referral.ID)
+		}
+		later, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeID, 20_000, "disabled-later"))
+		if err != nil || later.Referral != nil {
+			t.Fatalf("disabled later topup = %+v, %v; want ordinary topup", later, err)
+		}
+	})
+
+	t.Run("cross catalog concurrent winner is accepted", func(t *testing.T) {
+		f := newBillingReferralFixture(t, 10)
+		f.createUser(t, billingReferralInviterID, "")
+		f.createUser(t, billingReferralInviteeID, billingReferralInviterID)
+		first, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeID, 10_000, "winner"))
+		if err != nil || first.Referral == nil {
+			t.Fatalf("winner referral = %+v, %v", first, err)
+		}
+		f.bundle.Promotions.CatalogID = "promotion-sha256-loser"
+		loser := NewBillingReferralService(f.repo, f.wallet, &f.bundle, BillingReferralOptions{Now: func() time.Time { return f.now }})
+		err = f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
+			got, err := loser.issueOrReplay(context.Background(), tx.Billing(), f.topUpRequest(billingReferralInviteeID, 20_000, "loser"), &TopUpResult{EntryID: "other-topup"}, billingReferralInviterID, f.bundle.Promotions.Programs[0])
+			if err != nil || got.ID != first.Referral.ID || got.CatalogID != first.Referral.CatalogID {
+				t.Fatalf("concurrent winner = %+v, %v; want historical issue", got, err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("inviter cap spans promotion catalogs", func(t *testing.T) {
+		f := newBillingReferralFixture(t, 1)
+		f.createUser(t, billingReferralInviterID, "")
+		f.createUser(t, billingReferralInviteeOneID, billingReferralInviterID)
+		f.createUser(t, billingReferralInviteeTwoID, billingReferralInviterID)
+		first, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeOneID, 10_000, "catalog-cap-one"))
+		if err != nil || first.Referral == nil || first.Referral.Status != BillingReferralStatusIssued {
+			t.Fatalf("first referral = %+v, %v", first, err)
+		}
+		f.bundle.Promotions.CatalogID = "promotion-sha256-next"
+		f.wallet = NewBillingWalletService(f.repo, &f.bundle, BillingWalletOptions{Now: func() time.Time { return f.now }})
+		f.referrals = NewBillingReferralService(f.repo, f.wallet, &f.bundle, BillingReferralOptions{Now: func() time.Time { return f.now }})
+		second, err := f.referrals.TopUp(context.Background(), f.topUpRequest(billingReferralInviteeTwoID, 10_000, "catalog-cap-two"))
+		if err != nil || second.Referral == nil || second.Referral.Status != BillingReferralStatusCapped {
+			t.Fatalf("cross-catalog capped referral = %+v, %v", second, err)
+		}
 	})
 
 	t.Run("topup and rewards roll back together", func(t *testing.T) {
@@ -454,11 +544,11 @@ func newBillingReferralFixtureWithDebtAndCap(t *testing.T, debt, maxInviterRewar
 	t.Helper()
 	repo, db := newBillingServiceRepositoryWithDB(t)
 	bundle := testBillingBundle()
-	bundle.Policy.CreditsPerCNY = 1_000
+	bundle.Economics.CreditsPerCNY = 1_000
 	bundle.Promotions = billing.PromotionCatalog{
 		CatalogID: "promotion-test-v1",
 		Programs: []billing.ReferralProgram{{
-			ID: "referral-test-v1", Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: billing.MicroCNY(10_000_000),
+			ID: billing.ReferralFirstTopUpProgramID, Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: billing.MicroCNY(10_000_000),
 			InviterCredits: 1_000, InviteeCredits: 1_000, ExpiresAfter: 30 * 24 * time.Hour,
 			MaxInviterRewards: maxInviterRewards,
 		}},
@@ -538,7 +628,7 @@ func (f *billingReferralFixture) assertReferralLot(t *testing.T, lotID *string, 
 		t.Fatal(err)
 	}
 	wantExpiry := f.now.Add(30 * 24 * time.Hour)
-	if lot.ID != *lotID || lot.UserID != userID || lot.ProgramID != "referral-test-v1" || lot.CatalogID != "promotion-test-v1" ||
+	if lot.ID != *lotID || lot.UserID != userID || lot.ProgramID != billing.ReferralFirstTopUpProgramID || lot.CatalogID != "promotion-test-v1" ||
 		lot.OriginalCredits != 1_000 || lot.AvailableCredits != 1_000 || lot.ExpiresAt == nil || !lot.ExpiresAt.Equal(wantExpiry) {
 		t.Fatalf("reward lot = %+v, want user=%s source=%s expiry=%s", lot, userID, sourceID, wantExpiry)
 	}

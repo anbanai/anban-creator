@@ -16,8 +16,8 @@ func TestLoadBundleLoadsTypedCatalogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBundle: %v", err)
 	}
-	if bundle.Policy.CreditsPerCNY != 1000 {
-		t.Fatalf("credits_per_cny = %d, want 1000", bundle.Policy.CreditsPerCNY)
+	if bundle.Economics.CreditsPerCNY != 1000 {
+		t.Fatalf("credits_per_cny = %d, want 1000", bundle.Economics.CreditsPerCNY)
 	}
 	if !bundle.Policy.AcceptedTask.ContinueWhenBalanceNegative || !bundle.Policy.AcceptedTask.OperationChargeMayCreateDebt {
 		t.Fatalf("accepted_task policy = %#v", bundle.Policy.AcceptedTask)
@@ -43,10 +43,10 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 		overrides map[string]string
 		want      string
 	}{
-		{name: "unknown field", overrides: map[string]string{"policy.yaml": validPolicyYAML + "unknown: true\n"}, want: "field unknown not found"},
-		{name: "trailing document", overrides: map[string]string{"policy.yaml": validPolicyYAML + "---\nversion: second\n"}, want: "trailing YAML document"},
+		{name: "unknown field", overrides: map[string]string{"economics.yaml": validEconomicsYAML + "unknown: true\n"}, want: "field unknown not found"},
+		{name: "trailing document", overrides: map[string]string{"economics.yaml": validEconomicsYAML + "---\ncredits_per_cny: 2000\n"}, want: "trailing YAML document"},
 		{name: "duplicate SKU", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "skus:\n", "skus:\n  - id: task.seednote.balanced\n    operation: task.seednote\n    execution_profile: balanced\n    charge_policy: task_admission\n    price_credits: 5000\n    delivery: verified\n", 1)}, want: "duplicate SKU id"},
-		{name: "duplicate program", overrides: map[string]string{"promotions.yaml": validPromotionsYAML + "  - id: referral-v1\n    trigger: invitee_first_paid_topup\n    minimum_topup_cny: \"10.00\"\n    inviter_credits: 1\n    invitee_credits: 1\n    expires_after: 24h\n    max_inviter_rewards: 1\n    can_repay_debt: false\n"}, want: "duplicate referral program id"},
+		{name: "duplicate program", overrides: map[string]string{"promotions.yaml": validPromotionsYAML + "  - id: referral-first-topup-v1\n    trigger: invitee_first_paid_topup\n    minimum_topup_cny: \"10.00\"\n    inviter_credits: 1\n    invitee_credits: 1\n    expires_after: 24h\n    max_inviter_rewards: 1\n"}, want: "duplicate referral program id"},
 		{name: "malformed currency rate", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `"7.2.0"`, 1)}, want: "currency_rates.USD"},
 		{name: "currency rate must be string", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `7.20`, 1)}, want: "must be a quoted decimal string"},
 		{name: "malformed model price", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `input: "6.00"`, `input: "1e3"`, 1)}, want: "models.provider/model.input"},
@@ -57,7 +57,10 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 		{name: "missing currency reference", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `currency: "CNY"`, `currency: "EUR"`, 1)}, want: "references missing currency rate"},
 		{name: "CNY rate must be unit", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `CNY: "1.00"`, `CNY: "1.01"`, 1)}, want: "currency_rates.CNY: must equal 1.00"},
 		{name: "invalid charge policy", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "task_admission", "runtime_usage", 1)}, want: "charge_policy"},
-		{name: "promotion cannot repay debt", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "can_repay_debt: false", "can_repay_debt: true", 1)}, want: "can_repay_debt must be false"},
+		{name: "legacy cost catalog ID", overrides: map[string]string{"costs.yaml": "catalog_id: old\n" + validCostsYAML}, want: "field catalog_id not found"},
+		{name: "legacy promotion catalog ID", overrides: map[string]string{"promotions.yaml": "catalog_id: old\n" + validPromotionsYAML}, want: "field catalog_id not found"},
+		{name: "legacy promotion debt field", overrides: map[string]string{"promotions.yaml": strings.Replace(validPromotionsYAML, "    max_inviter_rewards: 10\n", "    max_inviter_rewards: 10\n    can_repay_debt: false\n", 1)}, want: "field can_repay_debt not found"},
+		{name: "legacy policy file", overrides: map[string]string{"policy.yaml": "credits_per_cny: 1000\n"}, want: "is no longer supported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,55 +82,6 @@ func TestLoadBundleRequiresCNYCurrencyRate(t *testing.T) {
 	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
 	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "currency_rates.CNY: is required") {
 		t.Fatalf("LoadBundle error = %v, want mandatory CNY rate rejection", err)
-	}
-}
-
-func TestLoadBundleRejectsWeakenedPolicy(t *testing.T) {
-	tests := []struct {
-		name string
-		old  string
-		new  string
-		want string
-	}{
-		{name: "task admission requires zero debt", old: "require_zero_debt: true", new: "require_zero_debt: false", want: "task_admission.require_zero_debt: must be true"},
-		{name: "task admission requires full price", old: "require_full_price: true", new: "require_full_price: false", want: "task_admission.require_full_price: must be true"},
-		{name: "accepted task continues negative", old: "continue_when_balance_negative: true", new: "continue_when_balance_negative: false", want: "accepted_task.continue_when_balance_negative: must be true"},
-		{name: "operation may create debt", old: "operation_charge_may_create_debt: true", new: "operation_charge_may_create_debt: false", want: "accepted_task.operation_charge_may_create_debt: must be true"},
-		{name: "topup repays debt first", old: "repay_debt_first: true", new: "repay_debt_first: false", want: "top_up.repay_debt_first: must be true"},
-		{name: "promotions never repay debt", old: "may_repay_debt: false", new: "may_repay_debt: true", want: "promotions.may_repay_debt: must be false"},
-		{name: "failure reversal enabled", old: "enabled: true", new: "enabled: false", want: "task_failure_reversal.enabled: must be true"},
-		{name: "failure reasons required", old: "reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]", new: "reasons: []", want: "task_failure_reversal.reasons: must not be empty"},
-		{name: "failure reasons constrained", old: "provider_error", new: "user_cancelled", want: "unsupported reversal reason"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := strings.Replace(validPolicyYAML, tt.old, tt.new, 1)
-			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
-			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
-			}
-		})
-	}
-}
-
-func TestLoadBundleRequiresExactReversalReasonSet(t *testing.T) {
-	tests := []struct {
-		name    string
-		reasons string
-		want    string
-	}{
-		{name: "missing reason", reasons: "[platform_error, provider_error, execution_timeout]", want: "must equal the approved set"},
-		{name: "extra reason", reasons: "[platform_error, provider_error, execution_timeout, infrastructure_cancelled, user_cancelled]", want: "must equal the approved set"},
-		{name: "duplicate reason", reasons: "[platform_error, provider_error, execution_timeout, platform_error]", want: "duplicate reason"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := strings.Replace(validPolicyYAML, "[platform_error, provider_error, execution_timeout, infrastructure_cancelled]", tt.reasons, 1)
-			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
-			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
-			}
-		})
 	}
 }
 
@@ -250,33 +204,13 @@ func TestLoadBundleDerivesContentAddressedRetailCatalogID(t *testing.T) {
 		t.Fatal("price change did not change content-addressed catalog ID")
 	}
 
-	changedPolicy := strings.Replace(validPolicyYAML, `version: "2026-07-17"`, `version: "2026-07-18"`, 1)
-	policyBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedPolicy}))
-	if err != nil {
-		t.Fatalf("LoadBundle(changed policy): %v", err)
-	}
-	if policyBundle.Products.CatalogID == first.Products.CatalogID {
-		t.Fatal("billing policy change did not change content-addressed catalog ID")
-	}
-
-	changedCreditsPerCNY := strings.Replace(validPolicyYAML, "credits_per_cny: 1000", "credits_per_cny: 2000", 1)
-	creditsBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedCreditsPerCNY}))
+	changedCreditsPerCNY := strings.Replace(validEconomicsYAML, "credits_per_cny: 1000", "credits_per_cny: 2000", 1)
+	creditsBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"economics.yaml": changedCreditsPerCNY}))
 	if err != nil {
 		t.Fatalf("LoadBundle(changed credits per CNY): %v", err)
 	}
 	if creditsBundle.Products.CatalogID == first.Products.CatalogID {
 		t.Fatal("credits_per_cny change did not change content-addressed catalog ID")
-	}
-
-	changedReversalOrder := strings.Replace(validPolicyYAML,
-		"reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]",
-		"reasons: [provider_error, platform_error, execution_timeout, infrastructure_cancelled]", 1)
-	reversalBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedReversalOrder}))
-	if err != nil {
-		t.Fatalf("LoadBundle(changed reversal policy): %v", err)
-	}
-	if reversalBundle.Products.CatalogID == first.Products.CatalogID {
-		t.Fatal("task failure reversal policy change did not change content-addressed catalog ID")
 	}
 }
 
@@ -383,20 +317,12 @@ skus:
 	}
 }
 
-func TestLoadBundleCanonicalizesCatalogAndCurrencyIdentities(t *testing.T) {
-	policy := strings.Replace(validPolicyYAML, `version: "2026-07-17"`, `version: " 2026-07-17 "`, 1)
-	costs := strings.Replace(validCostsYAML, "catalog_id: provider-cost-v1", `catalog_id: " provider-cost-v1 "`, 1)
-	costs = strings.Replace(costs, "  CNY: \"1.00\"", `  " CNY ": "1.00"`, 1)
+func TestLoadBundleCanonicalizesCurrencyIdentities(t *testing.T) {
+	costs := strings.Replace(validCostsYAML, "  CNY: \"1.00\"", `  " CNY ": "1.00"`, 1)
 	costs = strings.Replace(costs, `currency: "CNY"`, `currency: " CNY "`, 1)
-	promotions := strings.Replace(validPromotionsYAML, "catalog_id: promotion-v1", `catalog_id: " promotion-v1 "`, 1)
-	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{
-		"policy.yaml": policy, "costs.yaml": costs, "promotions.yaml": promotions,
-	}))
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
 	if err != nil {
 		t.Fatalf("LoadBundle: %v", err)
-	}
-	if bundle.Policy.Version != "2026-07-17" || bundle.Costs.CatalogID != "provider-cost-v1" || bundle.Promotions.CatalogID != "promotion-v1" {
-		t.Fatalf("catalog identities not canonical: policy=%q costs=%q promotions=%q", bundle.Policy.Version, bundle.Costs.CatalogID, bundle.Promotions.CatalogID)
 	}
 	if _, ok := bundle.Costs.CurrencyRates["CNY"]; !ok || bundle.Costs.Models["provider/model"].Currency != "CNY" {
 		t.Fatalf("currency identities not canonical: rates=%#v model=%#v", bundle.Costs.CurrencyRates, bundle.Costs.Models["provider/model"])
@@ -444,25 +370,24 @@ func TestLoadBundleRejectsCanonicalDuplicateCostModelIDs(t *testing.T) {
 }
 
 func TestLoadBundleCanonicalizesReferralProgramIDs(t *testing.T) {
-	promotions := strings.Replace(validPromotionsYAML, "id: referral-v1", `id: " referral-v1 "`, 1)
+	promotions := strings.Replace(validPromotionsYAML, "id: referral-first-topup-v1", `id: " referral-first-topup-v1 "`, 1)
 	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"promotions.yaml": promotions}))
 	if err != nil {
 		t.Fatalf("LoadBundle: %v", err)
 	}
-	if got := bundle.Promotions.Programs[0].ID; got != "referral-v1" {
-		t.Fatalf("program id = %q, want canonical referral-v1", got)
+	if got := bundle.Promotions.Programs[0].ID; got != ReferralFirstTopUpProgramID {
+		t.Fatalf("program id = %q, want canonical %s", got, ReferralFirstTopUpProgramID)
 	}
 }
 
 func TestLoadBundleRejectsCanonicalDuplicateReferralProgramIDs(t *testing.T) {
-	promotions := validPromotionsYAML + `  - id: " referral-v1 "
+	promotions := validPromotionsYAML + `  - id: " referral-first-topup-v1 "
     trigger: invitee_first_paid_topup
     minimum_topup_cny: "10.00"
     inviter_credits: 1000
     invitee_credits: 1000
     expires_after: 30d
     max_inviter_rewards: 10
-    can_repay_debt: false
 `
 	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"promotions.yaml": promotions}))
 	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "duplicate referral program id") {
@@ -471,17 +396,6 @@ func TestLoadBundleRejectsCanonicalDuplicateReferralProgramIDs(t *testing.T) {
 }
 
 func TestLoadBundleCanonicalizesRemainingEnumIdentifiers(t *testing.T) {
-	t.Run("reversal reason", func(t *testing.T) {
-		policy := strings.Replace(validPolicyYAML, "platform_error", `" platform_error "`, 1)
-		bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": policy}))
-		if err != nil {
-			t.Fatalf("LoadBundle: %v", err)
-		}
-		if got := bundle.Policy.TaskFailureReversal.Reasons[0]; got != "platform_error" {
-			t.Fatalf("reversal reason = %q, want canonical platform_error", got)
-		}
-	})
-
 	t.Run("pricing type", func(t *testing.T) {
 		costs := strings.Replace(validCostsYAML, "pricing_type: token", `pricing_type: " token "`, 1)
 		bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"costs.yaml": costs}))
@@ -529,8 +443,7 @@ func TestLoadBundleValidatesCostMetadataAndTokenProfile(t *testing.T) {
 }
 
 func TestLoadBundleValidatesOutputPixelTiers(t *testing.T) {
-	validPixelCosts := `catalog_id: provider-cost-v1
-currency_rates:
+	validPixelCosts := `currency_rates:
   CNY: "1.00"
 models:
   provider/image:
@@ -588,7 +501,7 @@ func TestLoadBundleRequiresAllFiles(t *testing.T) {
 
 func TestLoadBundleRequiresExactMicroCNYCreditUnit(t *testing.T) {
 	dir := writeBundleFixture(t, map[string]string{
-		"policy.yaml": strings.Replace(validPolicyYAML, "credits_per_cny: 1000", "credits_per_cny: 3000", 1),
+		"economics.yaml": strings.Replace(validEconomicsYAML, "credits_per_cny: 1000", "credits_per_cny: 3000", 1),
 	})
 	_, err := LoadBundle(dir)
 	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "must divide 1000000 exactly") {
@@ -600,7 +513,7 @@ func writeBundleFixture(t *testing.T, overrides map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"policy.yaml":     validPolicyYAML,
+		"economics.yaml":  validEconomicsYAML,
 		"products.yaml":   validProductsYAML,
 		"costs.yaml":      validCostsYAML,
 		"promotions.yaml": validPromotionsYAML,
@@ -616,21 +529,7 @@ func writeBundleFixture(t *testing.T, overrides map[string]string) string {
 	return dir
 }
 
-const validPolicyYAML = `version: "2026-07-17"
-credits_per_cny: 1000
-task_admission:
-  require_zero_debt: true
-  require_full_price: true
-accepted_task:
-  continue_when_balance_negative: true
-  operation_charge_may_create_debt: true
-top_up:
-  repay_debt_first: true
-promotions:
-  may_repay_debt: false
-task_failure_reversal:
-  enabled: true
-  reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]
+const validEconomicsYAML = `credits_per_cny: 1000
 `
 
 const validProductsYAML = `currency: credits
@@ -644,8 +543,7 @@ skus:
     delivery: verified
 `
 
-const validCostsYAML = `catalog_id: provider-cost-v1
-currency_rates:
+const validCostsYAML = `currency_rates:
   USD: "7.20"
   CNY: "1.00"
 models:
@@ -661,14 +559,12 @@ models:
     effective_at: "2026-07-17T00:00:00Z"
 `
 
-const validPromotionsYAML = `catalog_id: promotion-v1
-programs:
-  - id: referral-v1
+const validPromotionsYAML = `programs:
+  - id: referral-first-topup-v1
     trigger: invitee_first_paid_topup
     minimum_topup_cny: "10.00"
     inviter_credits: 1000
     invitee_credits: 1000
     expires_after: 30d
     max_inviter_rewards: 10
-    can_repay_debt: false
 `

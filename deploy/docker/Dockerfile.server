@@ -22,7 +22,7 @@ RUN set -eux; \
     chown -R 1000:1000 /app/data
 
 COPY --from=builder /anban-creator-server /app/anban-creator-server
-COPY --from=builder /build/server/billing/policy.yaml /app/conf/billing/policy.yaml
+COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml
 COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml

@@ -64,16 +64,15 @@ func (s *BillingReferralService) TopUp(ctx context.Context, req TopUpRequest) (*
 	}
 
 	program, hasProgram := s.activeProgram()
-	qualifies := hasProgram && qualifiesReferralTopUp(req.Credits, program.MinimumTopUpCNY, s.bundle.Policy.CreditsPerCNY)
+	qualifies := hasProgram && qualifiesReferralTopUp(req.Credits, program.MinimumTopUpCNY, s.bundle.Economics.CreditsPerCNY)
 	var candidate referralCandidate
-	var existing *model.BillingReferralIssue
-	if qualifies {
-		existing, err = s.findReferralIssueCandidate(ctx, req.UserID, program.ID)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			existing = nil
+	existing, err := s.findReferralIssueCandidate(ctx, req.UserID, billing.ReferralFirstTopUpProgramID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		existing = nil
+		if qualifies {
 			candidate, err = s.resolveReferralCandidate(ctx, req.UserID)
 			if err != nil {
 				return nil, err
@@ -82,12 +81,11 @@ func (s *BillingReferralService) TopUp(ctx context.Context, req TopUpRequest) (*
 	}
 	var result *BillingReferralTopUpResult
 	err = s.wallet.withTx(ctx, func(tx repository.Repository) error {
+		if existing != nil {
+			return s.topUpWithExistingReferral(ctx, tx, req, qualifies, existing, &result)
+		}
 		if !qualifies {
 			return s.topUpWithoutReferral(ctx, tx, req, &result)
-		}
-
-		if existing != nil {
-			return s.topUpWithExistingReferral(ctx, tx, req, program, existing, &result)
 		}
 
 		lockedUsers, err := lockReferralUsers(ctx, tx.Users(), req.UserID, candidate.InviterID)
@@ -211,7 +209,7 @@ func (s *BillingReferralService) topUpWithoutReferral(ctx context.Context, tx re
 	return nil
 }
 
-func (s *BillingReferralService) topUpWithExistingReferral(ctx context.Context, tx repository.Repository, req TopUpRequest, program billing.ReferralProgram, existing *model.BillingReferralIssue, result **BillingReferralTopUpResult) error {
+func (s *BillingReferralService) topUpWithExistingReferral(ctx context.Context, tx repository.Repository, req TopUpRequest, qualifies bool, existing *model.BillingReferralIssue, result **BillingReferralTopUpResult) error {
 	invitee, err := tx.Users().LockByID(ctx, req.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -219,9 +217,8 @@ func (s *BillingReferralService) topUpWithExistingReferral(ctx context.Context, 
 		}
 		return err
 	}
-	if existing.InviteeUserID != req.UserID || existing.ProgramID != program.ID ||
-		existing.CatalogID != s.bundle.Promotions.CatalogID || existing.InviterUserID == req.UserID ||
-		strings.TrimSpace(invitee.InvitedBy) != existing.InviterUserID {
+	if existing.InviteeUserID != req.UserID || existing.ProgramID != billing.ReferralFirstTopUpProgramID ||
+		existing.InviterUserID == req.UserID {
 		return ErrBillingConflict
 	}
 	topUp, err := s.wallet.topUpInTxAfterUserLock(ctx, tx, req)
@@ -229,12 +226,21 @@ func (s *BillingReferralService) topUpWithExistingReferral(ctx context.Context, 
 		return err
 	}
 	if existing.QualifyingTopUpEntryID == topUp.EntryID {
-		wantFingerprint := referralFingerprint(req, topUp.EntryID, existing.InviterUserID, program.ID, s.bundle.Promotions.CatalogID)
-		if existing.RequestFingerprint != wantFingerprint {
+		wantFingerprint := referralFingerprint(req, topUp.EntryID, existing.InviterUserID, existing.ProgramID, existing.CatalogID)
+		if strings.TrimSpace(invitee.InvitedBy) != existing.InviterUserID || existing.RequestFingerprint != wantFingerprint {
 			return ErrBillingConflict
 		}
+		*result = &BillingReferralTopUpResult{TopUp: topUp, Referral: existing}
+		return nil
 	}
-	*result = &BillingReferralTopUpResult{TopUp: topUp, Referral: existing}
+	if qualifies {
+		if strings.TrimSpace(invitee.InvitedBy) != existing.InviterUserID {
+			return ErrBillingConflict
+		}
+		*result = &BillingReferralTopUpResult{TopUp: topUp, Referral: existing}
+		return nil
+	}
+	*result = &BillingReferralTopUpResult{TopUp: topUp}
 	return nil
 }
 
@@ -251,11 +257,11 @@ func (s *BillingReferralService) issueOrReplay(ctx context.Context, repo reposit
 	existing, err := repo.FindReferralIssue(ctx, req.UserID, program.ID)
 	if err == nil {
 		if existing.InviteeUserID != req.UserID || existing.InviterUserID != inviterID ||
-			existing.ProgramID != program.ID || existing.CatalogID != s.bundle.Promotions.CatalogID {
+			existing.ProgramID != program.ID {
 			return nil, ErrBillingConflict
 		}
 		if existing.QualifyingTopUpEntryID == topUp.EntryID {
-			wantFingerprint := referralFingerprint(req, topUp.EntryID, inviterID, program.ID, s.bundle.Promotions.CatalogID)
+			wantFingerprint := referralFingerprint(req, topUp.EntryID, inviterID, existing.ProgramID, existing.CatalogID)
 			if existing.RequestFingerprint != wantFingerprint {
 				return nil, ErrBillingConflict
 			}
