@@ -209,33 +209,28 @@ func (s *TaskService) prependVerifiedReferenceAttachment(ctx context.Context, us
 	if s.referenceAssets == nil {
 		return nil, ErrReferenceAssetUnavailable
 	}
-	asset, err := s.referenceAssets.RequireOwned(ctx, userID, assetID, []string{DirectUploadPurposeTaskReference})
+	asset, err := s.referenceAssets.RequireOwned(ctx, userID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment})
 	if err != nil {
 		return nil, fmt.Errorf("resolve cloned reference attachment: %w", err)
 	}
-	for i, attachment := range attachments {
+	firstInstruction := ""
+	foundReference := false
+	filtered := make([]model.EntryAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
 		if strings.TrimSpace(attachment.AssetID) == asset.ID {
-			reference := model.EntryAttachment{
-				AssetID: asset.ID, Type: "image", FileName: asset.FileName,
-				ContentType: asset.ContentType, Size: asset.Size, Instruction: attachment.Instruction,
+			if !foundReference {
+				firstInstruction = attachment.Instruction
+				foundReference = true
 			}
-			if i == 0 {
-				normalized := cloneEntryAttachments(attachments)
-				normalized[0] = reference
-				return normalized, nil
-			}
-			normalized := make([]model.EntryAttachment, 0, len(attachments))
-			normalized = append(normalized, reference)
-			normalized = append(normalized, attachments[:i]...)
-			normalized = append(normalized, attachments[i+1:]...)
-			return normalized, nil
+			continue
 		}
+		filtered = append(filtered, attachment)
 	}
 	reference := model.EntryAttachment{
 		AssetID: asset.ID, Type: "image", FileName: asset.FileName,
-		ContentType: asset.ContentType, Size: asset.Size,
+		ContentType: asset.ContentType, Size: asset.Size, Instruction: firstInstruction,
 	}
-	return append([]model.EntryAttachment{reference}, attachments...), nil
+	return append([]model.EntryAttachment{reference}, filtered...), nil
 }
 
 // ResolveCloneInputSource returns the trusted root task/project pair whose

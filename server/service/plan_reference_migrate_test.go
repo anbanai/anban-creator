@@ -72,8 +72,9 @@ func TestMigratePlanReferenceAttachments(t *testing.T) {
 		runPlanReferenceMigration(t, db)
 
 		got := findPlanReferenceMigratePlan(t, db, "plan-existing-asset")
-		if !reflect.DeepEqual(got.InputAttachments.Data(), existing) {
-			t.Fatalf("attachments = %#v, want unchanged %#v", got.InputAttachments.Data(), existing)
+		want := []model.EntryAttachment{{AssetID: asset.ID, Type: "image", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size, Instruction: "keep metadata"}, {Type: "text", Text: "keep first"}}
+		if !reflect.DeepEqual(got.InputAttachments.Data(), want) {
+			t.Fatalf("attachments = %#v, want canonical %#v", got.InputAttachments.Data(), want)
 		}
 		if got.ReferenceImageAssetID != "" {
 			t.Fatalf("reference = %q, want cleared", got.ReferenceImageAssetID)

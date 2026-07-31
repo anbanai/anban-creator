@@ -10,6 +10,8 @@ import {
 } from 'react'
 import {
   ArrowUpIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
   FileIcon,
   FilePenLineIcon,
   LoaderCircleIcon,
@@ -52,6 +54,7 @@ import {
   AttachmentRejectionReason,
   classifyPromptAttachment,
 } from './attachment-admission'
+import { hasOrdinalMaterialReference, materialOrdinals } from './attachment-order'
 import {
   AttachmentPreviewDialog,
   type AttachmentPreviewOwner,
@@ -137,6 +140,11 @@ interface AttachmentTileProps {
   disabled: boolean
   previewSource?: string
   onPreview: (trigger: HTMLButtonElement) => void
+  ordinal: { index: number; typeIndex: number; label: string }
+  position: number
+  total: number
+  onMove: (target: number) => void
+  onRemove: () => void
 }
 
 function AttachmentTile({
@@ -145,6 +153,11 @@ function AttachmentTile({
   disabled,
   previewSource,
   onPreview,
+  ordinal,
+  position,
+  total,
+  onMove,
+  onRemove,
 }: AttachmentTileProps) {
   const failed = attachment.status === 'failed'
   return (
@@ -152,6 +165,7 @@ function AttachmentTile({
       data-slot="agent-prompt-attachment"
       className="group/attachment relative size-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
     >
+      <span className="absolute left-1 top-1 z-10 rounded bg-background/90 px-1 text-[10px] font-medium">{ordinal.label}</span>
       <Button
         type="button"
         variant="ghost"
@@ -242,6 +256,8 @@ function AttachmentTile({
         </Popover>
 
         <span className="ml-auto flex items-center gap-1">
+          <Tooltip><TooltipTrigger render={<InputGroupButton size="icon-xs" aria-label={`将 ${ordinal.label} 前移`} disabled={disabled || position === 0} onClick={() => onMove(position - 1)} className="bg-background/90 shadow-sm" />}><ArrowLeftIcon /></TooltipTrigger><TooltipContent>前移</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger render={<InputGroupButton size="icon-xs" aria-label={`将 ${ordinal.label} 后移`} disabled={disabled || position === total - 1} onClick={() => onMove(position + 1)} className="bg-background/90 shadow-sm" />}><ArrowRightIcon /></TooltipTrigger><TooltipContent>后移</TooltipContent></Tooltip>
           {attachment.status === 'failed' ? (
             <Tooltip>
               <TooltipTrigger
@@ -268,7 +284,7 @@ function AttachmentTile({
                   size="icon-xs"
                   aria-label={`删除 ${attachment.fileName}`}
                   disabled={disabled}
-                  onClick={() => controller.remove(attachment.id)}
+                  onClick={onRemove}
                   className="rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/80 hover:text-background"
                 />
               }
@@ -310,6 +326,7 @@ export function AgentPromptInput({
   const [locallySubmitting, setLocallySubmitting] = useState(false)
   const [rejectionStatus, setRejectionStatus] = useState('')
   const [submitErrorStatus, setSubmitErrorStatus] = useState('')
+  const [orderStatus, setOrderStatus] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string>()
   const pendingRef = useRef(false)
@@ -332,6 +349,10 @@ export function AgentPromptInput({
     const maxBytes = attachmentPolicy.maxBytes?.[type]
     return maxBytes === undefined || file.size <= maxBytes
   }, [attachmentPolicy])
+  const ordinals = materialOrdinals(value.attachments)
+  const warnOrderChange = useCallback(() => {
+    if (hasOrdinalMaterialReference(value.prompt)) setOrderStatus('素材顺序已变化，请检查提示词中的图片或附件编号。')
+  }, [value.prompt])
 
   const acceptsItemType = useCallback((mime: string) => {
     const type = classifyPromptAttachment(new File([], 'dropped-file', { type: mime }))
@@ -448,6 +469,11 @@ export function AgentPromptInput({
                     disabled={disabled}
                     previewSource={attachmentController.previewSource(item.id)}
                     onPreview={(trigger) => openPreview(item.id, trigger)}
+                    ordinal={ordinals[value.attachments.indexOf(item)]}
+                    position={value.attachments.indexOf(item)}
+                    total={value.attachments.length}
+                    onMove={(target) => { attachmentController.move?.(item.id, target); warnOrderChange() }}
+                    onRemove={() => { attachmentController.remove(item.id); warnOrderChange() }}
                   />
                 ))}
               </div>
@@ -539,7 +565,7 @@ export function AgentPromptInput({
         />
 
         <div role="alert" aria-live="polite" aria-atomic="true" className="sr-only">
-          {rejectionStatus}
+          {rejectionStatus || orderStatus}
         </div>
         {submitErrorStatus ? (
           <div role="alert" aria-live="assertive" aria-atomic="true" className="sr-only">

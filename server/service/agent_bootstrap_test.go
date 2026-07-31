@@ -921,6 +921,46 @@ func TestAgentBootstrapAttachmentTypeIndexPreservesSourceOrder(t *testing.T) {
 	}
 }
 
+func TestAgentBootstrapAttachmentIndexIsCompactAroundResumeEntries(t *testing.T) {
+	svc := &AgentBootstrapService{}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	attachments := []model.EntryAttachment{
+		{Type: "text", Text: "first", FileName: "first.txt"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "resume"},
+		{Type: "image", Text: "second", FileName: "second.png"},
+	}
+	files, err := svc.buildAttachmentFiles(t.Context(), "execution-1", task, attachments, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index []struct {
+		Index     int    `json:"index"`
+		TypeIndex int    `json:"type_index"`
+		Path      string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(files[len(files)-1].Text), &index); err != nil {
+		t.Fatal(err)
+	}
+	if len(index) != 2 || index[0].Index != 1 || index[1].Index != 2 || index[0].TypeIndex != 1 || index[1].TypeIndex != 1 {
+		t.Fatalf("index=%#v", index)
+	}
+}
+
+func TestAgentBootstrapAcceptsHistoricalAIEntryReferenceAsset(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	asset := referenceAssetFixture("asset-historical", task.UserID, DirectUploadPurposeAIEntryAttachment)
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	files, err := svc.buildAttachmentFiles(t.Context(), "execution-1", task, []model.EntryAttachment{{AssetID: asset.ID, URL: "https://attacker.invalid/x", Key: "victim/key"}}, time.Now().Add(time.Hour))
+	if err != nil || len(files) != 2 || files[0].DownloadURL == "" || len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("err=%v files=%#v signed=%#v", err, files, store.signedKeys)
+	}
+}
+
 func TestAgentBootstrapAssetAttachmentUsesRepositoryIdentity(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}

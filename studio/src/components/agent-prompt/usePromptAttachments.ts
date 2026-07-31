@@ -49,7 +49,7 @@ export interface PromptAttachmentsController {
   addFiles: (files: readonly File[]) => AttachmentAdmissionResult
   retry: (id: string) => void
   remove: (id: string) => void
-  move: (id: string, targetIndex: number) => void
+  move?: (id: string, targetIndex: number) => void
   updateInstruction: (id: string, instruction: string) => void
   reset: (attachments: readonly InputAttachment[]) => void
   clear: () => void
@@ -102,7 +102,6 @@ function serializeUploadedAttachment(attachment: PromptAttachment): InputAttachm
     if (attachment.role !== undefined) serialized.role = attachment.role
     return serialized
   }
-
   if (!attachment.uploadId || !attachment.key) return null
 
   const serialized: InputAttachment = {
@@ -392,8 +391,8 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     addFiles,
     retry,
     remove,
-    move,
     updateInstruction,
+    move,
     reset,
     clear,
     uploading: renderedAttachments.some((attachment) => attachment.status === 'uploading'),

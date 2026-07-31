@@ -36,25 +36,26 @@ func MigratePlanReferenceAttachments(ctx context.Context, db *gorm.DB, log *zero
 			if err := tx.Where("id = ? AND user_id = ?", assetID, plan.UserID).First(&asset).Error; err != nil {
 				return fmt.Errorf("validate reference asset for plan %q: %w", plan.ID, err)
 			}
-			if err := validateOwnedReferenceAsset(&asset, plan.UserID, []string{DirectUploadPurposeTaskReference}); err != nil {
+			if err := validateOwnedReferenceAsset(&asset, plan.UserID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}); err != nil {
 				return fmt.Errorf("validate reference asset for plan %q: %w", plan.ID, err)
 			}
 
 			attachments := plan.InputAttachments.Data()
-			alreadyPresent := false
+			firstInstruction := ""
+			foundReference := false
+			filtered := make([]model.EntryAttachment, 0, len(attachments))
 			for _, attachment := range attachments {
 				if strings.TrimSpace(attachment.AssetID) == asset.ID {
-					alreadyPresent = true
-					break
+					if !foundReference {
+						firstInstruction = attachment.Instruction
+						foundReference = true
+					}
+					continue
 				}
+				filtered = append(filtered, attachment)
 			}
-			if !alreadyPresent {
-				migratedAttachment := model.EntryAttachment{
-					AssetID: asset.ID, Type: "image", FileName: asset.FileName,
-					ContentType: asset.ContentType, Size: asset.Size,
-				}
-				attachments = append([]model.EntryAttachment{migratedAttachment}, attachments...)
-			}
+			migratedAttachment := model.EntryAttachment{AssetID: asset.ID, Type: "image", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size, Instruction: firstInstruction}
+			attachments = append([]model.EntryAttachment{migratedAttachment}, filtered...)
 
 			if err := tx.Model(&model.Plan{}).Where("id = ?", plan.ID).Updates(map[string]any{
 				"input_attachments":        datatypes.NewJSONType(attachments),

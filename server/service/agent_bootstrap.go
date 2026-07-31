@@ -625,6 +625,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 	}
 	index := make([]indexEntry, 0, len(attachments))
 	typeIndexes := make(map[string]int)
+	globalIndex := 0
 	for i, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
 			if strings.TrimSpace(attachment.Text) == "" {
@@ -641,7 +642,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		var asset *model.Asset
 		if assetID != "" {
 			var err error
-			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference})
+			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment})
 			if err != nil {
 				return nil, fmt.Errorf("resolve attachment asset %q: %w", assetID, err)
 			}
@@ -693,8 +694,9 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		}
 		files = append(files, file)
 		if attachment.Role != model.EntryAttachmentRoleResumeFile {
+			globalIndex++
 			typeIndexes[attachment.Type]++
-			index = append(index, indexEntry{Index: i + 1, TypeIndex: typeIndexes[attachment.Type], Type: attachment.Type, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel})
+			index = append(index, indexEntry{Index: globalIndex, TypeIndex: typeIndexes[attachment.Type], Type: attachment.Type, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel})
 		}
 	}
 	if len(index) > 0 {

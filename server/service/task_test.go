@@ -1214,6 +1214,52 @@ func TestCloneMovesDuplicateReferenceAttachmentToFront(t *testing.T) {
 	}
 }
 
+func TestCloneRemovesAllDuplicateReferenceAttachmentsPreservingFirstInstruction(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID}
+	source.SetInputAttachments([]model.EntryAttachment{
+		{AssetID: asset.ID, Type: "document", Instruction: "first instruction", FileName: "forged-a.pdf"},
+		{Type: "text", FileName: "brief.txt"},
+		{AssetID: asset.ID, Type: "image", Instruction: "second instruction", FileName: "forged-b.png"},
+		{Type: "document", FileName: "last.pdf"},
+	})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments := clones[0].InputAttachments.Data()
+	if len(attachments) != 3 || attachments[0].AssetID != asset.ID || attachments[0].Instruction != "first instruction" || attachments[1].FileName != "brief.txt" || attachments[2].FileName != "last.pdf" {
+		t.Fatalf("attachments = %#v", attachments)
+	}
+}
+
+func TestCloneAcceptsHistoricalAIEntryReferenceAsset(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil || len(clones[0].InputAttachments.Data()) != 1 || clones[0].InputAttachments.Data()[0].AssetID != asset.ID {
+		t.Fatalf("clone err=%v attachments=%#v", err, clones[0].InputAttachments.Data())
+	}
+}
+
 func TestCloneEditableOverridesConvertReferenceToPrependedAttachment(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
