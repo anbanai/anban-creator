@@ -43,8 +43,11 @@ func setupModelConfigHandlerTest(t *testing.T) *fiber.App {
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.UserModelConfig{}); err != nil {
+	if err := db.AutoMigrate(&model.UserModelConfig{}, &model.User{}); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
+	}
+	if err := db.Create(&model.User{ID: "user-1", Email: "user-1@test.invalid", Password: "test", InviteCode: "model-config", Tier: model.TierEnterprise}).Error; err != nil {
+		t.Fatalf("failed to create test user: %v", err)
 	}
 
 	repo := repository.New(db)
