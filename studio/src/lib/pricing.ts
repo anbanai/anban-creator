@@ -12,6 +12,19 @@ export function taskCostFor(
   )?.price_credits
 }
 
+export function executionProfilePriceInfo(
+  catalog: BillingCatalog | undefined,
+  type: string,
+  profile: AgentExecutionProfileID,
+  priceUnit: 'task' | 'run' = 'task',
+) {
+  const chargePolicy = priceUnit === 'run' ? 'task_admission' : 'task_admission'
+  const price = catalog?.skus.find((sku) => sku.charge_policy === chargePolicy && sku.operation === `task.${type}` && sku.execution_profile === profile)?.price_credits
+  const prices = catalog?.skus.filter((sku) => sku.charge_policy === chargePolicy && sku.operation === `task.${type}` && sku.price_credits > 0).map((sku) => sku.price_credits) ?? []
+  const baseline = prices.length ? Math.min(...prices) : undefined
+  return { price, multiplier: price !== undefined && baseline ? price / baseline : undefined }
+}
+
 export function cheapestAvailableExecutionProfile(
   profiles: AgentExecutionProfileCapability[] | undefined,
   catalog: BillingCatalog | undefined,

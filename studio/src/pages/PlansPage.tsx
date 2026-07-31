@@ -47,8 +47,6 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
-import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
@@ -92,7 +90,6 @@ export default function PlansPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
-  const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
@@ -100,7 +97,6 @@ export default function PlansPage() {
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
   const attachmentHydratingRef = useRef(false)
-  const referenceTouchedRef = useRef(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -298,8 +294,6 @@ export default function PlansPage() {
       : 'seednote'
     const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
     setEditingPlan(null)
-    referenceTouchedRef.current = false
-    setReferenceUploading(false)
     setMontageUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
@@ -336,8 +330,6 @@ export default function PlansPage() {
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
     setAttachmentSubmitError('')
-    referenceTouchedRef.current = false
-    setReferenceUploading(false)
     setMontageUploading(false)
     form.reset(planToFormValues(plan))
     attachmentsTouchedRef.current = false
@@ -359,8 +351,6 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
-    referenceTouchedRef.current = false
-    setReferenceUploading(false)
     setMontageUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
@@ -425,21 +415,15 @@ export default function PlansPage() {
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
-    const referenceImage = referenceSelectionFromValue(values.reference_image)
-
     if (editingPlan) {
-      const updatePayload = referenceTouchedRef.current
-        ? { ...payload, reference_image: referenceImage }
-        : payload
-      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: updatePayload })).catch(() => {})
+      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload })).catch(() => {})
     } else {
-      const createPayload = referenceImage ? { ...payload, reference_image: referenceImage } : payload
-      await submit(async () => createMutation.mutateAsync(createPayload)).catch(() => {})
+      await submit(async () => createMutation.mutateAsync(payload)).catch(() => {})
     }
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
+    if (attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -683,6 +667,9 @@ export default function PlansPage() {
                       value={field.value}
                       onChange={field.onChange}
                       loading={executionProfilesQuery.isLoading}
+                      catalog={billingCatalog}
+                      taskType={form.watch('type')}
+                      priceUnit="run"
                     />
                   </FormControl>
                   <FormMessage />
@@ -718,27 +705,6 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />}
-
-              {!isMontagePlan && (
-                <FormField control={form.control} name="reference_image" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>任务参考图</FormLabel>
-                    <FormControl>
-                      <ReferenceAssetUpload
-                        value={field.value ?? null}
-                        onChange={(value) => {
-                          referenceTouchedRef.current = true
-                          field.onChange(value)
-                        }}
-                        purpose="task_reference"
-                        onUploadingChange={setReferenceUploading}
-                      />
-                    </FormControl>
-                    <FormDescription>每次执行使用该参考图；留空则继承项目设置。</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
 
               {isMontagePlan && (
                 <MontageCreationPanel
@@ -950,8 +916,8 @@ export default function PlansPage() {
               type="submit"
               form="plan-form"
               loading={isSubmitting}
-              disabled={referenceUploading
-                || !watchedExecutionProfile
+              disabled={
+                !watchedExecutionProfile
                 || executionProfilesQuery.isError
                 || !selectedExecutionProfileAvailable
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined

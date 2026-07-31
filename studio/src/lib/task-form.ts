@@ -119,6 +119,17 @@ function taskReferenceSelection(task: Task): ReferenceImageSelection | null {
 
 export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
   const ecommerce = task.ecommerce
+  const clonedAttachments = (task.input_attachments ?? [])
+    .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
+    .map((attachment) => cloneValue(attachment))
+  const directReference = task.reference_image
+  if (directReference && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id) {
+    const withoutDuplicate = clonedAttachments.filter((attachment) => attachment.asset_id !== directReference.asset_id)
+    clonedAttachments.splice(0, clonedAttachments.length, {
+      type: 'image', asset_id: directReference.asset_id, file_name: directReference.file_name,
+      content_type: directReference.content_type, size: directReference.size,
+    }, ...withoutDuplicate)
+  }
 
   return {
     project_id: task.project_id,
@@ -131,9 +142,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     image_model_key: task.image_model_key ?? '',
     skip_reference_image: task.skip_reference_image ?? false,
     reference_image: taskReferenceSelection(task),
-    input_attachments: (task.input_attachments ?? [])
-      .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
-      .map((attachment) => cloneValue(attachment)),
+    input_attachments: clonedAttachments,
     watermark: task.watermark ?? false,
     goal: task.goal ?? '',
     goal_mode: task.goal_mode ?? false,
@@ -167,11 +176,6 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
   const goal = values.goal?.trim() || undefined
   const sellingPoints = values.selling_points?.trim() || undefined
   const hasActiveModules = Object.values(values.selected_modules ?? {}).some((quantity) => quantity >= 1)
-  const referenceImage = values.reference_image
-    ? cloneValue(values.reference_image)
-    : values.skip_reference_image
-      ? null
-      : undefined
   return {
     type: values.type,
     execution_profile: values.execution_profile as AgentExecutionProfileID,
@@ -182,7 +186,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     image_ratio: values.image_ratio || undefined,
     image_model_key: values.image_model_key || undefined,
     skip_reference_image: values.skip_reference_image,
-    ...(referenceImage !== undefined ? { reference_image: referenceImage } : {}),
+    ...(values.skip_reference_image ? { reference_image: null } : {}),
     input_attachments: cloneValue(values.input_attachments),
     watermark: values.watermark,
     ...(values.type !== 'ecommerce'

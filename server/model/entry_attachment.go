@@ -4,6 +4,7 @@ package model
 // First-version AI parsing only consumes metadata and URLs; agents materialize
 // the files into the task workspace before deeper understanding.
 type EntryAttachment struct {
+	AssetID     string `json:"asset_id,omitempty"`
 	Type        string `json:"type,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Text        string `json:"text,omitempty"`

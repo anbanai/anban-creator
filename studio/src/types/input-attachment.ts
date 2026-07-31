@@ -7,6 +7,8 @@ export type InputAttachmentType =
 
 export interface InputAttachment {
   type: InputAttachmentType
+  /** Server-verified asset identity for legacy/project-backed materials. */
+  asset_id?: string
   /** Legacy server-owned file URL. New composer attachments use upload_id + key. */
   url?: string
   /** Legacy inline text attachment. New composer files remain key-backed. */
@@ -39,6 +41,7 @@ export interface PromptAttachment {
   error?: string
   uploadId?: string
   key?: string
+  assetId?: string
   instruction?: string
   role?: string
 }

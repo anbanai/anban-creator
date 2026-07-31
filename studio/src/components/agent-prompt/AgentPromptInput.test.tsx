@@ -62,6 +62,7 @@ function controller(
     retry: vi.fn(),
     remove: vi.fn(),
     updateInstruction: vi.fn(),
+    move: vi.fn(),
     reset: vi.fn(),
     clear: vi.fn(),
     uploading: false,

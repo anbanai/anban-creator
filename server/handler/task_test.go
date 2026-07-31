@@ -1221,7 +1221,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
 		}
-		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
 			t.Fatalf("shared overrides = %#v", task)
 		}
 		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
@@ -1230,7 +1230,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
-		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
+		if got := task.InputAttachments.Data(); len(got) != 2 || got[0].AssetID != referenceAsset.ID || got[1].Text != "validated attachment" {
 			t.Fatalf("attachments = %#v", got)
 		}
 		if task.InputSourceTaskID != source.ID || task.InputSourceProjectID != source.ProjectID {
@@ -1327,8 +1327,8 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	if err != nil {
 		t.Fatalf("find first clone: %v", err)
 	}
-	if firstClone.ReferenceImageAssetID != inherited.ID {
-		t.Fatalf("first persisted clone reference = %q, want %q", firstClone.ReferenceImageAssetID, inherited.ID)
+	if firstClone.ReferenceImageAssetID != "" {
+		t.Fatalf("first persisted clone dedicated reference = %q, want cleared", firstClone.ReferenceImageAssetID)
 	}
 	firstClone.Status = model.TaskStatusCompleted
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
@@ -1348,8 +1348,8 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 		t.Fatalf("decode exact clone-of-clone: %v", err)
 	}
 	resp.Body.Close()
-	if exactEnvelope.Data.ReferenceImage == nil || exactEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
-		t.Fatalf("exact clone reference view = %#v, want %q", exactEnvelope.Data.ReferenceImage, inherited.ID)
+	if exactEnvelope.Data.ReferenceImage != nil {
+		t.Fatalf("exact clone dedicated reference view = %#v, want nil", exactEnvelope.Data.ReferenceImage)
 	}
 	firstClone.Status = model.TaskStatusFailed
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
@@ -1503,8 +1503,8 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 	if err != nil {
 		t.Fatalf("find trusted AI-entry clone: %v", err)
 	}
-	if persisted.ReferenceImageAssetID != trusted.ID {
-		t.Fatalf("persisted clone reference = %q, want %q", persisted.ReferenceImageAssetID, trusted.ID)
+	if persisted.ReferenceImageAssetID != "" || len(persisted.InputAttachments.Data()) == 0 || persisted.InputAttachments.Data()[0].AssetID != trusted.ID {
+		t.Fatalf("persisted clone reference = %q attachments=%#v, want ordered asset %q", persisted.ReferenceImageAssetID, persisted.InputAttachments.Data(), trusted.ID)
 	}
 
 	for _, test := range []struct {

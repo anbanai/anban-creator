@@ -64,30 +64,39 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 
 	if cloneParams.Overrides != nil {
 		override := cloneParams.Overrides
+		attachments := cloneEntryAttachments(override.InputAttachments)
+		referenceAssetID := strings.TrimSpace(override.ReferenceImageAssetID)
+		if referenceAssetID == "" {
+			referenceAssetID = strings.TrimSpace(src.ReferenceImageAssetID)
+		}
+		if referenceAssetID != strings.TrimSpace(src.ProjectSnapshot.Data().ReferenceImageAssetID) {
+			attachments, err = s.prependVerifiedReferenceAttachment(ctx, src.UserID, referenceAssetID, attachments)
+			if err != nil {
+				return nil, err
+			}
+		}
 		params := CreateManualParams{
-			UserID:                     src.UserID,
-			ProjectID:                  override.ProjectID,
-			ExecutionProfile:           cloneParams.ExecutionProfile,
-			Prompt:                     override.Prompt,
-			Quantity:                   override.Quantity,
-			ImageRatio:                 override.ImageRatio,
-			ImageModelKey:              override.ImageModelKey,
-			SkipRefImage:               override.SkipRefImage,
-			ReferenceImageAssetID:      override.ReferenceImageAssetID,
-			allowProjectReferenceAsset: trustedCloneProjectReferenceAsset(src, override.ReferenceImageAssetID),
-			InputSourceTaskID:          inputSourceTaskID,
-			InputSourceProjectID:       inputSourceProjectID,
-			InputAttachments:           cloneEntryAttachments(override.InputAttachments),
-			Watermark:                  override.Watermark,
-			Goal:                       override.Goal,
-			GoalMode:                   override.GoalMode,
-			HasContentImage:            override.HasContentImage,
-			HasTailImage:               override.HasTailImage,
-			ArticleWithCover:           override.ArticleWithCover,
-			ArticleWithContentImages:   override.ArticleWithContentImages,
-			Ecommerce:                  override.Ecommerce,
-			MontageInput:               override.MontageInput,
-			ExecutionTarget:            override.ExecutionTarget,
+			UserID:                   src.UserID,
+			ProjectID:                override.ProjectID,
+			ExecutionProfile:         cloneParams.ExecutionProfile,
+			Prompt:                   override.Prompt,
+			Quantity:                 override.Quantity,
+			ImageRatio:               override.ImageRatio,
+			ImageModelKey:            override.ImageModelKey,
+			SkipRefImage:             override.SkipRefImage,
+			InputSourceTaskID:        inputSourceTaskID,
+			InputSourceProjectID:     inputSourceProjectID,
+			InputAttachments:         attachments,
+			Watermark:                override.Watermark,
+			Goal:                     override.Goal,
+			GoalMode:                 override.GoalMode,
+			HasContentImage:          override.HasContentImage,
+			HasTailImage:             override.HasTailImage,
+			ArticleWithCover:         override.ArticleWithCover,
+			ArticleWithContentImages: override.ArticleWithContentImages,
+			Ecommerce:                override.Ecommerce,
+			MontageInput:             override.MontageInput,
+			ExecutionTarget:          override.ExecutionTarget,
 		}
 		tasks, err := s.CreateManual(ctx, params)
 		if err != nil {
@@ -134,7 +143,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ImageRatio:               src.ImageRatio,
 		ImageModelKey:            src.ImageModelKey,
 		SkipRefImage:             &skipRef,
-		ReferenceImageAssetID:    src.ReferenceImageAssetID,
 		InputSourceTaskID:        inputSourceTaskID,
 		InputSourceProjectID:     inputSourceProjectID,
 		Overrides:                &overrides,
@@ -148,8 +156,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ArticleWithContentImages: articleContent,
 		ExecutionTarget:          executionTarget,
 	}
-	params.allowProjectReferenceAsset = trustedCloneProjectReferenceAsset(src, src.ReferenceImageAssetID)
-
 	// Preserve the e-commerce package config (module selection, product photos,
 	// selling points) so the clone bills the same package and reuses the inputs.
 	if src.Type == model.PlatformEcommerce {
@@ -160,6 +166,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		params.InputAttachments = cloneEntryAttachments(*cloneParams.InputAttachments)
 	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
+	}
+	params.InputAttachments, err = s.prependClonedReferenceAttachment(ctx, src, params.InputAttachments)
+	if err != nil {
+		return nil, err
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
@@ -184,13 +194,43 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	return tasks, nil
 }
 
-func trustedCloneProjectReferenceAsset(source *model.Task, assetID string) bool {
-	assetID = strings.TrimSpace(assetID)
-	if source == nil || assetID == "" {
-		return false
+func (s *TaskService) prependClonedReferenceAttachment(ctx context.Context, source *model.Task, attachments []model.EntryAttachment) ([]model.EntryAttachment, error) {
+	if strings.TrimSpace(source.ReferenceImageAssetID) == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID) {
+		return attachments, nil
 	}
-	return assetID == strings.TrimSpace(source.ReferenceImageAssetID) ||
-		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID)
+	return s.prependVerifiedReferenceAttachment(ctx, source.UserID, source.ReferenceImageAssetID, attachments)
+}
+
+func (s *TaskService) prependVerifiedReferenceAttachment(ctx context.Context, userID, rawAssetID string, attachments []model.EntryAttachment) ([]model.EntryAttachment, error) {
+	assetID := strings.TrimSpace(rawAssetID)
+	if assetID == "" {
+		return attachments, nil
+	}
+	if s.referenceAssets == nil {
+		return nil, ErrReferenceAssetUnavailable
+	}
+	asset, err := s.referenceAssets.RequireOwned(ctx, userID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment})
+	if err != nil {
+		return nil, fmt.Errorf("resolve cloned reference attachment: %w", err)
+	}
+	firstInstruction := ""
+	foundReference := false
+	filtered := make([]model.EntryAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.AssetID) == asset.ID {
+			if !foundReference {
+				firstInstruction = attachment.Instruction
+				foundReference = true
+			}
+			continue
+		}
+		filtered = append(filtered, attachment)
+	}
+	reference := model.EntryAttachment{
+		AssetID: asset.ID, Type: "image", FileName: asset.FileName,
+		ContentType: asset.ContentType, Size: asset.Size, Instruction: firstInstruction,
+	}
+	return append([]model.EntryAttachment{reference}, filtered...), nil
 }
 
 // ResolveCloneInputSource returns the trusted root task/project pair whose

@@ -14,7 +14,6 @@ import { Button } from '@/components/common/button'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
-import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -90,7 +89,6 @@ export function TaskFormDialog({
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
-  const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
@@ -134,7 +132,6 @@ export function TaskFormDialog({
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedPrompt = useWatch({ control: form.control, name: 'prompt' }) ?? ''
   const watchedImageModelKey = useWatch({ control: form.control, name: 'image_model_key' }) ?? ''
-  const watchedReferenceImage = useWatch({ control: form.control, name: 'reference_image' })
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
   const watermark = useWatch({ control: form.control, name: 'watermark' }) ?? false
   const goalMode = useWatch({ control: form.control, name: 'goal_mode' }) ?? false
@@ -173,13 +170,6 @@ export function TaskFormDialog({
     && !imageModelsLoading
     && !imageModelsError
     && !imageModelOptions.some((option) => option.key === watchedImageModelKey)
-  const referenceImageValue = sourceTask?.reference_image
-    && watchedReferenceImage
-    && 'asset_id' in watchedReferenceImage
-    && watchedReferenceImage.asset_id === sourceTask.reference_image.asset_id
-    ? sourceTask.reference_image
-    : watchedReferenceImage ?? null
-
   useFormDirtyCheck(form, open)
 
   useEffect(() => {
@@ -210,7 +200,6 @@ export function TaskFormDialog({
     initializedKeyRef.current = initializationKey
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
-    setReferenceUploading(false)
     setMontageUploading(false)
     setShowDirtyDialog(false)
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
@@ -264,7 +253,6 @@ export function TaskFormDialog({
     initializedKeyRef.current = undefined
     form.reset(createTaskFormDefaults())
     attachmentController.clear()
-    setReferenceUploading(false)
     setMontageUploading(false)
     setShowDirtyDialog(false)
     onOpenChange(false)
@@ -308,7 +296,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -438,6 +426,9 @@ export function TaskFormDialog({
                       value={field.value}
                       onChange={field.onChange}
                       loading={executionProfilesQuery.isLoading}
+                      catalog={billingCatalog}
+                      taskType={watchedType}
+                      priceUnit="task"
                     />
                   </FormControl>
                   <FormMessage />
@@ -505,23 +496,6 @@ export function TaskFormDialog({
                       </FormItem>
                     )} />
                   </div>
-                ) : null}
-
-                {!isMontageTask && !isViralAnalysisTask ? (
-                  <FormField control={form.control} name="reference_image" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>任务参考图</FormLabel>
-                      <FormControl>
-                        <ReferenceAssetUpload
-                          value={referenceImageValue}
-                          onChange={field.onChange}
-                          purpose="task_reference"
-                          onUploadingChange={setReferenceUploading}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
                 ) : null}
 
                 {isMontageTask ? (
@@ -772,7 +746,7 @@ export function TaskFormDialog({
               type="submit"
               form="task-create-form"
               loading={isSubmitting}
-              disabled={isSubmitting || Boolean(creationBlocker) || referenceUploading || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)}
+              disabled={isSubmitting || Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)}
             >
               {submitLabel}
             </Button>

@@ -2,6 +2,8 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { AgentExecutionProfileCapability, AgentExecutionProfileID } from '@/types'
+import type { BillingCatalog } from '@/types'
+import { executionProfilePriceInfo } from '@/lib/pricing'
 
 const minimumTierLabel = {
   free: '全部用户',
@@ -28,6 +30,9 @@ export interface ExecutionProfileSelectorProps {
   onChange: (value: AgentExecutionProfileID) => void
   loading?: boolean
   disabled?: boolean
+  catalog?: BillingCatalog
+  taskType?: string
+  priceUnit?: 'task' | 'run'
 }
 
 export function ExecutionProfileSelector({
@@ -36,6 +41,9 @@ export function ExecutionProfileSelector({
   onChange,
   loading = false,
   disabled = false,
+  catalog,
+  taskType,
+  priceUnit = 'task',
 }: ExecutionProfileSelectorProps) {
   if (loading) {
     return (
@@ -59,6 +67,7 @@ export function ExecutionProfileSelector({
     >
       {profiles.map((profile) => {
         const reason = unavailableReason(profile)
+        const pricing = taskType ? executionProfilePriceInfo(catalog, taskType, profile.id, priceUnit) : undefined
         return (
           <ToggleGroupItem
             key={profile.id}
@@ -79,6 +88,7 @@ export function ExecutionProfileSelector({
             <span className="text-xs text-muted-foreground">
               {profile.available ? profile.description : reason}
             </span>
+            {pricing ? <span className="text-xs font-medium text-foreground">{pricing.price === undefined ? '价格暂不可用' : `${pricing.price.toLocaleString()} 积分 · ${pricing.multiplier === undefined ? '倍率暂不可用' : `${pricing.multiplier.toFixed(2).replace(/\.00$/, '')}x`}`}</span> : null}
           </ToggleGroupItem>
         )
       })}

@@ -49,6 +49,7 @@ export interface PromptAttachmentsController {
   addFiles: (files: readonly File[]) => AttachmentAdmissionResult
   retry: (id: string) => void
   remove: (id: string) => void
+  move: (id: string, targetIndex: number) => void
   updateInstruction: (id: string, instruction: string) => void
   reset: (attachments: readonly InputAttachment[]) => void
   clear: () => void
@@ -78,13 +79,30 @@ function hydrateAttachment(attachment: InputAttachment, id: string): PromptAttac
     progress: 100,
     uploadId: attachment.upload_id,
     key: attachment.key,
+    assetId: attachment.asset_id,
     instruction: attachment.instruction,
     role: attachment.role,
   }
 }
 
 function serializeUploadedAttachment(attachment: PromptAttachment): InputAttachment | null {
-  if (attachment.status !== 'uploaded' || !attachment.uploadId || !attachment.key) return null
+  if (attachment.status !== 'uploaded') return null
+
+  // Asset-backed attachments are already finalized by the server and do not
+  // have a client upload session/key. Preserve that identity verbatim.
+  if (attachment.assetId) {
+    const serialized: InputAttachment = {
+      type: attachment.type,
+      asset_id: attachment.assetId,
+      file_name: attachment.fileName,
+      size: attachment.size,
+    }
+    if (attachment.contentType) serialized.content_type = attachment.contentType
+    if (attachment.instruction !== undefined) serialized.instruction = attachment.instruction
+    if (attachment.role !== undefined) serialized.role = attachment.role
+    return serialized
+  }
+  if (!attachment.uploadId || !attachment.key) return null
 
   const serialized: InputAttachment = {
     type: attachment.type,
@@ -301,6 +319,19 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     updateAttachments((current) => current.filter((item) => item.id !== id))
   }, [cancelUpload, revokePreview, updateAttachments])
 
+  const move = useCallback((id: string, targetIndex: number) => {
+    updateAttachments((current) => {
+      const sourceIndex = current.findIndex((item) => item.id === id)
+      if (sourceIndex < 0 || current.length < 2) return current
+      const clampedIndex = Math.max(0, Math.min(current.length - 1, Math.trunc(targetIndex)))
+      if (sourceIndex === clampedIndex) return current
+      const next = [...current]
+      const [item] = next.splice(sourceIndex, 1)
+      next.splice(clampedIndex, 0, item)
+      return next
+    })
+  }, [updateAttachments])
+
   const updateInstruction = useCallback((id: string, instruction: string) => {
     const attachment = attachmentsRef.current.find((item) => item.id === id)
     if (!attachment || attachment.instruction === instruction) return
@@ -361,6 +392,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
     retry,
     remove,
     updateInstruction,
+    move,
     reset,
     clear,
     uploading: renderedAttachments.some((attachment) => attachment.status === 'uploading'),

@@ -616,6 +616,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 	files := make([]BootstrapFile, 0, len(attachments)+2)
 	type indexEntry struct {
 		Index       int    `json:"index"`
+		TypeIndex   int    `json:"type_index"`
 		Type        string `json:"type,omitempty"`
 		FileName    string `json:"file_name,omitempty"`
 		ContentType string `json:"content_type,omitempty"`
@@ -623,6 +624,8 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		Path        string `json:"path"`
 	}
 	index := make([]indexEntry, 0, len(attachments))
+	typeIndexes := make(map[string]int)
+	globalIndex := 0
 	for i, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
 			if strings.TrimSpace(attachment.Text) == "" {
@@ -634,6 +637,19 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 			}
 			files = append(files, BootstrapFile{Path: resumePath, Text: attachment.Text, Mode: 0644})
 			continue
+		}
+		assetID := strings.TrimSpace(attachment.AssetID)
+		var asset *model.Asset
+		if assetID != "" {
+			var err error
+			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				return nil, fmt.Errorf("resolve attachment asset %q: %w", assetID, err)
+			}
+			attachment.Type = "image"
+			attachment.FileName = asset.FileName
+			attachment.ContentType = asset.ContentType
+			attachment.Size = asset.Size
 		}
 		name := bootstrapAttachmentName(i+1, attachment.FileName)
 		dir := ".anban-creator/input-attachments"
@@ -653,7 +669,15 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 			rel = path.Join(dir, name)
 		}
 		file := BootstrapFile{Path: rel, Mode: 0644}
-		if strings.TrimSpace(attachment.Key) != "" || strings.TrimSpace(attachment.URL) != "" {
+		if asset != nil {
+			signed, err := s.signedReferenceAssetURL(ctx, asset, credentialDeadline)
+			if err != nil {
+				return nil, fmt.Errorf("sign attachment asset %q: %w", asset.ID, err)
+			}
+			file.DownloadURL = signed
+			file.ExpectedSize = asset.Size
+			file.MaxBytes = 10 << 20
+		} else if strings.TrimSpace(attachment.Key) != "" || strings.TrimSpace(attachment.URL) != "" {
 			purposes := []string{DirectUploadPurposeAIEntryAttachment}
 			if attachment.Role == model.EntryAttachmentRoleResumeFile {
 				purposes = nil
@@ -670,7 +694,9 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		}
 		files = append(files, file)
 		if attachment.Role != model.EntryAttachmentRoleResumeFile {
-			index = append(index, indexEntry{Index: i + 1, Type: attachment.Type, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel})
+			globalIndex++
+			typeIndexes[attachment.Type]++
+			index = append(index, indexEntry{Index: globalIndex, TypeIndex: typeIndexes[attachment.Type], Type: attachment.Type, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel})
 		}
 	}
 	if len(index) > 0 {
