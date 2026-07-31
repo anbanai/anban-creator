@@ -346,6 +346,7 @@ func (e *ImageReferenceLimitError) Error() string {
 type ResolvedImageModel struct {
 	Config             *config.ImageAPIConfig `json:"-"`
 	Key                string                 `json:"key,omitempty"`
+	BillingSKU         string                 `json:"-"`
 	Provider           string                 `json:"provider"`
 	Model              string                 `json:"model"`
 	Source             string                 `json:"source,omitempty"`
@@ -357,6 +358,7 @@ type ResolvedImageModel struct {
 type imageModelCandidate struct {
 	config             *config.ImageAPIConfig
 	key                string
+	billingSKU         string
 	provider           string
 	model              string
 	source             string
@@ -476,6 +478,7 @@ func (s *ModelConfigService) resolvePreferredImageCandidate(
 				continue
 			}
 			candidate.key = preset.Key
+			candidate.billingSKU = strings.TrimSpace(preset.BillingSKU)
 			candidate.qualityRank = preset.QualityRank
 			candidate.supportsReference = preset.Capabilities.SupportsReference
 			candidate.maxReferenceImages = preset.Capabilities.MaxReferenceImages
@@ -500,6 +503,7 @@ func imageModelCandidateFromPreset(
 	return imageModelCandidate{
 		config:             resolvedConfig,
 		key:                preset.Key,
+		billingSKU:         strings.TrimSpace(preset.BillingSKU),
 		provider:           imageProviderKind(apiCfg.Provider),
 		model:              strings.TrimSpace(apiCfg.Model),
 		source:             "preset:" + preset.Key,
@@ -513,6 +517,7 @@ func resolvedImageModelFromCandidate(candidate imageModelCandidate, reason strin
 	return &ResolvedImageModel{
 		Config:             candidate.config,
 		Key:                candidate.key,
+		BillingSKU:         candidate.billingSKU,
 		Provider:           candidate.provider,
 		Model:              candidate.model,
 		Source:             candidate.source,

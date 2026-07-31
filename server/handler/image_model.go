@@ -24,15 +24,17 @@ type ImageModelHandler struct {
 }
 
 // NewImageModelHandler creates a new ImageModelHandler.
-// repo may be nil in degraded mode; in that case List returns only the system-default option.
+// repo may be nil in degraded mode; in that case List fails closed to Free-tier
+// capabilities and does not manufacture a platform-default option.
 func NewImageModelHandler(presets []config.ImageModelPreset, repo repository.Repository, catalog *service.BillingCatalogService, logger *zerolog.Logger) *ImageModelHandler {
 	return &ImageModelHandler{presets: presets, repo: repo, catalog: catalog, logger: logger}
 }
 
 // ImageModelOption is a selectable image model entry returned to the frontend.
 type ImageModelOption struct {
-	// Key is the value stored on Task/Plan.ImageModelKey. "" = system default,
-	// "custom" = user override, any other = preset key.
+	// Key is the value stored on Task/Plan.ImageModelKey. Empty and "system_default"
+	// remain server-side fallback values; public entries use configurable
+	// capability keys. "custom" is the enterprise-only user override.
 	Key string `json:"key"`
 	// DisplayName is the user-facing label.
 	DisplayName string `json:"display_name"`
@@ -47,10 +49,9 @@ type ImageModelOption struct {
 
 // List handles GET /api/v1/image-models.
 //
-// Returns the list of image models the current user is allowed to select, in display order:
-//  1. Always: the "system default" entry (Key = "").
-//  2. Each preset whose MinTier the user satisfies, in the order declared in config.
-//  3. For Enterprise users only: a "custom" entry that uses the user's per-account model-config.
+// Returns the list of neutral image capabilities the current user is allowed
+// to select, in configured display order. The server-side empty-key fallback
+// is intentionally not exposed as a selectable public entry.
 func (h *ImageModelHandler) List(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {

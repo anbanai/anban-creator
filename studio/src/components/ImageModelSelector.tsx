@@ -99,10 +99,10 @@ export function ImageModelSelector({
           filter={(v, search) => v.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}
         >
           <div className="border-b border-border/50 px-1 pb-1">
-            <CommandInput placeholder="搜索模型..." />
+            <CommandInput placeholder="搜索图像能力..." />
           </div>
           <CommandList>
-            <CommandEmpty>没有找到模型</CommandEmpty>
+            <CommandEmpty>没有找到图像能力</CommandEmpty>
             {sorted.map((opt, idx) => {
               const isSelected = opt.key === value
               return (

@@ -334,6 +334,17 @@ func (s *BillingCatalogService) ResolvePriceBySKUID(ctx context.Context, catalog
 	return s.resolvePriceForSKU(ctx, sku, tier)
 }
 
+// ResolvePriceBySKUIDForUser resolves a configured SKU using the user's
+// current tier. The SKU remains server-owned; callers never receive it from
+// public client input.
+func (s *BillingCatalogService) ResolvePriceBySKUIDForUser(ctx context.Context, userID, catalogID, skuID string) (*ResolvedSKUPrice, error) {
+	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	return s.ResolvePriceBySKUID(ctx, catalogID, skuID, model.ResolveTier(user.Tier))
+}
+
 func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *model.BillingSKU, tier model.Tier) (*ResolvedSKUPrice, error) {
 	if sku == nil || !model.ValidTiers[tier] {
 		return nil, fmt.Errorf("%w: invalid pricing identity", ErrBillingInvalid)

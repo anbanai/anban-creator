@@ -690,7 +690,7 @@ export default function PlansPage() {
 
               {!isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>图像模型</FormLabel>
+                  <FormLabel>图像能力</FormLabel>
                   <FormControl>
                     {imageModelsLoading ? (
                       <Skeleton className="h-10 w-full rounded-xl" />

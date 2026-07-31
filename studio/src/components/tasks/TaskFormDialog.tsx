@@ -160,8 +160,7 @@ export function TaskFormDialog({
       ...imageModelOptions,
       {
         key: watchedImageModelKey,
-        display_name: `${watchedImageModelKey}（当前任务配置）`,
-        provider: '',
+        display_name: '已停用图像能力（当前任务配置）',
         is_custom: true,
       },
     ]
@@ -331,7 +330,7 @@ export function TaskFormDialog({
           : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageModelUnavailable
-                ? { message: '当前图像模型不可用，请重新选择。', href: '' }
+                ? { message: '当前图像能力不可用，请重新选择。', href: '' }
                 : watchedType !== 'ecommerce' && goalMode && !goal.trim()
                   ? { message: '强目标模式需要填写目标条件。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
@@ -484,7 +483,7 @@ export function TaskFormDialog({
                     ) : <div />}
                     <FormField control={form.control} name="image_model_key" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>图像模型</FormLabel>
+                        <FormLabel>图像能力</FormLabel>
                         <FormControl>
                           {imageModelsLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />

@@ -1011,7 +1011,7 @@ export default function ProjectsPage() {
                     )} />
                     <FormField control={form.control} name="ecommerce_image_model_key" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>默认图像模型</FormLabel>
+                        <FormLabel>默认图像能力</FormLabel>
                         <FormControl>
                           {imageModelsLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
