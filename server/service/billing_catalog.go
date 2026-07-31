@@ -96,19 +96,14 @@ func NewBillingCatalogService(repo repository.Repository, bundle *billing.Bundle
 	var snapshot billing.Bundle
 	if bundle != nil {
 		snapshot = *bundle
-		if snapshot.Products.PricingModel == "" {
-			snapshot.Products.PricingModel = billing.PricingModelFlatV1
-		}
-		snapshot.Products.SKUs = make([]billing.SKUConfig, len(bundle.Products.SKUs))
-		for index, sku := range bundle.Products.SKUs {
-			snapshot.Products.SKUs[index] = sku
-			if sku.TierPrices != nil {
-				snapshot.Products.SKUs[index].TierPrices = make(map[string]int64, len(sku.TierPrices))
-				for tier, price := range sku.TierPrices {
-					snapshot.Products.SKUs[index].TierPrices[tier] = price
-				}
+		if bundle.Products.TierRatesPercent != nil {
+			snapshot.Products.TierRatesPercent = make(map[string]int64, len(bundle.Products.TierRatesPercent))
+			for tier, rate := range bundle.Products.TierRatesPercent {
+				snapshot.Products.TierRatesPercent[tier] = rate
 			}
 		}
+		snapshot.Products.SKUs = make([]billing.SKUConfig, len(bundle.Products.SKUs))
+		copy(snapshot.Products.SKUs, bundle.Products.SKUs)
 	}
 	return &BillingCatalogService{repo: repo, bundle: snapshot, now: now, quoteTTL: ttl}
 }
@@ -123,7 +118,7 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 	}
 	now := s.now().UTC()
 	catalog := &model.BillingCatalogVersion{
-		CatalogID: s.bundle.Products.CatalogID, Currency: s.bundle.Products.Currency, PricingModel: s.bundle.Products.PricingModel,
+		CatalogID: s.bundle.Products.CatalogID, Currency: s.bundle.Products.Currency,
 		Status: "published", PublishedAt: now, Snapshot: snapshot, CreatedAt: now,
 	}
 	skus := make([]model.BillingSKU, 0, len(s.bundle.Products.SKUs))
@@ -139,27 +134,31 @@ func (s *BillingCatalogService) Publish(ctx context.Context) (*model.BillingCata
 			Route: item.Route, Delivery: item.Delivery, Snapshot: itemSnapshot, CreatedAt: now,
 		})
 		for _, tierName := range billing.RequiredPricingTiers {
-			priceCredits, ok := item.TierPrices[tierName]
+			priceCredits, ok := s.bundle.Products.PriceForTier(item.PriceCredits, tierName)
 			if !ok {
-				continue
+				return nil, fmt.Errorf("resolve billing SKU tier price %q/%s: %w", item.ID, tierName, ErrBillingInvalid)
 			}
+			ratePercent := s.bundle.Products.TierRatesPercent[tierName]
+			ruleID := catalog.CatalogID + ":" + tierName
 			priceSnapshot, marshalErr := json.Marshal(struct {
 				CatalogID     string `json:"catalog_id"`
 				SKUID         string `json:"sku_id"`
 				Tier          string `json:"tier"`
 				ListPrice     int64  `json:"list_price_credits"`
+				RatePercent   int64  `json:"rate_percent"`
+				Rounding      string `json:"rounding"`
 				PriceCredits  int64  `json:"price_credits"`
 				PricingRuleID string `json:"pricing_rule_id"`
 			}{
 				CatalogID: catalog.CatalogID, SKUID: item.ID, Tier: tierName, ListPrice: item.PriceCredits,
-				PriceCredits: priceCredits, PricingRuleID: catalog.CatalogID + ":" + item.ID + ":" + tierName,
+				RatePercent: ratePercent, Rounding: "floor", PriceCredits: priceCredits, PricingRuleID: ruleID,
 			})
 			if marshalErr != nil {
 				return nil, fmt.Errorf("marshal billing SKU tier price %q/%s: %w", item.ID, tierName, marshalErr)
 			}
 			tierPrices = append(tierPrices, model.BillingSKUTierPrice{
 				ID: uuid.NewString(), CatalogID: catalog.CatalogID, SKUID: item.ID, Tier: model.Tier(tierName),
-				PriceCredits: priceCredits, RuleID: catalog.CatalogID + ":" + item.ID + ":" + tierName,
+				PriceCredits: priceCredits, RuleID: ruleID,
 				Snapshot: priceSnapshot, CreatedAt: now,
 			})
 		}
@@ -299,24 +298,6 @@ func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *mod
 	if sku == nil || !model.ValidTiers[tier] {
 		return nil, fmt.Errorf("%w: invalid pricing identity", ErrBillingInvalid)
 	}
-	catalog, err := s.repo.Billing().FindCatalogVersion(ctx, sku.CatalogID)
-	if err != nil {
-		return nil, err
-	}
-	resolved := &ResolvedSKUPrice{
-		SKU: sku, PricingTier: tier, ListPriceCredits: sku.PriceCredits, PriceCredits: sku.PriceCredits,
-		PricingRuleID: sku.CatalogID + ":" + sku.SKUID + ":flat",
-	}
-	if catalog.PricingModel != billing.PricingModelTierMatrixV1 {
-		resolved.PricingSnapshot, _ = json.Marshal(struct {
-			CatalogID     string     `json:"catalog_id"`
-			SKUID         string     `json:"sku_id"`
-			Tier          model.Tier `json:"tier"`
-			PriceCredits  int64      `json:"price_credits"`
-			PricingRuleID string     `json:"pricing_rule_id"`
-		}{sku.CatalogID, sku.SKUID, tier, sku.PriceCredits, resolved.PricingRuleID})
-		return resolved, nil
-	}
 	price, err := s.repo.Billing().FindSKUTierPrice(ctx, sku.CatalogID, sku.SKUID, tier)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrBillingSKUNotFound
@@ -327,11 +308,7 @@ func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *mod
 	if price.PriceCredits > sku.PriceCredits {
 		return nil, fmt.Errorf("%w: tier price exceeds list price", ErrBillingInvalid)
 	}
-	resolved.PriceCredits = price.PriceCredits
-	resolved.DiscountCredits = sku.PriceCredits - price.PriceCredits
-	resolved.PricingRuleID = price.RuleID
-	resolved.PricingSnapshot = append(datatypes.JSON(nil), price.Snapshot...)
-	return resolved, nil
+	return tierResolvedSKUPrice(sku, price)
 }
 
 func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteRequest) (*model.BillingQuote, error) {
@@ -548,18 +525,22 @@ func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
 	snapshot := struct {
 		Products billing.ProductCatalog `json:"products"`
 		Policy   struct {
-			Version       string                      `json:"version"`
-			TaskAdmission billing.TaskAdmissionPolicy `json:"task_admission"`
-			AcceptedTask  billing.AcceptedTaskPolicy  `json:"accepted_task"`
-			TopUp         billing.TopUpPolicy         `json:"top_up"`
-			Promotions    billing.PromotionsPolicy    `json:"promotions"`
+			Version             string                            `json:"version"`
+			CreditsPerCNY       int64                             `json:"credits_per_cny"`
+			TaskAdmission       billing.TaskAdmissionPolicy       `json:"task_admission"`
+			AcceptedTask        billing.AcceptedTaskPolicy        `json:"accepted_task"`
+			TopUp               billing.TopUpPolicy               `json:"top_up"`
+			Promotions          billing.PromotionsPolicy          `json:"promotions"`
+			TaskFailureReversal billing.TaskFailureReversalPolicy `json:"task_failure_reversal"`
 		} `json:"policy"`
 	}{Products: bundle.Products}
 	snapshot.Policy.Version = bundle.Policy.Version
+	snapshot.Policy.CreditsPerCNY = bundle.Policy.CreditsPerCNY
 	snapshot.Policy.TaskAdmission = bundle.Policy.TaskAdmission
 	snapshot.Policy.AcceptedTask = bundle.Policy.AcceptedTask
 	snapshot.Policy.TopUp = bundle.Policy.TopUp
 	snapshot.Policy.Promotions = bundle.Policy.Promotions
+	snapshot.Policy.TaskFailureReversal = bundle.Policy.TaskFailureReversal
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("marshal retail billing catalog: %w", err)
@@ -569,7 +550,7 @@ func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
 
 func sameCatalog(left, right *model.BillingCatalogVersion) bool {
 	return left != nil && right != nil && left.CatalogID == right.CatalogID && left.Currency == right.Currency &&
-		left.PricingModel == right.PricingModel && left.Status == right.Status && sameJSONSemantic(left.Snapshot, right.Snapshot)
+		left.Status == right.Status && sameJSONSemantic(left.Snapshot, right.Snapshot)
 }
 
 func sameCatalogEvidence(ctx context.Context, repo repository.BillingRepository, existing, expected *model.BillingCatalogVersion, expectedSKUs []model.BillingSKU, expectedTierPrices []model.BillingSKUTierPrice) (bool, error) {

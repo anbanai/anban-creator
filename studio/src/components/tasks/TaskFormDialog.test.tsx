@@ -176,15 +176,15 @@ beforeEach(() => {
     catalog_id: 'retail-test-v1',
     currency: 'credits',
     skus: [
-      { id: 'task.article.cost', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+      { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
       { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-      { id: 'task.article.maximum', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
-      { id: 'task.seednote.cost', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+      { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+      { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
       { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-      { id: 'task.viral-analysis.cost-effective.v2', operation: 'task.viral_analysis', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
-      { id: 'task.viral-analysis.balanced.v2', operation: 'task.viral_analysis', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
-      { id: 'task.viral-analysis.maximum-quality.v2', operation: 'task.viral_analysis', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
-      { id: 'task.montage.cost', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+      { id: 'task.viral-analysis.effective', operation: 'task.viral_analysis', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.viral-analysis.balanced', operation: 'task.viral_analysis', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.viral-analysis.quality', operation: 'task.viral_analysis', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
     ],
   })
   vi.mocked(api.agentProfiles.list).mockResolvedValue([
@@ -286,9 +286,9 @@ describe('TaskFormDialog', () => {
 
   it('shows the authenticated tier price and savings before task creation', async () => {
     vi.mocked(api.billing.catalog).mockResolvedValueOnce({
-      catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_model: 'tier_matrix_v1', pricing_tier: 'pro',
+      catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_tier: 'pro',
       skus: [{
-        id: 'task.article.v1', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission',
+        id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission',
         list_price_credits: 6000, price_credits: 5400, discount_credits: 600, pricing_tier: 'pro',
         delivery: 'article_artifacts_verified',
       }],

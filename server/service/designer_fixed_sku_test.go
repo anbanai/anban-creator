@@ -54,8 +54,8 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 			AcceptedTask:        serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TaskFailureReversal: serverbilling.TaskFailureReversalPolicy{Enabled: true, Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"}},
 		},
-		Products: serverbilling.ProductCatalog{CatalogID: "retail-designer-v1", Currency: "credits", SKUs: []serverbilling.SKUConfig{{
-			ID: "image.seedream.designer.v1", Operation: "designer.generate_image", ChargePolicy: "standalone_operation",
+		Products: serverbilling.ProductCatalog{CatalogID: "retail-designer-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, SKUs: []serverbilling.SKUConfig{{
+			ID: "image.seedream.designer", Operation: "designer.generate_image", ChargePolicy: "standalone_operation",
 			PriceCredits: 500, Route: "image_generation.designer.seedream", Delivery: "persisted_image",
 		}}},
 	}

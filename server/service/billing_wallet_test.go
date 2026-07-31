@@ -429,6 +429,7 @@ func TestBillingWalletDoesNotMapLotDatabaseErrorToInsufficient(t *testing.T) {
 func TestAcceptedTaskOperationMayCreateDebt(t *testing.T) {
 	f := newBillingWalletFixture(t, 100, 0, 0)
 	req := acceptedOperationRequest(billingWalletUserID, "task-1", "attempt-1", "call-1", "operation-1")
+	seedAcceptedOperationTask(t, f, req.TaskID, model.TierFree)
 	c, err := f.wallet.ChargeAcceptedOperation(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ChargeAcceptedOperation: %v", err)
@@ -566,6 +567,7 @@ func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 	t.Run("accepted operation identity", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
 		req := acceptedOperationRequest(billingWalletUserID, "task-operation-identity", "attempt-operation-identity", "call-operation-identity", "operation-identity")
+		seedAcceptedOperationTask(t, f, req.TaskID, model.TierFree)
 		if _, err := f.wallet.ChargeAcceptedOperation(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
@@ -767,7 +769,9 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 	t.Run("accepted operation", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 0, 0, 0)
-		original, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest(billingWalletUserID, "task-operation-reverse", "attempt-operation-reverse", "call-operation-reverse", "operation-reverse"))
+		req := acceptedOperationRequest(billingWalletUserID, "task-operation-reverse", "attempt-operation-reverse", "call-operation-reverse", "operation-reverse")
+		seedAcceptedOperationTask(t, f, req.TaskID, model.TierFree)
+		original, err := f.wallet.ChargeAcceptedOperation(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -782,7 +786,9 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 func TestBillingWalletTopUpAndReplayDoNotScanWalletLedger(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
-	charge, err := f.wallet.ChargeAcceptedOperation(context.Background(), acceptedOperationRequest(billingWalletUserID, "task-indexed-debt", "attempt-indexed-debt", "call-indexed-debt", "indexed-debt"))
+	operationReq := acceptedOperationRequest(billingWalletUserID, "task-indexed-debt", "attempt-indexed-debt", "call-indexed-debt", "indexed-debt")
+	seedAcceptedOperationTask(t, f, operationReq.TaskID, model.TierFree)
+	charge, err := f.wallet.ChargeAcceptedOperation(context.Background(), operationReq)
 	if err != nil || charge.DebtCredits != 500 {
 		t.Fatalf("debt charge = %+v, %v", charge, err)
 	}
@@ -929,6 +935,7 @@ func TestBillingWalletRebuildProjection(t *testing.T) {
 func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 	f := newBillingWalletFixture(t, 1000, 0, 0)
 	req := acceptedOperationRequest(billingWalletUserID, "task-c", "attempt-c", "call-c", "operation-c")
+	seedAcceptedOperationTask(t, f, req.TaskID, model.TierFree)
 	var wg sync.WaitGroup
 	results := make(chan *model.BillingCharge, 2)
 	errs := make(chan error, 2)
@@ -974,7 +981,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newTaskCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), f.now)
+		existing := newTaskCharge(req, sku, fixtureTierResolvedSKUPrice(t, f.repo, sku, model.TierFree), f.now)
 		existing.ID = "committed-task-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		raceRepo := &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -1002,7 +1009,8 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newOperationCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), true, f.now)
+		seedAcceptedOperationTask(t, f, req.TaskID, model.TierFree)
+		existing := newOperationCharge(req, sku, fixtureTierResolvedSKUPrice(t, f.repo, sku, model.TierFree), true, f.now)
 		existing.ID = "committed-operation-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -1027,7 +1035,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newOperationCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), false, f.now)
+		existing := newOperationCharge(req, sku, fixtureTierResolvedSKUPrice(t, f.repo, sku, model.TierFree), false, f.now)
 		existing.ID = "committed-standalone-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		f.wallet.repo = &postLockCurrentReadRepository{Repository: f.repo, state: state}
@@ -1095,7 +1103,7 @@ func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		drift := newTaskCharge(req, sku, flatResolvedSKUPrice(sku, model.TierFree), f.now)
+		drift := newTaskCharge(req, sku, fixtureTierResolvedSKUPrice(t, f.repo, sku, model.TierFree), f.now)
 		drift.ID = "committed-drift-task-charge"
 		drift.ResourceID = "different-task"
 		state := &postLockCurrentReadState{keyCharge: drift, identityCharge: drift}
@@ -1240,6 +1248,7 @@ func TestBillingWalletSettlementOutboxRetryNoDuplicateAndFencing(t *testing.T) {
 	taskID := uuid.NewString()
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
 		ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1298,6 +1307,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 		taskID := uuid.NewString()
 		if err := f.repo.Tasks().Create(context.Background(), &model.Task{
 			ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+			BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1887,6 +1897,19 @@ func (f *billingWalletFixture) quote(t *testing.T, userID, operation, route, ide
 	return quote
 }
 
+func fixtureTierResolvedSKUPrice(t *testing.T, repo repository.Repository, sku *model.BillingSKU, tier model.Tier) *ResolvedSKUPrice {
+	t.Helper()
+	price, err := repo.Billing().FindSKUTierPrice(context.Background(), sku.CatalogID, sku.SKUID, tier)
+	if err != nil {
+		t.Fatalf("FindSKUTierPrice: %v", err)
+	}
+	resolved, err := tierResolvedSKUPrice(sku, price)
+	if err != nil {
+		t.Fatalf("tierResolvedSKUPrice: %v", err)
+	}
+	return resolved
+}
+
 func (f *billingWalletFixture) account(t *testing.T, userID string) *model.BillingWalletAccount {
 	t.Helper()
 	account, err := f.repo.Billing().FindAccount(context.Background(), userID)
@@ -1936,5 +1959,15 @@ func acceptedOperationRequest(userID, taskID, attemptID, callID, identity string
 		TaskID: taskID, AttemptID: attemptID, ToolCallID: callID,
 		ResourceType: "image", ResourceID: fmt.Sprintf("image-%s", identity),
 		RequestFingerprint: billingFingerprint(identity), IdempotencyScope: "operation-charge", IdempotencyKey: identity,
+	}
+}
+
+func seedAcceptedOperationTask(t *testing.T, f *billingWalletFixture, taskID string, tier model.Tier) {
+	t.Helper()
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
+		ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(tier),
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

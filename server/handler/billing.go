@@ -117,11 +117,10 @@ type BillingCatalogSKUResponse struct {
 }
 
 type BillingCatalogResponse struct {
-	CatalogID    string                      `json:"catalog_id"`
-	Currency     string                      `json:"currency"`
-	PricingModel string                      `json:"pricing_model"`
-	PricingTier  string                      `json:"pricing_tier"`
-	SKUs         []BillingCatalogSKUResponse `json:"skus"`
+	CatalogID   string                      `json:"catalog_id"`
+	Currency    string                      `json:"currency"`
+	PricingTier string                      `json:"pricing_tier"`
+	SKUs        []BillingCatalogSKUResponse `json:"skus"`
 }
 
 func NewBillingHandler(repo repository.Repository, catalog *service.BillingCatalogService, referrals *service.BillingReferralService, bundle *serverbilling.Bundle, opts BillingHandlerOptions, logger *zerolog.Logger) *BillingHandler {
@@ -187,7 +186,7 @@ func (h *BillingHandler) Catalog(c fiber.Ctx) error {
 	}
 	return Success(c, BillingCatalogResponse{
 		CatalogID: h.bundle.Products.CatalogID, Currency: h.bundle.Products.Currency,
-		PricingModel: h.bundle.Products.PricingModel, PricingTier: pricingTier, SKUs: skus,
+		PricingTier: pricingTier, SKUs: skus,
 	})
 }
 

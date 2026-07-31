@@ -1,6 +1,9 @@
 package billing
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -77,21 +80,20 @@ type TaskFailureReversalPolicy struct {
 }
 
 type ProductCatalog struct {
-	CatalogID    string      `yaml:"catalog_id" json:"catalog_id"`
-	Currency     string      `yaml:"currency" json:"currency"`
-	PricingModel string      `yaml:"pricing_model" json:"pricing_model"`
-	SKUs         []SKUConfig `yaml:"skus" json:"skus"`
+	CatalogID        string           `yaml:"-" json:"catalog_id"`
+	Currency         string           `yaml:"currency" json:"currency"`
+	TierRatesPercent map[string]int64 `yaml:"tier_rates_percent" json:"tier_rates_percent"`
+	SKUs             []SKUConfig      `yaml:"skus" json:"skus"`
 }
 
 type SKUConfig struct {
-	ID               string           `yaml:"id" json:"id"`
-	Operation        string           `yaml:"operation" json:"operation"`
-	ExecutionProfile string           `yaml:"execution_profile" json:"execution_profile,omitempty"`
-	ChargePolicy     string           `yaml:"charge_policy" json:"charge_policy"`
-	PriceCredits     int64            `yaml:"price_credits" json:"price_credits"`
-	TierPrices       map[string]int64 `yaml:"tier_prices" json:"tier_prices,omitempty"`
-	Route            string           `yaml:"route" json:"route,omitempty"`
-	Delivery         string           `yaml:"delivery" json:"delivery"`
+	ID               string `yaml:"id" json:"id"`
+	Operation        string `yaml:"operation" json:"operation"`
+	ExecutionProfile string `yaml:"execution_profile" json:"execution_profile,omitempty"`
+	ChargePolicy     string `yaml:"charge_policy" json:"charge_policy"`
+	PriceCredits     int64  `yaml:"price_credits" json:"price_credits"`
+	Route            string `yaml:"route" json:"route,omitempty"`
+	Delivery         string `yaml:"delivery" json:"delivery"`
 }
 
 func (c ProductCatalog) FindSKUByExecutionProfile(operation, profile string) (SKUConfig, bool) {
@@ -103,10 +105,14 @@ func (c ProductCatalog) FindSKUByExecutionProfile(operation, profile string) (SK
 	return SKUConfig{}, false
 }
 
-const (
-	PricingModelFlatV1       = "flat_v1"
-	PricingModelTierMatrixV1 = "tier_matrix_v1"
-)
+func (c ProductCatalog) PriceForTier(listPrice int64, tier string) (int64, bool) {
+	rate, ok := c.TierRatesPercent[tier]
+	if !ok || listPrice < 0 || rate < 0 || rate > 100 {
+		return 0, false
+	}
+	whole, remainder := listPrice/100, listPrice%100
+	return whole*rate + remainder*rate/100, true
+}
 
 var RequiredPricingTiers = []string{"free", "pro", "enterprise"}
 
@@ -328,20 +334,32 @@ func validateBundle(bundle *Bundle) error {
 		seenReasons[reason] = struct{}{}
 	}
 
-	bundle.Products.CatalogID = strings.TrimSpace(bundle.Products.CatalogID)
 	bundle.Products.Currency = strings.TrimSpace(bundle.Products.Currency)
-	bundle.Products.PricingModel = strings.TrimSpace(bundle.Products.PricingModel)
-	if bundle.Products.PricingModel == "" {
-		bundle.Products.PricingModel = PricingModelFlatV1
-	}
-	if bundle.Products.CatalogID == "" {
-		return configError("products.yaml", "catalog_id", errors.New("is required"))
-	}
 	if bundle.Products.Currency != "credits" {
 		return configError("products.yaml", "currency", errors.New("must be credits"))
 	}
-	if bundle.Products.PricingModel != PricingModelFlatV1 && bundle.Products.PricingModel != PricingModelTierMatrixV1 {
-		return configError("products.yaml", "pricing_model", fmt.Errorf("unsupported value %q", bundle.Products.PricingModel))
+	if len(bundle.Products.TierRatesPercent) != len(RequiredPricingTiers) {
+		return configError("products.yaml", "tier_rates_percent", errors.New("must define exactly free, pro, and enterprise"))
+	}
+	for _, tier := range RequiredPricingTiers {
+		rate, exists := bundle.Products.TierRatesPercent[tier]
+		if !exists {
+			return configError("products.yaml", "tier_rates_percent", fmt.Errorf("missing tier %q", tier))
+		}
+		if rate < 0 || rate > 100 {
+			return configError("products.yaml", "tier_rates_percent."+tier, errors.New("must be between 0 and 100"))
+		}
+	}
+	for tier := range bundle.Products.TierRatesPercent {
+		if tier != "free" && tier != "pro" && tier != "enterprise" {
+			return configError("products.yaml", "tier_rates_percent", fmt.Errorf("unsupported tier %q", tier))
+		}
+	}
+	if bundle.Products.TierRatesPercent["free"] != 100 {
+		return configError("products.yaml", "tier_rates_percent.free", errors.New("must equal 100"))
+	}
+	if bundle.Products.TierRatesPercent["free"] < bundle.Products.TierRatesPercent["pro"] || bundle.Products.TierRatesPercent["pro"] < bundle.Products.TierRatesPercent["enterprise"] {
+		return configError("products.yaml", "tier_rates_percent", errors.New("must satisfy free >= pro >= enterprise"))
 	}
 	if len(bundle.Products.SKUs) == 0 {
 		return configError("products.yaml", "skus", errors.New("must not be empty"))
@@ -366,6 +384,9 @@ func validateBundle(bundle *Bundle) error {
 		if sku.ID == "" || sku.Operation == "" || sku.ChargePolicy == "" || sku.Delivery == "" {
 			return configError("products.yaml", field, errors.New("id, operation, charge_policy, and delivery are required"))
 		}
+		if hasVersionSuffix(sku.ID) {
+			return configError("products.yaml", field+".id", errors.New("must not end in a version suffix"))
+		}
 		if _, exists := seenSKUs[sku.ID]; exists {
 			return configError("products.yaml", field+".id", fmt.Errorf("duplicate SKU id %q", sku.ID))
 		}
@@ -373,35 +394,9 @@ func validateBundle(bundle *Bundle) error {
 		if sku.PriceCredits < 0 {
 			return configError("products.yaml", field+".price_credits", errors.New("must be non-negative"))
 		}
-		if bundle.Products.PricingModel == PricingModelFlatV1 {
-			if len(sku.TierPrices) != 0 {
-				return configError("products.yaml", field+".tier_prices", errors.New("must be empty for flat_v1 pricing"))
-			}
-		} else {
-			if len(sku.TierPrices) != len(RequiredPricingTiers) {
-				return configError("products.yaml", field+".tier_prices", errors.New("must define exactly free, pro, and enterprise"))
-			}
-			for _, tier := range RequiredPricingTiers {
-				price, exists := sku.TierPrices[tier]
-				if !exists {
-					return configError("products.yaml", field+".tier_prices", fmt.Errorf("missing tier %q", tier))
-				}
-				if price < 0 || price > sku.PriceCredits {
-					return configError("products.yaml", field+".tier_prices."+tier, errors.New("must be non-negative and no greater than price_credits"))
-				}
-			}
-			if sku.TierPrices["free"] != sku.PriceCredits {
-				return configError("products.yaml", field+".tier_prices.free", errors.New("must equal price_credits list price"))
-			}
-			for tier := range sku.TierPrices {
-				if tier != "free" && tier != "pro" && tier != "enterprise" {
-					return configError("products.yaml", field+".tier_prices", fmt.Errorf("unsupported tier %q", tier))
-				}
-			}
-		}
 		switch sku.ChargePolicy {
 		case "task_admission":
-			if sku.ExecutionProfile != "" && sku.ExecutionProfile != "effective" && sku.ExecutionProfile != "balanced" && sku.ExecutionProfile != "quality" {
+			if sku.ExecutionProfile != "effective" && sku.ExecutionProfile != "balanced" && sku.ExecutionProfile != "quality" {
 				return configError("products.yaml", field+".execution_profile", errors.New("must be effective, balanced, or quality"))
 			}
 			if sku.Route != "" {
@@ -433,7 +428,57 @@ func validateBundle(bundle *Bundle) error {
 			return configError("promotions.yaml", fmt.Sprintf("programs[%d].can_repay_debt", index), errors.New("can_repay_debt must be false"))
 		}
 	}
+	catalogID, err := retailCatalogID(bundle)
+	if err != nil {
+		return configError("products.yaml", "", err)
+	}
+	bundle.Products.CatalogID = catalogID
 	return nil
+}
+
+func hasVersionSuffix(value string) bool {
+	index := strings.LastIndex(value, ".v")
+	if index < 0 || index+2 >= len(value) {
+		return false
+	}
+	for _, digit := range value[index+2:] {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func retailCatalogID(bundle *Bundle) (string, error) {
+	definition := struct {
+		Currency         string           `json:"currency"`
+		TierRatesPercent map[string]int64 `json:"tier_rates_percent"`
+		SKUs             []SKUConfig      `json:"skus"`
+		Policy           struct {
+			Version             string                    `json:"version"`
+			CreditsPerCNY       int64                     `json:"credits_per_cny"`
+			TaskAdmission       TaskAdmissionPolicy       `json:"task_admission"`
+			AcceptedTask        AcceptedTaskPolicy        `json:"accepted_task"`
+			TopUp               TopUpPolicy               `json:"top_up"`
+			Promotions          PromotionsPolicy          `json:"promotions"`
+			TaskFailureReversal TaskFailureReversalPolicy `json:"task_failure_reversal"`
+		} `json:"policy"`
+	}{
+		Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs,
+	}
+	definition.Policy.Version = bundle.Policy.Version
+	definition.Policy.CreditsPerCNY = bundle.Policy.CreditsPerCNY
+	definition.Policy.TaskAdmission = bundle.Policy.TaskAdmission
+	definition.Policy.AcceptedTask = bundle.Policy.AcceptedTask
+	definition.Policy.TopUp = bundle.Policy.TopUp
+	definition.Policy.Promotions = bundle.Policy.Promotions
+	definition.Policy.TaskFailureReversal = bundle.Policy.TaskFailureReversal
+	encoded, err := json.Marshal(definition)
+	if err != nil {
+		return "", fmt.Errorf("marshal retail catalog definition: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return "retail-sha256-" + hex.EncodeToString(sum[:]), nil
 }
 
 func validateCosts(raw rawCostCatalog) (CostCatalog, error) {

@@ -97,6 +97,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
 		Status: model.TaskStatusRunning, ImageModelKey: "preferred-image",
+		BillingCatalogID: "retail-task-image-v1", BillingSKUID: "task.seednote.effective", BillingPricingTier: string(model.TierFree),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +118,10 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	taskSvc := newTestTaskService(repo, nil, store, &logger, "", nil, nil)
 	bundle := &serverbilling.Bundle{Products: serverbilling.ProductCatalog{
 		CatalogID: "retail-task-image-v1", Currency: "credits",
+		TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 		SKUs: []serverbilling.SKUConfig{
-			{ID: "image.cover.v1", Operation: "mcp.generate_image", Route: "image_generation.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
-			{ID: "image.content.v1", Operation: "mcp.generate_image", Route: "image_generation.content", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
+			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image_generation.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
+			{ID: "image.content", Operation: "mcp.generate_image", Route: "image_generation.content", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
 		},
 	}, Policy: serverbilling.PolicyCatalog{AcceptedTask: serverbilling.AcceptedTaskPolicy{
 		ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true,

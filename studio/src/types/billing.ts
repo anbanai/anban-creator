@@ -67,7 +67,6 @@ export interface BillingSKU {
 export interface BillingCatalog {
   catalog_id: string
   currency: 'credits'
-  pricing_model?: 'flat_v1' | 'tier_matrix_v1'
   pricing_tier?: 'free' | 'pro' | 'enterprise'
   skus: BillingSKU[]
 }

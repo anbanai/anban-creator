@@ -115,6 +115,21 @@ func TestBillingCatalogPublishesImmutableSnapshot(t *testing.T) {
 	if err != nil || second.CatalogID != first.CatalogID || string(second.Snapshot) != string(first.Snapshot) {
 		t.Fatalf("idempotent Publish = %+v, %v; first = %+v", second, err, first)
 	}
+	var publishedSnapshot struct {
+		Policy struct {
+			CreditsPerCNY       int64                             `json:"credits_per_cny"`
+			TaskFailureReversal billing.TaskFailureReversalPolicy `json:"task_failure_reversal"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(first.Snapshot, &publishedSnapshot); err != nil {
+		t.Fatalf("decode published catalog snapshot: %v", err)
+	}
+	if publishedSnapshot.Policy.CreditsPerCNY != bundle.Policy.CreditsPerCNY {
+		t.Fatalf("published credits_per_cny = %d, want %d", publishedSnapshot.Policy.CreditsPerCNY, bundle.Policy.CreditsPerCNY)
+	}
+	if !publishedSnapshot.Policy.TaskFailureReversal.Enabled || len(publishedSnapshot.Policy.TaskFailureReversal.Reasons) != len(bundle.Policy.TaskFailureReversal.Reasons) {
+		t.Fatalf("published reversal policy = %#v", publishedSnapshot.Policy.TaskFailureReversal)
+	}
 
 	conflicting := bundle
 	conflicting.Products.SKUs = append([]billing.SKUConfig(nil), bundle.Products.SKUs...)
@@ -142,14 +157,14 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 	}
 
 	taskSKU, err := svc.ResolveSKUForExecutionProfile(context.Background(), bundle.Products.CatalogID, "task.article", "balanced")
-	if err != nil || taskSKU.SKUID != "task.article.balanced.v1" {
+	if err != nil || taskSKU.SKUID != "task.article.balanced" {
 		t.Fatalf("ResolveSKUForExecutionProfile task balanced = %+v, %v", taskSKU, err)
 	}
 	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.article", ""); !errors.Is(err, ErrBillingSKUNotFound) {
 		t.Fatalf("route resolution matched task profile SKU: %v", err)
 	}
 	cover, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "mcp.generate_image", "image_generation.cover")
-	if err != nil || cover.SKUID != "image.seedream.cover.v1" {
+	if err != nil || cover.SKUID != "image.seedream.cover" {
 		t.Fatalf("ResolveSKU cover = %+v, %v", cover, err)
 	}
 	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "mcp.generate_image", ""); !errors.Is(err, ErrBillingSKUNotFound) {
@@ -220,7 +235,7 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 	if err := json.Unmarshal(quote.SKUSnapshot, &frozen); err != nil {
 		t.Fatal(err)
 	}
-	if frozen.ExecutionProfile != "balanced" || frozen.ID != "task.article.balanced.v1" {
+	if frozen.ExecutionProfile != "balanced" || frozen.ID != "task.article.balanced" {
 		t.Fatalf("frozen SKU = %#v", frozen)
 	}
 }
@@ -303,9 +318,9 @@ func TestCreateTaskQuoteViralAnalysisRequiresExactExecutionProfileSKU(t *testing
 		profile string
 		skuID   string
 	}{
-		{profile: "effective", skuID: "task.viral-analysis.cost-effective.v2"},
-		{profile: "balanced", skuID: "task.viral-analysis.balanced.v2"},
-		{profile: "quality", skuID: "task.viral-analysis.maximum-quality.v2"},
+		{profile: "effective", skuID: "task.viral-analysis.effective"},
+		{profile: "balanced", skuID: "task.viral-analysis.balanced"},
+		{profile: "quality", skuID: "task.viral-analysis.quality"},
 	} {
 		t.Run(tt.profile, func(t *testing.T) {
 			quote, err := svc.CreateTaskQuote(ctx, TaskQuoteRequest{
@@ -376,7 +391,7 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 		t.Fatal(err)
 	}
 	account.DebtCredits = 0
-	account.PaidCredits = 499
+	account.PaidCredits = 449
 	expectedVersion := account.Version
 	account.Version++
 	if err := repo.Billing().UpdateAccount(ctx, account, expectedVersion); err != nil {
@@ -385,7 +400,7 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingInsufficientForTask) {
 		t.Fatalf("insufficient quote error = %v, want ErrBillingInsufficientForTask", err)
 	}
-	account.PaidCredits = 500
+	account.PaidCredits = 450
 	expectedVersion = account.Version
 	account.Version++
 	if err := repo.Billing().UpdateAccount(ctx, account, expectedVersion); err != nil {
@@ -428,9 +443,6 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 	nextBundle.Products.CatalogID = "retail-test-v2"
 	nextBundle.Products.SKUs = append([]billing.SKUConfig(nil), bundle.Products.SKUs...)
 	nextBundle.Products.SKUs[0].PriceCredits = 700
-	for tier := range nextBundle.Products.SKUs[0].TierPrices {
-		nextBundle.Products.SKUs[0].TierPrices[tier] = 700
-	}
 	if _, err := NewBillingCatalogService(repo, &nextBundle, BillingCatalogOptions{Now: func() time.Time { return time.Now().Add(time.Hour) }}).Publish(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -513,6 +525,16 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 		}
 		if quote.PricingTier != string(tt.tier) || quote.ListPriceCredits != 500 || quote.PriceCredits != tt.want || quote.DiscountCredits != 500-tt.want {
 			t.Fatalf("%s quote = %#v", tt.tier, quote)
+		}
+		if quote.PricingRuleID != bundle.Products.CatalogID+":"+string(tt.tier) {
+			t.Fatalf("%s rule ID = %q", tt.tier, quote.PricingRuleID)
+		}
+		var snapshot struct {
+			RatePercent int64  `json:"rate_percent"`
+			Rounding    string `json:"rounding"`
+		}
+		if err := json.Unmarshal(quote.PricingSnapshot, &snapshot); err != nil || snapshot.Rounding != "floor" || snapshot.RatePercent != bundle.Products.TierRatesPercent[string(tt.tier)] {
+			t.Fatalf("%s pricing snapshot = %s, %#v, %v", tt.tier, quote.PricingSnapshot, snapshot, err)
 		}
 	}
 
@@ -773,7 +795,7 @@ func testBillingBundle() billing.Bundle {
 			},
 		},
 		Products: billing.ProductCatalog{
-			CatalogID: "retail-test-v1", Currency: "credits",
+			CatalogID: "retail-test-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 			SKUs: []billing.SKUConfig{
 				{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Route: "image.cover", Delivery: "image"},
@@ -784,14 +806,5 @@ func testBillingBundle() billing.Bundle {
 }
 
 func tieredTestBillingBundle() billing.Bundle {
-	bundle := testBillingBundle()
-	bundle.Products.CatalogID = "retail-tiered-test-v1"
-	bundle.Products.PricingModel = billing.PricingModelTierMatrixV1
-	for index := range bundle.Products.SKUs {
-		listPrice := bundle.Products.SKUs[index].PriceCredits
-		bundle.Products.SKUs[index].TierPrices = map[string]int64{
-			"free": listPrice, "pro": listPrice * 9 / 10, "enterprise": listPrice * 8 / 10,
-		}
-	}
-	return bundle
+	return testBillingBundle()
 }

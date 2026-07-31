@@ -1,166 +1,143 @@
-catalog_id: "retail-2026-07-30-v7"
 currency: "credits"
-pricing_model: "tier_matrix_v1"
+tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
 skus:
-  - id: "task.article.cost-effective.v1"
+  - id: "task.article.effective"
     operation: "task.article"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 4800
-    tier_prices: { free: 4800, pro: 4320, enterprise: 3840 }
     delivery: "article_artifacts_verified"
-  - id: "task.article.balanced.v1"
+  - id: "task.article.balanced"
     operation: "task.article"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 6000
-    tier_prices: { free: 6000, pro: 5400, enterprise: 4800 }
     delivery: "article_artifacts_verified"
-  - id: "task.article.maximum-quality.v1"
+  - id: "task.article.quality"
     operation: "task.article"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 18000
-    tier_prices: { free: 18000, pro: 16200, enterprise: 14400 }
     delivery: "article_artifacts_verified"
 
-  - id: "task.seednote.cost-effective.v1"
+  - id: "task.seednote.effective"
     operation: "task.seednote"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 4000
-    tier_prices: { free: 4000, pro: 3600, enterprise: 3200 }
     delivery: "seednote_artifacts_verified"
-  - id: "task.seednote.balanced.v1"
+  - id: "task.seednote.balanced"
     operation: "task.seednote"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 5000
-    tier_prices: { free: 5000, pro: 4500, enterprise: 4000 }
     delivery: "seednote_artifacts_verified"
-  - id: "task.seednote.maximum-quality.v1"
+  - id: "task.seednote.quality"
     operation: "task.seednote"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 15000
-    tier_prices: { free: 15000, pro: 13500, enterprise: 12000 }
     delivery: "seednote_artifacts_verified"
 
-  - id: "task.moments.cost-effective.v1"
+  - id: "task.moments.effective"
     operation: "task.moments"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 2400
-    tier_prices: { free: 2400, pro: 2160, enterprise: 1920 }
     delivery: "moments_artifacts_verified"
-  - id: "task.moments.balanced.v1"
+  - id: "task.moments.balanced"
     operation: "task.moments"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 3000
-    tier_prices: { free: 3000, pro: 2700, enterprise: 2400 }
     delivery: "moments_artifacts_verified"
-  - id: "task.moments.maximum-quality.v1"
+  - id: "task.moments.quality"
     operation: "task.moments"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 9000
-    tier_prices: { free: 9000, pro: 8100, enterprise: 7200 }
     delivery: "moments_artifacts_verified"
 
-  - id: "task.ecommerce.cost-effective.v1"
+  - id: "task.ecommerce.effective"
     operation: "task.ecommerce"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 2400
-    tier_prices: { free: 2400, pro: 2160, enterprise: 1920 }
     delivery: "ecommerce_artifacts_verified"
-  - id: "task.ecommerce.balanced.v1"
+  - id: "task.ecommerce.balanced"
     operation: "task.ecommerce"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 3000
-    tier_prices: { free: 3000, pro: 2700, enterprise: 2400 }
     delivery: "ecommerce_artifacts_verified"
-  - id: "task.ecommerce.maximum-quality.v1"
+  - id: "task.ecommerce.quality"
     operation: "task.ecommerce"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 9000
-    tier_prices: { free: 9000, pro: 8100, enterprise: 7200 }
     delivery: "ecommerce_artifacts_verified"
 
-  - id: "task.montage.cost-effective.v1"
+  - id: "task.montage.effective"
     operation: "task.montage"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 1600
-    tier_prices: { free: 1600, pro: 1440, enterprise: 1280 }
     delivery: "montage_artifacts_verified"
-  - id: "task.montage.balanced.v1"
+  - id: "task.montage.balanced"
     operation: "task.montage"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 2000
-    tier_prices: { free: 2000, pro: 1800, enterprise: 1600 }
     delivery: "montage_artifacts_verified"
-  - id: "task.montage.maximum-quality.v1"
+  - id: "task.montage.quality"
     operation: "task.montage"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 6000
-    tier_prices: { free: 6000, pro: 5400, enterprise: 4800 }
     delivery: "montage_artifacts_verified"
 
-  - id: "task.viral-analysis.cost-effective.v2"
+  - id: "task.viral-analysis.effective"
     operation: "task.viral_analysis"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 1200
-    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
     delivery: "viral_analysis_report_verified"
-  - id: "task.viral-analysis.balanced.v2"
+  - id: "task.viral-analysis.balanced"
     operation: "task.viral_analysis"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1200
-    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
     delivery: "viral_analysis_report_verified"
-  - id: "task.viral-analysis.maximum-quality.v2"
+  - id: "task.viral-analysis.quality"
     operation: "task.viral_analysis"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 1200
-    tier_prices: { free: 1200, pro: 1080, enterprise: 960 }
     delivery: "viral_analysis_report_verified"
 
-  - id: "image.seedream.cover.v1"
+  - id: "image.seedream.cover"
     operation: "mcp.generate_image"
     charge_policy: "accepted_task_operation"
     price_credits: 500
-    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.cover"
     delivery: "persisted_image"
-  - id: "image.seedream.content.v1"
+  - id: "image.seedream.content"
     operation: "mcp.generate_image"
     charge_policy: "accepted_task_operation"
     price_credits: 500
-    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.content"
     delivery: "persisted_image"
 
-  - id: "image.seedream.designer.v1"
+  - id: "image.seedream.designer"
     operation: "designer.generate_image"
     charge_policy: "standalone_operation"
     price_credits: 500
-    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.designer.seedream"
     delivery: "persisted_image"
 
-  - id: "image.gpt-image-2.designer.v1"
+  - id: "image.gpt-image-2.designer"
     operation: "designer.generate_image"
     charge_policy: "standalone_operation"
     price_credits: 500
-    tier_prices: { free: 500, pro: 450, enterprise: 400 }
     route: "image_generation.designer.gpt_image_2"
     delivery: "persisted_image"

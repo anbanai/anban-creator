@@ -1515,6 +1515,7 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
 		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
 	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1845,7 +1846,10 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
 	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

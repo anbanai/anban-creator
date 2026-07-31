@@ -191,7 +191,10 @@ func TestBillingHandler(t *testing.T) {
 		resp := f.publicRequest(t, http.MethodGet, "/api/billing/catalog", nil)
 		assertBillingHTTP(t, resp, http.StatusOK, 0)
 		data := billingResponseData(t, resp)
-		if data["pricing_model"] != serverbilling.PricingModelTierMatrixV1 || data["pricing_tier"] != string(model.TierPro) {
+		if _, exposed := data["pricing_model"]; exposed {
+			t.Fatalf("catalog exposed pricing_model: %#v", data)
+		}
+		if data["pricing_tier"] != string(model.TierPro) {
 			t.Fatalf("catalog pricing identity = %#v", data)
 		}
 		skus := data["skus"].([]any)
@@ -549,9 +552,9 @@ func billingHandlerBundle() serverbilling.Bundle {
 			AcceptedTask:  serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         serverbilling.TopUpPolicy{RepayDebtFirst: true}, Promotions: serverbilling.PromotionsPolicy{MayRepayDebt: false},
 		},
-		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", PricingModel: serverbilling.PricingModelTierMatrixV1, SKUs: []serverbilling.SKUConfig{
-			{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, TierPrices: map[string]int64{"free": 500, "pro": 450, "enterprise": 400}, Delivery: "article"},
-			{ID: "image.cover.v1", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, TierPrices: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, Delivery: "image"},
+		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, SKUs: []serverbilling.SKUConfig{
+			{ID: "task.article.balanced", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
 		}},
 		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{
 			ID: "referral-handler-v1", Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: 10_000_000,

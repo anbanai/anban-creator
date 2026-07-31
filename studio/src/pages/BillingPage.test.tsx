@@ -185,4 +185,26 @@ describe('BillingPage', () => {
 
     expect(await screen.findByText('专业版价格 450 · 标准价 500 · 优惠 50 · 现金积分 -450')).toBeInTheDocument()
   })
+
+  it('uses a human-readable association when only an internal catalog ID is available', async () => {
+    vi.mocked(api.billing.transactions).mockResolvedValueOnce({
+      total: 1,
+      offset: 0,
+      limit: 20,
+      items: [{
+        id: 'catalog-only-entry',
+        event_kind: 'promotion',
+        paid_delta: 0,
+        promotional_delta: 1000,
+        debt_delta: 0,
+        catalog_id: 'retail-internal-v7',
+        created_at: '2026-07-27T11:03:30.725Z',
+      }],
+    })
+
+    render(<BillingPage />)
+
+    expect(await screen.findByText('钱包调整')).toBeInTheDocument()
+    expect(screen.queryByText('retail-internal-v7')).not.toBeInTheDocument()
+  })
 })

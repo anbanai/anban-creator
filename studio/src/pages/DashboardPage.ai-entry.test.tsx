@@ -70,10 +70,10 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       catalog_id: 'catalog-1',
       currency: 'credits',
       skus: [
-        { id: 'article-cost', operation: 'task.article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'effective', delivery: 'task' },
-        { id: 'article-balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
-        { id: 'seednote-cost', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 3200, execution_profile: 'effective', delivery: 'task' },
-        { id: 'seednote-balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
+        { id: 'task.article.effective', operation: 'task.article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'effective', delivery: 'task' },
+        { id: 'task.article.balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
+        { id: 'task.seednote.effective', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 3200, execution_profile: 'effective', delivery: 'task' },
+        { id: 'task.seednote.balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
       ],
     } as const,
   }

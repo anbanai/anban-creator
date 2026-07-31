@@ -196,13 +196,12 @@ func (BillingWalletEntry) TableName() string { return "billing_wallet_entries" }
 
 // BillingCatalogVersion is an immutable published retail-catalog snapshot.
 type BillingCatalogVersion struct {
-	CatalogID    string         `gorm:"type:varchar(128);primaryKey" json:"catalog_id"`
-	Currency     string         `gorm:"type:varchar(20);not null" json:"currency"`
-	PricingModel string         `gorm:"type:varchar(32);not null;default:flat_v1" json:"pricing_model"`
-	Status       string         `gorm:"type:varchar(20);index;not null" json:"status"`
-	PublishedAt  time.Time      `gorm:"index;not null" json:"published_at"`
-	Snapshot     datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
-	CreatedAt    time.Time      `json:"created_at"`
+	CatalogID   string         `gorm:"type:varchar(128);primaryKey" json:"catalog_id"`
+	Currency    string         `gorm:"type:varchar(20);not null" json:"currency"`
+	Status      string         `gorm:"type:varchar(20);index;not null" json:"status"`
+	PublishedAt time.Time      `gorm:"index;not null" json:"published_at"`
+	Snapshot    datatypes.JSON `gorm:"type:json;not null" json:"snapshot"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 func (BillingCatalogVersion) TableName() string { return "billing_catalog_versions" }

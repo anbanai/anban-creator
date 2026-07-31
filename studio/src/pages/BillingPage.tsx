@@ -70,7 +70,7 @@ function entryAssociation(entry: BillingTransaction) {
   const resource = [entry.resource_type, entry.resource_id].filter(Boolean).join(' / ')
   if (resource) return { primary: resource, secondary: entry.sku_id }
   const source = [entry.source_type, entry.source_id].filter(Boolean).join(' / ')
-  return { primary: source || entry.catalog_id || '钱包调整', secondary: entry.sku_id }
+  return { primary: source || '钱包调整', secondary: entry.sku_id }
 }
 
 function amountExplanation(entry: BillingTransaction) {

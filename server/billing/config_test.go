@@ -2,6 +2,7 @@ package billing
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,7 +45,7 @@ func TestLoadBundleRejectsStrictYAMLErrors(t *testing.T) {
 	}{
 		{name: "unknown field", overrides: map[string]string{"policy.yaml": validPolicyYAML + "unknown: true\n"}, want: "field unknown not found"},
 		{name: "trailing document", overrides: map[string]string{"policy.yaml": validPolicyYAML + "---\nversion: second\n"}, want: "trailing YAML document"},
-		{name: "duplicate SKU", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "skus:\n", "skus:\n  - id: task.seednote.standard.v1\n    operation: task.seednote\n    execution_profile: balanced\n    charge_policy: task_admission\n    price_credits: 5000\n    delivery: verified\n", 1)}, want: "duplicate SKU id"},
+		{name: "duplicate SKU", overrides: map[string]string{"products.yaml": strings.Replace(validProductsYAML, "skus:\n", "skus:\n  - id: task.seednote.balanced\n    operation: task.seednote\n    execution_profile: balanced\n    charge_policy: task_admission\n    price_credits: 5000\n    delivery: verified\n", 1)}, want: "duplicate SKU id"},
 		{name: "duplicate program", overrides: map[string]string{"promotions.yaml": validPromotionsYAML + "  - id: referral-v1\n    trigger: invitee_first_paid_topup\n    minimum_topup_cny: \"10.00\"\n    inviter_credits: 1\n    invitee_credits: 1\n    expires_after: 24h\n    max_inviter_rewards: 1\n    can_repay_debt: false\n"}, want: "duplicate referral program id"},
 		{name: "malformed currency rate", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `"7.2.0"`, 1)}, want: "currency_rates.USD"},
 		{name: "currency rate must be string", overrides: map[string]string{"costs.yaml": strings.Replace(validCostsYAML, `"7.20"`, `7.20`, 1)}, want: "must be a quoted decimal string"},
@@ -138,7 +139,7 @@ func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
 	}{
 		{
 			name: "duplicate billable identity normalizes blank route",
-			products: validProductsYAML + `  - id: task.seednote.alternate.v1
+			products: validProductsYAML + `  - id: task.seednote.alternate
     operation: task.seednote
     execution_profile: balanced
     charge_policy: task_admission
@@ -187,10 +188,10 @@ func TestLoadBundleNormalizesBlankTaskAdmissionRoute(t *testing.T) {
 }
 
 func TestLoadBundleCanonicalizesSKUFields(t *testing.T) {
-	products := `catalog_id: " retail-v1 "
-currency: " credits "
+	products := `currency: " credits "
+tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
 skus:
-  - id: " image.standard.v1 "
+  - id: " image.standard "
     operation: " mcp.generate_image "
     charge_policy: " accepted_task_operation "
     price_credits: 500
@@ -201,11 +202,11 @@ skus:
 	if err != nil {
 		t.Fatalf("LoadBundle: %v", err)
 	}
-	if bundle.Products.CatalogID != "retail-v1" || bundle.Products.Currency != "credits" {
+	if !strings.HasPrefix(bundle.Products.CatalogID, "retail-sha256-") || bundle.Products.Currency != "credits" {
 		t.Fatalf("product identity = catalog %q currency %q", bundle.Products.CatalogID, bundle.Products.Currency)
 	}
 	want := SKUConfig{
-		ID: "image.standard.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation",
+		ID: "image.standard", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation",
 		PriceCredits: 500, Route: "image_generation.content", Delivery: "persisted_image",
 	}
 	if got := bundle.Products.SKUs[0]; !reflect.DeepEqual(got, want) {
@@ -224,29 +225,152 @@ func TestLoadBundleCanonicalizesSinglePaddedOperation(t *testing.T) {
 	}
 }
 
-func TestLoadBundleRequiresCompleteTierMatrix(t *testing.T) {
-	base := strings.Replace(validProductsYAML, "currency: credits\n", "currency: credits\npricing_model: tier_matrix_v1\n", 1)
-	base = strings.Replace(base, "    price_credits: 5000\n", "    price_credits: 5000\n    tier_prices: { free: 5000, pro: 4500, enterprise: 4000 }\n", 1)
-	if _, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": base})); err != nil {
-		t.Fatalf("complete tier matrix: %v", err)
+func TestLoadBundleDerivesContentAddressedRetailCatalogID(t *testing.T) {
+	first, err := LoadBundle(writeBundleFixture(t, nil))
+	if err != nil {
+		t.Fatalf("LoadBundle(first): %v", err)
 	}
-	missing := strings.Replace(base, ", enterprise: 4000", "", 1)
-	if _, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": missing})); !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "exactly free, pro, and enterprise") {
-		t.Fatalf("missing tier error = %v", err)
+	second, err := LoadBundle(writeBundleFixture(t, nil))
+	if err != nil {
+		t.Fatalf("LoadBundle(second): %v", err)
+	}
+	if first.Products.CatalogID != second.Products.CatalogID {
+		t.Fatalf("catalog IDs differ for identical content: %q != %q", first.Products.CatalogID, second.Products.CatalogID)
+	}
+	if !strings.HasPrefix(first.Products.CatalogID, "retail-sha256-") || len(first.Products.CatalogID) != len("retail-sha256-")+64 {
+		t.Fatalf("catalog ID = %q, want full SHA-256 identity", first.Products.CatalogID)
+	}
+
+	changedPrice := strings.Replace(validProductsYAML, "price_credits: 5000", "price_credits: 5001", 1)
+	priceBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": changedPrice}))
+	if err != nil {
+		t.Fatalf("LoadBundle(changed price): %v", err)
+	}
+	if priceBundle.Products.CatalogID == first.Products.CatalogID {
+		t.Fatal("price change did not change content-addressed catalog ID")
+	}
+
+	changedPolicy := strings.Replace(validPolicyYAML, `version: "2026-07-17"`, `version: "2026-07-18"`, 1)
+	policyBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedPolicy}))
+	if err != nil {
+		t.Fatalf("LoadBundle(changed policy): %v", err)
+	}
+	if policyBundle.Products.CatalogID == first.Products.CatalogID {
+		t.Fatal("billing policy change did not change content-addressed catalog ID")
+	}
+
+	changedCreditsPerCNY := strings.Replace(validPolicyYAML, "credits_per_cny: 1000", "credits_per_cny: 2000", 1)
+	creditsBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedCreditsPerCNY}))
+	if err != nil {
+		t.Fatalf("LoadBundle(changed credits per CNY): %v", err)
+	}
+	if creditsBundle.Products.CatalogID == first.Products.CatalogID {
+		t.Fatal("credits_per_cny change did not change content-addressed catalog ID")
+	}
+
+	changedReversalOrder := strings.Replace(validPolicyYAML,
+		"reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]",
+		"reasons: [provider_error, platform_error, execution_timeout, infrastructure_cancelled]", 1)
+	reversalBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"policy.yaml": changedReversalOrder}))
+	if err != nil {
+		t.Fatalf("LoadBundle(changed reversal policy): %v", err)
+	}
+	if reversalBundle.Products.CatalogID == first.Products.CatalogID {
+		t.Fatal("task failure reversal policy change did not change content-addressed catalog ID")
+	}
+}
+
+func TestProductCatalogPriceForTierFloorsWithoutOverflow(t *testing.T) {
+	bundle, err := LoadBundle(writeBundleFixture(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		price int64
+		tier  string
+		want  int64
+	}{
+		{name: "free list price", price: 101, tier: "free", want: 101},
+		{name: "pro floors fractional credit", price: 101, tier: "pro", want: 90},
+		{name: "enterprise floors fractional credit", price: 101, tier: "enterprise", want: 80},
+		{name: "zero price", price: 0, tier: "pro", want: 0},
+		{name: "maximum int64", price: math.MaxInt64, tier: "free", want: math.MaxInt64},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := bundle.Products.PriceForTier(tt.price, tt.tier)
+			if !ok || got != tt.want {
+				t.Fatalf("PriceForTier(%d, %q) = %d, %v; want %d, true", tt.price, tt.tier, got, ok, tt.want)
+			}
+		})
+	}
+	if _, ok := bundle.Products.PriceForTier(100, "unknown"); ok {
+		t.Fatal("unknown tier resolved a price")
+	}
+}
+
+func TestLoadBundleRejectsLegacyRetailPricingFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		products string
+		want     string
+	}{
+		{name: "manual catalog ID", products: "catalog_id: retail-v1\n" + validProductsYAML, want: "field catalog_id not found"},
+		{name: "pricing model", products: "pricing_model: tier_matrix_v1\n" + validProductsYAML, want: "field pricing_model not found"},
+		{name: "SKU tier prices", products: strings.Replace(validProductsYAML, "    delivery: verified\n", "    tier_prices: { free: 5000, pro: 4500, enterprise: 4000 }\n    delivery: verified\n", 1), want: "field tier_prices not found"},
+		{name: "versioned SKU ID", products: strings.Replace(validProductsYAML, "task.seednote.balanced", "task.seednote.balanced.v1", 1), want: "must not end in a version suffix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": tt.products}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleValidatesGlobalTierRates(t *testing.T) {
+	tests := []struct {
+		name, rates, want string
+	}{
+		{name: "missing tier", rates: "{ free: 100, pro: 90 }", want: "exactly free, pro, and enterprise"},
+		{name: "rate below zero", rates: "{ free: 100, pro: -1, enterprise: 0 }", want: "must be between 0 and 100"},
+		{name: "rate above one hundred", rates: "{ free: 100, pro: 101, enterprise: 80 }", want: "must be between 0 and 100"},
+		{name: "free is list price", rates: "{ free: 99, pro: 90, enterprise: 80 }", want: "free: must equal 100"},
+		{name: "rates are ordered", rates: "{ free: 100, pro: 80, enterprise: 90 }", want: "free >= pro >= enterprise"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			products := strings.Replace(validProductsYAML, "{ free: 100, pro: 90, enterprise: 80 }", tt.rates, 1)
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadBundleRequiresTaskAdmissionExecutionProfile(t *testing.T) {
+	products := strings.Replace(validProductsYAML, "    execution_profile: balanced\n", "", 1)
+	_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "must be effective, balanced, or quality") {
+		t.Fatalf("LoadBundle error = %v, want required canonical execution profile", err)
 	}
 }
 
 func TestLoadBundleRejectsCanonicalDuplicateSKUIDs(t *testing.T) {
-	products := `catalog_id: retail-v1
-currency: credits
+	products := `currency: credits
+tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
 skus:
-  - id: " duplicate.v1 "
+  - id: " duplicate "
     operation: task.one
     execution_profile: balanced
     charge_policy: task_admission
     price_credits: 100
     delivery: one
-  - id: duplicate.v1
+  - id: duplicate
     operation: task.two
     execution_profile: balanced
     charge_policy: task_admission
@@ -509,10 +633,10 @@ task_failure_reversal:
   reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]
 `
 
-const validProductsYAML = `catalog_id: retail-v1
-currency: credits
+const validProductsYAML = `currency: credits
+tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
 skus:
-  - id: task.seednote.standard.v1
+  - id: task.seednote.balanced
     operation: task.seednote
     execution_profile: balanced
     charge_policy: task_admission

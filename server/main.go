@@ -1027,6 +1027,9 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 	if bundle == nil {
 		return nil, fmt.Errorf("billing bundle is required")
 	}
+	if err := service.MigrateBillingTierPrices(ctx, db, log); err != nil {
+		return nil, fmt.Errorf("migrate billing tier prices: %w", err)
+	}
 	catalog := service.NewBillingCatalogService(repo, bundle, service.BillingCatalogOptions{})
 	if _, err := catalog.Publish(ctx); err != nil {
 		return nil, fmt.Errorf("publish billing catalog: %w", err)

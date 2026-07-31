@@ -307,7 +307,7 @@ func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
 	if task.Type != model.TaskTypeViralAnalysis || task.ExecutionProfile != "effective" || task.AgentProfileSnapshot.ProfileID != "effective" {
 		t.Fatalf("task contract = %#v", task)
 	}
-	if task.BillingCatalogID != "retail-2026-07-30-v7" || task.BillingSKUID != "task.viral-analysis.cost-effective.v2" {
+	if task.BillingCatalogID != bundle.Products.CatalogID || task.BillingSKUID != "task.viral-analysis.effective" {
 		t.Fatalf("task billing = %q/%q", task.BillingCatalogID, task.BillingSKUID)
 	}
 	quote, err := repo.Billing().FindQuoteByKey(ctx, "task-admission-quote", task.ID)
@@ -2238,10 +2238,11 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 			TopUp:         billing.TopUpPolicy{RepayDebtFirst: true},
 		},
 		Products: billing.ProductCatalog{
-			CatalogID: "clone-insufficient-v1",
-			Currency:  "credits",
+			CatalogID:        "clone-insufficient-v1",
+			Currency:         "credits",
+			TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 			SKUs: []billing.SKUConfig{{
-				ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "effective", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
+				ID: "task.article.effective", Operation: "task.article", ExecutionProfile: "effective", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
 			}},
 		},
 	}

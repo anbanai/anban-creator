@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -40,7 +39,7 @@ func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 	}
 }
 
-func TestAgentProfileCatalogV7(t *testing.T) {
+func TestContentAddressedRetailCatalog(t *testing.T) {
 	if err := initialRetailCatalogContractError(loadProductionBundle(t).Products); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +182,7 @@ func TestInitialRetailCatalogContractRejectsUnsupportedAdditions(t *testing.T) {
 		{
 			name: "arbitrary extra SKU",
 			sku: SKUConfig{
-				ID: "extra.arbitrary.v1", Operation: "extra.arbitrary", ChargePolicy: "standalone_operation",
+				ID: "extra.arbitrary", Operation: "extra.arbitrary", ChargePolicy: "standalone_operation",
 				PriceCredits: 1, Route: "extra.arbitrary", Delivery: "extra",
 			},
 			want: "unexpected SKU",
@@ -216,24 +215,22 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
 		},
 		{
 			name: "duplicate SKU ID",
-			products: products + `  - id: "task.article.balanced.v1"
+			products: products + `  - id: "task.article.balanced"
     operation: "task.duplicate"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1
-    tier_prices: { free: 1, pro: 1, enterprise: 1 }
     delivery: "duplicate"
 `,
 			want: "duplicate SKU id",
 		},
 		{
 			name: "ambiguous billable identity",
-			products: products + `  - id: "task.article.alternate.v1"
+			products: products + `  - id: "task.article.alternate"
     operation: "task.article"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1
-    tier_prices: { free: 1, pro: 1, enterprise: 1 }
     delivery: "alternate"
 `,
 			want: "duplicates billable identity",
@@ -370,10 +367,10 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		priceCredits     int64
 	}
 	want := map[string]skuSnapshot{
-		"image.seedream.cover.v1":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
-		"image.seedream.content.v1":     {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
-		"image.seedream.designer.v1":    {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
-		"image.gpt-image-2.designer.v1": {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
+		"image.seedream.cover":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
+		"image.seedream.content":     {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
+		"image.seedream.designer":    {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
+		"image.gpt-image-2.designer": {operation: "designer.generate_image", chargePolicy: "standalone_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
 	}
 	taskTypes := []struct {
 		id, operation, delivery string
@@ -386,34 +383,39 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		{"montage", "task.montage", "montage_artifacts_verified", 2000},
 	}
 	profiles := []struct {
-		id, suffix string
-		numerator  int64
+		id        string
+		numerator int64
 	}{
-		{"effective", "cost-effective", 8},
-		{"balanced", "balanced", 10},
-		{"quality", "maximum-quality", 30},
+		{"effective", 8},
+		{"balanced", 10},
+		{"quality", 30},
 	}
 	for _, taskType := range taskTypes {
 		for _, profile := range profiles {
-			id := "task." + taskType.id + "." + profile.suffix + ".v1"
+			id := "task." + taskType.id + "." + profile.id
 			want[id] = skuSnapshot{
 				operation: taskType.operation, executionProfile: profile.id, chargePolicy: "task_admission",
 				priceCredits: taskType.balanced * profile.numerator / 10, delivery: taskType.delivery,
 			}
 		}
 	}
-	for profile, suffix := range map[string]string{
-		"effective": "cost-effective",
-		"balanced":  "balanced",
-		"quality":   "maximum-quality",
-	} {
-		want["task.viral-analysis."+suffix+".v2"] = skuSnapshot{
+	for _, profile := range []string{"effective", "balanced", "quality"} {
+		want["task.viral-analysis."+profile] = skuSnapshot{
 			operation: "task.viral_analysis", executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200,
 			delivery: "viral_analysis_report_verified",
 		}
 	}
-	if catalog.CatalogID != "retail-2026-07-30-v7" || catalog.Currency != "credits" || catalog.PricingModel != PricingModelTierMatrixV1 {
+	if !strings.HasPrefix(catalog.CatalogID, "retail-sha256-") || len(catalog.CatalogID) != len("retail-sha256-")+64 || catalog.Currency != "credits" {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)
+	}
+	wantRates := map[string]int64{"free": 100, "pro": 90, "enterprise": 80}
+	if len(catalog.TierRatesPercent) != len(wantRates) {
+		return fmt.Errorf("tier rates = %#v, want %#v", catalog.TierRatesPercent, wantRates)
+	}
+	for tier, rate := range wantRates {
+		if catalog.TierRatesPercent[tier] != rate {
+			return fmt.Errorf("tier rate %q = %d, want %d", tier, catalog.TierRatesPercent[tier], rate)
+		}
 	}
 	seen := make(map[string]int, len(catalog.SKUs))
 	for _, sku := range catalog.SKUs {
@@ -427,14 +429,6 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		}
 		if actual != expected {
 			return fmt.Errorf("SKU %q snapshot = %#v, want %#v", sku.ID, actual, expected)
-		}
-		wantTierPrices := map[string]int64{
-			"free":       sku.PriceCredits,
-			"pro":        sku.PriceCredits * 9 / 10,
-			"enterprise": sku.PriceCredits * 8 / 10,
-		}
-		if !reflect.DeepEqual(sku.TierPrices, wantTierPrices) {
-			return fmt.Errorf("SKU %q tier prices = %#v, want %#v", sku.ID, sku.TierPrices, wantTierPrices)
 		}
 		seen[sku.ID]++
 		if seen[sku.ID] != 1 {

@@ -163,14 +163,14 @@ func TestBuildBillingRuntime(t *testing.T) {
 		}
 	})
 
-	t.Run("publish failure", func(t *testing.T) {
+	t.Run("migration failure", func(t *testing.T) {
 		db, repo := newRepo(t)
 		if err := repo.Close(); err != nil {
 			t.Fatal(err)
 		}
 		cfg := &config.Config{BillingRuntime: config.BillingRuntimeConfig{ConfigDir: catalogDir, AdminAPIKey: "key"}}
-		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err == nil || !strings.Contains(err.Error(), "publish billing catalog") {
-			t.Fatalf("publish failure = %v", err)
+		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err == nil || !strings.Contains(err.Error(), "migrate billing tier prices") {
+			t.Fatalf("migration failure = %v", err)
 		}
 	})
 
@@ -181,7 +181,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if err != nil || runtime == nil || runtime.Handler == nil || runtime.AdminHandler == nil || runtime.Catalog == nil || runtime.Wallet == nil || runtime.Referrals == nil || runtime.Worker == nil || runtime.Cost == nil || runtime.Margin == nil {
 			t.Fatalf("buildBillingRuntime = %+v, %v", runtime, err)
 		}
-		if _, err := repo.Billing().FindCatalogVersion(t.Context(), "retail-2026-07-30-v7"); err != nil {
+		if _, err := repo.Billing().FindCatalogVersion(t.Context(), bundle.Products.CatalogID); err != nil {
 			t.Fatalf("published production catalog: %v", err)
 		}
 	})
@@ -202,7 +202,7 @@ func TestBuildBillingRuntime(t *testing.T) {
 		if _, err := buildBillingRuntime(t.Context(), db, repo, bundle, cfg, &logger); err != nil {
 			t.Fatalf("buildBillingRuntime with previous catalog: %v", err)
 		}
-		for _, catalogID := range []string{"retail-2026-07-20-v2", "retail-2026-07-30-v7"} {
+		for _, catalogID := range []string{"retail-2026-07-20-v2", bundle.Products.CatalogID} {
 			if _, err := repo.Billing().FindCatalogVersion(t.Context(), catalogID); err != nil {
 				t.Fatalf("catalog %s not preserved: %v", catalogID, err)
 			}
@@ -231,6 +231,16 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 		if !strings.Contains(text, required) {
 			t.Fatalf("main billing wiring missing %q", required)
 		}
+	}
+	buildStart := strings.Index(text, "func buildBillingRuntime(")
+	if buildStart < 0 {
+		t.Fatal("buildBillingRuntime is missing")
+	}
+	buildSection := text[buildStart:]
+	tierMigration := strings.Index(buildSection, "service.MigrateBillingTierPrices(ctx, db, log)")
+	catalogPublish := strings.Index(buildSection, "catalog.Publish(ctx)")
+	if tierMigration < 0 || catalogPublish < 0 || tierMigration >= catalogPublish {
+		t.Fatalf("billing tier migration must run before catalog publication: migration=%d publish=%d", tierMigration, catalogPublish)
 	}
 	workerStart := strings.Index(text, "fixedBilling.Worker.Run(ctx)")
 	workerWait := strings.Index(text, "billingWorkerWG.Wait()")

@@ -13,8 +13,8 @@ describe('taskCostFor', () => {
       catalog_id: 'retail-profile-v1',
       currency: 'credits' as const,
       skus: [
-        { id: 'article-cost', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
-        { id: 'article-balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission' as const, price_credits: 6000, delivery: 'article' },
+        { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
+        { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission' as const, price_credits: 6000, delivery: 'article' },
       ],
     } satisfies BillingCatalog
 
@@ -28,8 +28,8 @@ describe('taskCostFor', () => {
       catalog_id: 'retail-profile-v1',
       currency: 'credits' as const,
       skus: [
-        { id: 'article-cost', operation: 'task.article', execution_profile: 'effective' as const, charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
-        { id: 'article-balanced', operation: 'task.article', execution_profile: 'balanced' as const, charge_policy: 'task_admission' as const, price_credits: 4000, delivery: 'article' },
+        { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective' as const, charge_policy: 'task_admission' as const, price_credits: 4800, delivery: 'article' },
+        { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced' as const, charge_policy: 'task_admission' as const, price_credits: 4000, delivery: 'article' },
       ],
     }
     const profiles = [

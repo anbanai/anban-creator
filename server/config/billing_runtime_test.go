@@ -48,8 +48,8 @@ billing_runtime:
 	if cfg.BillingRuntime.AdminAPIKey != "billing-admin-secret" {
 		t.Fatalf("billing_runtime.admin_api_key was not expanded")
 	}
-	if cfg.BillingBundle == nil || cfg.BillingBundle.Products.CatalogID != "retail-v1" {
-		t.Fatalf("BillingBundle = %#v, want loaded retail-v1 bundle", cfg.BillingBundle)
+	if cfg.BillingBundle == nil || !strings.HasPrefix(cfg.BillingBundle.Products.CatalogID, "retail-sha256-") || len(cfg.BillingBundle.Products.CatalogID) != len("retail-sha256-")+64 {
+		t.Fatalf("BillingBundle = %#v, want content-addressed retail bundle", cfg.BillingBundle)
 	}
 
 	encoded, err := json.Marshal(cfg.BillingRuntime)
@@ -187,10 +187,10 @@ top_up: {repay_debt_first: true}
 promotions: {may_repay_debt: false}
 task_failure_reversal: {enabled: true, reasons: [platform_error, provider_error, execution_timeout, infrastructure_cancelled]}
 `,
-		"products.yaml": `catalog_id: retail-v1
-currency: credits
+		"products.yaml": `currency: credits
+tier_rates_percent: {free: 100, pro: 90, enterprise: 80}
 skus:
-  - {id: task.article.v1, operation: task.article, charge_policy: task_admission, price_credits: 1000, delivery: verified}
+  - {id: task.article.effective, operation: task.article, execution_profile: effective, charge_policy: task_admission, price_credits: 1000, delivery: verified}
 `,
 		"costs.yaml": `catalog_id: costs-v1
 currency_rates: {CNY: "1.00"}

@@ -375,40 +375,16 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 }
 
 func (s *BillingWalletService) resolveAcceptedOperationPrice(ctx context.Context, tx repository.Repository, req OperationChargeRequest, sku *model.BillingSKU) (*ResolvedSKUPrice, error) {
-	catalog, err := tx.Billing().FindCatalogVersion(ctx, sku.CatalogID)
+	task, err := tx.Tasks().FindByID(ctx, req.TaskID)
 	if err != nil {
 		return nil, err
 	}
-	task, err := tx.Tasks().FindByID(ctx, req.TaskID)
-	if err != nil && !(errors.Is(err, gorm.ErrRecordNotFound) && catalog.PricingModel != billing.PricingModelTierMatrixV1) {
-		return nil, err
+	if task.UserID != req.UserID || task.BillingCatalogID != req.CatalogID {
+		return nil, ErrBillingQuoteMismatch
 	}
-	if task != nil {
-		if task.UserID != req.UserID {
-			return nil, ErrBillingQuoteMismatch
-		}
-		if catalog.PricingModel == billing.PricingModelTierMatrixV1 || task.BillingCatalogID != "" {
-			if task.BillingCatalogID != req.CatalogID {
-				return nil, ErrBillingQuoteMismatch
-			}
-		}
-	}
-	var tier model.Tier
-	if task != nil {
-		tier = model.Tier(task.BillingPricingTier)
-	}
-	if !model.ValidTiers[tier] && catalog.PricingModel != billing.PricingModelTierMatrixV1 {
-		user, userErr := tx.Users().FindByID(ctx, req.UserID)
-		if userErr != nil {
-			return nil, userErr
-		}
-		tier = model.ResolveTier(user.Tier)
-	}
+	tier := model.Tier(task.BillingPricingTier)
 	if !model.ValidTiers[tier] {
 		return nil, fmt.Errorf("%w: task pricing tier is invalid", ErrBillingInvalid)
-	}
-	if catalog.PricingModel != billing.PricingModelTierMatrixV1 {
-		return flatResolvedSKUPrice(sku, tier), nil
 	}
 	price, err := tx.Billing().FindSKUTierPrice(ctx, sku.CatalogID, sku.SKUID, tier)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1171,21 +1147,6 @@ func validateQuoteAvailability(quote *model.BillingQuote, now time.Time) error {
 		return ErrBillingQuoteExpired
 	}
 	return nil
-}
-
-func flatResolvedSKUPrice(sku *model.BillingSKU, tier model.Tier) *ResolvedSKUPrice {
-	ruleID := sku.CatalogID + ":" + sku.SKUID + ":flat"
-	snapshot, _ := json.Marshal(struct {
-		CatalogID     string     `json:"catalog_id"`
-		SKUID         string     `json:"sku_id"`
-		Tier          model.Tier `json:"tier"`
-		PriceCredits  int64      `json:"price_credits"`
-		PricingRuleID string     `json:"pricing_rule_id"`
-	}{sku.CatalogID, sku.SKUID, tier, sku.PriceCredits, ruleID})
-	return &ResolvedSKUPrice{
-		SKU: sku, PricingTier: tier, ListPriceCredits: sku.PriceCredits, PriceCredits: sku.PriceCredits,
-		PricingRuleID: ruleID, PricingSnapshot: snapshot,
-	}
 }
 
 func tierResolvedSKUPrice(sku *model.BillingSKU, price *model.BillingSKUTierPrice) (*ResolvedSKUPrice, error) {

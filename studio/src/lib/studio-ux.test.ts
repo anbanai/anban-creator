@@ -110,7 +110,7 @@ describe('studio business UX helpers', () => {
           catalog_id: 'retail-v1',
           currency: 'credits',
           skus: [{
-            id: 'task.article.v1',
+            id: 'task.article.effective',
             operation: 'task.article',
             charge_policy: 'task_admission',
             price_credits: 6000,
