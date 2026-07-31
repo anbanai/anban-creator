@@ -25,15 +25,15 @@ func TestValidateImagePresets(t *testing.T) {
 		{
 			name: "valid single preset",
 			presets: []ImageModelPreset{
-				{Key: "volcengine-standard", Provider: "volcengine", Model: "doubao-seedream"},
+				{Key: "standard_image", DisplayName: "标准图像", Description: "适合日常内容配图", BillingSKU: "image.seedream.designer"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid multiple presets with distinct keys",
 			presets: []ImageModelPreset{
-				{Key: "volcengine-standard"},
-				{Key: "gemini-pro"},
+				{Key: "standard_image", BillingSKU: "image.seedream.designer"},
+				{Key: "professional_enhance", BillingSKU: "image.gpt-image-2.designer"},
 			},
 			wantErr: false,
 		},
@@ -56,7 +56,7 @@ func TestValidateImagePresets(t *testing.T) {
 		{
 			name: "key at exactly 50 chars accepted",
 			presets: []ImageModelPreset{
-				{Key: strings.Repeat("a", 50)},
+				{Key: strings.Repeat("a", 50), BillingSKU: "image.seedream.designer"},
 			},
 			wantErr: false,
 		},
@@ -87,11 +87,29 @@ func TestValidateImagePresets(t *testing.T) {
 		{
 			name: "duplicate keys rejected",
 			presets: []ImageModelPreset{
-				{Key: "gemini-pro"},
-				{Key: "gemini-pro"},
+				{Key: "standard_image", BillingSKU: "image.seedream.designer"},
+				{Key: "standard_image", BillingSKU: "image.seedream.designer"},
 			},
 			wantErr: true,
 			substr:  "duplicate key",
+		},
+		{
+			name:    "missing billing SKU rejected",
+			presets: []ImageModelPreset{{Key: "standard_image", DisplayName: "标准图像"}},
+			wantErr: true,
+			substr:  "billing_sku",
+		},
+		{
+			name:    "blocked brand in display name rejected case insensitive",
+			presets: []ImageModelPreset{{Key: "standard_image", DisplayName: "OpenAI 标准图像", BillingSKU: "image.seedream.designer"}},
+			wantErr: true,
+			substr:  "blocked",
+		},
+		{
+			name:    "blocked brand in description rejected",
+			presets: []ImageModelPreset{{Key: "standard_image", DisplayName: "标准图像", Description: "Gemini 细节增强", BillingSKU: "image.seedream.designer"}},
+			wantErr: true,
+			substr:  "blocked",
 		},
 	}
 
@@ -109,6 +127,19 @@ func TestValidateImagePresets(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateImagePresetsBlocksSensitiveTermsInPublicKeys(t *testing.T) {
+	for _, term := range []string{"openai", "chatgpt", "gpt", "gemini", "claude", "seedream", "doubao"} {
+		t.Run(term, func(t *testing.T) {
+			err := ValidateImagePresets([]ImageModelPreset{{
+				Key: "capability_" + strings.ToUpper(term), BillingSKU: "image.seedream.designer",
+			}})
+			if err == nil || !strings.Contains(err.Error(), "blocked") {
+				t.Fatalf("ValidateImagePresets error = %v, want blocked public key", err)
 			}
 		})
 	}
