@@ -195,6 +195,9 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 }
 
 func (s *TaskService) prependClonedReferenceAttachment(ctx context.Context, source *model.Task, attachments []model.EntryAttachment) ([]model.EntryAttachment, error) {
+	if strings.TrimSpace(source.ReferenceImageAssetID) == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID) {
+		return attachments, nil
+	}
 	return s.prependVerifiedReferenceAttachment(ctx, source.UserID, source.ReferenceImageAssetID, attachments)
 }
 
@@ -212,11 +215,19 @@ func (s *TaskService) prependVerifiedReferenceAttachment(ctx context.Context, us
 	}
 	for i, attachment := range attachments {
 		if strings.TrimSpace(attachment.AssetID) == asset.ID {
-			normalized := cloneEntryAttachments(attachments)
-			normalized[i] = model.EntryAttachment{
+			reference := model.EntryAttachment{
 				AssetID: asset.ID, Type: "image", FileName: asset.FileName,
 				ContentType: asset.ContentType, Size: asset.Size, Instruction: attachment.Instruction,
 			}
+			if i == 0 {
+				normalized := cloneEntryAttachments(attachments)
+				normalized[0] = reference
+				return normalized, nil
+			}
+			normalized := make([]model.EntryAttachment, 0, len(attachments))
+			normalized = append(normalized, reference)
+			normalized = append(normalized, attachments[:i]...)
+			normalized = append(normalized, attachments[i+1:]...)
 			return normalized, nil
 		}
 	}
