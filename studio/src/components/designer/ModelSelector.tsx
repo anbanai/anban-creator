@@ -9,13 +9,13 @@ interface ModelSelectorProps {
 }
 
 export default function ModelSelector({ providers, selectedProviderId, onChange, className }: ModelSelectorProps) {
-  const options = providers.filter((provider) => provider.enabled).map((provider) => ({
+  const options = providers.filter((provider) => provider.enabled && provider.priceAvailable !== false).map((provider) => ({
     key: provider.id,
     display_name: provider.name,
     description: provider.description,
     price_credits: provider.credits,
     sort_order: provider.idx + 1,
-    min_tier: provider.pricing?.pricingTier,
+    min_tier: provider.minTier,
   }))
 
   return (

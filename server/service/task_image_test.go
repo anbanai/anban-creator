@@ -67,6 +67,7 @@ func (f *taskImageGeneratorFake) UploadImage()  { f.uploadCalls++ }
 
 type taskImageFixture struct {
 	service     *TaskImageService
+	wallet      *BillingWalletService
 	db          *gorm.DB
 	repo        repository.Repository
 	resolver    *taskImageResolverFake
@@ -122,6 +123,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		SKUs: []serverbilling.SKUConfig{
 			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image_generation.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
 			{ID: "image.content", Operation: "mcp.generate_image", Route: "image_generation.content", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
+			{ID: "image.seedream.designer", Operation: "designer.generate_image", Route: "image_generation.designer.seedream", ChargePolicy: "image_operation", PriceCredits: 500, Delivery: "persisted_image"},
 		},
 	}, Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000}, Policy: serverbilling.PolicySnapshot{AcceptedTask: serverbilling.AcceptedTaskPolicy{
 		ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true,
@@ -130,7 +132,14 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	if _, err := catalog.Publish(ctx); err != nil {
 		t.Fatal(err)
 	}
-	taskSvc.SetBillingWalletService(NewBillingWalletService(repo, bundle, BillingWalletOptions{}))
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: userID, PaidCredits: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	createBillingLot(t, repo, model.BillingCreditLot{ID: uuid.NewString(), UserID: userID,
+		Kind: model.BillingCreditLotKindPaid, SourceType: "fixture", SourceID: uuid.NewString(),
+		CatalogID: bundle.Products.CatalogID, OriginalCredits: 1000, AvailableCredits: 1000})
+	wallet := NewBillingWalletService(repo, bundle, BillingWalletOptions{})
+	taskSvc.SetBillingWalletService(wallet)
 
 	generatedPath := filepath.Join(t.TempDir(), "generated.png")
 	if err := os.WriteFile(generatedPath, taskImageTinyPNG(), 0o644); err != nil {
@@ -138,6 +147,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	}
 	resolver := &taskImageResolverFake{resolved: &ResolvedImageModel{
 		Provider: "openai", Model: "gpt-image-2", SelectionReason: "preferred",
+		BillingSKU:        "image.seedream.designer",
 		SupportsReference: true, MaxReferenceImages: 16,
 	}}
 	generator := &taskImageGeneratorFake{result: &ImageResult{
@@ -145,7 +155,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		Provider: "secret-provider", Model: "secret-model", RevisedPrompt: "secret prompt",
 	}}
 	return &taskImageFixture{
-		service: NewTaskImageService(taskSvc, resolver, generator, catalog, &logger), db: db,
+		service: NewTaskImageService(taskSvc, resolver, generator, catalog, &logger), wallet: wallet, db: db,
 		repo: repo, resolver: resolver, generator: generator,
 		userID: userID, projectID: projectID, taskID: taskID, executionID: executionID,
 	}
@@ -177,6 +187,42 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	}
 	if files != 1 || settlements != 1 {
 		t.Fatalf("task files=%d settlements=%d, want 1/1", files, settlements)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(context.Background(), 10); err != nil || processed != 1 {
+		t.Fatalf("ProcessSettlementOutbox = %d, %v, want one processed image settlement", processed, err)
+	}
+	var account model.BillingWalletAccount
+	if err := f.db.Where("user_id = ?", f.userID).First(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if account.PaidCredits != 500 {
+		t.Fatalf("paid credits = %d, want 500 after image charge", account.PaidCredits)
+	}
+}
+
+func TestGenerateTaskImageWrongPolicyFailsSettlementWithoutCharge(t *testing.T) {
+	f := newTaskImageFixture(t)
+	if err := f.db.Model(&model.BillingSKU{}).
+		Where("catalog_id = ? AND sk_uid = ?", "retail-task-image-v1", "image.seedream.designer").
+		Update("policy", "standalone_operation").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(context.Background(), 10); err != nil || processed != 1 {
+		t.Fatalf("ProcessSettlementOutbox = %d, %v, want one permanently failed settlement", processed, err)
+	}
+	var settlement model.BillingSettlementOutbox
+	if err := f.db.First(&settlement).Error; err != nil {
+		t.Fatal(err)
+	}
+	if settlement.Status != "failed" || !strings.Contains(settlement.LastError, "SKU policy") {
+		t.Fatalf("settlement status=%q error=%q", settlement.Status, settlement.LastError)
+	}
+	var charges int64
+	if err := f.db.Model(&model.BillingCharge{}).Count(&charges).Error; err != nil || charges != 0 {
+		t.Fatalf("charges=%d err=%v, want no charge", charges, err)
 	}
 }
 

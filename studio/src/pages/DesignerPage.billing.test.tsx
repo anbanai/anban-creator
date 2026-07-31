@@ -73,12 +73,10 @@ vi.mock('@/lib/api/designer', () => ({
 }))
 
 const provider = {
-  id: 'gpt_image_2',
-  name: 'GPT Image 2',
-  provider: 'openai',
-  providerKey: 'wangcai_openai',
-  route: 'image_generation.designer.gpt_image_2',
-  model: 'gpt-image-2',
+  id: 'professional_enhance',
+  name: '专业增强',
+  description: '适合复杂构图与高细节视觉任务',
+  minTier: 'enterprise',
   credits: 500,
   enabled: true,
   idx: 0,
@@ -150,7 +148,7 @@ describe('Designer billing guidance', () => {
   it('does not expose Agent execution profiles for image operations', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
   })
 
@@ -174,7 +172,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -191,7 +189,7 @@ describe('Designer billing guidance', () => {
 
     renderWithQueryClient(queryClient)
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     await waitFor(() => expect(queryClient.getQueryState(['billing', 'wallet'])?.status).toBe('error'))
     expect(screen.queryByText('500 积分 · 余额 1,000')).not.toBeInTheDocument()
     expect(screen.getByText('500 积分')).toBeInTheDocument()
@@ -200,7 +198,7 @@ describe('Designer billing guidance', () => {
   it('refreshes the wallet after a normal generation is accepted', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -220,8 +218,8 @@ describe('Designer billing guidance', () => {
       user_id: 'user-1',
       project_id: 'default',
       prompt: '原图',
-      provider: 'openai',
-      model: 'gpt-image-2',
+      capability_key: 'professional_enhance',
+      capability_name: '专业增强',
       n: 1,
       status: 'completed',
       created_at: '2026-07-24T00:00:00Z',
@@ -255,7 +253,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })

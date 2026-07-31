@@ -366,7 +366,7 @@ func validateBundle(bundle *Bundle) error {
 			if sku.Route != "" {
 				return configError("products.yaml", field+".route", errors.New("must be empty for task_admission"))
 			}
-		case "accepted_task_operation", "standalone_operation":
+		case "accepted_task_operation", "standalone_operation", "image_operation":
 			if sku.ExecutionProfile != "" {
 				return configError("products.yaml", field+".execution_profile", errors.New("must be empty for operation SKUs"))
 			}

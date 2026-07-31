@@ -3,10 +3,11 @@ import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { ImageCapabilityOption } from '@/types'
 
-export function useImageCapabilities() {
+export function useImageCapabilities(enabled = true) {
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.imageModels.all,
     queryFn: () => api.imageModels.list(),
+    enabled,
     staleTime: 5 * 60 * 1000,
   })
 

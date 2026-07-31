@@ -592,6 +592,9 @@ func main() {
 			designerSvc.SetProviderCostService(fixedBilling.Cost)
 			designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
 			designerSvc.SetBillingWalletService(fixedBilling.Wallet)
+			if projectHandler != nil {
+				projectHandler.SetDesignerService(designerSvc)
+			}
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 			designerHandler.SetDirectUploadDependencies(repo, store)
 		}

@@ -16,9 +16,6 @@ export interface PreviewImage {
 
 export interface PreviewMetadata {
   capabilityName?: string
-  /** Legacy transport fields accepted for historical callers; never rendered. */
-  provider?: string
-  model?: string
   prompt: string
   revisedPrompt?: string
   quality?: string

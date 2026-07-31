@@ -9,12 +9,12 @@ describe('designer API normalization', () => {
     vi.restoreAllMocks()
   })
 
-  it('maps provider capabilities without model-specific size inference', () => {
+  it('maps public capability metadata without internal provider identity', () => {
     const provider = normalizeProvider({
-      id: 'gpt_image_2',
-      name: 'GPT Image 2',
-      provider: 'wangcai_openai',
-      model: 'gpt-image-2',
+      id: 'professional_enhance',
+      name: '专业增强',
+      description: '适合复杂构图与高细节视觉任务',
+      min_tier: 'enterprise',
       credits: 0,
       enabled: true,
       idx: 0,
@@ -38,6 +38,10 @@ describe('designer API normalization', () => {
       '1536x1024',
       '1024x1536',
     ])
+    expect(provider).not.toHaveProperty('provider')
+    expect(provider).not.toHaveProperty('providerKey')
+    expect(provider).not.toHaveProperty('route')
+    expect(provider).not.toHaveProperty('model')
   })
 
   it('registers an immutable direct upload identity without multipart data', async () => {
@@ -72,7 +76,7 @@ describe('designer API normalization', () => {
     const controller = new AbortController()
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', provider: 'openai' }, controller.signal)
+    await designerApi.generate({ project_id: 'default', prompt: 'test', provider_id: 'professional_enhance' }, controller.signal)
     await designerApi.registerReference({ upload_id: 'upload-1', key: 'uploads/finalized/reference.png' }, controller.signal)
     await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
     await designerApi.getGeneration('generation-1', controller.signal)
@@ -102,7 +106,7 @@ describe('designer API normalization', () => {
       })
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', provider: 'openai' })
+    await designerApi.generate({ project_id: 'default', prompt: 'test', provider_id: 'professional_enhance' })
 
     const quoteRequest = post.mock.calls[0]?.[1]
     const generateRequest = post.mock.calls[1]?.[1]

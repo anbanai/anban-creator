@@ -25,11 +25,10 @@ export interface RawDesignerProvider {
   id: string
   name: string
   alias?: string
-  provider: string
-  provider_key?: string
-  route?: string
-  model: string
+  description?: string
+  min_tier?: string
   credits: number
+  price_available?: boolean
   enabled: boolean
   idx: number
   capabilities?: {
@@ -60,14 +59,12 @@ export interface DesignerProvider {
   id: string
   name: string
   alias?: string
-  provider: string
-  providerKey?: string
-  route?: string
-  model: string
+  description?: string
+  minTier?: string
   credits: number
+  priceAvailable?: boolean
   enabled: boolean
   idx: number
-  description?: string
   capabilities: ModelCapabilities
   pricing: DesignerProviderPricing
 }
@@ -86,9 +83,7 @@ export interface DesignerSettings {
 export interface GenerateRequest {
   project_id: string
   prompt: string
-  provider?: string
-  provider_id?: string
-  model?: string
+  provider_id: string
   quality?: string
   size?: string
   n?: number
@@ -126,8 +121,6 @@ export interface ImageGeneration {
   project_id: string
   prompt: string
   revised_prompt?: string
-  provider?: string
-  model?: string
   capability_key?: string
   capability_name?: string
   quality?: string

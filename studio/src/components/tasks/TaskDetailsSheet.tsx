@@ -395,9 +395,11 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             />
           </TabsContent>
           <TabsContent value="configuration" className="min-h-0 overflow-y-auto p-4">
-            <TaskDetailsSection label="创作配置详情" title="创作配置" icon={Settings2}>
-              <TaskConfigurationDetails task={props.task} project={props.project} />
-            </TaskDetailsSection>
+            {props.selectedTab === 'configuration' ? (
+              <TaskDetailsSection label="创作配置详情" title="创作配置" icon={Settings2}>
+                <TaskConfigurationDetails task={props.task} project={props.project} />
+              </TaskDetailsSection>
+            ) : null}
           </TabsContent>
           <TabsContent value="materials" className="min-h-0 overflow-y-auto p-4">
             <TaskDetailsSection label="参考素材详情" title="参考素材" icon={Images}>

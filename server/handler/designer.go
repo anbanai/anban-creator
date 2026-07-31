@@ -72,6 +72,9 @@ func (h *DesignerHandler) Quote(c fiber.Ctx) error {
 	}
 	quote, err := h.svc.CreateGenerationQuote(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
+			return Forbidden(c, "designer capability is not available for your tier")
+		}
 		return writeBillingServiceError(c, err)
 	}
 	return Success(c, quote)
@@ -103,6 +106,9 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrDesignerReferenceInvalid) {
 			return Error(c, fiber.StatusBadRequest, "designer reference is invalid or unavailable")
+		}
+		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
+			return Forbidden(c, "designer capability is not available for your tier")
 		}
 		if h.logger != nil {
 			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")

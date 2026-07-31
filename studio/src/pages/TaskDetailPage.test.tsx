@@ -1169,7 +1169,7 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).getByText('数量')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '1' })).toBeInTheDocument()
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
@@ -1652,7 +1652,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('图片比例')).toBeInTheDocument()
-    expect(screen.getByText('图片模型')).toBeInTheDocument()
+    expect(screen.getByText('图像能力')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()

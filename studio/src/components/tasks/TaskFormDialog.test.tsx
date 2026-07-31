@@ -309,10 +309,10 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByText('数量')).toBeInTheDocument()
     expect(within(dialog).getAllByRole('radio')).toHaveLength(4)
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    const imageModelSelector = within(dialog).getAllByRole('combobox').find((element) => element.textContent?.includes('系统默认'))
+    const imageModelSelector = within(dialog).getAllByRole('combobox').find((element) => element.textContent?.includes('标准图像'))
     expect(imageModelSelector).toBeDefined()
     fireEvent.click(imageModelSelector!)
-    expect(await screen.findByPlaceholderText('搜索模型...')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('搜索图像能力...')).toBeInTheDocument()
     fireEvent.click(imageModelSelector!)
     expect(within(dialog).queryByText('任务参考图')).not.toBeInTheDocument()
     expect(within(dialog).getByText('水印')).toBeInTheDocument()
@@ -377,7 +377,7 @@ describe('TaskFormDialog', () => {
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '预览 reference.png' })).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
     expect(within(dialog).queryByText('resume.txt')).not.toBeInTheDocument()
@@ -389,7 +389,7 @@ describe('TaskFormDialog', () => {
     const { onCreated, onOpenChange } = renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     await waitFor(() => expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求'))
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '克隆' }))
 
@@ -422,7 +422,7 @@ describe('TaskFormDialog', () => {
   it('reports the cloned quantity in its success toast', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '3' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
@@ -441,8 +441,9 @@ describe('TaskFormDialog', () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
 
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    expect(await within(dialog).findByText('source-model（当前任务配置）')).toBeInTheDocument()
-    expect(within(dialog).getByText('当前图像模型不可用，请重新选择。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('已停用图像能力（当前任务配置）')).toBeInTheDocument()
+    expect(within(dialog).getByText('当前图像能力不可用，请重新选择。')).toBeInTheDocument()
+    expect(within(dialog).queryByText('source-model')).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
   })
 
@@ -468,14 +469,14 @@ describe('TaskFormDialog', () => {
   it('applies destination project defaults when a clone changes project', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await within(dialog).findByText('源模型')
+    await within(dialog).findByText('源图像')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目'))
     expect(screen.getByRole('radio', { name: '3:4 vertical default' })).toBeChecked()
-    expect(await screen.findByText('目标模型')).toBeInTheDocument()
+    expect(await screen.findByText('目标图像')).toBeInTheDocument()
     expect(screen.getByText('尾图')).toBeInTheDocument()
     expect(screen.queryByText('仅生成正文配图；发布草稿不设封面')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
@@ -495,7 +496,7 @@ describe('TaskFormDialog', () => {
     uploadToOSSMock.mockReturnValueOnce(uploadRequest.promise)
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await within(dialog).findByText('源模型')
+    await within(dialog).findByText('源图像')
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['pending'], 'pending.pdf', { type: 'application/pdf' })] },
@@ -524,7 +525,7 @@ describe('TaskFormDialog', () => {
   it('rejects new non-image attachments after switching to a Seednote project', async () => {
     renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, input_attachments: [] }, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await within(dialog).findByText('源模型')
+    await within(dialog).findByText('源图像')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
@@ -541,7 +542,7 @@ describe('TaskFormDialog', () => {
     uploadToOSSMock.mockRejectedValueOnce(new Error('upload failed'))
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await within(dialog).findByText('源模型')
+    await within(dialog).findByText('源图像')
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['failed'], 'failed.pdf', { type: 'application/pdf' })] },
@@ -563,7 +564,7 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     const prompt = screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
     await waitFor(() => expect(prompt).toHaveValue('复制后的完整创作要求'))
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
     fireEvent.change(prompt, { target: { value: '编辑后仍需保留' } })
     fireEvent.click(screen.getByRole('button', { name: '克隆' }))
 
@@ -584,7 +585,7 @@ describe('TaskFormDialog', () => {
     })
 
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
 
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledOnce())
@@ -628,7 +629,7 @@ describe('TaskFormDialog', () => {
   it('shows destination Montage defaults and removes incompatible article controls', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
-    await within(dialog).findByText('源模型')
+    await within(dialog).findByText('源图像')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
     fireEvent.click(await screen.findByRole('option', { name: '剪辑项目' }))
 

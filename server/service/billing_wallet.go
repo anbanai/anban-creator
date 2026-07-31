@@ -299,11 +299,13 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 		}
 		return nil, err
 	}
-	wantPolicy := "standalone_operation"
+	policyAllowed := sku.Policy == "image_operation"
 	if accepted {
-		wantPolicy = "accepted_task_operation"
+		policyAllowed = policyAllowed || sku.Policy == "accepted_task_operation"
+	} else {
+		policyAllowed = policyAllowed || sku.Policy == "standalone_operation"
 	}
-	if sku.Policy != wantPolicy {
+	if !policyAllowed {
 		return nil, fmt.Errorf("%w: SKU policy is %q", ErrBillingInvalid, sku.Policy)
 	}
 	account, lockErr := lockRequiredBillingAccount(ctx, billingRepo, req.UserID)
@@ -709,7 +711,8 @@ func (s *BillingWalletService) reverseCharge(ctx context.Context, chargeID, reas
 		}
 		validOriginal := original.Kind == model.BillingChargeKindTask && original.Policy == "task_admission"
 		if standalone {
-			validOriginal = original.Kind == model.BillingChargeKindOperation && original.Policy == "standalone_operation" && original.QuoteID != nil
+			validOriginal = original.Kind == model.BillingChargeKindOperation &&
+				(original.Policy == "standalone_operation" || original.Policy == "image_operation") && original.QuoteID != nil
 		}
 		if !validOriginal || original.Status != model.BillingChargeStatusPosted || original.DebtCredits != 0 {
 			return ErrBillingReversalNotAllowed
@@ -1308,6 +1311,9 @@ func findOperationChargeReplay(ctx context.Context, repo repository.BillingRepos
 	policy := "standalone_operation"
 	if accepted {
 		policy = "accepted_task_operation"
+	}
+	if existing.Policy == "image_operation" {
+		policy = "image_operation"
 	}
 	sku := &model.BillingSKU{
 		CatalogID: req.CatalogID, SKUID: req.SKUID, PriceCredits: existing.PriceCredits, Policy: policy,

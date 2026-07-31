@@ -188,7 +188,6 @@ function appendPollingReplay(prev: string[], replay: string): string[] {
 }
 
 export default function TaskDetailPage() {
-  const { items: imageCapabilities } = useImageCapabilities()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -214,6 +213,7 @@ export default function TaskDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
+  const { items: imageCapabilities } = useImageCapabilities(showProjectDialog)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCloneDialog, setShowCloneDialog] = useState(false)
   const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)

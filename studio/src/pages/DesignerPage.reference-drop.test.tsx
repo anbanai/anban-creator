@@ -61,12 +61,10 @@ vi.mock('@/components/designer/InlineMaskEditor', async () => {
 
 function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): DesignerProvider {
   return {
-    id: 'gpt_image_2',
-    name: 'GPT Image 2',
-    provider: 'openai',
-    providerKey: 'wangcai_openai',
-    route: 'image_generation.designer.gpt_image_2',
-    model: 'gpt-image-2',
+    id: 'professional_enhance',
+    name: '专业增强',
+    description: '适合复杂构图与高细节视觉任务',
+    minTier: 'enterprise',
     credits: 0,
     enabled: true,
     idx: 0,
@@ -320,8 +318,8 @@ describe('Designer shared prompt composer', () => {
 
   it('restores a history prompt without losing current references', async () => {
     const generation = {
-      id: 'history-1', user_id: 'user-1', project_id: 'default', prompt: '历史提示词', provider: 'openai',
-      model: 'gpt-image-2', n: 1, status: 'completed', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      id: 'history-1', user_id: 'user-1', project_id: 'default', prompt: '历史提示词', capability_key: 'professional_enhance',
+      capability_name: '专业增强', n: 1, status: 'completed', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     } satisfies ImageGeneration
     vi.mocked(api.designer.getHistory).mockResolvedValue({ items: [generation], total: 1, page: 1, page_size: 50 })
     render(<DesignerPage />)
@@ -422,7 +420,7 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
     poll.resolve({
       id: 'late-generation', user_id: 'user-1', project_id: 'default', prompt: '等待轮询',
-      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'completed',
+      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'completed',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'late-generation', image_url: 'https://example.com/late.png', index: 0 }],
     })
@@ -441,7 +439,7 @@ describe('Designer shared prompt composer', () => {
     const firstPoll = deferred<ImageGeneration>()
     const completed = {
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '串行轮询',
-      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'completed' as const,
+      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'completed' as const,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'generation-1', image_url: 'https://example.com/final.png', index: 0 }],
     }
@@ -473,7 +471,7 @@ describe('Designer shared prompt composer', () => {
   it('finalizes a failed generation exactly once', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '失败轮询',
-      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'failed', error: '生成失败',
+      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'failed', error: '生成失败',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
     render(<DesignerPage />)
@@ -494,7 +492,7 @@ describe('Designer shared prompt composer', () => {
   it('finalizes polling timeout exactly once', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '超时轮询',
-      provider: 'openai', model: 'gpt-image-2', n: 1, status: 'generating',
+      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'generating',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
     render(<DesignerPage />)

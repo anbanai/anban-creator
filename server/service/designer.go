@@ -38,6 +38,14 @@ var ErrURLNotOwned = errors.New("url not allowed")
 // reference identities without disclosing which ownership check failed.
 var ErrDesignerReferenceInvalid = errors.New("designer reference is invalid or unavailable")
 
+// ErrDesignerCapabilityAccessDenied is returned when a valid capability is
+// configured but the caller's subscription tier does not include it.
+var ErrDesignerCapabilityAccessDenied = errors.New("designer capability access denied")
+
+// ErrDesignerCapabilityUnavailable is returned for unknown or disabled public
+// capability identifiers.
+var ErrDesignerCapabilityUnavailable = errors.New("designer capability unavailable")
+
 const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
 
 type DesignerService struct {
@@ -200,10 +208,9 @@ func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID stri
 	if req.N != 1 {
 		return nil, fmt.Errorf("n must equal 1; batch designer SKUs are not configured")
 	}
-	cfg := s.findDesignerConfigByID(req.ProviderID)
-	route, ok := s.designerRoute(req.ProviderID)
-	if cfg == nil || !ok || !cfg.IsEnabled() {
-		return nil, fmt.Errorf("designer provider %s is not available", req.ProviderID)
+	_, route, err := s.authorizeDesignerCapability(ctx, userID, req.ProviderID)
+	if err != nil {
+		return nil, err
 	}
 	if err := validateDesignerGenerateRequest(req, route.Capabilities); err != nil {
 		return nil, err
@@ -260,6 +267,10 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if s.billingCatalog == nil || s.billingWallet == nil {
 		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
 	}
+	_, authorizedRoute, err := s.authorizeDesignerCapability(ctx, userID, req.ProviderID)
+	if err != nil {
+		return nil, err
+	}
 
 	provider := req.Provider
 	if provider == "" {
@@ -311,9 +322,8 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		return nil, err
 	}
 	var sku *model.BillingSKU
-	var err error
-	if route, ok := s.designerRoute(req.ProviderID); ok && strings.TrimSpace(route.BillingSKU) != "" {
-		sku, err = s.billingCatalog.ResolveSKUByID(ctx, "", strings.TrimSpace(route.BillingSKU))
+	if strings.TrimSpace(authorizedRoute.BillingSKU) != "" {
+		sku, err = s.billingCatalog.ResolveSKUByID(ctx, "", strings.TrimSpace(authorizedRoute.BillingSKU))
 	} else {
 		sku, err = s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName)
 	}
@@ -388,6 +398,46 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 
 	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, PriceCredits: int(chargedPrice)}, nil
+}
+
+// authorizeDesignerCapability resolves the public selection key to the
+// configured route and enforces its minimum tier. All write paths (quote and
+// generation) must use this helper; filtering GET /providers alone is not an
+// authorization boundary.
+func (s *DesignerService) authorizeDesignerCapability(ctx context.Context, userID, capabilityID string) (*config.ImageAPI, srvconfig.ImageGenerationRouteConfig, error) {
+	capabilityID = strings.TrimSpace(capabilityID)
+	cfg := s.findDesignerConfigByID(capabilityID)
+	route, ok := s.designerRoute(capabilityID)
+	if cfg == nil || !ok || !cfg.IsEnabled() || !route.Enabled {
+		return nil, srvconfig.ImageGenerationRouteConfig{}, fmt.Errorf("%w: %s", ErrDesignerCapabilityUnavailable, capabilityID)
+	}
+	if s.repo == nil || strings.TrimSpace(userID) == "" {
+		return nil, srvconfig.ImageGenerationRouteConfig{}, ErrDesignerCapabilityAccessDenied
+	}
+	user, err := s.repo.Users().FindByID(ctx, userID)
+	if err != nil || user == nil {
+		if err != nil {
+			return nil, srvconfig.ImageGenerationRouteConfig{}, fmt.Errorf("resolve designer capability entitlement: %w", err)
+		}
+		return nil, srvconfig.ImageGenerationRouteConfig{}, ErrDesignerCapabilityAccessDenied
+	}
+	userTier := model.ResolveTier(user.Tier)
+	requiredTier := model.NormalizeTier(route.MinTier)
+	if !model.TierSatisfies(userTier, requiredTier) {
+		return nil, srvconfig.ImageGenerationRouteConfig{}, fmt.Errorf("%w: capability requires %s", ErrDesignerCapabilityAccessDenied, requiredTier)
+	}
+	return cfg, route, nil
+}
+
+// ValidateCapabilityForUser validates a project/task default without exposing
+// internal provider or model identifiers to callers.
+func (s *DesignerService) ValidateCapabilityForUser(ctx context.Context, userID, capabilityID string) error {
+	capabilityID = strings.TrimSpace(capabilityID)
+	if capabilityID == "" {
+		return nil
+	}
+	_, _, err := s.authorizeDesignerCapability(ctx, userID, capabilityID)
+	return err
 }
 
 func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) string {
@@ -1157,20 +1207,21 @@ func looksLikeInternalDesignerError(msg string) bool {
 }
 
 type DesignerProviderInfo struct {
-	ID           string                       `json:"id"`
-	Name         string                       `json:"name"`
-	Alias        string                       `json:"alias,omitempty"`
-	Description  string                       `json:"description,omitempty"`
-	MinTier      string                       `json:"min_tier,omitempty"`
-	Provider     string                       `json:"-"`
-	ProviderKey  string                       `json:"-"`
-	Route        string                       `json:"-"`
-	Model        string                       `json:"-"`
-	Credits      int                          `json:"credits"`
-	Enabled      bool                         `json:"enabled"`
-	Idx          int                          `json:"idx"`
-	Capabilities DesignerProviderCapabilities `json:"capabilities"`
-	Pricing      DesignerProviderPricing      `json:"pricing"`
+	ID             string                       `json:"id"`
+	Name           string                       `json:"name"`
+	Alias          string                       `json:"alias,omitempty"`
+	Description    string                       `json:"description,omitempty"`
+	MinTier        string                       `json:"min_tier,omitempty"`
+	Provider       string                       `json:"-"`
+	ProviderKey    string                       `json:"-"`
+	Route          string                       `json:"-"`
+	Model          string                       `json:"-"`
+	Credits        int                          `json:"credits"`
+	PriceAvailable bool                         `json:"price_available"`
+	Enabled        bool                         `json:"enabled"`
+	Idx            int                          `json:"idx"`
+	Capabilities   DesignerProviderCapabilities `json:"capabilities"`
+	Pricing        DesignerProviderPricing      `json:"pricing"`
 }
 
 type DesignerProviderCapabilities = srvconfig.DesignerProviderCapabilities
@@ -1235,6 +1286,7 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 		capabilities := route.Capabilities
 		capabilities.MaxBatch = 1
 		credits := 0
+		priceAvailable := false
 		listPrice, discount := 0, 0
 		pricingTier := ""
 		if s.billingCatalog != nil {
@@ -1249,29 +1301,33 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 				if err == nil {
 					credits, listPrice, discount = int(resolved.PriceCredits), int(resolved.ListPriceCredits), int(resolved.DiscountCredits)
 					pricingTier = string(resolved.PricingTier)
+					priceAvailable = true
 				}
 			} else if strings.TrimSpace(route.BillingSKU) != "" {
 				if sku, err := s.billingCatalog.ResolveSKUByID(ctx, "", route.BillingSKU); err == nil {
 					credits, listPrice = int(sku.PriceCredits), int(sku.PriceCredits)
+					priceAvailable = true
 				}
 			} else if sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName); err == nil {
 				credits, listPrice = int(sku.PriceCredits), int(sku.PriceCredits)
+				priceAvailable = true
 			}
 		}
 		providers = append(providers, DesignerProviderInfo{
-			ID:           publicID,
-			Name:         name,
-			Alias:        cfg.Alias,
-			Description:  route.Description,
-			MinTier:      string(requiredTier),
-			Provider:     cfg.Provider,
-			ProviderKey:  providerKey,
-			Route:        routeName,
-			Model:        cfg.Model,
-			Credits:      credits,
-			Enabled:      cfg.IsEnabled(),
-			Idx:          i,
-			Capabilities: capabilities,
+			ID:             publicID,
+			Name:           name,
+			Alias:          cfg.Alias,
+			Description:    route.Description,
+			MinTier:        string(requiredTier),
+			Provider:       cfg.Provider,
+			ProviderKey:    providerKey,
+			Route:          routeName,
+			Model:          cfg.Model,
+			Credits:        credits,
+			Enabled:        cfg.IsEnabled(),
+			Idx:            i,
+			Capabilities:   capabilities,
+			PriceAvailable: priceAvailable,
 			Pricing: DesignerProviderPricing{
 				PricingType: "fixed_sku", Currency: "credits", BillingNote: "fixed retail SKU",
 				PricingTier: pricingTier, ListPriceCredits: listPrice, DiscountCredits: discount,
