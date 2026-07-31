@@ -175,8 +175,9 @@ beforeEach(() => {
   vi.mocked(api.billing.catalog).mockResolvedValue({
     catalog_id: 'retail-test-v1',
     currency: 'credits',
+    task_time_pricing: { timezone: 'Asia/Shanghai', peak_windows: [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], off_peak_windows: [{ start: '00:00', end: '09:00' }, { start: '12:00', end: '14:00' }, { start: '18:00', end: '24:00' }], off_peak_rate_percent: 80, current_period: 'peak', server_time: '2026-07-31T10:00:00+08:00', next_transition_at: '2026-07-31T12:00:00+08:00' },
     skus: [
-      { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+      { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
       { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
       { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
       { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
@@ -212,6 +213,14 @@ beforeEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('shows configuration-driven off-peak windows and current task prices', async () => {
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    expect(await within(dialog).findByText('当前选择为高峰时段 · 预计 4800 积分/次')).toBeInTheDocument()
+    expect(within(dialog).getByText('Asia/Shanghai 低峰：00:00–09:00、12:00–14:00、18:00–24:00；低峰价格为高峰会员价的 80%')).toBeInTheDocument()
+    expect(within(dialog).getByText('高峰 4800 积分 · 低峰 3840 积分 · 低峰可节省 960 积分')).toBeInTheDocument()
+  })
+
   it('creates viral analysis through the task API with only Seednote projects', async () => {
     renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })

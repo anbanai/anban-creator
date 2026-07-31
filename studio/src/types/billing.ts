@@ -56,6 +56,8 @@ export interface BillingSKU {
   operation: string
   charge_policy: 'task_admission' | 'accepted_task_operation' | 'standalone_operation'
   price_credits: number
+  peak_price_credits?: number
+  off_peak_price_credits?: number
   pricing_tier?: 'free' | 'pro' | 'enterprise'
   list_price_credits?: number
   discount_credits?: number
@@ -64,11 +66,31 @@ export interface BillingSKU {
   delivery: string
 }
 
+export interface BillingTimeWindow { start: string; end: string }
+
+export interface TaskTimePricing {
+  timezone: string
+  peak_windows: BillingTimeWindow[]
+  off_peak_windows: BillingTimeWindow[]
+  off_peak_rate_percent: number
+  current_period: 'peak' | 'off_peak'
+  server_time: string
+  next_transition_at: string
+}
+
 export interface BillingCatalog {
   catalog_id: string
   currency: 'credits'
   pricing_tier?: 'free' | 'pro' | 'enterprise'
+  task_time_pricing?: TaskTimePricing
   skus: BillingSKU[]
+}
+
+export interface ScheduleRecommendation {
+  time: string
+  timezone: string
+  granularity_minutes: number
+  load_balanced: boolean
 }
 
 export interface BillingReferralProgram {

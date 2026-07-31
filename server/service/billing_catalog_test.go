@@ -544,14 +544,15 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 		if quote.PricingTier != string(tt.tier) || quote.ListPriceCredits != 500 || quote.PriceCredits != tt.want || quote.DiscountCredits != 500-tt.want {
 			t.Fatalf("%s quote = %#v", tt.tier, quote)
 		}
-		if quote.PricingRuleID != bundle.Products.CatalogID+":"+string(tt.tier) {
+		if quote.PricingRuleID != bundle.Products.CatalogID+":"+string(tt.tier)+":peak" {
 			t.Fatalf("%s rule ID = %q", tt.tier, quote.PricingRuleID)
 		}
 		var snapshot struct {
-			RatePercent int64  `json:"rate_percent"`
-			Rounding    string `json:"rounding"`
+			MembershipPercent int64  `json:"membership_percent"`
+			TimePercent       int64  `json:"time_percent"`
+			Rounding          string `json:"rounding"`
 		}
-		if err := json.Unmarshal(quote.PricingSnapshot, &snapshot); err != nil || snapshot.Rounding != "floor" || snapshot.RatePercent != bundle.Products.TierRatesPercent[string(tt.tier)] {
+		if err := json.Unmarshal(quote.PricingSnapshot, &snapshot); err != nil || snapshot.Rounding != "floor" || snapshot.TimePercent != 100 || snapshot.MembershipPercent != bundle.Products.TierRatesPercent[string(tt.tier)] {
 			t.Fatalf("%s pricing snapshot = %s, %#v, %v", tt.tier, quote.PricingSnapshot, snapshot, err)
 		}
 	}
@@ -580,6 +581,200 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 	newQuote, err := svc.CreateQuote(ctx, req)
 	if err != nil || newQuote.ID == first.ID || newQuote.PriceCredits != 400 || newQuote.PricingTier != string(model.TierEnterprise) {
 		t.Fatalf("new tier quote = %#v, %v", newQuote, err)
+	}
+}
+
+func TestBillingCatalogTaskTimePricingBoundariesAndTierFloor(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		now        time.Time
+		tier       model.Tier
+		wantPrice  int64
+		wantPeriod string
+	}{
+		{name: "peak start inclusive", now: time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC), tier: model.TierPro, wantPrice: 90, wantPeriod: "peak"},
+		{name: "peak end exclusive", now: time.Date(2026, 7, 20, 4, 0, 0, 0, time.UTC), tier: model.TierPro, wantPrice: 72, wantPeriod: "off_peak"},
+		{name: "second peak start inclusive", now: time.Date(2026, 7, 20, 6, 0, 0, 0, time.UTC), tier: model.TierEnterprise, wantPrice: 80, wantPeriod: "peak"},
+		{name: "off peak floors after membership", now: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC), tier: model.TierEnterprise, wantPrice: 64, wantPeriod: "off_peak"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newBillingServiceRepository(t)
+			bundle := testBillingBundle()
+			bundle.Products.TaskTimePricing = billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "09:00", End: "12:00"}, {Start: "14:00", End: "18:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "14:00"}, {Start: "18:00", End: "24:00"}}, OffPeakRatePercent: 80}
+			bundle.Products.SKUs[0].PriceCredits = 101
+			svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return tt.now }})
+			if _, err := svc.Publish(ctx); err != nil {
+				t.Fatal(err)
+			}
+			user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			user.Tier = tt.tier
+			if err := repo.Users().Update(ctx, user); err != nil {
+				t.Fatal(err)
+			}
+			quote, err := svc.CreateQuote(ctx, QuoteRequest{
+				UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced",
+				RequestFingerprint: billingFingerprint(tt.name), IdempotencyScope: "time", IdempotencyKey: tt.name,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if quote.PriceCredits != tt.wantPrice || quote.DiscountCredits != 101-tt.wantPrice {
+				t.Fatalf("quote price=%d discount=%d, want %d/%d", quote.PriceCredits, quote.DiscountCredits, tt.wantPrice, 101-tt.wantPrice)
+			}
+			if quote.PricingRuleID != bundle.Products.CatalogID+":"+string(tt.tier)+":"+tt.wantPeriod {
+				t.Fatalf("pricing rule ID = %q", quote.PricingRuleID)
+			}
+			var snapshot struct {
+				Timezone          string               `json:"timezone"`
+				PeakWindows       []billing.TimeWindow `json:"peak_windows"`
+				OffPeakWindows    []billing.TimeWindow `json:"off_peak_windows"`
+				MembershipPercent int64                `json:"membership_percent"`
+				TimePercent       int64                `json:"time_percent"`
+				EvaluatedAt       time.Time            `json:"evaluated_at"`
+				Period            string               `json:"period"`
+				Rounding          string               `json:"rounding"`
+				FinalPrice        int64                `json:"final_price_credits"`
+			}
+			if err := json.Unmarshal(quote.PricingSnapshot, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			wantTimeRate := int64(100)
+			if tt.wantPeriod == "off_peak" {
+				wantTimeRate = 80
+			}
+			_, offset := snapshot.EvaluatedAt.Zone()
+			if snapshot.Timezone != "Asia/Shanghai" || snapshot.Period != tt.wantPeriod || snapshot.TimePercent != wantTimeRate ||
+				snapshot.MembershipPercent != bundle.Products.TierRatesPercent[string(tt.tier)] || snapshot.Rounding != "floor" || snapshot.FinalPrice != tt.wantPrice ||
+				len(snapshot.PeakWindows) != 2 || len(snapshot.OffPeakWindows) != 3 || offset != 8*60*60 || !snapshot.EvaluatedAt.Equal(tt.now) {
+				t.Fatalf("pricing snapshot = %s", quote.PricingSnapshot)
+			}
+		})
+	}
+}
+
+func TestBillingCatalogOperationSKUIsUnaffectedByOffPeak(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := testBillingBundle()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := svc.ResolvePrice(ctx, billingCatalogUserID, bundle.Products.CatalogID, "mcp.generate_image", "image.cover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.PriceCredits != 100 || resolved.PricingRuleID != bundle.Products.CatalogID+":free" {
+		t.Fatalf("operation price = %#v", resolved)
+	}
+}
+
+func TestBillingCatalogQuoteUsesOneServerTimestampForTimePriceAndCreation(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := testBillingBundle()
+	bundle.Products.TaskTimePricing = billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "09:00", End: "12:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "24:00"}}, OffPeakRatePercent: 80}
+	times := []time.Time{
+		time.Date(2026, 7, 20, 0, 59, 59, 0, time.UTC),
+		time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC),
+	}
+	call := 0
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time {
+		if call >= len(times) {
+			return times[len(times)-1]
+		}
+		value := times[call]
+		call++
+		return value
+	}})
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	call = 0
+	quote, err := svc.CreateQuote(ctx, QuoteRequest{UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("single-time"), IdempotencyScope: "time", IdempotencyKey: "single-time"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot struct {
+		EvaluatedAt time.Time `json:"evaluated_at"`
+	}
+	if err := json.Unmarshal(quote.PricingSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.EvaluatedAt.Equal(quote.CreatedAt) || quote.PriceCredits != 400 {
+		t.Fatalf("evaluated_at=%s created_at=%s price=%d", snapshot.EvaluatedAt, quote.CreatedAt, quote.PriceCredits)
+	}
+}
+
+func TestCreateTaskQuoteUsesOneServerTimestampForAdmissionAndQuote(t *testing.T) {
+	ctx := context.Background()
+	repo := newBillingServiceRepository(t)
+	bundle := testBillingBundle()
+	bundle.Products.TaskTimePricing = billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "09:00", End: "12:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "24:00"}}, OffPeakRatePercent: 80}
+	times := []time.Time{
+		time.Date(2026, 7, 20, 0, 59, 59, 0, time.UTC),
+		time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC),
+	}
+	call := 0
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time {
+		if call >= len(times) {
+			return times[len(times)-1]
+		}
+		value := times[call]
+		call++
+		return value
+	}})
+	registry, err := NewAgentProfileRegistry(testAgentProfiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentProfileRegistry(registry)
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.Users().FindByID(ctx, billingCatalogUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierPro
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Billing().CreateAccount(ctx, &model.BillingWalletAccount{UserID: billingCatalogUserID, PaidCredits: 400}); err != nil {
+		t.Fatal(err)
+	}
+	call = 0
+	quote, err := svc.CreateTaskQuote(ctx, TaskQuoteRequest{
+		UserID: billingCatalogUserID, TaskType: "article", ExecutionProfile: "balanced",
+		RequestFingerprint: billingFingerprint("single-task-time"), IdempotencyScope: "time", IdempotencyKey: "single-task-time",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quote.PriceCredits != 360 || !quote.CreatedAt.Equal(times[0]) || call != 1 {
+		t.Fatalf("quote price=%d created_at=%s clock_calls=%d", quote.PriceCredits, quote.CreatedAt, call)
+	}
+}
+
+func TestBillingCatalogTaskTimePricingNextTransitionWrapsToNextPeak(t *testing.T) {
+	bundle := testBillingBundle()
+	bundle.Products.TaskTimePricing = billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "09:00", End: "12:00"}, {Start: "14:00", End: "18:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "14:00"}, {Start: "18:00", End: "24:00"}}, OffPeakRatePercent: 80}
+	svc := NewBillingCatalogService(newBillingServiceRepository(t), &bundle, BillingCatalogOptions{Now: func() time.Time {
+		return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) // 20:00 Asia/Shanghai.
+	}})
+	status, err := svc.CurrentTaskTimePricing()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 7, 21, 9, 0, 0, 0, status.ServerTime.Location())
+	if status.CurrentPeriod != "off_peak" || !status.NextTransitionAt.Equal(want) {
+		t.Fatalf("status = %#v, want next transition %s", status, want)
 	}
 }
 
@@ -814,6 +1009,7 @@ func testBillingBundle() billing.Bundle {
 		},
 		Products: billing.ProductCatalog{
 			CatalogID: "retail-test-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
+			TaskTimePricing: billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "00:15", End: "24:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "00:15"}}, OffPeakRatePercent: 80},
 			SKUs: []billing.SKUConfig{
 				{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Route: "image.cover", Delivery: "image"},

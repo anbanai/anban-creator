@@ -183,6 +183,12 @@ func writeBillingRuntimeFixture(t *testing.T, dir string) {
 `,
 		"products.yaml": `currency: credits
 tier_rates_percent: {free: 100, pro: 90, enterprise: 80}
+task_time_pricing:
+  timezone: Asia/Shanghai
+  peak_windows:
+    - {start: "09:00", end: "12:00"}
+    - {start: "14:00", end: "18:00"}
+  off_peak_rate_percent: 80
 skus:
   - {id: task.article.effective, operation: task.article, execution_profile: effective, charge_policy: task_admission, price_credits: 1000, delivery: verified}
 `,

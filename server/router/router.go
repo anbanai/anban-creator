@@ -309,6 +309,7 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.PlanHandler != nil {
 		apiV1.Post("/plans", svc.PlanHandler.Create)
 		apiV1.Get("/plans", svc.PlanHandler.List)
+		apiV1.Get("/plans/schedule-recommendation", svc.PlanHandler.ScheduleRecommendation)
 		apiV1.Get("/plans/:id", svc.PlanHandler.GetByID)
 		apiV1.Put("/plans/:id", svc.PlanHandler.Update)
 		apiV1.Delete("/plans/:id", svc.PlanHandler.Delete)

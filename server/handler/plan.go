@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -19,16 +20,32 @@ import (
 
 // PlanHandler handles plan-related HTTP endpoints.
 type PlanHandler struct {
-	service         *service.PlanService
-	logger          *zerolog.Logger
-	imagePresets    []config.ImageModelPreset
-	repo            repository.Repository
-	store           storage.Provider
-	referenceAssets *service.ReferenceAssetService
+	service                 *service.PlanService
+	logger                  *zerolog.Logger
+	imagePresets            []config.ImageModelPreset
+	repo                    repository.Repository
+	store                   storage.Provider
+	referenceAssets         *service.ReferenceAssetService
+	scheduleRecommendations *service.ScheduleRecommendationService
 }
 
 func (h *PlanHandler) SetReferenceAssetService(referenceAssets *service.ReferenceAssetService) {
 	h.referenceAssets = referenceAssets
+}
+
+func (h *PlanHandler) SetScheduleRecommendationService(recommendations *service.ScheduleRecommendationService) {
+	h.scheduleRecommendations = recommendations
+}
+
+func (h *PlanHandler) ScheduleRecommendation(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	if h.scheduleRecommendations == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "schedule recommendation unavailable")
+	}
+	return Success(c, h.scheduleRecommendations.Recommend(c.Context(), userID, time.Now()))
 }
 
 func (h *PlanHandler) presentPlanReference(ctx context.Context, userID string, plan *model.Plan) error {

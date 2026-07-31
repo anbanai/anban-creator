@@ -981,7 +981,11 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		existing := newTaskCharge(req, sku, fixtureTierResolvedSKUPrice(t, f.repo, sku, model.TierFree), f.now)
+		existing := newTaskCharge(req, sku, &ResolvedSKUPrice{
+			SKU: sku, PricingTier: model.Tier(quote.PricingTier), ListPriceCredits: quote.ListPriceCredits,
+			PriceCredits: quote.PriceCredits, DiscountCredits: quote.DiscountCredits, PricingRuleID: quote.PricingRuleID,
+			PricingSnapshot: quote.PricingSnapshot,
+		}, f.now)
 		existing.ID = "committed-task-charge"
 		state := &postLockCurrentReadState{keyCharge: existing, identityCharge: existing}
 		raceRepo := &postLockCurrentReadRepository{Repository: f.repo, state: state}

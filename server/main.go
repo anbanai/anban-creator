@@ -482,6 +482,7 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		planHandler.SetScheduleRecommendationService(service.NewScheduleRecommendationService(repo, billingBundle.Products.CatalogID, billingBundle.Products.TaskTimePricing, log))
 		planHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			planHandler.SetStore(store)

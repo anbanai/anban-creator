@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { Clock } from 'lucide-react'
 import {
   Popover,
@@ -16,7 +16,7 @@ interface TimePickerProps {
 }
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
-const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5)
+const MINUTES = Array.from({ length: 60 }, (_, i) => i)
 
 function formatTime(hour: number, minute: number): string {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
@@ -25,24 +25,12 @@ function formatTime(hour: number, minute: number): string {
 export default function TimePicker({ value, onChange, className, disabled }: TimePickerProps) {
   const [open, setOpen] = useState(false)
 
-  // Snap non-5-minute values to nearest 5-minute interval
-  useEffect(() => {
-    const raw = parseInt(value.split(':')[1]) || 0
-    const snapped = Math.round(raw / 5) * 5
-    if (snapped !== raw) {
-      onChange(formatTime(parseInt(value.split(':')[0]) || 0, snapped))
-    }
-  }, [value, onChange])
-
   const [hour, minute] = useMemo(() => {
     const parts = value.split(':').map(Number)
-    return [parts[0] || 0, Math.round((parts[1] || 0) / 5) * 5]
+    const parsedHour = Number.isInteger(parts[0]) && parts[0] >= 0 && parts[0] < 24 ? parts[0] : 0
+    const parsedMinute = Number.isInteger(parts[1]) && parts[1] >= 0 && parts[1] < 60 ? parts[1] : 0
+    return [parsedHour, parsedMinute]
   }, [value])
-
-  const snapMinute = (m: number) => {
-    // Snap to nearest 5-minute interval
-    return Math.round(m / 5) * 5
-  }
 
   const handleHourSelect = (h: number) => {
     onChange(formatTime(h, minute))
@@ -111,7 +99,7 @@ export default function TimePicker({ value, onChange, className, disabled }: Tim
                   type="button"
                   className={cn(
                     'rounded-md px-3 py-1 text-sm tabular-nums transition-colors',
-                    m === snapMinute(minute)
+                    m === minute
                       ? 'bg-primary text-primary-foreground font-medium'
                       : 'text-foreground hover:bg-accent'
                   )}

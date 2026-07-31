@@ -1,7 +1,9 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Plan, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse } from '@/types'
+import type { Plan, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse, ScheduleRecommendation } from '@/types'
 
 export const plansApi = {
+  scheduleRecommendation: () =>
+    unwrap<ScheduleRecommendation>(http.get('/plans/schedule-recommendation')),
   create: (data: CreatePlanRequest) =>
     unwrap<Plan>(http.post('/plans', data)),
 

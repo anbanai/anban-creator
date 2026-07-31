@@ -134,6 +134,16 @@ func (r *planRepository) ListActive(ctx context.Context) ([]*model.Plan, error) 
 	return plans, nil
 }
 
+func (r *planRepository) ListActiveNextRunAt(ctx context.Context) ([]time.Time, error) {
+	var nextRuns []time.Time
+	if err := r.db.WithContext(ctx).Model(&model.Plan{}).
+		Where("status = ? AND next_run_at IS NOT NULL", model.PlanStatusActive).
+		Pluck("next_run_at", &nextRuns).Error; err != nil {
+		return nil, err
+	}
+	return nextRuns, nil
+}
+
 func (r *planRepository) ListActiveByUserID(ctx context.Context, userID string, projectID string) ([]*model.Plan, error) {
 	var plans []*model.Plan
 	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, model.PlanStatusActive)

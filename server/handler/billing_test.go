@@ -199,9 +199,20 @@ func TestBillingHandler(t *testing.T) {
 		}
 		skus := data["skus"].([]any)
 		article := skus[0].(map[string]any)
-		assertJSONNumbers(t, article, map[string]float64{"list_price_credits": 500, "price_credits": 450, "discount_credits": 50})
+		assertJSONNumbers(t, article, map[string]float64{"list_price_credits": 500, "peak_price_credits": 450, "off_peak_price_credits": 360, "price_credits": 450, "discount_credits": 50})
 		if _, exposed := article["tier_prices"]; exposed {
 			t.Fatalf("catalog exposed full tier matrix: %#v", article)
+		}
+		operation := skus[1].(map[string]any)
+		if _, exposed := operation["peak_price_credits"]; exposed {
+			t.Fatalf("operation SKU exposed task time prices: %#v", operation)
+		}
+		rule := data["task_time_pricing"].(map[string]any)
+		if rule["timezone"] != "Asia/Shanghai" || rule["current_period"] != "peak" || rule["server_time"] != "2026-07-19T10:00:00+08:00" || rule["next_transition_at"] != "2026-07-19T12:00:00+08:00" {
+			t.Fatalf("catalog task time pricing = %#v", rule)
+		}
+		if len(rule["peak_windows"].([]any)) != 2 || len(rule["off_peak_windows"].([]any)) != 3 || rule["off_peak_rate_percent"] != float64(80) {
+			t.Fatalf("catalog task time windows = %#v", rule)
 		}
 	})
 
@@ -508,7 +519,7 @@ func newBillingHandlerFixture(t *testing.T) *billingHandlerFixture {
 	}
 	repo := repository.New(db)
 	t.Cleanup(func() { _ = repo.Close() })
-	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 7, 19, 2, 0, 0, 0, time.UTC)
 	bundle := billingHandlerBundle()
 	catalog := service.NewBillingCatalogService(repo, &bundle, service.BillingCatalogOptions{Now: func() time.Time { return now }, QuoteTTL: 5 * time.Minute})
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
@@ -552,10 +563,11 @@ func billingHandlerBundle() serverbilling.Bundle {
 			AcceptedTask:  serverbilling.AcceptedTaskPolicy{ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true},
 			TopUp:         serverbilling.TopUpPolicy{RepayDebtFirst: true}, Promotions: serverbilling.PromotionsPolicy{MayRepayDebt: false},
 		},
-		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, SKUs: []serverbilling.SKUConfig{
-			{ID: "task.article.balanced", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
-			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
-		}},
+		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
+			TaskTimePricing: serverbilling.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []serverbilling.TimeWindow{{Start: "09:00", End: "12:00"}, {Start: "14:00", End: "18:00"}}, OffPeakWindows: []serverbilling.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "14:00"}, {Start: "18:00", End: "24:00"}}, OffPeakRatePercent: 80}, SKUs: []serverbilling.SKUConfig{
+				{ID: "task.article.balanced", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+				{ID: "image.cover", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
+			}},
 		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{
 			ID: serverbilling.ReferralFirstTopUpProgramID, Trigger: "invitee_first_paid_topup", MinimumTopUpCNY: 10_000_000,
 			InviterCredits: 1_000, InviteeCredits: 1_000, ExpiresAfter: 30 * 24 * time.Hour, MaxInviterRewards: 10,
