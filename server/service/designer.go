@@ -1144,9 +1144,20 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 		pricingTier := ""
 		if s.billingCatalog != nil {
 			if userID != "" {
-				if resolved, err := s.billingCatalog.ResolvePrice(ctx, userID, "", "designer.generate_image", routeName); err == nil {
+				var resolved *ResolvedSKUPrice
+				var err error
+				if strings.TrimSpace(route.BillingSKU) != "" {
+					resolved, err = s.billingCatalog.ResolvePriceBySKUIDForUser(ctx, userID, "", route.BillingSKU)
+				} else {
+					resolved, err = s.billingCatalog.ResolvePrice(ctx, userID, "", "designer.generate_image", routeName)
+				}
+				if err == nil {
 					credits, listPrice, discount = int(resolved.PriceCredits), int(resolved.ListPriceCredits), int(resolved.DiscountCredits)
 					pricingTier = string(resolved.PricingTier)
+				}
+			} else if strings.TrimSpace(route.BillingSKU) != "" {
+				if sku, err := s.billingCatalog.ResolveSKUByID(ctx, "", route.BillingSKU); err == nil {
+					credits, listPrice = int(sku.PriceCredits), int(sku.PriceCredits)
 				}
 			} else if sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName); err == nil {
 				credits, listPrice = int(sku.PriceCredits), int(sku.PriceCredits)
