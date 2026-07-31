@@ -4,8 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestDesignerRoutesDeriveSelectablePresetsInStableQualityOrder(t *testing.T) {
@@ -83,6 +86,11 @@ claude:
 			t.Fatalf("preset order = %#v, want index %d = %q", cfg.ImagePresets, index, want)
 		}
 	}
+	wantDesignerOrder := []string{"higher_a", "higher_z", "lower"}
+	gotDesignerOrder := cfg.ImageAPI.DesignerOrder()
+	if !slices.Equal(gotDesignerOrder, wantDesignerOrder) {
+		t.Fatalf("designer order = %#v, want %#v", gotDesignerOrder, wantDesignerOrder)
+	}
 	if got := cfg.ImagePresets[0]; got.DisplayName != "Higher A" || got.MinTier != "pro" || got.ProviderRoute != "image_generation.designer.higher_a" {
 		t.Fatalf("derived preset = %#v", got)
 	}
@@ -120,6 +128,27 @@ func TestClaudeExecutionProfileEnvDefaultsRejectUnknownEnv(t *testing.T) {
 	_, err := loadClaudeConfigYAML(t, body)
 	if err == nil || !strings.Contains(err.Error(), "claude.execution_profile_env_defaults.PATH") {
 		t.Fatalf("NewConfig error = %v, want strict defaults env error", err)
+	}
+}
+
+func TestClaudeExecutionProfileEnvDefaultsRejectProviderAndModelFields(t *testing.T) {
+	for _, key := range []string{
+		model.ClaudeEnvBaseURL,
+		model.ClaudeEnvAuthToken,
+		model.ClaudeEnvModel,
+		"ANTHROPIC_DEFAULT_OPUS_MODEL",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+		"CLAUDE_CODE_SUBAGENT_MODEL",
+	} {
+		t.Run(key, func(t *testing.T) {
+			body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  execution_profile_env_defaults:\n    "+key+": shared-value\n", 1)
+			_, err := loadClaudeConfigYAML(t, body)
+			if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "must be configured per profile") {
+				t.Fatalf("NewConfig error = %v, want profile-owned field rejection", err)
+			}
+		})
 	}
 }
 

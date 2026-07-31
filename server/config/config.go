@@ -544,7 +544,8 @@ func (c *ImageAPIConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// DesignerOrder returns the designer keys in YAML insertion order.
+// DesignerOrder returns enabled designer route keys in the derived selection
+// order: quality rank descending, selection key ascending, then route key.
 func (c *ImageAPIConfig) DesignerOrder() []string {
 	if c == nil {
 		return nil
@@ -687,6 +688,21 @@ func validateClaudeNestedFields(value *yaml.Node) error {
 func validateClaudeExecutionProfileEnvDefaults(defaults map[string]string) error {
 	if defaults == nil {
 		return nil
+	}
+	profileOwned := map[string]struct{}{
+		model.ClaudeEnvBaseURL:           {},
+		model.ClaudeEnvAuthToken:         {},
+		model.ClaudeEnvModel:             {},
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   {},
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  {},
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": {},
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  {},
+		"CLAUDE_CODE_SUBAGENT_MODEL":     {},
+	}
+	for key := range defaults {
+		if _, owned := profileOwned[key]; owned {
+			return fmt.Errorf("claude profile env %s must be configured per profile", key)
+		}
 	}
 	validationEnv := map[string]string{
 		model.ClaudeEnvBaseURL:           "https://defaults-validation.invalid/anthropic",
@@ -1396,11 +1412,27 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
 		c.ImagePresets = make([]ImageModelPreset, 0, len(c.ModelRoutes.ImageGeneration.Designer))
+		routeKeys := make([]string, 0, len(c.ModelRoutes.ImageGeneration.Designer))
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-			routeName := "model_routes.image_generation.designer." + key
 			if !route.Enabled {
 				continue
 			}
+			routeKeys = append(routeKeys, key)
+		}
+		sort.Slice(routeKeys, func(i, j int) bool {
+			left := c.ModelRoutes.ImageGeneration.Designer[routeKeys[i]]
+			right := c.ModelRoutes.ImageGeneration.Designer[routeKeys[j]]
+			if left.QualityRank != right.QualityRank {
+				return left.QualityRank > right.QualityRank
+			}
+			if left.SelectionKey != right.SelectionKey {
+				return left.SelectionKey < right.SelectionKey
+			}
+			return routeKeys[i] < routeKeys[j]
+		})
+		for _, key := range routeKeys {
+			route := c.ModelRoutes.ImageGeneration.Designer[key]
+			routeName := "model_routes.image_generation.designer." + key
 			if err := validateEnabledDesignerRoute(routeName, route); err != nil {
 				return err
 			}

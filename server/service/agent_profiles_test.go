@@ -144,6 +144,9 @@ func TestAgentProfileRegistryUsesModelIdentityWhenAliasIsOmitted(t *testing.T) {
 	if err != nil || !got.Available {
 		t.Fatalf("identity-mapped profile = %#v, %v", got, err)
 	}
+	if canonical := got.ModelUsageAliases["glm-5.2"]; canonical != "glm-5.2" {
+		t.Fatalf("derived identity alias = %q, want glm-5.2", canonical)
+	}
 }
 
 func TestAgentProfileRegistryMarksModelAliasAndCostMismatchUnavailable(t *testing.T) {
