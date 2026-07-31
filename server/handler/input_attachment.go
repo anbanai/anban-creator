@@ -106,7 +106,6 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 			a = model.EntryAttachment{
 				AssetID:     asset.ID,
 				Type:        "image",
-				Key:         asset.StorageKey,
 				FileName:    asset.FileName,
 				ContentType: asset.ContentType,
 				Size:        asset.Size,
@@ -196,7 +195,7 @@ func validateHandlerEntryAttachment(a *model.EntryAttachment) error {
 		return fmt.Errorf("unsupported attachment type")
 	}
 	a.Type = typ
-	if typ != "text" && a.URL == "" && a.Key == "" {
+	if typ != "text" && a.AssetID == "" && a.URL == "" && a.Key == "" {
 		return fmt.Errorf("attachment url is required")
 	}
 	if typ == "text" && a.URL == "" && a.Text == "" && a.Key == "" {

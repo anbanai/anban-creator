@@ -71,12 +71,25 @@ func TestValidateInputAttachmentsAcceptsOwnedAssetAndPreservesOrder(t *testing.T
 	if got[0].FileName != "brief.txt" {
 		t.Fatalf("first attachment = %#v, want brief.txt first", got[0])
 	}
-	if got[1].AssetID != ownedReference.ID || got[1].Type != "image" || got[1].Key != ownedReference.StorageKey ||
+	if got[1].AssetID != ownedReference.ID || got[1].Type != "image" ||
 		got[1].FileName != ownedReference.FileName || got[1].ContentType != ownedReference.ContentType || got[1].Size != ownedReference.Size {
 		t.Fatalf("asset attachment = %#v, want server-owned metadata from %#v", got[1], ownedReference)
 	}
+	if got[1].URL != "" || got[1].Key != "" || got[1].UploadID != "" {
+		t.Fatalf("asset attachment alternate identities = %#v, want asset_id only", got[1])
+	}
 	if got[1].Instruction != "use this composition" {
 		t.Fatalf("instruction = %q, want normalized caller instruction", got[1].Instruction)
+	}
+	roundTripped, err := validateInputAttachments(t.Context(), nil, repo, "user-1", got, InputAttachmentValidationOptions{
+		AllowedTypes:         allAgentAttachmentTypes,
+		AllowedAssetPurposes: []string{service.DirectUploadPurposeTaskReference},
+	})
+	if err != nil {
+		t.Fatalf("round-trip normalized asset attachment: %v", err)
+	}
+	if len(roundTripped) != 2 || roundTripped[1] != got[1] {
+		t.Fatalf("round-trip attachments = %#v, want %#v", roundTripped, got)
 	}
 }
 
