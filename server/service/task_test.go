@@ -1052,6 +1052,104 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
+func TestCloneConvertsDirectReferenceToPrependedAttachment(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+	}
+	source.SetInputAttachments([]model.EntryAttachment{
+		{Type: "document", Text: "brief", FileName: "brief.md"},
+		{Type: "text", Text: "notes", FileName: "notes.txt"},
+	})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	clone := clones[0]
+	if clone.ReferenceImageAssetID != "" {
+		t.Fatalf("clone reference asset = %q, want empty", clone.ReferenceImageAssetID)
+	}
+	attachments := clone.InputAttachments.Data()
+	if len(attachments) != 3 {
+		t.Fatalf("clone attachments = %#v, want reference plus two materials", attachments)
+	}
+	if attachments[0].AssetID != asset.ID || attachments[0].Type != "image" || attachments[0].FileName != asset.FileName || attachments[0].ContentType != asset.ContentType || attachments[0].Size != asset.Size {
+		t.Fatalf("first attachment = %#v, want canonical asset material", attachments[0])
+	}
+	if attachments[1].FileName != "brief.md" || attachments[2].FileName != "notes.txt" {
+		t.Fatalf("existing material order changed: %#v", attachments)
+	}
+}
+
+func TestCloneDoesNotDuplicateDirectReferenceAttachment(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+	}
+	source.SetInputAttachments([]model.EntryAttachment{
+		{AssetID: asset.ID, Type: "document", FileName: "forged.pdf", ContentType: "application/pdf", Size: 1},
+		{Type: "text", Text: "notes", FileName: "notes.txt"},
+	})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	attachments := clones[0].InputAttachments.Data()
+	if clones[0].ReferenceImageAssetID != "" || len(attachments) != 2 || attachments[0].AssetID != asset.ID || attachments[0].Type != "image" || attachments[0].FileName != asset.FileName || attachments[0].ContentType != asset.ContentType || attachments[0].Size != asset.Size || attachments[1].FileName != "notes.txt" {
+		t.Fatalf("clone = reference %q attachments %#v", clones[0].ReferenceImageAssetID, attachments)
+	}
+}
+
+func TestCloneKeepsProjectSnapshotReferenceOutOfAttachments(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeProjectReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective"}
+	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformArticle, ReferenceImageAssetID: asset.ID})
+	source.SetInputAttachments([]model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	attachments := clones[0].InputAttachments.Data()
+	if clones[0].ReferenceImageAssetID != "" || clones[0].ProjectSnapshot.Data().ReferenceImageAssetID != asset.ID || len(attachments) != 1 || attachments[0].FileName != "notes.txt" {
+		t.Fatalf("clone = reference %q snapshot %#v attachments %#v", clones[0].ReferenceImageAssetID, clones[0].ProjectSnapshot.Data(), attachments)
+	}
+}
+
 func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1303,9 +1401,8 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
 		t.Fatalf("complete first clone: %v", err)
 	}
-	exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile})
-	if err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != inherited.ID {
-		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
+	if exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile}); !errors.Is(err, ErrReferenceAssetPurposeMismatch) {
+		t.Fatalf("exact clone-of-clone = %#v, %v; want project reference purpose rejection", exactClones, err)
 	}
 
 	for _, test := range []struct {

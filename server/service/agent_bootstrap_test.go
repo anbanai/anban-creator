@@ -876,6 +876,107 @@ func TestBuildEcommerceProductBootstrapFiles(t *testing.T) {
 	}
 }
 
+func TestAgentBootstrapAttachmentTypeIndexPreservesSourceOrder(t *testing.T) {
+	svc := &AgentBootstrapService{}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	attachments := []model.EntryAttachment{
+		{Type: "document", Text: "document", FileName: "brief.pdf"},
+		{Type: "image", Text: "image one", FileName: "first.png"},
+		{Type: "image", Text: "image two", FileName: "second.png"},
+		{Type: "text", Text: "notes", FileName: "notes.txt"},
+	}
+
+	files, err := svc.buildAttachmentFiles(t.Context(), "execution-1", task, attachments, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 5 {
+		t.Fatalf("files = %#v", files)
+	}
+	for i, want := range []string{
+		".anban-creator/input-attachments/01-brief.pdf",
+		".anban-creator/input-attachments/02-first.png",
+		".anban-creator/input-attachments/03-second.png",
+		".anban-creator/input-attachments/04-notes.txt",
+	} {
+		if files[i].Path != want {
+			t.Fatalf("file %d path = %q, want %q", i, files[i].Path, want)
+		}
+	}
+	var index []struct {
+		Index     int    `json:"index"`
+		Type      string `json:"type"`
+		TypeIndex int    `json:"type_index"`
+		Path      string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(files[4].Text), &index); err != nil {
+		t.Fatal(err)
+	}
+	wantTypes := []string{"document", "image", "image", "text"}
+	wantTypeIndexes := []int{1, 1, 2, 1}
+	for i := range index {
+		if index[i].Index != i+1 || index[i].Type != wantTypes[i] || index[i].TypeIndex != wantTypeIndexes[i] || index[i].Path != files[i].Path {
+			t.Fatalf("index[%d] = %#v", i, index[i])
+		}
+	}
+}
+
+func TestAgentBootstrapAssetAttachmentUsesRepositoryIdentity(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+	asset := referenceAssetFixture("asset-material", task.UserID, DirectUploadPurposeTaskReference)
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	attachment := model.EntryAttachment{
+		AssetID: asset.ID, Type: "document", FileName: "forged.pdf", ContentType: "application/pdf", Size: 1,
+		URL: "https://attacker.example.com/forged.pdf", Key: "assets/users/victim/secret.pdf",
+	}
+
+	files, err := svc.buildAttachmentFiles(t.Context(), "execution-1", task, []model.EntryAttachment{attachment}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildAttachmentFiles: %v", err)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v, want repository key %q", store.signedKeys, asset.StorageKey)
+	}
+	if len(files) != 2 || files[0].DownloadURL == "" || files[0].ExpectedSize != asset.Size || files[0].Path != ".anban-creator/input-attachments/01-"+asset.FileName {
+		t.Fatalf("files = %#v", files)
+	}
+}
+
+func TestAgentBootstrapAssetAttachmentRejectsUntrustedAsset(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		owner   string
+		purpose string
+	}{
+		{name: "foreign owner", owner: "user-2", purpose: DirectUploadPurposeTaskReference},
+		{name: "wrong purpose", owner: "user-1", purpose: DirectUploadPurposeProjectReference},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := openBootstrapTestRepository(t)
+			store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+			svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{Store: store, SignedURLTTL: 60}}
+			task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1"}
+			asset := referenceAssetFixture("asset-material", tc.owner, tc.purpose)
+			if err := repo.Assets().Create(t.Context(), asset); err != nil {
+				t.Fatal(err)
+			}
+			attachment := model.EntryAttachment{AssetID: asset.ID, Type: "image", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}
+
+			if _, err := svc.buildAttachmentFiles(t.Context(), "execution-1", task, []model.EntryAttachment{attachment}, time.Now().Add(time.Hour)); err == nil {
+				t.Fatal("untrusted asset attachment was accepted")
+			}
+			if len(store.signedKeys) != 0 {
+				t.Fatalf("untrusted asset reached signer: %#v", store.signedKeys)
+			}
+		})
+	}
+}
+
 func TestBuildEcommerceProductBootstrapFilesFromKeyFirstAttachment(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}}

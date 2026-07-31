@@ -134,7 +134,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ImageRatio:               src.ImageRatio,
 		ImageModelKey:            src.ImageModelKey,
 		SkipRefImage:             &skipRef,
-		ReferenceImageAssetID:    src.ReferenceImageAssetID,
 		InputSourceTaskID:        inputSourceTaskID,
 		InputSourceProjectID:     inputSourceProjectID,
 		Overrides:                &overrides,
@@ -148,8 +147,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ArticleWithContentImages: articleContent,
 		ExecutionTarget:          executionTarget,
 	}
-	params.allowProjectReferenceAsset = trustedCloneProjectReferenceAsset(src, src.ReferenceImageAssetID)
-
 	// Preserve the e-commerce package config (module selection, product photos,
 	// selling points) so the clone bills the same package and reuses the inputs.
 	if src.Type == model.PlatformEcommerce {
@@ -160,6 +157,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		params.InputAttachments = cloneEntryAttachments(*cloneParams.InputAttachments)
 	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
+	}
+	params.InputAttachments, err = s.prependClonedReferenceAttachment(ctx, src, params.InputAttachments)
+	if err != nil {
+		return nil, err
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
@@ -182,6 +183,35 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks, nil
+}
+
+func (s *TaskService) prependClonedReferenceAttachment(ctx context.Context, source *model.Task, attachments []model.EntryAttachment) ([]model.EntryAttachment, error) {
+	assetID := strings.TrimSpace(source.ReferenceImageAssetID)
+	if assetID == "" {
+		return attachments, nil
+	}
+	if s.referenceAssets == nil {
+		return nil, ErrReferenceAssetUnavailable
+	}
+	asset, err := s.referenceAssets.RequireOwned(ctx, source.UserID, assetID, []string{DirectUploadPurposeTaskReference})
+	if err != nil {
+		return nil, fmt.Errorf("resolve cloned reference attachment: %w", err)
+	}
+	for i, attachment := range attachments {
+		if strings.TrimSpace(attachment.AssetID) == asset.ID {
+			normalized := cloneEntryAttachments(attachments)
+			normalized[i] = model.EntryAttachment{
+				AssetID: asset.ID, Type: "image", FileName: asset.FileName,
+				ContentType: asset.ContentType, Size: asset.Size, Instruction: attachment.Instruction,
+			}
+			return normalized, nil
+		}
+	}
+	reference := model.EntryAttachment{
+		AssetID: asset.ID, Type: "image", FileName: asset.FileName,
+		ContentType: asset.ContentType, Size: asset.Size,
+	}
+	return append([]model.EntryAttachment{reference}, attachments...), nil
 }
 
 func trustedCloneProjectReferenceAsset(source *model.Task, assetID string) bool {
