@@ -139,6 +139,48 @@ type DesignerGenerationQuote struct {
 	ExpiresAt          time.Time `json:"expires_at"`
 }
 
+type DesignerGenerationPublic struct {
+	ID             string                        `json:"id"`
+	ProjectID      string                        `json:"project_id"`
+	Prompt         string                        `json:"prompt"`
+	RevisedPrompt  string                        `json:"revised_prompt,omitempty"`
+	CapabilityKey  string                        `json:"capability_key,omitempty"`
+	CapabilityName string                        `json:"capability_name,omitempty"`
+	Quality        string                        `json:"quality,omitempty"`
+	Size           string                        `json:"size,omitempty"`
+	N              int                           `json:"n"`
+	OutputFormat   string                        `json:"output_format,omitempty"`
+	Status         string                        `json:"status"`
+	Error          string                        `json:"error,omitempty"`
+	Cost           int                           `json:"cost,omitempty"`
+	EstimatedCost  int                           `json:"estimated_cost,omitempty"`
+	FinalCost      int                           `json:"final_cost,omitempty"`
+	BillingMode    string                        `json:"billing_mode,omitempty"`
+	BillingStatus  string                        `json:"billing_status,omitempty"`
+	CreatedAt      time.Time                     `json:"created_at"`
+	UpdatedAt      time.Time                     `json:"updated_at"`
+	Results        []model.ImageGenerationResult `json:"results,omitempty"`
+}
+
+func (s *DesignerService) publicGeneration(gen *model.ImageGeneration) *DesignerGenerationPublic {
+	if gen == nil {
+		return nil
+	}
+	capKey, capName := "", ""
+	if route, ok := s.designerRoute(gen.ProviderID); ok {
+		capKey, capName = route.SelectionKey, route.Alias
+	}
+	if capName == "" {
+		capName = "图像能力"
+	}
+	return &DesignerGenerationPublic{ID: gen.ID, ProjectID: gen.ProjectID, Prompt: gen.Prompt,
+		RevisedPrompt: gen.RevisedPrompt, CapabilityKey: capKey, CapabilityName: capName,
+		Quality: gen.Quality, Size: gen.Size, N: gen.N, OutputFormat: gen.OutputFormat,
+		Status: gen.Status, Error: gen.Error, Cost: gen.Cost, EstimatedCost: gen.EstimatedCost,
+		FinalCost: gen.FinalCost, BillingMode: gen.BillingMode, BillingStatus: gen.BillingStatus,
+		CreatedAt: gen.CreatedAt, UpdatedAt: gen.UpdatedAt, Results: gen.Results}
+}
+
 func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID string, req DesignerGenerateRequest) (*DesignerGenerationQuote, error) {
 	if s == nil || s.billingCatalog == nil {
 		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
@@ -167,10 +209,15 @@ func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID stri
 		return nil, err
 	}
 	fingerprint := DesignerGenerationFingerprint(userID, req)
-	quote, err := s.billingCatalog.CreateQuote(ctx, QuoteRequest{
-		UserID: userID, Operation: "designer.generate_image", Route: "image_generation.designer." + req.ProviderID,
+	internalID := s.designerInternalID(req.ProviderID)
+	quoteRequest := QuoteRequest{
+		UserID: userID, Operation: "designer.generate_image", Route: "image_generation.designer." + internalID,
 		RequestFingerprint: fingerprint, IdempotencyScope: "designer-quote", IdempotencyKey: req.OperationID,
-	})
+	}
+	if strings.TrimSpace(route.BillingSKU) != "" {
+		quoteRequest.SKUID = strings.TrimSpace(route.BillingSKU)
+	}
+	quote, err := s.billingCatalog.CreateQuote(ctx, quoteRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +299,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 				if err := validateDesignerGenerateRequest(req, route.Capabilities); err != nil {
 					return nil, err
 				}
-				routeName = "image_generation.designer." + req.ProviderID
+				routeName = "image_generation.designer." + s.designerInternalID(req.ProviderID)
 			} else {
 				return nil, fmt.Errorf("designer provider %s route is not configured", req.ProviderID)
 			}
@@ -263,7 +310,13 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if err := s.validateDesignerReferenceOwnership(ctx, userID, req.ReferenceFileIDs, req.MaskFileID); err != nil {
 		return nil, err
 	}
-	sku, err := s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName)
+	var sku *model.BillingSKU
+	var err error
+	if route, ok := s.designerRoute(req.ProviderID); ok && strings.TrimSpace(route.BillingSKU) != "" {
+		sku, err = s.billingCatalog.ResolveSKUByID(ctx, "", strings.TrimSpace(route.BillingSKU))
+	} else {
+		sku, err = s.billingCatalog.ResolveSKU(ctx, "", "designer.generate_image", routeName)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve fixed designer SKU: %w", err)
 	}
@@ -412,8 +465,30 @@ func (s *DesignerService) designerRoute(id string) (srvconfig.ImageGenerationRou
 	if s.fullCfg == nil || s.fullCfg.ModelRoutes.ImageGeneration.Designer == nil {
 		return srvconfig.ImageGenerationRouteConfig{}, false
 	}
-	route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Designer[id]
-	return route, ok
+	if route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Designer[id]; ok {
+		return route, true
+	}
+	for _, route := range s.fullCfg.ModelRoutes.ImageGeneration.Designer {
+		if strings.TrimSpace(route.SelectionKey) == strings.TrimSpace(id) {
+			return route, true
+		}
+	}
+	return srvconfig.ImageGenerationRouteConfig{}, false
+}
+
+func (s *DesignerService) designerInternalID(id string) string {
+	if s.fullCfg == nil {
+		return id
+	}
+	if _, ok := s.fullCfg.ModelRoutes.ImageGeneration.Designer[id]; ok {
+		return id
+	}
+	for internalID, route := range s.fullCfg.ModelRoutes.ImageGeneration.Designer {
+		if strings.TrimSpace(route.SelectionKey) == strings.TrimSpace(id) {
+			return internalID
+		}
+	}
+	return id
 }
 
 func designerCapabilitySize(size string) string {
@@ -947,7 +1022,7 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 	return s.UploadReference(ctx, userID, "source"+ext, contentTypeForUploadExt(ext), data)
 }
 
-func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {
+func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID string, page, pageSize int) ([]DesignerGenerationPublic, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -977,17 +1052,21 @@ func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID stri
 		s.signResultURLs(ctx, generations[i].Results)
 	}
 
-	return generations, total, nil
+	items := make([]DesignerGenerationPublic, 0, len(generations))
+	for i := range generations {
+		items = append(items, *s.publicGeneration(&generations[i]))
+	}
+	return items, total, nil
 }
 
-func (s *DesignerService) GetGeneration(ctx context.Context, userID, generationID string) (*model.ImageGeneration, error) {
+func (s *DesignerService) GetGeneration(ctx context.Context, userID, generationID string) (*DesignerGenerationPublic, error) {
 	var gen model.ImageGeneration
 	if err := s.db.Where("id = ? AND user_id = ?", generationID, userID).
 		Preload("Results").First(&gen).Error; err != nil {
 		return nil, err
 	}
 	s.signResultURLs(ctx, gen.Results)
-	return &gen, nil
+	return s.publicGeneration(&gen), nil
 }
 
 func (s *DesignerService) updateGenerationStatus(genID, status, errMsg string) {
@@ -1081,6 +1160,8 @@ type DesignerProviderInfo struct {
 	ID           string                       `json:"id"`
 	Name         string                       `json:"name"`
 	Alias        string                       `json:"alias,omitempty"`
+	Description  string                       `json:"description,omitempty"`
+	MinTier      string                       `json:"min_tier,omitempty"`
 	Provider     string                       `json:"-"`
 	ProviderKey  string                       `json:"-"`
 	Route        string                       `json:"-"`
@@ -1125,6 +1206,12 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 	}
 
 	providers := make([]DesignerProviderInfo, 0, len(order))
+	userTier := model.TierFree
+	if s.repo != nil && strings.TrimSpace(userID) != "" {
+		if user, err := s.repo.Users().FindByID(ctx, userID); err == nil && user != nil {
+			userTier = model.ResolveTier(user.Tier)
+		}
+	}
 	for i, id := range order {
 		cfg := s.imageCfg.Designer[id]
 		if cfg == nil {
@@ -1132,11 +1219,19 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 		}
 		name := cfg.Alias
 		if name == "" {
-			name = strings.ToUpper(id[:1]) + id[1:]
+			name = "图像能力"
 		}
 		routeName := "image_generation.designer." + id
 		providerKey := s.designerProviderKey(id)
 		route, _ := s.designerRoute(id)
+		requiredTier := model.NormalizeTier(route.MinTier)
+		if !model.TierSatisfies(userTier, requiredTier) {
+			continue
+		}
+		publicID := strings.TrimSpace(route.SelectionKey)
+		if publicID == "" {
+			publicID = id
+		}
 		capabilities := route.Capabilities
 		capabilities.MaxBatch = 1
 		credits := 0
@@ -1164,9 +1259,11 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 			}
 		}
 		providers = append(providers, DesignerProviderInfo{
-			ID:           id,
+			ID:           publicID,
 			Name:         name,
 			Alias:        cfg.Alias,
+			Description:  route.Description,
+			MinTier:      string(requiredTier),
 			Provider:     cfg.Provider,
 			ProviderKey:  providerKey,
 			Route:        routeName,
@@ -1212,7 +1309,17 @@ func (s *DesignerService) findDesignerConfigByID(id string) *config.ImageAPI {
 	if s.imageCfg == nil || s.imageCfg.Designer == nil {
 		return nil
 	}
-	return s.imageCfg.Designer[id]
+	if cfg := s.imageCfg.Designer[id]; cfg != nil {
+		return cfg
+	}
+	if s.fullCfg != nil {
+		for internalID, route := range s.fullCfg.ModelRoutes.ImageGeneration.Designer {
+			if strings.TrimSpace(route.SelectionKey) == strings.TrimSpace(id) {
+				return s.imageCfg.Designer[internalID]
+			}
+		}
+	}
+	return nil
 }
 
 func (s *DesignerService) resolveAPIKey(provider string) string {

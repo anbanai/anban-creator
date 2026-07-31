@@ -62,10 +62,14 @@ type ResolvedSKUPrice struct {
 }
 
 type QuoteRequest struct {
-	UserID               string
-	CatalogID            string
-	Operation            string
-	Route                string
+	UserID    string
+	CatalogID string
+	Operation string
+	Route     string
+	// SKUID is an internal server-selected SKU override. Public callers must
+	// never populate it; it is used when a configurable capability owns a SKU
+	// that is intentionally independent from its semantic route.
+	SKUID                string
 	ExecutionProfile     string
 	AgentProfileSnapshot *model.AgentProfileSnapshot
 	RequestFingerprint   string
@@ -380,7 +384,9 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 		return nil, err
 	}
 	var resolved *ResolvedSKUPrice
-	if req.ExecutionProfile != "" {
+	if req.SKUID != "" {
+		resolved, err = s.ResolvePriceBySKUIDForUser(ctx, req.UserID, req.CatalogID, req.SKUID)
+	} else if req.ExecutionProfile != "" {
 		resolved, err = s.ResolvePriceForExecutionProfile(ctx, req.UserID, req.CatalogID, req.Operation, req.ExecutionProfile)
 	} else {
 		resolved, err = s.ResolvePrice(ctx, req.UserID, req.CatalogID, req.Operation, req.Route)
@@ -559,6 +565,9 @@ func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 	if req.ExecutionProfile != "" && req.Route != "" {
 		return QuoteRequest{}, fmt.Errorf("%w: route and execution_profile are mutually exclusive", ErrBillingInvalid)
 	}
+	if req.SKUID, ok = canonicalBillingText(req.SKUID, 128, false); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
 	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
 	if !validBillingFingerprint(req.RequestFingerprint) {
 		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
@@ -674,7 +683,7 @@ func quoteMatchesRequest(existing *model.BillingQuote, req QuoteRequest) bool {
 	if err := json.Unmarshal(existing.SKUSnapshot, &pinned); err != nil {
 		return false
 	}
-	if pinned.ID != existing.SKUID || pinned.Operation != strings.TrimSpace(req.Operation) || pinned.Route != strings.TrimSpace(req.Route) || pinned.ExecutionProfile != strings.TrimSpace(req.ExecutionProfile) {
+	if pinned.ID != existing.SKUID || (req.SKUID != "" && pinned.ID != req.SKUID) || (req.SKUID == "" && (pinned.Operation != strings.TrimSpace(req.Operation) || pinned.Route != strings.TrimSpace(req.Route) || pinned.ExecutionProfile != strings.TrimSpace(req.ExecutionProfile))) {
 		return false
 	}
 	if req.AgentProfileSnapshot == nil {

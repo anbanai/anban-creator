@@ -97,6 +97,20 @@ type ImageModelPreset struct {
 // maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
 const maxImageModelKeyLen = 50
 
+// NormalizeImageModelKey keeps already-persisted tasks and plans executable
+// after public capability keys are renamed. These aliases are server-side only
+// and are never returned by the public catalog.
+func NormalizeImageModelKey(key string) string {
+	switch strings.TrimSpace(key) {
+	case "volcengine-standard":
+		return "standard_image"
+	case "openai-standard", "gpt-image-2":
+		return "professional_enhance"
+	default:
+		return strings.TrimSpace(key)
+	}
+}
+
 // ValidateImagePresets checks that preset keys fit the Task/Plan ImageModelKey
 // column (varchar(50)) and are globally unique. Returns the first error found.
 // Call this at startup so a malformed config fails fast instead of surfacing

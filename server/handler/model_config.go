@@ -36,6 +36,9 @@ func (h *ModelConfigHandler) Get(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("get model config failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get model config")
 	}
+	if !h.service.IsEnterpriseUser(c.Context(), userID) {
+		resp.Image = nil
+	}
 
 	return Success(c, resp)
 }
@@ -70,6 +73,9 @@ func (h *ModelConfigHandler) Update(c fiber.Ctx) error {
 	const sentinel = "****"
 
 	if req.Image != nil {
+		if !(req.Image.APIKey == "" && req.Image.Endpoint == "" && req.Image.Model == "" && req.Image.Provider == "" && req.Image.Proxy == "") && !h.service.IsEnterpriseUser(c.Context(), userID) {
+			return Error(c, fiber.StatusForbidden, "custom image configuration requires enterprise tier")
+		}
 		if err := validateConfigField("image.endpoint", req.Image.Endpoint, maxFieldLen, true); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}

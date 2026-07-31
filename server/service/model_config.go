@@ -162,6 +162,10 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 	return uc.HasCompleteConfig()
 }
 
+func (s *ModelConfigService) IsEnterpriseUser(ctx context.Context, userID string) bool {
+	return s.userTierIsEnterprise(ctx, userID)
+}
+
 // GetEffectiveImageConfig returns the resolved image config as an ImageAPIConfig.
 // Returns nil if no user override exists (use server default).
 func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID string) *config.ImageAPIConfig {
@@ -227,9 +231,12 @@ func (s *ModelConfigService) GetImageProxy(ctx context.Context, userID string) s
 func (s *ModelConfigService) ResolveImageConfigForKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string) {
+	imageModelKey = config.NormalizeImageModelKey(imageModelKey)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
-		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
-			return cfg, "user_custom"
+		if s.userTierIsEnterprise(ctx, userID) {
+			if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
+				return cfg, "user_custom"
+			}
 		}
 		return nil, "system_default"
 	}
@@ -288,6 +295,7 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 func (s *ModelConfigService) ResolveImageConfigForTaskKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string, error) {
+	imageModelKey = config.NormalizeImageModelKey(imageModelKey)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
 			return cfg, "user_custom", nil

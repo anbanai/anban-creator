@@ -390,7 +390,6 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider: effectiveProvider.provider,
           provider_id: effectiveProvider.id,
           quality: settings.quality !== 'auto' ? settings.quality : undefined,
           size: buildDesignerRequestSize(settings.size, settings.resolution),
@@ -456,7 +455,6 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider: effectiveProvider.provider,
           provider_id: effectiveProvider.id,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
