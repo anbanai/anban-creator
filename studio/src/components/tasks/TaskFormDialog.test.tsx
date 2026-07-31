@@ -195,9 +195,9 @@ beforeEach(() => {
   vi.mocked(api.imageModels.list).mockResolvedValue({
     tier: 'pro',
     items: [
-      { key: '', display_name: '系统默认', provider: '', min_tier: 'free', is_custom: false },
-      { key: 'source-model', display_name: '源模型', provider: 'openai', min_tier: 'pro', is_custom: false },
-      { key: 'destination-model', display_name: '目标模型', provider: 'gemini', min_tier: 'pro', is_custom: false },
+      { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
+      { key: 'source-model', display_name: '源图像', min_tier: 'pro', is_custom: false },
+      { key: 'destination-model', display_name: '目标图像', min_tier: 'pro', is_custom: false },
     ],
   })
   vi.mocked(api.tasks.create).mockResolvedValue(fixtures.createdTask)
@@ -434,8 +434,8 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
       items: [
-        { key: '', display_name: '系统默认', provider: '', min_tier: 'free', is_custom: false },
-        { key: 'destination-model', display_name: '目标模型', provider: 'gemini', min_tier: 'pro', is_custom: false },
+        { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
+        { key: 'destination-model', display_name: '目标图像', min_tier: 'pro', is_custom: false },
       ],
     })
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })

@@ -1,12 +1,16 @@
-export interface ImageModelOption {
+export interface ImageCapabilityOption {
   key: string
   display_name: string
-  provider: string
+  description?: string
   min_tier?: string
+  sort_order?: number
+  price_credits?: number
   is_custom?: boolean
 }
 
 export interface ImageModelListResponse {
-  items: ImageModelOption[]
+  items: ImageCapabilityOption[]
   tier: string
 }
+
+export type ImageModelOption = ImageCapabilityOption

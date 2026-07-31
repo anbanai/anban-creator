@@ -554,7 +554,11 @@ func main() {
 	}
 	// Image model options handler (tier-gated listing). Always available so the
 	// frontend can render the create-task/plan dropdown even without presets.
-	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, log)
+	var imageCatalog *service.BillingCatalogService
+	if fixedBilling != nil {
+		imageCatalog = fixedBilling.Catalog
+	}
+	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, imageCatalog, log)
 	// Wire image presets + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
 		taskHandler.SetImagePresets(cfg.ImagePresets)

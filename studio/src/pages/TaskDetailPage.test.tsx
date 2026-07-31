@@ -235,8 +235,8 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
       items: [
-        { key: '', display_name: '系统默认', provider: '', min_tier: 'free', is_custom: false },
-        { key: 'source-model', display_name: '源模型', provider: 'gemini', min_tier: 'pro', is_custom: false },
+      { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
+      { key: 'source-model', display_name: '源图像', min_tier: 'pro', is_custom: false },
       ],
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })

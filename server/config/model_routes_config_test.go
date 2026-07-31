@@ -171,9 +171,10 @@ model_routes:
       model: doubao-seedream-5-0-pro-260628
     designer:
       seedream:
-        selection_key: volcengine-standard
+        selection_key: standard_image
         min_tier: free
-        alias: Doubao Seedream
+        alias: Standard Image
+        billing_sku: image.seedream.designer
         provider: volcengine_ark
         model: doubao-seedream-5-0-pro-260628
         enabled: true
@@ -190,9 +191,10 @@ model_routes:
           has_compression: false
           watermark: true
       gpt_image_2:
-        selection_key: openai-standard
+        selection_key: professional_enhance
         min_tier: pro
-        alias: GPT Image 2
+        alias: Professional Enhance
+        billing_sku: image.gpt-image-2.designer
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
@@ -375,9 +377,9 @@ model_routes:
   image_generation:
     designer:
       gpt_image_2:
-        selection_key: openai-standard
+        selection_key: professional_enhance
         min_tier: pro
-        alias: GPT Image 2
+        alias: Professional Enhance
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true
@@ -418,9 +420,9 @@ model_routes:
   image_generation:
     designer:
       gpt_image_2:
-        selection_key: openai-standard
+        selection_key: professional_enhance
         min_tier: pro
-        alias: GPT Image 2
+        alias: Professional Enhance
         provider: wangcai_openai
         model: gpt-image-2
         enabled: true

@@ -80,6 +80,9 @@ func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceC
 type ImageModelPreset struct {
 	Key           string                       `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
 	DisplayName   string                       `yaml:"display_name"`   // user-facing label
+	Description   string                       `yaml:"description"`    // neutral user-facing capability description
+	SortOrder     int                          `yaml:"sort_order"`     // stable public catalog order
+	BillingSKU    string                       `yaml:"billing_sku"`    // retail billing catalog identity
 	ProviderRoute string                       `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
 	Provider      string                       `yaml:"provider"`       // derived provider kind or legacy direct provider
 	Model         string                       `yaml:"model"`          // concrete model id
@@ -99,6 +102,7 @@ const maxImageModelKeyLen = 50
 // Call this at startup so a malformed config fails fast instead of surfacing
 // as a 500 on first task create.
 func ValidateImagePresets(presets []ImageModelPreset) error {
+	const blockedPublicBrandHint = "openai, chatgpt, gpt, gemini, claude, seedream, doubao"
 	seen := make(map[string]bool, len(presets))
 	for i, p := range presets {
 		if p.Key == "" {
@@ -115,6 +119,15 @@ func ValidateImagePresets(presets []ImageModelPreset) error {
 		}
 		if seen[p.Key] {
 			return fmt.Errorf("image_presets[%d]: duplicate key %q", i, p.Key)
+		}
+		if strings.TrimSpace(p.BillingSKU) == "" {
+			return fmt.Errorf("image_presets[%d]: billing_sku is required", i)
+		}
+		publicText := strings.ToLower(p.Key + "\n" + p.DisplayName + "\n" + p.Description)
+		for _, term := range []string{"openai", "chatgpt", "gpt", "gemini", "claude", "seedream", "doubao"} {
+			if strings.Contains(publicText, term) {
+				return fmt.Errorf("image_presets[%d]: public display text contains blocked brand %q (allowed terms: %s)", i, term, blockedPublicBrandHint)
+			}
 		}
 		seen[p.Key] = true
 	}
@@ -375,6 +388,9 @@ type ImageGenerationRouteConfig struct {
 	SelectionKey   string                       `yaml:"selection_key" json:"selection_key"`
 	MinTier        string                       `yaml:"min_tier" json:"min_tier"`
 	Alias          string                       `yaml:"alias"`
+	Description    string                       `yaml:"description"`
+	SortOrder      int                          `yaml:"sort_order" json:"sort_order"`
+	BillingSKU     string                       `yaml:"billing_sku" json:"billing_sku"`
 	Enabled        bool                         `yaml:"enabled"`
 	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
 	ResponseFormat string                       `yaml:"response_format"`
@@ -385,6 +401,7 @@ func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := validateYAMLMappingFields(value, "image generation route", map[string]bool{
 		"provider": true, "model": true, "timeout": true,
 		"selection_key": true, "min_tier": true, "alias": true,
+		"description": true, "sort_order": true, "billing_sku": true,
 		"enabled": true, "quality_rank": true, "response_format": true,
 		"capabilities": true,
 	}); err != nil {
@@ -1422,6 +1439,17 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		sort.Slice(routeKeys, func(i, j int) bool {
 			left := c.ModelRoutes.ImageGeneration.Designer[routeKeys[i]]
 			right := c.ModelRoutes.ImageGeneration.Designer[routeKeys[j]]
+			if left.SortOrder > 0 || right.SortOrder > 0 {
+				if left.SortOrder == 0 {
+					return false
+				}
+				if right.SortOrder == 0 {
+					return true
+				}
+				if left.SortOrder != right.SortOrder {
+					return left.SortOrder < right.SortOrder
+				}
+			}
 			if left.QualityRank != right.QualityRank {
 				return left.QualityRank > right.QualityRank
 			}
@@ -1445,6 +1473,7 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			providerConfig := c.ModelProviders[route.Provider]
 			c.ImagePresets = append(c.ImagePresets, ImageModelPreset{
 				Key: route.SelectionKey, DisplayName: route.Alias,
+				Description: route.Description, SortOrder: route.SortOrder, BillingSKU: route.BillingSKU,
 				ProviderRoute: "image_generation.designer." + key,
 				Provider:      providerKind(route.Provider), Model: route.Model,
 				Endpoint: providerConfig.BaseURL, APIKey: providerConfig.APIKey,
@@ -1454,10 +1483,22 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		}
 	}
 	sort.Slice(c.ImagePresets, func(i, j int) bool {
-		if c.ImagePresets[i].QualityRank != c.ImagePresets[j].QualityRank {
-			return c.ImagePresets[i].QualityRank > c.ImagePresets[j].QualityRank
+		left, right := c.ImagePresets[i], c.ImagePresets[j]
+		if left.SortOrder > 0 || right.SortOrder > 0 {
+			if left.SortOrder == 0 {
+				return false
+			}
+			if right.SortOrder == 0 {
+				return true
+			}
+			if left.SortOrder != right.SortOrder {
+				return left.SortOrder < right.SortOrder
+			}
 		}
-		return c.ImagePresets[i].Key < c.ImagePresets[j].Key
+		if left.QualityRank != right.QualityRank {
+			return left.QualityRank > right.QualityRank
+		}
+		return left.Key < right.Key
 	})
 	if err := ValidateImagePresets(c.ImagePresets); err != nil {
 		return err

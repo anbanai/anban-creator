@@ -193,6 +193,29 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 	}
 }
 
+func TestBillingCatalogResolvesPriceBySKUIdentity(t *testing.T) {
+	ctx := context.Background()
+	bundle, err := billing.LoadBundle(filepath.Join("..", "billing"))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	repo := newBillingServiceRepository(t)
+	svc := NewBillingCatalogService(repo, bundle, BillingCatalogOptions{})
+	if _, err := svc.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	price, err := svc.ResolvePriceBySKUID(ctx, bundle.Products.CatalogID, "image.seedream.designer", model.TierFree)
+	if err != nil {
+		t.Fatalf("ResolvePriceBySKUID: %v", err)
+	}
+	if price.SKU == nil || price.SKU.SKUID != "image.seedream.designer" || price.PriceCredits <= 0 {
+		t.Fatalf("price = %+v, want positive price for exact SKU", price)
+	}
+	if _, err := svc.ResolvePriceBySKUID(ctx, bundle.Products.CatalogID, "missing-capability", model.TierFree); !errors.Is(err, ErrBillingSKUNotFound) {
+		t.Fatalf("missing SKU error = %v, want ErrBillingSKUNotFound", err)
+	}
+}
+
 func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing.T) {
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)

@@ -32,6 +32,9 @@ model_routes:
         selection_key: stable-b
         min_tier: free
         alias: Lower
+        description: Routine illustrations
+        sort_order: 10
+        billing_sku: image.seedream.designer
         provider: images
         model: lower
         enabled: true
@@ -46,6 +49,7 @@ model_routes:
         selection_key: stable-z
         min_tier: enterprise
         alias: Higher Z
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: higher-z
         enabled: true
@@ -55,6 +59,9 @@ model_routes:
         selection_key: stable-a
         min_tier: pro
         alias: Higher A
+        description: Detailed compositions
+        sort_order: 20
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: higher-a
         enabled: true
@@ -81,17 +88,17 @@ claude:
 	if len(cfg.ImagePresets) != 3 {
 		t.Fatalf("derived presets = %#v", cfg.ImagePresets)
 	}
-	for index, want := range []string{"stable-a", "stable-z", "stable-b"} {
+	for index, want := range []string{"stable-b", "stable-a", "stable-z"} {
 		if cfg.ImagePresets[index].Key != want {
 			t.Fatalf("preset order = %#v, want index %d = %q", cfg.ImagePresets, index, want)
 		}
 	}
-	wantDesignerOrder := []string{"higher_a", "higher_z", "lower"}
+	wantDesignerOrder := []string{"lower", "higher_a", "higher_z"}
 	gotDesignerOrder := cfg.ImageAPI.DesignerOrder()
 	if !slices.Equal(gotDesignerOrder, wantDesignerOrder) {
 		t.Fatalf("designer order = %#v, want %#v", gotDesignerOrder, wantDesignerOrder)
 	}
-	if got := cfg.ImagePresets[0]; got.DisplayName != "Higher A" || got.MinTier != "pro" || got.ProviderRoute != "image_generation.designer.higher_a" {
+	if got := cfg.ImagePresets[1]; got.DisplayName != "Higher A" || got.Description != "Detailed compositions" || got.SortOrder != 20 || got.BillingSKU != "image.gpt-image-2.designer" || got.MinTier != "pro" || got.ProviderRoute != "image_generation.designer.higher_a" {
 		t.Fatalf("derived preset = %#v", got)
 	}
 }
@@ -226,6 +233,7 @@ model_routes:
         selection_key: stable-image
         min_tier: pro
         alias: Stable Image
+        billing_sku: image.seedream.designer
         provider: images
         model: image-v1
         enabled: true
@@ -249,6 +257,7 @@ model_routes:
 		{name: "selection key reserved", old: "selection_key: stable-image", replace: "selection_key: custom", want: "reserved"},
 		{name: "tier exact", old: "min_tier: pro", replace: "min_tier: premium", want: "min_tier"},
 		{name: "alias required", old: "alias: Stable Image", replace: "alias: \"\"", want: "alias"},
+		{name: "billing SKU required", old: "        billing_sku: image.seedream.designer\n", replace: "", want: "billing_sku"},
 		{name: "quality rank positive", old: "quality_rank: 100", replace: "quality_rank: 0", want: "quality_rank"},
 		{name: "capabilities valid", old: "max_batch: 1", replace: "max_batch: 0", want: "capabilities"},
 	}
@@ -310,6 +319,7 @@ model_routes:
         selection_key: same-key
         min_tier: free
         alias: First
+        billing_sku: image.seedream.designer
         provider: images
         model: image-v1
         enabled: true
@@ -324,6 +334,7 @@ model_routes:
         selection_key: same-key
         min_tier: free
         alias: Second
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: image-v2
         enabled: true

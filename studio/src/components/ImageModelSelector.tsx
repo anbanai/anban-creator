@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, ChevronsUpDown, Crown, Sparkles, Wand2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Crown, Sparkles } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Command,
@@ -9,30 +9,15 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Badge } from '@/components/ui/badge'
-import type { ImageModelOption } from '@/types/imageModel'
+import type { ImageCapabilityOption } from '@/types/imageModel'
 import { cn } from '@/lib/utils'
 
 interface ImageModelSelectorProps {
-  options: ImageModelOption[]
+  options: ImageCapabilityOption[]
   value: string
   onChange: (value: string) => void
   className?: string
   disabled?: boolean
-}
-
-function providerLabel(provider: string): string {
-  switch (provider) {
-    case 'gemini':
-      return 'Gemini'
-    case 'volcengine':
-    case 'volc':
-    case 'seedream':
-      return '豆包'
-    case 'openai':
-      return 'GPT Image'
-    default:
-      return provider
-  }
 }
 
 function TierBadge({ tier, className }: { tier?: string; className?: string }) {
@@ -59,9 +44,15 @@ export function ImageModelSelector({
   const [open, setOpen] = useState(false)
 
   const sorted = useMemo(() => {
-    return [...options].sort((a, b) => {
-      if (a.key === '') return -1
-      if (b.key === '') return 1
+    return options.filter((opt) => {
+      const text = `${opt.key} ${opt.display_name} ${opt.description ?? ''}`.toLowerCase()
+      return !['openai', 'chatgpt', 'gpt', 'gemini', 'claude', 'seedream', 'doubao'].some((term) => text.includes(term))
+    }).sort((a, b) => {
+      if ((a.sort_order ?? 0) !== (b.sort_order ?? 0)) {
+        if (!a.sort_order) return 1
+        if (!b.sort_order) return -1
+        return a.sort_order - b.sort_order
+      }
       if (a.is_custom && !b.is_custom) return 1
       if (!a.is_custom && b.is_custom) return -1
       return a.display_name.localeCompare(b.display_name, 'zh-Hans-CN')
@@ -69,6 +60,8 @@ export function ImageModelSelector({
   }, [options])
 
   const selected = sorted.find((opt) => opt.key === value)
+
+  if (sorted.length === 0) return null
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -89,14 +82,8 @@ export function ImageModelSelector({
       >
         <div className="flex min-w-0 items-center gap-2">
           <span className={cn('truncate font-medium', !selected && 'text-muted-foreground')}>
-            {selected?.display_name ?? '系统默认'}
+            {selected?.display_name ?? sorted[0]?.display_name ?? '选择图像能力'}
           </span>
-          {selected && selected.key !== '' && !selected.is_custom && (
-            <Badge variant="outline" className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
-              <Wand2 className="h-2.5 w-2.5" />
-              {providerLabel(selected.provider)}
-            </Badge>
-          )}
           {selected && <TierBadge tier={selected.min_tier} className="shrink-0" />}
           {selected?.is_custom && (
             <Badge variant="outline" className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
@@ -112,10 +99,10 @@ export function ImageModelSelector({
           filter={(v, search) => v.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}
         >
           <div className="border-b border-border/50 px-1 pb-1">
-            <CommandInput placeholder="搜索模型..." />
+            <CommandInput placeholder="搜索图像能力..." />
           </div>
           <CommandList>
-            <CommandEmpty>没有找到模型</CommandEmpty>
+            <CommandEmpty>没有找到图像能力</CommandEmpty>
             {sorted.map((opt, idx) => {
               const isSelected = opt.key === value
               return (
@@ -136,12 +123,6 @@ export function ImageModelSelector({
                       )}
                     />
                     <span className="text-[13px] font-medium">{opt.display_name}</span>
-                    {opt.key !== '' && !opt.is_custom && (
-                      <Badge variant="outline" className="h-4 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
-                        <Wand2 className="h-2.5 w-2.5" />
-                        {providerLabel(opt.provider)}
-                      </Badge>
-                    )}
                     <TierBadge tier={opt.min_tier} />
                     {opt.is_custom && (
                       <Badge variant="outline" className="h-4 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
@@ -150,11 +131,8 @@ export function ImageModelSelector({
                       </Badge>
                     )}
                   </div>
-                  {opt.key === '' && (
-                    <span className="ml-[22px] text-[10px] text-muted-foreground">
-                      使用平台默认配置
-                    </span>
-                  )}
+                  {opt.description && <span className="ml-[22px] text-[10px] text-muted-foreground">{opt.description}</span>}
+                  {typeof opt.price_credits === 'number' && <span className="ml-[22px] text-[10px] text-muted-foreground">预计消耗：{opt.price_credits.toLocaleString()} 积分</span>}
                 </CommandItem>
               )
             })}

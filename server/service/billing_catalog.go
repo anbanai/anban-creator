@@ -274,6 +274,34 @@ func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, opera
 	return sku, err
 }
 
+// ResolveSKUByID resolves a configured retail SKU identity. SKU IDs are
+// internal billing identities and must never be accepted from a public client
+// as a provider/model selector.
+func (s *BillingCatalogService) ResolveSKUByID(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error) {
+	var ok bool
+	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if skuID, ok = canonicalBillingText(skuID, 128, false); !ok || skuID == "" {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if catalogID == "" {
+		catalog, err := s.repo.Billing().FindLatestPublishedCatalog(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBillingSKUNotFound
+			}
+			return nil, err
+		}
+		catalogID = catalog.CatalogID
+	}
+	sku, err := s.repo.Billing().FindSKU(ctx, catalogID, skuID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrBillingSKUNotFound
+	}
+	return sku, err
+}
+
 func (s *BillingCatalogService) ResolvePrice(ctx context.Context, userID, catalogID, operation, route string) (*ResolvedSKUPrice, error) {
 	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
 	if err != nil {
@@ -292,6 +320,29 @@ func (s *BillingCatalogService) ResolvePriceForTier(ctx context.Context, catalog
 		return nil, err
 	}
 	return s.resolvePriceForSKU(ctx, sku, tier)
+}
+
+// ResolvePriceBySKUID resolves the current tier price for a configured SKU.
+func (s *BillingCatalogService) ResolvePriceBySKUID(ctx context.Context, catalogID, skuID string, tier model.Tier) (*ResolvedSKUPrice, error) {
+	if !model.ValidTiers[tier] {
+		return nil, fmt.Errorf("%w: invalid pricing tier", ErrBillingInvalid)
+	}
+	sku, err := s.ResolveSKUByID(ctx, catalogID, skuID)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolvePriceForSKU(ctx, sku, tier)
+}
+
+// ResolvePriceBySKUIDForUser resolves a configured SKU using the user's
+// current tier. The SKU remains server-owned; callers never receive it from
+// public client input.
+func (s *BillingCatalogService) ResolvePriceBySKUIDForUser(ctx context.Context, userID, catalogID, skuID string) (*ResolvedSKUPrice, error) {
+	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	return s.ResolvePriceBySKUID(ctx, catalogID, skuID, model.ResolveTier(user.Tier))
 }
 
 func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *model.BillingSKU, tier model.Tier) (*ResolvedSKUPrice, error) {

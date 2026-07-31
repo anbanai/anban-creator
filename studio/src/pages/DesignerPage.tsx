@@ -614,8 +614,7 @@ export default function DesignerPage() {
           images={currentImages}
           initialIndex={Math.max(0, currentImages.findIndex((image) => image.url === previewImage))}
           metadata={{
-            provider: currentGeneration.provider,
-            model: currentGeneration.model,
+            capabilityName: effectiveProvider?.name,
             prompt: currentGeneration.prompt,
             revisedPrompt: currentGeneration.revised_prompt,
             quality: currentGeneration.quality,
