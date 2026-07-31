@@ -306,6 +306,7 @@ func (ps *RedisPubSub) ReleaseSlot(ctx context.Context, projectID string) error 
 	key := projectRunningCountPrefix + projectID
 	if err := releaseSlotScript.Run(ctx, ps.rdb, []string{key}).Err(); err != nil {
 		ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to release concurrency slot")
+		return err
 	}
 	return nil
 }
@@ -320,11 +321,13 @@ func (ps *RedisPubSub) SyncProjectCount(ctx context.Context, projectID string, d
 	if dbCount <= 0 {
 		if err := ps.rdb.Del(ctx, key).Err(); err != nil {
 			ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to sync concurrency counter")
+			return err
 		}
 		return nil
 	}
 	if err := ps.rdb.Set(ctx, key, dbCount, projectRunningCountTTL).Err(); err != nil {
 		ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to sync concurrency counter")
+		return err
 	}
 	return nil
 }

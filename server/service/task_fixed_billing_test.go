@@ -60,6 +60,31 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	}
 }
 
+func TestTaskFixedBillingEnqueueCancellationStillFinalizesAndReverses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	svc.enqueuer = cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "enqueue failure", Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created=%d, want 1", len(tasks))
+	}
+	found, err := f.repo.Tasks().FindByID(context.Background(), tasks[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlements, settlementErr := f.repo.Billing().ListSettlementsByTask(context.Background(), tasks[0].ID)
+	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || settlementErr != nil || len(settlements) != 1 || settlements[0].Action != model.BillingSettlementActionReverseTask {
+		t.Fatalf("enqueue failure state: task=%#v settlements=%#v settlementErr=%v", found, settlements, settlementErr)
+	}
+}
+
 func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testing.T) {
 	tests := []struct {
 		name string

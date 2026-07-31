@@ -271,8 +271,11 @@ func TestManagedRuntimeWiring(t *testing.T) {
 	if strings.Contains(taskExecution, "s.runtimeDispatcher != nil") {
 		t.Error("HandleExecutionFromPayload must not retain a synchronous executor branch")
 	}
-	if !strings.Contains(taskExecution, "return s.dispatchRuntime(ctx, task)") {
+	if !strings.Contains(taskExecution, "s.dispatchRuntime(ctx, task)") {
 		t.Error("HandleExecutionFromPayload must always dispatch a durable managed execution")
+	}
+	if !strings.Contains(taskExecution, "s.dispatchPendingTask(ctx, task)") || !strings.Contains(taskExecution, "s.finalizePendingDispatchFailure(task, err)") {
+		t.Error("HandleExecutionFromPayload must terminalize pre-dispatch failures instead of leaving retryable pending tasks")
 	}
 }
 

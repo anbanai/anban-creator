@@ -66,7 +66,7 @@ func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc
 	}
 
 	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
-	checkAndDispatchPendingTasks(ctx, repo, taskSvc, logger)
+	syncProjectRunningCounts(ctx, repo, taskSvc, logger)
 	reapStuckTasks(ctx, repo, taskSvc, logger)
 }
 
@@ -130,7 +130,9 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 		}
 		// Release concurrency slot for the reaped task.
 		if t.ProjectID != "" && taskSvc.PubSub() != nil {
-			taskSvc.PubSub().ReleaseSlot(ctx, t.ProjectID)
+			if err := taskSvc.PubSub().ReleaseSlot(ctx, t.ProjectID); err != nil {
+				logger.Warn().Err(err).Str("project_id", t.ProjectID).Msg("failed to release slot after reaping stuck task")
+			}
 		}
 
 		if t.ProjectID != "" {
@@ -246,26 +248,23 @@ func advancePlanNextRun(ctx context.Context, repo repository.Repository, plan *m
 	return &next, nil
 }
 
-// checkAndDispatchPendingTasks finds all projects that have pending tasks
-// and available concurrency slots, then enqueues them.
-// This serves as a fallback for cases where the post-completion dispatch
-// was missed (e.g., server restart, crash).
-func checkAndDispatchPendingTasks(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
-	// Find all active projects.
-	projects, err := repo.Projects().ListActiveProjects(ctx)
-	if err != nil {
-		logger.Warn().Err(err).Msg("failed to list projects for pending task dispatch")
+func syncProjectRunningCounts(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
+	if taskSvc.PubSub() == nil {
 		return
 	}
-
-	for _, ch := range projects {
-		// Reconcile Redis counter with DB to prevent drift.
-		if taskSvc.PubSub() != nil {
-			dbCount, _ := repo.Tasks().CountRunningByProject(ctx, ch.ID)
-			taskSvc.PubSub().SyncProjectCount(ctx, ch.ID, dbCount)
+	projects, err := repo.Projects().ListActiveProjects(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to list projects for running task reconciliation")
+		return
+	}
+	for _, project := range projects {
+		count, err := repo.Tasks().CountRunningByProject(ctx, project.ID)
+		if err != nil {
+			logger.Warn().Err(err).Str("project_id", project.ID).Msg("failed to count running tasks")
+			continue
 		}
-		if err := taskSvc.DispatchPendingTasks(ctx, ch.ID); err != nil {
-			logger.Warn().Err(err).Str("project_id", ch.ID).Msg("failed to dispatch pending tasks")
+		if err := taskSvc.PubSub().SyncProjectCount(ctx, project.ID, count); err != nil {
+			logger.Warn().Err(err).Str("project_id", project.ID).Msg("failed to sync running task count")
 		}
 	}
 }

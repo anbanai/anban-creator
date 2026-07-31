@@ -134,7 +134,7 @@ func (s *TaskService) persistTerminalBillingInTx(ctx context.Context, tx reposit
 }
 
 func (s *TaskService) failPendingAdmittedTask(ctx context.Context, task *model.Task, reason, message string) error {
-	_, err := s.failPendingAdmittedTaskTransition(ctx, task, reason, message)
+	_, err := s.failPendingAdmittedTaskTransitionWithRetry(ctx, task, reason, message)
 	return err
 }
 

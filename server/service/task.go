@@ -697,7 +697,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	for _, task := range tasks {
 		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to enqueue task, marking as failed")
-			if failErr := s.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error()); failErr != nil {
+			persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
+			failErr := s.failPendingAdmittedTask(persistCtx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error())
+			cancel()
+			if failErr != nil {
 				return nil, fmt.Errorf("finalize failed task enqueue: %w", failErr)
 			}
 		}
@@ -936,7 +939,10 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 
 	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Str("plan_id", plan.ID).Msg("failed to enqueue plan task")
-		if failErr := s.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error()); failErr != nil {
+		persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)
+		failErr := s.failPendingAdmittedTask(persistCtx, task, model.TaskBillingTerminalPlatformError, "failed to enqueue: "+err.Error())
+		cancel()
+		if failErr != nil {
 			return nil, fmt.Errorf("finalize failed plan task enqueue: %w", failErr)
 		}
 		return task, nil
@@ -1448,7 +1454,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 		_, preparation, err := s.preparePendingExecution(fallbackCtx, task)
 		if err != nil {
 			releaseOwnedSlot(fallbackCtx)
-			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation failed; task remains pending for periodic dispatch retry")
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task preparation terminal persistence failed")
 			return
 		}
 		if preparation == pendingExecutionTerminalized {
@@ -1459,7 +1465,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 			releaseOwnedSlotIfNonTerminal(fallbackCtx)
 			return
 		}
-		if err := s.dispatchRuntime(fallbackCtx, task); err != nil {
+		if err := s.dispatchPendingTask(fallbackCtx, task); err != nil {
 			releaseOwnedSlotIfNonTerminal(fallbackCtx)
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback managed runtime dispatch failed")
 		}

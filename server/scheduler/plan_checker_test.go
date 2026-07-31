@@ -365,6 +365,35 @@ func TestTriggerPlanNowSkipsInactivePlanWithoutRetryableError(t *testing.T) {
 	}
 }
 
+func TestPlanCheckerDoesNotRedispatchHistoricalPendingTasks(t *testing.T) {
+	repo, taskSvc, enqueuer, logger := setupPlanCheckerTest(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "historical-pending@example.com", Password: "hashed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		Name: "Historical pending", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusPending,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	tryAcquireAndCheck(ctx, repo, taskSvc, logger, nil)
+
+	if len(enqueuer.items) != 0 {
+		t.Fatalf("startup redispatched %d historical pending tasks, want none", len(enqueuer.items))
+	}
+}
+
 func TestStuckTaskReaperSkipsDurableExecution(t *testing.T) {
 	repo, taskSvc, _, logger := setupPlanCheckerTest(t)
 	ctx := context.Background()
