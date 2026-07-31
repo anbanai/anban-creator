@@ -1327,8 +1327,8 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	if err != nil {
 		t.Fatalf("find first clone: %v", err)
 	}
-	if firstClone.ReferenceImageAssetID != inherited.ID {
-		t.Fatalf("first persisted clone reference = %q, want %q", firstClone.ReferenceImageAssetID, inherited.ID)
+	if firstClone.ReferenceImageAssetID != "" {
+		t.Fatalf("first persisted clone dedicated reference = %q, want cleared", firstClone.ReferenceImageAssetID)
 	}
 	firstClone.Status = model.TaskStatusCompleted
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
@@ -1348,8 +1348,8 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 		t.Fatalf("decode exact clone-of-clone: %v", err)
 	}
 	resp.Body.Close()
-	if exactEnvelope.Data.ReferenceImage == nil || exactEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
-		t.Fatalf("exact clone reference view = %#v, want %q", exactEnvelope.Data.ReferenceImage, inherited.ID)
+	if exactEnvelope.Data.ReferenceImage != nil {
+		t.Fatalf("exact clone dedicated reference view = %#v, want nil", exactEnvelope.Data.ReferenceImage)
 	}
 	firstClone.Status = model.TaskStatusFailed
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
@@ -1503,8 +1503,8 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 	if err != nil {
 		t.Fatalf("find trusted AI-entry clone: %v", err)
 	}
-	if persisted.ReferenceImageAssetID != trusted.ID {
-		t.Fatalf("persisted clone reference = %q, want %q", persisted.ReferenceImageAssetID, trusted.ID)
+	if persisted.ReferenceImageAssetID != "" || len(persisted.InputAttachments.Data()) == 0 || persisted.InputAttachments.Data()[0].AssetID != trusted.ID {
+		t.Fatalf("persisted clone reference = %q attachments=%#v, want ordered asset %q", persisted.ReferenceImageAssetID, persisted.InputAttachments.Data(), trusted.ID)
 	}
 
 	for _, test := range []struct {
