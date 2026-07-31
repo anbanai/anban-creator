@@ -43,6 +43,7 @@ type ImageModelOption struct {
 	MinTier      string `json:"min_tier,omitempty"`
 	SortOrder    int    `json:"sort_order,omitempty"`
 	PriceCredits int64  `json:"price_credits,omitempty"`
+	PriceAvailable bool `json:"price_available"`
 	// IsCustom marks the user-override ("custom") entry.
 	IsCustom bool `json:"is_custom,omitempty"`
 }
@@ -98,6 +99,7 @@ func (h *ImageModelHandler) List(c fiber.Ctx) error {
 		if h.catalog != nil && p.BillingSKU != "" {
 			if price, err := h.catalog.ResolvePriceBySKUID(c.Context(), "", p.BillingSKU, userTier); err == nil && price != nil {
 				option.PriceCredits = price.PriceCredits
+				option.PriceAvailable = true
 			}
 		}
 		options = append(options, option)

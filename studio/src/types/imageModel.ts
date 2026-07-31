@@ -5,6 +5,7 @@ export interface ImageCapabilityOption {
   min_tier?: string
   sort_order?: number
   price_credits?: number
+  price_available?: boolean
   is_custom?: boolean
 }
 

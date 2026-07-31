@@ -132,7 +132,7 @@ export function ImageModelSelector({
                     )}
                   </div>
                   {opt.description && <span className="ml-[22px] text-[10px] text-muted-foreground">{opt.description}</span>}
-                  {typeof opt.price_credits === 'number' && <span className="ml-[22px] text-[10px] text-muted-foreground">预计消耗：{opt.price_credits.toLocaleString()} 积分</span>}
+                  {opt.price_available && typeof opt.price_credits === 'number' && <span className="ml-[22px] text-[10px] text-muted-foreground">预计消耗：{opt.price_credits.toLocaleString()} 积分</span>}
                 </CommandItem>
               )
             })}
