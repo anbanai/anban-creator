@@ -231,7 +231,7 @@ func (s *ModelConfigService) GetImageProxy(ctx context.Context, userID string) s
 func (s *ModelConfigService) ResolveImageConfigForKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string) {
-	imageModelKey = config.NormalizeImageModelKey(imageModelKey)
+	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if s.userTierIsEnterprise(ctx, userID) {
 			if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
@@ -295,7 +295,7 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 func (s *ModelConfigService) ResolveImageConfigForTaskKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string, error) {
-	imageModelKey = config.NormalizeImageModelKey(imageModelKey)
+	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
 			return cfg, "user_custom", nil

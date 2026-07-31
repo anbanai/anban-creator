@@ -111,6 +111,20 @@ func NormalizeImageModelKey(key string) string {
 	}
 }
 
+func NormalizeImageModelKeyForPresets(key string, presets []ImageModelPreset) string {
+	original := strings.TrimSpace(key)
+	normalized := NormalizeImageModelKey(original)
+	if normalized == original {
+		return original
+	}
+	for _, preset := range presets {
+		if preset.Key == normalized {
+			return normalized
+		}
+	}
+	return original
+}
+
 // ValidateImagePresets checks that preset keys fit the Task/Plan ImageModelKey
 // column (varchar(50)) and are globally unique. Returns the first error found.
 // Call this at startup so a malformed config fails fast instead of surfacing

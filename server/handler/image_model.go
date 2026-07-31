@@ -126,7 +126,7 @@ func (h *ImageModelHandler) List(c fiber.Ctx) error {
 //   - "custom" → valid only for Enterprise tier.
 //   - any other value → valid only if it matches a preset key whose MinTier the user satisfies.
 func ValidateImageModelKey(key string, userTier model.Tier, presets []config.ImageModelPreset) error {
-	key = config.NormalizeImageModelKey(key)
+	key = config.NormalizeImageModelKeyForPresets(key, presets)
 	if key == "" || key == model.ImageModelKeySystemDefault {
 		return nil
 	}
