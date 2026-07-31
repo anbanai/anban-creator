@@ -11,7 +11,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { Button } from '@/components/common/button'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -23,7 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
-import { useImageModels } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { api } from '@/lib/api'
@@ -105,7 +105,7 @@ export function TaskFormDialog({
     queryFn: () => api.billing.catalog(),
   })
   const executionProfilesQuery = useAgentExecutionProfiles()
-  const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageCapabilities()
 
   const form = useForm<TaskFormDefaults>({
     resolver: zodResolver(createTaskSchema) as Resolver<TaskFormDefaults>,
@@ -489,7 +489,7 @@ export function TaskFormDialog({
                           {imageModelsLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
                           ) : (
-                            <ImageModelSelector options={imageModelOptionsForValue} value={field.value || ''} onChange={field.onChange} />
+                            <ImageCapabilitySelector options={imageModelOptionsForValue} value={field.value || ''} onChange={field.onChange} />
                           )}
                         </FormControl>
                         <FormMessage />

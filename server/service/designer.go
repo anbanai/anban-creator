@@ -1081,10 +1081,10 @@ type DesignerProviderInfo struct {
 	ID           string                       `json:"id"`
 	Name         string                       `json:"name"`
 	Alias        string                       `json:"alias,omitempty"`
-	Provider     string                       `json:"provider"`
-	ProviderKey  string                       `json:"provider_key,omitempty"`
-	Route        string                       `json:"route,omitempty"`
-	Model        string                       `json:"model"`
+	Provider     string                       `json:"-"`
+	ProviderKey  string                       `json:"-"`
+	Route        string                       `json:"-"`
+	Model        string                       `json:"-"`
 	Credits      int                          `json:"credits"`
 	Enabled      bool                         `json:"enabled"`
 	Idx          int                          `json:"idx"`

@@ -12,7 +12,7 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import type { AgentExecutionProfileID, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
@@ -34,7 +34,7 @@ import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { useImageModels } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
@@ -92,7 +92,7 @@ export default function PlansPage() {
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const [montageUploading, setMontageUploading] = useState(false)
   const { submit } = useSubmitLock()
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageCapabilities()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
@@ -695,7 +695,7 @@ export default function PlansPage() {
                     {imageModelsLoading ? (
                       <Skeleton className="h-10 w-full rounded-xl" />
                     ) : (
-                      <ImageModelSelector
+                      <ImageCapabilitySelector
                         options={imageModelOptions}
                         value={field.value || ''}
                         onChange={field.onChange}

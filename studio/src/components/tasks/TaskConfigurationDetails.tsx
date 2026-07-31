@@ -2,6 +2,8 @@ import { Separator } from '@/components/ui/separator'
 import { contentTypeLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
+import { useImageCapabilities } from '@/hooks/useImageModels'
+import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
 
 export interface TaskConfigurationDetailsProps {
   task: Task
@@ -105,6 +107,7 @@ function AgentProfileDetails({ task }: { task: Task }) {
 }
 
 export function TaskConfigurationDetails({ task, project }: TaskConfigurationDetailsProps) {
+  const { items: imageCapabilities } = useImageCapabilities()
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
   const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
@@ -117,6 +120,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
     || (hasSnapshot
       ? snapshot?.ecommerce_defaults?.image_model_key || '—'
       : project?.ecommerce_defaults?.image_model_key || '—')
+  const imageCapability = imageCapabilities.find((option) => option.key === imageModel)
   const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
 
   return (
@@ -134,7 +138,10 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
           <Detail label="内容类型" value={contentTypeLabel[platform] || platform} />
           <Detail label="视觉风格" value={visualStyle} wide />
           <Detail label="图片比例" value={imageRatio} />
-          <Detail label="图片模型" value={imageModel} />
+          <div className="flex min-w-0 flex-col gap-1">
+            <dt className="text-xs text-muted-foreground">图像能力</dt>
+            <dd className="break-words text-sm text-foreground"><ImageCapabilityDisplay option={imageCapability} fallback={imageModel === '—' || imageModel === '' ? '标准图像' : '已停用能力'} /></dd>
+          </div>
         </dl>
       </section>
 

@@ -107,8 +107,8 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if providers[0].Idx != 0 {
 		t.Fatalf("providers[0].Idx = %d, want 0", providers[0].Idx)
 	}
-	if providers[0].ProviderKey != "wangcai_openai" || providers[0].Route != "image_generation.designer.test-openai" {
-		t.Fatalf("provider route fields = %+v", providers[0])
+	if providers[0].ProviderKey != "" || providers[0].Route != "" || providers[0].Provider != "" || providers[0].Model != "" {
+		t.Fatalf("provider identity leaked into public response = %+v", providers[0])
 	}
 	if providers[0].Capabilities.MaxBatch != 1 || !providers[0].Capabilities.SupportsReference || len(providers[0].Capabilities.QualityLevels) == 0 {
 		t.Fatalf("capabilities = %+v", providers[0].Capabilities)
