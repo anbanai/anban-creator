@@ -25,7 +25,7 @@ export interface RawDesignerProvider {
   id: string
   name: string
   alias?: string
-  provider?: string
+  provider: string
   provider_key?: string
   route?: string
   model: string
@@ -86,7 +86,7 @@ export interface DesignerSettings {
 export interface GenerateRequest {
   project_id: string
   prompt: string
-  provider: string
+  provider?: string
   provider_id?: string
   model?: string
   quality?: string
