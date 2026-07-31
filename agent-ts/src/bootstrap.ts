@@ -50,6 +50,8 @@ export const CLAUDE_PROFILE_ENV_KEYS = new Set([
   "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
   "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
   "MAX_THINKING_TOKENS",
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
   "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
   "CLAUDE_CODE_DISABLE_THINKING",
   "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
@@ -242,6 +244,9 @@ function validateClaudeProfileEnvs(input: unknown): Record<string, string> {
   if (envs.CLAUDE_CODE_EFFORT_LEVEL !== undefined && !new Set(["low", "medium", "high", "max"]).has(envs.CLAUDE_CODE_EFFORT_LEVEL)) throw new Error("bootstrap execution profile environment is invalid");
   for (const key of ["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "CLAUDE_CODE_DISABLE_THINKING", "CLAUDE_CODE_DISABLE_1M_CONTEXT", "ENABLE_TOOL_SEARCH"]) {
     if (envs[key] !== undefined && envs[key] !== "true" && envs[key] !== "false") throw new Error("bootstrap execution profile environment is invalid");
+  }
+  for (const key of ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]) {
+    if (envs[key] !== undefined && envs[key] !== "0" && envs[key] !== "1") throw new Error("bootstrap execution profile environment is invalid");
   }
   for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"]) {
     if (envs[key] !== undefined && !validUnsignedInteger(envs[key], false)) throw new Error("bootstrap execution profile environment is invalid");

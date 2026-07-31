@@ -20,22 +20,24 @@ const (
 )
 
 const (
-	claudeEnvDefaultOpusModel        = "ANTHROPIC_DEFAULT_OPUS_MODEL"
-	claudeEnvDefaultFableModel       = "ANTHROPIC_DEFAULT_FABLE_MODEL"
-	claudeEnvDefaultSonnetModel      = "ANTHROPIC_DEFAULT_SONNET_MODEL"
-	claudeEnvDefaultHaikuModel       = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
-	claudeEnvEffortLevel             = "CLAUDE_CODE_EFFORT_LEVEL"
-	claudeEnvAlwaysEnableEffort      = "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"
-	claudeEnvMaxThinkingTokens       = "MAX_THINKING_TOKENS"
-	claudeEnvDisableAdaptiveThinking = "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"
-	claudeEnvDisableThinking         = "CLAUDE_CODE_DISABLE_THINKING"
-	claudeEnvMaxContextTokens        = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
-	claudeEnvMaxOutputTokens         = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
-	claudeEnvAutoCompactWindow       = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
-	claudeEnvAutocompactPctOverride  = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
-	claudeEnvDisable1MContext        = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
-	claudeEnvSubagentModel           = "CLAUDE_CODE_SUBAGENT_MODEL"
-	claudeEnvEnableToolSearch        = "ENABLE_TOOL_SEARCH"
+	claudeEnvDefaultOpusModel           = "ANTHROPIC_DEFAULT_OPUS_MODEL"
+	claudeEnvDefaultFableModel          = "ANTHROPIC_DEFAULT_FABLE_MODEL"
+	claudeEnvDefaultSonnetModel         = "ANTHROPIC_DEFAULT_SONNET_MODEL"
+	claudeEnvDefaultHaikuModel          = "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+	claudeEnvEffortLevel                = "CLAUDE_CODE_EFFORT_LEVEL"
+	claudeEnvAlwaysEnableEffort         = "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"
+	claudeEnvMaxThinkingTokens          = "MAX_THINKING_TOKENS"
+	claudeEnvDisableNonessentialTraffic = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+	claudeEnvDisableAutoMemory          = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+	claudeEnvDisableAdaptiveThinking    = "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"
+	claudeEnvDisableThinking            = "CLAUDE_CODE_DISABLE_THINKING"
+	claudeEnvMaxContextTokens           = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
+	claudeEnvMaxOutputTokens            = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+	claudeEnvAutoCompactWindow          = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+	claudeEnvAutocompactPctOverride     = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+	claudeEnvDisable1MContext           = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
+	claudeEnvSubagentModel              = "CLAUDE_CODE_SUBAGENT_MODEL"
+	claudeEnvEnableToolSearch           = "ENABLE_TOOL_SEARCH"
 )
 
 var claudeProfileEnvKeys = []string{
@@ -49,6 +51,8 @@ var claudeProfileEnvKeys = []string{
 	claudeEnvEffortLevel,
 	claudeEnvAlwaysEnableEffort,
 	claudeEnvMaxThinkingTokens,
+	claudeEnvDisableNonessentialTraffic,
+	claudeEnvDisableAutoMemory,
 	claudeEnvDisableAdaptiveThinking,
 	claudeEnvDisableThinking,
 	claudeEnvMaxContextTokens,
@@ -139,6 +143,14 @@ func ValidateClaudeProfileEnvs(envs map[string]string, requireAuthToken bool) er
 	} {
 		if value, exists := envs[key]; exists && value != "true" && value != "false" {
 			return fmt.Errorf("claude profile env %s must be true or false", key)
+		}
+	}
+	for _, key := range []string{
+		claudeEnvDisableNonessentialTraffic,
+		claudeEnvDisableAutoMemory,
+	} {
+		if value, exists := envs[key]; exists && value != "0" && value != "1" {
+			return fmt.Errorf("claude profile env %s must be 0 or 1", key)
 		}
 	}
 	for _, key := range []string{

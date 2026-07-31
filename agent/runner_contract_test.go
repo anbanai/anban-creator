@@ -272,7 +272,7 @@ func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing
 	runner := NewRunner(&Config{
 		Workspace: t.TempDir(), AgentFlag: "anban:article", MaxTurns: 10,
 		RuntimeEnv: map[string]string{
-			"ANTHROPIC_MODEL": "k3", "CLAUDE_CODE_EFFORT_LEVEL": "high", "MAX_THINKING_TOKENS": "0", "ENABLE_TOOL_SEARCH": "false",
+			"ANTHROPIC_MODEL": "k3", "CLAUDE_CODE_EFFORT_LEVEL": "high", "MAX_THINKING_TOKENS": "0", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144", "ENABLE_TOOL_SEARCH": "false",
 		},
 	}, nil, nil)
 	opts, err := runner.buildSDKOptions(context.Background())
@@ -283,7 +283,7 @@ func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing
 	if got.Model != nil || got.Effort != nil || got.ExtraArgs["thinking"] != nil {
 		t.Fatalf("legacy SDK controls = model %#v, effort %#v, thinking %#v", got.Model, got.Effort, got.ExtraArgs["thinking"])
 	}
-	if got.ExtraEnv["CLAUDE_CODE_EFFORT_LEVEL"] != "high" || got.ExtraEnv["MAX_THINKING_TOKENS"] != "0" || got.ExtraEnv["ENABLE_TOOL_SEARCH"] != "false" {
+	if got.ExtraEnv["CLAUDE_CODE_EFFORT_LEVEL"] != "high" || got.ExtraEnv["MAX_THINKING_TOKENS"] != "0" || got.ExtraEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || got.ExtraEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "0" || got.ExtraEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "262144" || got.ExtraEnv["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("frozen Claude control environment = %#v", got.ExtraEnv)
 	}
 }

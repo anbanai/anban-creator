@@ -29,6 +29,8 @@ func TestValidateClaudeProfileEnvs(t *testing.T) {
 		"CLAUDE_CODE_EFFORT_LEVEL",
 		"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
 		"MAX_THINKING_TOKENS",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY",
 		"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
 		"CLAUDE_CODE_DISABLE_THINKING",
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
@@ -57,6 +59,8 @@ func TestValidateClaudeProfileEnvs(t *testing.T) {
 	all[ClaudeEnvAuthToken] = "token"
 	all["CLAUDE_CODE_EFFORT_LEVEL"] = "max"
 	all["MAX_THINKING_TOKENS"] = "0"
+	all["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+	all["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "0"
 	all["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = "200000"
 	all["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = "64000"
 	all["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "120000"
@@ -69,7 +73,7 @@ func TestValidateClaudeProfileEnvs(t *testing.T) {
 		requireAuth bool
 		wantErr     bool
 	}{
-		{name: "all nineteen keys", envs: all, requireAuth: true},
+		{name: "all allowed keys", envs: all, requireAuth: true},
 		{name: "optional values omitted", envs: validClaudeProfileEnvs()},
 		{name: "auth token required and present", envs: withClaudeEnv(validClaudeProfileEnvs(), ClaudeEnvAuthToken, "token"), requireAuth: true},
 		{name: "auth token required and missing", envs: validClaudeProfileEnvs(), requireAuth: true, wantErr: true},
@@ -166,6 +170,16 @@ func TestValidateClaudeProfileEnvsStrictTypedValues(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+	for _, key := range []string{
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+	} {
+		envs := validClaudeProfileEnvs()
+		envs[key] = "true"
+		if err := ValidateClaudeProfileEnvs(envs, false); err == nil || !strings.Contains(err.Error(), "must be 0 or 1") {
+			t.Fatalf("%s accepted invalid Claude switch value: %v", key, err)
 		}
 	}
 }

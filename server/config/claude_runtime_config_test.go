@@ -30,6 +30,9 @@ claude:
         ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
         MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
         ENABLE_TOOL_SEARCH: "false"
       model_usage_aliases:
         kimi-k3: kimi-k3
@@ -81,13 +84,15 @@ func TestClaudeConfigAcceptsOnlyProfileEnvs(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := cfg.Claude.ExecutionProfiles["quality"]
-	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
+	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || profile.Envs["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "0" || profile.Envs["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "262144" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile envs = %#v", profile.Envs)
 	}
 }
 
 func TestClaudeConfigAllowsOptionalProfileEnvsToBeOmitted(t *testing.T) {
-	cfg, err := loadClaudeConfigYAML(t, strings.ReplaceAll(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"\n        ENABLE_TOOL_SEARCH: \"false\"\n", ""))
+	body := strings.ReplaceAll(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"\n", "")
+	body = strings.ReplaceAll(body, "        ENABLE_TOOL_SEARCH: \"false\"\n", "")
+	cfg, err := loadClaudeConfigYAML(t, body)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -54,7 +54,7 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
-  test("accepts all 19 Claude profile env values without rewriting them", () => {
+  test("accepts all Claude profile env values without rewriting them", () => {
     const response = validResponse();
     expect(validateBootstrapResponse("execution-1", response).execution_profile.envs).toEqual(response.execution_profile.envs);
   });
@@ -126,6 +126,18 @@ describe("validateBootstrapResponse", () => {
     expect(validateBootstrapResponse("execution-1", response).execution_profile.profile_id).toBe("quality");
   });
 
+  test("accepts Claude traffic and auto-memory controls", () => {
+    const response = validResponse();
+    response.execution_profile.envs.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+    response.execution_profile.envs.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "0";
+    response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
+
+    expect(validateBootstrapResponse("execution-1", response).execution_profile.envs).toMatchObject({
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0",
+    });
+  });
+
   test("uses the Server value-only byte limit for Claude profile envs", () => {
     const response = validResponse();
     const model = "m".repeat(3324);
@@ -149,6 +161,8 @@ describe("validateBootstrapResponse", () => {
   test("validates optional Claude env value domains", () => {
     for (const [key, value] of [
       ["CLAUDE_CODE_EFFORT_LEVEL", "extreme"],
+      ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "true"],
+      ["CLAUDE_CODE_DISABLE_AUTO_MEMORY", "false"],
       ["CLAUDE_CODE_DISABLE_THINKING", "yes"],
       ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "0"],
       ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "0001"],
