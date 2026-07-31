@@ -117,7 +117,10 @@ func NewAgentProfileRegistryFromConfig(configured map[string]srvconfig.ClaudeExe
 
 func profileModelsHaveCosts(profile AgentExecutionProfile, costs billing.CostCatalog) bool {
 	for _, raw := range model.ClaudeProfileReferencedModels(profile.Envs) {
-		canonical := profile.ModelUsageAliases[raw]
+		canonical := raw
+		if configured, ok := profile.ModelUsageAliases[raw]; ok {
+			canonical = configured
+		}
 		if _, ok := costs.Models[profile.Provider+"/"+canonical]; !ok {
 			return false
 		}

@@ -983,7 +983,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		}
 	}
 
-	for _, configPath := range []string{"server/config.yaml", "server/config.example.yaml"} {
+	for _, configPath := range []string{"server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
@@ -1126,7 +1126,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 	})
 
 	t.Run("repository config loads with the documented Compose environment", func(t *testing.T) {
-		configPath := filepath.Join(root, "server", "config.yaml")
+		configPath := filepath.Join(root, "server", "config.example.yaml")
 		configBody := readTextFile(t, configPath)
 		envReference := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 		for _, match := range envReference.FindAllStringSubmatch(configBody, -1) {

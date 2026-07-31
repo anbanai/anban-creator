@@ -179,16 +179,8 @@ func ValidateClaudeProfileEnvs(envs map[string]string, requireAuthToken bool) er
 	return nil
 }
 
-func ValidateClaudeProfileModelUsageAliases(provider string, envs, aliases map[string]string) error {
-	if err := ValidateClaudeProfileModelUsageAliasMappings(provider, aliases); err != nil {
-		return err
-	}
-	for _, referenced := range ClaudeProfileReferencedModels(envs) {
-		if _, exists := aliases[referenced]; !exists {
-			return fmt.Errorf("claude profile model usage alias %q is required", referenced)
-		}
-	}
-	return nil
+func ValidateClaudeProfileModelUsageAliases(provider string, _ map[string]string, aliases map[string]string) error {
+	return ValidateClaudeProfileModelUsageAliasMappings(provider, aliases)
 }
 
 func ValidateClaudeProfileModelUsageAliasMappings(provider string, aliases map[string]string) error {

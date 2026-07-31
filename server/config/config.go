@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	ImageAPI           ImageAPIConfig                  `yaml:"-"`
 	Montage            MontageConfig                   `yaml:"montage"`
-	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
+	ImagePresets       []ImageModelPreset              `yaml:"-"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
@@ -371,11 +372,26 @@ type ImageGenerationRouteConfig struct {
 	Provider       string                       `yaml:"provider"`
 	Model          string                       `yaml:"model"`
 	Timeout        time.Duration                `yaml:"timeout"`
+	SelectionKey   string                       `yaml:"selection_key" json:"selection_key"`
+	MinTier        string                       `yaml:"min_tier" json:"min_tier"`
 	Alias          string                       `yaml:"alias"`
 	Enabled        bool                         `yaml:"enabled"`
 	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
 	ResponseFormat string                       `yaml:"response_format"`
 	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+}
+
+func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "image generation route", map[string]bool{
+		"provider": true, "model": true, "timeout": true,
+		"selection_key": true, "min_tier": true, "alias": true,
+		"enabled": true, "quality_rank": true, "response_format": true,
+		"capabilities": true,
+	}); err != nil {
+		return err
+	}
+	type plain ImageGenerationRouteConfig
+	return value.Decode((*plain)(c))
 }
 
 type ImageGenerationRoutesConfig struct {
@@ -576,17 +592,18 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
-	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
-	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
-	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
-	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes           KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns             map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir           string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	ExecutionProfileEnvDefaults map[string]string                       `yaml:"execution_profile_env_defaults" json:"-"`
+	ExecutionProfiles           map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	Executor                    string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages               RuntimeImages                           `yaml:"runtime_images"`
+	ExecutionTokenSecret        string                                  `yaml:"execution_token_secret" json:"-"`
+	PluginDir                   string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox                     bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker                      DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes                  KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns                    map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir                  string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL              string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 type ClaudeExecutionProfileConfig struct {
@@ -598,7 +615,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "runtime_images": true,
+		"execution_profile_env_defaults": true, "execution_profiles": true, "executor": true, "runtime_images": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -616,10 +633,33 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	type plain ClaudeConfig
-	return value.Decode((*plain)(c))
+	if err := value.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	if err := validateClaudeExecutionProfileEnvDefaults(c.ExecutionProfileEnvDefaults); err != nil {
+		return fmt.Errorf("claude.execution_profile_env_defaults: %w", err)
+	}
+	c.ExecutionProfileEnvDefaults = model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
+	for name, profile := range c.ExecutionProfiles {
+		merged := model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
+		if merged == nil {
+			merged = make(map[string]string, len(profile.Envs))
+		}
+		for key, value := range profile.Envs {
+			merged[key] = value
+		}
+		profile.Envs = merged
+		c.ExecutionProfiles[name] = profile
+	}
+	return nil
 }
 
 func validateClaudeNestedFields(value *yaml.Node) error {
+	if defaults := yamlMappingValue(value, "execution_profile_env_defaults"); defaults != nil {
+		if err := validateClaudeEnvFields(defaults, "claude.execution_profile_env_defaults"); err != nil {
+			return err
+		}
+	}
 	profiles := yamlMappingValue(value, "execution_profiles")
 	if profiles == nil {
 		return nil
@@ -630,7 +670,7 @@ func validateClaudeNestedFields(value *yaml.Node) error {
 	for i := 0; i < len(profiles.Content); i += 2 {
 		name, profile := profiles.Content[i].Value, profiles.Content[i+1]
 		path := "claude.execution_profiles." + name
-		if err := validateClaudeMappingFields(profile, path, map[string]bool{
+		if err := validateYAMLMappingFields(profile, path, map[string]bool{
 			"provider": true, "description": true, "envs": true, "model_usage_aliases": true,
 		}); err != nil {
 			return err
@@ -642,6 +682,25 @@ func validateClaudeNestedFields(value *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+func validateClaudeExecutionProfileEnvDefaults(defaults map[string]string) error {
+	if defaults == nil {
+		return nil
+	}
+	validationEnv := map[string]string{
+		model.ClaudeEnvBaseURL:           "https://defaults-validation.invalid/anthropic",
+		model.ClaudeEnvAuthToken:         "defaults-validation-token",
+		model.ClaudeEnvModel:             "defaults-validation-model",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "defaults-validation-model",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "defaults-validation-model",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "defaults-validation-model",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "defaults-validation-model",
+	}
+	for key, value := range defaults {
+		validationEnv[key] = value
+	}
+	return model.ValidateClaudeProfileEnvs(validationEnv, true)
 }
 
 func validateClaudeEnvFields(node *yaml.Node, path string) error {
@@ -677,7 +736,7 @@ func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-func validateClaudeMappingFields(node *yaml.Node, path string, known map[string]bool) error {
+func validateYAMLMappingFields(node *yaml.Node, path string, known map[string]bool) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("%s must be a mapping", path)
 	}
@@ -1000,7 +1059,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"storage":         true,
 		"mcp":             true,
 		"montage":         true,
-		"image_presets":   true,
 		"model_providers": true,
 		"model_routes":    true,
 		"billing_runtime": true,
@@ -1263,8 +1321,9 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) deriveModelRouteRuntimeConfig() error {
-	if len(c.ModelProviders) == 0 {
-		return nil
+	if (c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "") &&
+		!c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
+		return fmt.Errorf("model_routes.video_understanding.require_native_video must be true")
 	}
 	provider := func(routeName, providerKey string) (ModelProviderConfig, error) {
 		if strings.TrimSpace(providerKey) == "" {
@@ -1336,12 +1395,13 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 	if len(c.ModelRoutes.ImageGeneration.Designer) > 0 {
 		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
 		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
+		c.ImagePresets = make([]ImageModelPreset, 0, len(c.ModelRoutes.ImageGeneration.Designer))
 		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
 			routeName := "model_routes.image_generation.designer." + key
-			if route.Enabled && route.QualityRank <= 0 {
-				return fmt.Errorf("%s.quality_rank must be positive when enabled", routeName)
+			if !route.Enabled {
+				continue
 			}
-			if err := validateDesignerProviderCapabilities(routeName+".capabilities", route.Capabilities); err != nil {
+			if err := validateEnabledDesignerRoute(routeName, route); err != nil {
 				return err
 			}
 			cfg, err := c.imageAPIFromRoute(routeName, route)
@@ -1350,35 +1410,56 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			}
 			c.ImageAPI.Designer[key] = cfg
 			c.ImageAPI.designerOrder = append(c.ImageAPI.designerOrder, key)
+			providerConfig := c.ModelProviders[route.Provider]
+			c.ImagePresets = append(c.ImagePresets, ImageModelPreset{
+				Key: route.SelectionKey, DisplayName: route.Alias,
+				ProviderRoute: "image_generation.designer." + key,
+				Provider:      providerKind(route.Provider), Model: route.Model,
+				Endpoint: providerConfig.BaseURL, APIKey: providerConfig.APIKey,
+				Timeout: route.Timeout, MinTier: route.MinTier,
+				QualityRank: route.QualityRank, Capabilities: route.Capabilities,
+			})
 		}
 	}
-	if err := c.resolveImagePresetRoutes(); err != nil {
+	sort.Slice(c.ImagePresets, func(i, j int) bool {
+		if c.ImagePresets[i].QualityRank != c.ImagePresets[j].QualityRank {
+			return c.ImagePresets[i].QualityRank > c.ImagePresets[j].QualityRank
+		}
+		return c.ImagePresets[i].Key < c.ImagePresets[j].Key
+	})
+	if err := ValidateImagePresets(c.ImagePresets); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *Config) resolveImagePresetRoutes() error {
-	for i := range c.ImagePresets {
-		preset := &c.ImagePresets[i]
-		if strings.TrimSpace(preset.ProviderRoute) == "" {
-			continue
-		}
-		route, err := c.imageGenerationRouteByPath(preset.ProviderRoute)
-		if err != nil {
-			return fmt.Errorf("image_presets[%d].provider_route: %w", i, err)
-		}
-		provider, ok := c.ModelProviders[route.Provider]
-		if !ok {
-			return fmt.Errorf("image_presets[%d].provider_route provider %q is not configured in model_providers", i, route.Provider)
-		}
-		preset.Provider = providerKind(route.Provider)
-		preset.Model = route.Model
-		preset.Endpoint = provider.BaseURL
-		preset.APIKey = provider.APIKey
-		preset.Timeout = route.Timeout
-		preset.QualityRank = route.QualityRank
-		preset.Capabilities = route.Capabilities
+func validateEnabledDesignerRoute(path string, route ImageGenerationRouteConfig) error {
+	var errs []string
+	if strings.TrimSpace(route.Provider) == "" {
+		errs = append(errs, path+".provider is required")
+	}
+	if strings.TrimSpace(route.Model) == "" {
+		errs = append(errs, path+".model is required")
+	}
+	if strings.TrimSpace(route.SelectionKey) == "" {
+		errs = append(errs, path+".selection_key is required")
+	}
+	switch route.MinTier {
+	case "free", "pro", "enterprise":
+	default:
+		errs = append(errs, path+".min_tier must be free, pro, or enterprise")
+	}
+	if strings.TrimSpace(route.Alias) == "" {
+		errs = append(errs, path+".alias is required")
+	}
+	if route.QualityRank <= 0 {
+		errs = append(errs, path+".quality_rank must be positive")
+	}
+	if err := validateDesignerProviderCapabilities(path+".capabilities", route.Capabilities); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -1430,25 +1511,6 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 		return fmt.Errorf("%s invalid: %s", path, strings.Join(errs, "; "))
 	}
 	return nil
-}
-
-func (c *Config) imageGenerationRouteByPath(path string) (ImageGenerationRouteConfig, error) {
-	path = strings.TrimPrefix(strings.TrimSpace(path), "model_routes.")
-	switch path {
-	case "image_generation.cover":
-		return c.ModelRoutes.ImageGeneration.Cover, nil
-	case "image_generation.content":
-		return c.ModelRoutes.ImageGeneration.Content, nil
-	}
-	const designerPrefix = "image_generation.designer."
-	if strings.HasPrefix(path, designerPrefix) {
-		key := strings.TrimPrefix(path, designerPrefix)
-		if route, ok := c.ModelRoutes.ImageGeneration.Designer[key]; ok {
-			return route, nil
-		}
-		return ImageGenerationRouteConfig{}, fmt.Errorf("designer route %q is not configured", key)
-	}
-	return ImageGenerationRouteConfig{}, fmt.Errorf("unsupported route %q", path)
 }
 
 func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteConfig) (*appconfig.ImageAPI, error) {
@@ -1652,11 +1714,10 @@ func (c *Config) Validate() error {
 	}
 
 	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-		if route.Enabled && route.QualityRank <= 0 {
-			errs = append(errs, "model_routes.image_generation.designer."+key+".quality_rank must be positive when enabled")
-		}
-		if err := validateDesignerProviderCapabilities("model_routes.image_generation.designer."+key+".capabilities", route.Capabilities); err != nil {
-			errs = append(errs, err.Error())
+		if route.Enabled {
+			if err := validateEnabledDesignerRoute("model_routes.image_generation.designer."+key, route); err != nil {
+				errs = append(errs, err.Error())
+			}
 		}
 	}
 

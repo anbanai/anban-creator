@@ -98,11 +98,14 @@ model_routes:
       timeout: 5m
     designer:
       seedream:
+        selection_key: "volcengine-standard"
+        min_tier: "free"
         alias: "豆包 Seedream"
         provider: "volcengine_ark"
         model: "doubao-seedream-5-0-pro-260628"
         timeout: 5m
         enabled: true
+        quality_rank: 100
         capabilities:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
           default_size: "1:1"
@@ -115,11 +118,14 @@ model_routes:
           has_compression: false
           watermark: true
       gpt_image_2:
+        selection_key: "openai-standard"
+        min_tier: "pro"
         alias: "GPT Image 2"
         provider: "wangcai_openai"
         model: "gpt-image-2"
         timeout: 5m
         enabled: true
+        quality_rank: 200
         response_format: "url"
         capabilities:
           quality_levels: ["auto", "low", "medium", "high"]
@@ -224,17 +230,21 @@ billing_runtime:
   config_dir: "./billing"
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
 
-image_presets:
-  - key: "volcengine-standard"
-    display_name: "豆包 Seedream"
-    provider_route: "image_generation.designer.seedream"
-    min_tier: "free"
-  - key: "openai-standard"
-    display_name: "GPT Image 2"
-    provider_route: "image_generation.designer.gpt_image_2"
-    min_tier: "pro"
-
 claude:
+  execution_profile_env_defaults:
+    CLAUDE_CODE_EFFORT_LEVEL: "high"
+    CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
+    MAX_THINKING_TOKENS: "0"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+    CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+    CLAUDE_CODE_DISABLE_THINKING: "false"
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
+    CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+    CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+    ENABLE_TOOL_SEARCH: "true"
   execution_profiles:
     effective:
       description: "适合日常创作和批量任务，成本最低"
@@ -248,22 +258,8 @@ claude:
         ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
         CLAUDE_CODE_EFFORT_LEVEL: "medium"
-        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
-        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
         CLAUDE_CODE_MAX_OUTPUT_TOKENS: "393216"
-        MAX_THINKING_TOKENS: "0"
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
-        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
-        CLAUDE_CODE_DISABLE_THINKING: "false"
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
-        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
-        ENABLE_TOOL_SEARCH: "true"
-      model_usage_aliases:
-        deepseek-v4-flash: "deepseek-v4-flash"
-        deepseek-v4-pro: "deepseek-v4-pro"
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
       provider: "zhipu"
@@ -275,22 +271,7 @@ claude:
         ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-5.2"
         ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.2"
-        CLAUDE_CODE_EFFORT_LEVEL: "high"
-        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
-        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
-        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
-        MAX_THINKING_TOKENS: "0"
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
-        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
-        CLAUDE_CODE_DISABLE_THINKING: "false"
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
-        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         CLAUDE_CODE_SUBAGENT_MODEL: "glm-5.2"
-        ENABLE_TOOL_SEARCH: "true"
-      model_usage_aliases:
-        glm-5.2: "glm-5.2"
     quality:
       description: "旗舰模型与超长上下文，适合高难度任务"
       provider: "moonshot"
@@ -302,22 +283,9 @@ claude:
         ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
         ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
-        CLAUDE_CODE_EFFORT_LEVEL: "high"
         CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "true"
-        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
-        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
-        MAX_THINKING_TOKENS: "0"
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
-        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
-        CLAUDE_CODE_DISABLE_THINKING: "false"
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
-        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3[1m]"
-        ENABLE_TOOL_SEARCH: "true"
       model_usage_aliases:
-        kimi-k3: "kimi-k3"
         "kimi-k3[1m]": "kimi-k3"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"

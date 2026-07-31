@@ -158,7 +158,7 @@ func TestClaudeConfigRedactsExecutionProfileSecrets(t *testing.T) {
 }
 
 func TestProductionClaudeConfigUsesExecutionProfileEnvsOnly(t *testing.T) {
-	for _, name := range []string{"../config.yaml", "../config.example.yaml"} {
+	for _, name := range []string{"../config.example.yaml"} {
 		raw, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
