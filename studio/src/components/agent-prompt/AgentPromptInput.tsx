@@ -97,7 +97,7 @@ export interface AgentPromptInputProps {
   onChange: (value: AgentPromptValue) => void
   onSubmit: (value: AgentPromptValue) => void | Promise<void>
   /** Operations and upload lifecycle only; value.attachments is the render/submit source. */
-  attachmentController: PromptAttachmentsController
+  attachmentController: Omit<PromptAttachmentsController, 'move'> & Partial<Pick<PromptAttachmentsController, 'move'>>
   attachmentPolicy: AttachmentAdmissionPolicy
   contextBar?: ReactNode
   leadingTools?: ReactNode
@@ -136,7 +136,7 @@ function rejectionAnnouncement(rejections: readonly AttachmentRejection[]) {
 
 interface AttachmentTileProps {
   attachment: PromptAttachment
-  controller: PromptAttachmentsController
+  controller: Omit<PromptAttachmentsController, 'move'> & Partial<Pick<PromptAttachmentsController, 'move'>>
   disabled: boolean
   previewSource?: string
   onPreview: (trigger: HTMLButtonElement) => void

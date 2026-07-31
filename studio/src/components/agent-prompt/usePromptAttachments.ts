@@ -49,7 +49,7 @@ export interface PromptAttachmentsController {
   addFiles: (files: readonly File[]) => AttachmentAdmissionResult
   retry: (id: string) => void
   remove: (id: string) => void
-  move?: (id: string, targetIndex: number) => void
+  move: (id: string, targetIndex: number) => void
   updateInstruction: (id: string, instruction: string) => void
   reset: (attachments: readonly InputAttachment[]) => void
   clear: () => void
