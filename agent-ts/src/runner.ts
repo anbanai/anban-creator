@@ -6,8 +6,6 @@ import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse } from "./bootstrap.js"
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 
-const allowedTools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite", "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*"];
-const disallowedTools = ["Agent", "ScheduleWakeup", "AskUserQuestion"];
 // Keep this list aligned with server/agent/claude_runtime_env.go and the
 // authentication, provider-routing, and model inputs in SDK 0.3.220.
 const CLAUDE_INHERITED_ENVIRONMENT_KEYS_TO_UNSET = [
@@ -187,10 +185,8 @@ export function buildQueryOptions(
     maxTurns: data.max_turns,
     agent: data.agent_flag,
     resume: data.resume_session_id,
-    permissionMode: "dontAsk",
-    allowedTools,
-    disallowedTools,
-    canUseTool: async (toolName) => isAllowedTool(toolName) ? { behavior: "allow", updatedInput: undefined } : { behavior: "deny", message: `tool ${toolName} is outside the managed Agent SDK allowlist` },
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
     plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
@@ -323,5 +319,4 @@ function requiredSkills(taskType: string): string[] {
   return [];
 }
 
-function isAllowedTool(name: string): boolean { return allowedTools.some((allowed) => allowed.endsWith("*") ? name.startsWith(allowed.slice(0, -1)) : name === allowed); }
 function toolBaseName(name: string): string { return name.startsWith("mcp__") ? name.split("__", 3)[2] ?? name : name; }

@@ -78,6 +78,16 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("gives the managed runtime unrestricted tool access", () => {
+    const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
+
+    expect(options.permissionMode).toBe("bypassPermissions");
+    expect(options.allowDangerouslySkipPermissions).toBe(true);
+    expect(options).not.toHaveProperty("allowedTools");
+    expect(options).not.toHaveProperty("disallowedTools");
+    expect(options).not.toHaveProperty("canUseTool");
+  });
+
   test("does not translate frozen controls into SDK-only options", () => {
     const options = (runner as typeof runner & {
       buildQueryOptions: (data: unknown, workspace: string) => Record<string, unknown>;
