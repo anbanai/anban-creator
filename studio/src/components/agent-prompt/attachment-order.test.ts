@@ -11,7 +11,6 @@ const attachment = (type: PromptAttachment['type'], id: string): PromptAttachmen
   status: 'uploaded',
   progress: 100,
 })
-
 describe('attachment ordering helpers', () => {
   it('assigns global and per-type ordinals in array order', () => {
     expect(materialOrdinals([
@@ -31,4 +30,3 @@ describe('attachment ordering helpers', () => {
     expect(hasOrdinalMaterialReference('请处理第 2 个素材')).toBe(true)
   })
 })
-
