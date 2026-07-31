@@ -101,7 +101,7 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if err := json.Unmarshal(raw, &providers); err != nil {
 		t.Fatalf("decode providers: %v", err)
 	}
-	if len(providers) != 1 || providers[0].ID != "test-openai" {
+	if len(providers) != 1 || providers[0].ID != "capability_1" {
 		t.Fatalf("providers = %+v", providers)
 	}
 	if providers[0].Idx != 0 {

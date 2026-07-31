@@ -1230,7 +1230,7 @@ func (s *DesignerService) GetProviders(ctx context.Context, userID string) []Des
 		}
 		publicID := strings.TrimSpace(route.SelectionKey)
 		if publicID == "" {
-			publicID = id
+			publicID = fmt.Sprintf("capability_%d", i+1)
 		}
 		capabilities := route.Capabilities
 		capabilities.MaxBatch = 1
