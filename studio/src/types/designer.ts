@@ -126,8 +126,10 @@ export interface ImageGeneration {
   project_id: string
   prompt: string
   revised_prompt?: string
-  provider: string
-  model: string
+  provider?: string
+  model?: string
+  capability_key?: string
+  capability_name?: string
   quality?: string
   size?: string
   n: number
