@@ -1221,7 +1221,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
 		}
-		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != referenceAsset.ID || !task.Watermark {
+		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
 			t.Fatalf("shared overrides = %#v", task)
 		}
 		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
@@ -1230,7 +1230,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
-		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
+		if got := task.InputAttachments.Data(); len(got) != 2 || got[0].AssetID != referenceAsset.ID || got[1].Text != "validated attachment" {
 			t.Fatalf("attachments = %#v", got)
 		}
 		if task.InputSourceTaskID != source.ID || task.InputSourceProjectID != source.ProjectID {
