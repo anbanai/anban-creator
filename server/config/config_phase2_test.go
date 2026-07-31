@@ -346,6 +346,9 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(raw), "\n  execution_profile_env_defaults:") {
+		t.Fatal("config.example.yaml contains removed claude.execution_profile_env_defaults")
+	}
 	for _, match := range regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`).FindAllStringSubmatch(string(raw), -1) {
 		t.Setenv(match[1], "")
 	}
@@ -390,9 +393,71 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if len(cfg.ImagePresets) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("derived catalog sizes: image_presets=%d execution_profiles=%d", len(cfg.ImagePresets), len(cfg.Claude.ExecutionProfiles))
 	}
+	expectedRuntimeControls := map[string]map[string]string{
+		"effective": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "medium",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "false",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "393216",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+		"balanced": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "high",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "false",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "131072",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+		"quality": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "high",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "true",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "131072",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+	}
+	for name, expected := range expectedRuntimeControls {
+		for key, want := range expected {
+			if got := cfg.Claude.ExecutionProfiles[name].Envs[key]; got != want {
+				t.Errorf("%s env %s = %q, want %q", name, key, got, want)
+			}
+		}
+	}
+	for _, name := range []string{"effective", "balanced"} {
+		if got := len(cfg.Claude.ExecutionProfiles[name].ModelUsageAliases); got != 0 {
+			t.Errorf("%s model_usage_aliases length = %d, want 0", name, got)
+		}
+	}
+	if got := cfg.Claude.ExecutionProfiles["quality"].ModelUsageAliases; len(got) != 1 || got["kimi-k3[1m]"] != "kimi-k3" {
+		t.Errorf("quality model_usage_aliases = %#v, want only kimi-k3[1m]: kimi-k3", got)
+	}
 	effective := cfg.Claude.ExecutionProfiles["effective"]
 	effective.Envs["ENABLE_TOOL_SEARCH"] = "mutated"
-	if cfg.Claude.ExecutionProfiles["balanced"].Envs["ENABLE_TOOL_SEARCH"] != "true" || cfg.Claude.ExecutionProfileEnvDefaults["ENABLE_TOOL_SEARCH"] != "true" {
-		t.Fatalf("execution profile env maps share storage: defaults=%#v balanced=%#v", cfg.Claude.ExecutionProfileEnvDefaults, cfg.Claude.ExecutionProfiles["balanced"].Envs)
+	if got := cfg.Claude.ExecutionProfiles["balanced"].Envs["ENABLE_TOOL_SEARCH"]; got != "true" {
+		t.Fatalf("execution profile env maps share storage: balanced ENABLE_TOOL_SEARCH = %q, want true", got)
 	}
 }
