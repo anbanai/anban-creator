@@ -43,12 +43,12 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: project.ID,
 		Type: model.PlatformSeednote, Status: model.TaskStatusPending,
-		ImageCapabilityKey: "server-owned-route",
+		ImageCapabilityKey: "server-owned-route", ImageRatio: "16:9",
 	}
 	task.SetProjectSnapshot(model.ProjectSnapshot{
 		ProjectName: "snapshot", Platform: model.PlatformSeednote,
 		Instructions: "snapshot instructions", VisualStyle: "snapshot style",
-		ReferenceImageAssetID: "asset-id",
+		ReferenceImageAssetID: "asset-id", ImageRatio: "3:4",
 	})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -72,6 +72,9 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	resolved := (*profile)["resolved_profile"].(map[string]any)
 	if got := resolved["reference_image_path"]; got != ".anban-creator/reference.png" {
 		t.Fatalf("reference_image_path = %v", got)
+	}
+	if got := resolved["image_ratio"]; got != "16:9" {
+		t.Fatalf("effective image_ratio = %v, want task value 16:9", got)
 	}
 	raw, err := json.Marshal(profile)
 	if err != nil {

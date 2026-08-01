@@ -45,7 +45,7 @@ func TestImageCapabilityResolverIsStrictAndDoesNotAutoUpgradeReferences(t *testi
 	resolver := NewImageCapabilityResolver(repo, cfg)
 
 	standard, err := resolver.ResolveImageModelForGeneration(t.Context(), "free", "", "content", 0)
-	if err != nil || standard.Key != "standard" || standard.BillingSKU != "image.standard" {
+	if err != nil || standard.Key != "standard" || standard.BillingSKU != "image.standard" || len(standard.SupportedSizes) != 1 || standard.SupportedSizes[0] != "1:1" {
 		t.Fatalf("default resolution = %#v, %v", standard, err)
 	}
 	if _, err := resolver.ResolveImageModelForGeneration(t.Context(), "free", "professional", "content", 0); err == nil {

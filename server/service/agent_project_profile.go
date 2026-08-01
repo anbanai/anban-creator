@@ -66,6 +66,10 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	}
 
 	style := ResolveStyle(project, task)
+	effectiveImageRatio := strings.TrimSpace(project.ImageRatio)
+	if task != nil && strings.TrimSpace(task.ImageRatio) != "" {
+		effectiveImageRatio = strings.TrimSpace(task.ImageRatio)
+	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
 		"instructions": project.Instructions, "keywords": project.Keywords,
@@ -80,7 +84,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"instructions": project.Instructions, "positioning": project.Instructions,
 		"keywords": project.Keywords, "visual_style": style.VisualStyle,
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
-		"image_ratio": project.ImageRatio, "uses_project_snapshot": usesProjectSnapshot,
+		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
 			"instructions": agentProfileSource(usesProjectSnapshot),
@@ -101,7 +105,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 		profile["image_config"] = imageConfig
 	case model.PlatformMoments:
-		imageConfig := map[string]any{"default_ratio": firstAgentProfileValue(project.ImageRatio, "3:4")}
+		imageConfig := map[string]any{"default_ratio": firstAgentProfileValue(effectiveImageRatio, "3:4")}
 		if hasReference {
 			imageConfig["reference_image_path"] = agentReferenceImageRuntimePath
 		}

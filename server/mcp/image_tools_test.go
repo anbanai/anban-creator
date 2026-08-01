@@ -2,12 +2,17 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func TestGenerateImageToolDescriptionUsesTerminalFileSemantics(t *testing.T) {
@@ -98,10 +103,46 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	}
 }
 
+func TestCropImageSchemaIsAtomicAndTaskRelative(t *testing.T) {
+	schema := cropImageInputSchema()
+	properties := schema["properties"].(map[string]any)
+	for _, key := range []string{"task_id", "input_path", "output_path", "target_width", "target_height", "anchor"} {
+		if _, ok := properties[key]; !ok {
+			t.Fatalf("crop_image schema missing %s", key)
+		}
+	}
+	for _, forbidden := range []string{"project_id", "platform", "image_type", "provider", "model"} {
+		if _, ok := properties[forbidden]; ok {
+			t.Fatalf("crop_image schema exposes business routing field %s", forbidden)
+		}
+	}
+	anchor := properties["anchor"].(map[string]any)
+	if values, ok := anchor["enum"].([]any); !ok || !containsAnyString(values, "center") || !containsAnyString(values, "top") {
+		t.Fatalf("crop anchors = %#v", anchor["enum"])
+	}
+}
+
 func TestCategorizeImageGenFailureDetectsFilesystemErrors(t *testing.T) {
 	err := fmt.Errorf("create output directory: %w", os.ErrPermission)
 
 	if got := categorizeImageGenFailure(err, ""); got != "filesystem" {
 		t.Fatalf("categorizeImageGenFailure() = %q, want filesystem", got)
+	}
+}
+
+func TestClassifyImageToolFailurePreservesUnsupportedCapabilitySize(t *testing.T) {
+	err := &service.ImageCapabilitySizeError{
+		Requested:      "16:9",
+		SupportedSizes: []string{"1:1", "3:2", "2:3"},
+	}
+	failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
+	if failure.Code != "image_capability_size_unsupported" {
+		t.Fatalf("failure code = %q", failure.Code)
+	}
+	if failure.Requested != "16:9" || !slices.Equal(failure.SupportedSizes, []string{"1:1", "3:2", "2:3"}) {
+		t.Fatalf("failure size details = %#v", failure)
+	}
+	if !errors.As(err, new(*service.ImageCapabilitySizeError)) {
+		t.Fatal("test error no longer exposes the typed capability failure")
 	}
 }

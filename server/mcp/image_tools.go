@@ -24,6 +24,12 @@ func registerImageTools(server *mcp.Server) {
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
+		Name:        "crop_image",
+		Description: "Crop one existing task image to an exact width and height using an explicit anchor, then register the output as a durable task file. This tool performs no platform-specific decisions.",
+		InputSchema: cropImageInputSchema(),
+	}, cropImageHandler)
+
+	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
 		Description: "Upload an absolute server-local file path to WeChat CDN or configured storage. The path is not the agent client's current working directory. task_id only associates and authorizes the operation. Returns upload metadata.",
 		InputSchema: map[string]any{
@@ -111,7 +117,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	})
 	if err != nil {
 		failure := classifyImageToolFailure(parentCtx, ctx, err, "generate", operationTimeout, false)
-		if isImageTimeoutFailure(failure.Code) {
+		if isImageTimeoutFailure(failure.Code) || failure.Code == "image_capability_size_unsupported" {
 			return imageFailureResult(failure), nil
 		}
 		return billingError("generate image", err), nil
@@ -123,11 +129,13 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 type imageToolFailure struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Stage     string `json:"stage"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
-	Durable   bool   `json:"durable_task_file"`
+	Code           string   `json:"code"`
+	Message        string   `json:"message"`
+	Stage          string   `json:"stage"`
+	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	Durable        bool     `json:"durable_task_file"`
+	Requested      string   `json:"requested,omitempty"`
+	SupportedSizes []string `json:"supported_sizes,omitempty"`
 }
 
 func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
@@ -140,6 +148,13 @@ func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
 
 func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error, stage string, timeout time.Duration, durable bool) imageToolFailure {
 	code := categorizeImageGenFailure(err, "")
+	var sizeErr *service.ImageCapabilitySizeError
+	if errors.As(err, &sizeErr) {
+		return imageToolFailure{
+			Code: "image_capability_size_unsupported", Message: sizeErr.Error(), Stage: stage, Durable: durable,
+			Requested: sizeErr.Requested, SupportedSizes: append([]string(nil), sizeErr.SupportedSizes...),
+		}
+	}
 	switch {
 	case errors.Is(parentCtx.Err(), context.Canceled):
 		code = "request_cancelled"
@@ -242,6 +257,32 @@ func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	return textResult(result)
 }
 
+func cropImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("crop_image request parameters are required"), nil
+	}
+	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
+		return errorResult("task image service not available"), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	targetWidth, targetHeight := 0, 0
+	if value, ok := args["target_width"].(float64); ok {
+		targetWidth = int(value)
+	}
+	if value, ok := args["target_height"].(float64); ok {
+		targetHeight = int(value)
+	}
+	result, err := svcs.TaskImageOperationsSvc.Crop(ctx, service.CropTaskImageRequest{
+		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), TaskID: stringArg(args, "task_id"),
+		InputPath: stringArg(args, "input_path"), OutputPath: stringArg(args, "output_path"),
+		TargetWidth: targetWidth, TargetHeight: targetHeight, Anchor: stringArg(args, "anchor"),
+	})
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(result)
+}
+
 func generateImageInputSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
@@ -258,6 +299,25 @@ func generateImageInputSchema() map[string]any {
 			"watermark":       map[string]any{"type": "boolean", "description": "Whether the generated image should include a watermark", "default": false},
 		},
 		"required": []any{"project_id", "task_id", "prompt", "output_path"},
+	}
+}
+
+func cropImageInputSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"task_id":       map[string]any{"type": "string", "description": "Task that owns the input and output files"},
+			"input_path":    map[string]any{"type": "string", "description": "Task-relative path of an existing image"},
+			"output_path":   map[string]any{"type": "string", "description": "Distinct task-relative output path"},
+			"target_width":  map[string]any{"type": "integer", "minimum": 1, "maximum": 8192},
+			"target_height": map[string]any{"type": "integer", "minimum": 1, "maximum": 8192},
+			"anchor": map[string]any{
+				"type": "string", "default": "center",
+				"enum": []any{"center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"},
+			},
+		},
+		"required": []any{"task_id", "input_path", "output_path", "target_width", "target_height"},
 	}
 }
 

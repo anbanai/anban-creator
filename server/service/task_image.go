@@ -56,6 +56,15 @@ type TaskImageService struct {
 	logger    *zerolog.Logger
 }
 
+type ImageCapabilitySizeError struct {
+	Requested      string   `json:"requested"`
+	SupportedSizes []string `json:"supported_sizes"`
+}
+
+func (e *ImageCapabilitySizeError) Error() string {
+	return fmt.Sprintf("requested image size %q is not supported by the selected capability", e.Requested)
+}
+
 func NewTaskImageService(tasks *TaskService, resolver TaskImageModelResolver, generator TaskImageGenerator, catalog *BillingCatalogService, logger *zerolog.Logger) *TaskImageService {
 	return &TaskImageService{tasks: tasks, resolver: resolver, generator: generator, catalog: catalog, logger: logger}
 }
@@ -104,6 +113,9 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	if resolved == nil {
 		return nil, errors.New("image model unavailable: resolver returned no descriptor")
+	}
+	if req.Size != "" && !stringInSet(req.Size, resolved.SupportedSizes) {
+		return nil, &ImageCapabilitySizeError{Requested: req.Size, SupportedSizes: append([]string(nil), resolved.SupportedSizes...)}
 	}
 	var pricing *ResolvedSKUPrice
 	// Preset selections carry their internal billing SKU through the resolver.

@@ -1,12 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -148,6 +152,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		BillingSKU:        "image.standard",
 		Key:               "standard",
 		SupportsReference: true, MaxReferenceImages: 16,
+		SupportedSizes: []string{"1:1", "3:4"},
 	}}
 	generator := &taskImageGeneratorFake{result: &ImageResult{
 		LocalFilePath: generatedPath, OutputMIME: "image/png", Size: "3:4",
@@ -196,6 +201,60 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	}
 	if account.PaidCredits != 500 {
 		t.Fatalf("paid credits = %d, want 500 after image charge", account.PaidCredits)
+	}
+}
+
+func TestGenerateTaskImageRejectsUnsupportedExplicitSizeWithoutProviderCall(t *testing.T) {
+	f := newTaskImageFixture(t)
+	req := f.request()
+	req.Size = "16:9"
+	_, err := f.service.Generate(context.Background(), req)
+	var sizeErr *ImageCapabilitySizeError
+	if !errors.As(err, &sizeErr) || sizeErr.Requested != "16:9" || len(sizeErr.SupportedSizes) != 2 {
+		t.Fatalf("size error = %#v, %v", sizeErr, err)
+	}
+	if f.generator.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", f.generator.calls)
+	}
+}
+
+func TestCropTaskImageReadsCurrentExecutionFileAndPersistsOutput(t *testing.T) {
+	f := newTaskImageFixture(t)
+	var encoded bytes.Buffer
+	source := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 40; x++ {
+			source.Set(x, y, color.White)
+		}
+	}
+	if err := png.Encode(&encoded, source); err != nil {
+		t.Fatal(err)
+	}
+	input := encoded.Bytes()
+	if _, err := f.service.tasks.UploadExecutionTaskFileFromReader(
+		context.Background(), f.taskID, f.userID, f.executionID, "output/source.png",
+		bytes.NewReader(input), "image/png", int64(len(input)),
+	); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewTaskImageOperationsService(f.service.tasks, nil, nil, nil, TaskImageOperationsConfig{}, nil)
+	result, err := ops.Crop(context.Background(), CropTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.taskID,
+		InputPath: "output/source.png", OutputPath: "output/cropped.png",
+		TargetWidth: 20, TargetHeight: 10, Anchor: "center",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FilePath != "output/cropped.png" || result.Width != 20 || result.Height != 10 || result.DownloadURL == "" {
+		t.Fatalf("crop result = %#v", result)
+	}
+	if _, err := ops.Crop(context.Background(), CropTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.taskID,
+		InputPath: filepath.Join(t.TempDir(), "source.png"), OutputPath: "output/invalid.png",
+		TargetWidth: 20, TargetHeight: 10,
+	}); err == nil {
+		t.Fatal("absolute input path was accepted")
 	}
 }
 

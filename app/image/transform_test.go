@@ -114,3 +114,35 @@ func TestCropToSize_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestCropToSizeWithAnchorWritesSeparateOutputAndHonorsTop(t *testing.T) {
+	img := imaging.New(100, 200, color.White)
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 100; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 255, A: 255})
+		}
+	}
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.png")
+	output := filepath.Join(dir, "output.png")
+	if err := imaging.Save(img, input); err != nil {
+		t.Fatal(err)
+	}
+	if err := CropToSizeWithAnchor(input, output, 100, 100, "top"); err != nil {
+		t.Fatal(err)
+	}
+	if w, h, err := GetImageDimensions(input); err != nil || w != 100 || h != 200 {
+		t.Fatalf("input changed: %dx%d, %v", w, h, err)
+	}
+	result, err := imaging.Open(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, g, _, _ := result.At(50, 10).RGBA()
+	if r>>8 < 200 || g>>8 > 80 {
+		t.Fatalf("top anchor lost top subject: R=%d G=%d", r>>8, g>>8)
+	}
+	if err := CropToSizeWithAnchor(input, output, 100, 100, "platform-default"); err == nil {
+		t.Fatal("unknown anchor was accepted")
+	}
+}

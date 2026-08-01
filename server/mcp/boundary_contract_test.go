@@ -34,6 +34,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"checkSeednoteLoginStatusHandler": "svcs.SeednoteCapabilitySvc.LoginStatus",
 	"claimTopicHandler":               "svcs.TopicPoolSvc.ClaimTopic",
 	"compressImageHandler":            "svcs.TaskImageOperationsSvc.Compress",
+	"cropImageHandler":                "svcs.TaskImageOperationsSvc.Crop",
 	"convertMarkdownHandler":          "svcs.ContentRenderSvc.ConvertMarkdown",
 	"createLiveAnalysisTaskHandler":   "svcs.LiveSliceSvc.CreateLiveAnalysisTask",
 	"downloadImageHandler":            "svcs.ImageSvc.DownloadImage",

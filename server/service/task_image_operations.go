@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	appimage "github.com/anbanai/anban-creator/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -49,6 +51,17 @@ type CompressTaskImageRequest struct {
 type CompressTaskImageResult struct {
 	FilePath   string `json:"file_path"`
 	Compressed bool   `json:"compressed"`
+}
+
+type CropTaskImageRequest struct {
+	UserID, ExecutionID, TaskID, InputPath, OutputPath, Anchor string
+	TargetWidth, TargetHeight                                  int
+}
+
+type CropTaskImageResult struct {
+	TaskImageAsset
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 type AnalyzeTaskImageRequest struct {
@@ -132,6 +145,101 @@ func (s *TaskImageOperationsService) Compress(ctx context.Context, req CompressT
 		return nil, fmt.Errorf("compress image: %w", err)
 	}
 	return &CompressTaskImageResult{FilePath: filePath, Compressed: compressed}, nil
+}
+
+func (s *TaskImageOperationsService) Crop(ctx context.Context, req CropTaskImageRequest) (*CropTaskImageResult, error) {
+	if s == nil || s.tasks == nil || s.tasks.Repository() == nil || s.tasks.Storage() == nil {
+		return nil, errors.New("task image storage is not available")
+	}
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return nil, errors.New("task_id and current execution identity are required")
+	}
+	if filepath.IsAbs(req.InputPath) || filepath.IsAbs(req.OutputPath) {
+		return nil, errors.New("input_path and output_path must be task-relative")
+	}
+	inputPath, err := CleanTaskFileRelativePath(req.InputPath)
+	if err != nil {
+		return nil, fmt.Errorf("input_path: %w", err)
+	}
+	outputPath, err := CleanTaskFileRelativePath(req.OutputPath)
+	if err != nil {
+		return nil, fmt.Errorf("output_path: %w", err)
+	}
+	if inputPath == outputPath {
+		return nil, errors.New("output_path must differ from input_path")
+	}
+	if req.TargetWidth <= 0 || req.TargetHeight <= 0 || req.TargetWidth > 8192 || req.TargetHeight > 8192 {
+		return nil, errors.New("target_width and target_height must be between 1 and 8192")
+	}
+	if err := s.validateTask(ctx, req.UserID, req.TaskID, ""); err != nil {
+		return nil, err
+	}
+
+	inputFile, err := s.findCropInput(ctx, req.TaskID, req.ExecutionID, filepath.ToSlash(inputPath))
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.tasks.Storage().Read(ctx, inputFile.OSSKey)
+	if err != nil {
+		return nil, fmt.Errorf("read input task image: %w", err)
+	}
+	localInput, cleanup, err := writeTaskImageTemp(data, inputPath)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	localOutput := filepath.Join(filepath.Dir(localInput), "cropped"+strings.ToLower(filepath.Ext(outputPath)))
+	defer os.Remove(localOutput)
+	if err := appimage.CropToSizeWithAnchor(localInput, localOutput, req.TargetWidth, req.TargetHeight, req.Anchor); err != nil {
+		return nil, fmt.Errorf("crop image: %w", err)
+	}
+	file, err := os.Open(localOutput)
+	if err != nil {
+		return nil, fmt.Errorf("open cropped image: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat cropped image: %w", err)
+	}
+	header := make([]byte, 512)
+	n, _ := file.Read(header)
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, fmt.Errorf("rewind cropped image: %w", err)
+	}
+	mimeType := http.DetectContentType(header[:n])
+	taskFile, err := s.tasks.UploadExecutionTaskFileFromReader(ctx, req.TaskID, req.UserID, req.ExecutionID, filepath.ToSlash(outputPath), file, mimeType, info.Size())
+	if err != nil {
+		return nil, fmt.Errorf("register cropped task image: %w", err)
+	}
+	s.tasks.EnrichFilesWithURLs(ctx, []*model.TaskFile{taskFile})
+	return &CropTaskImageResult{
+		TaskImageAsset: TaskImageAsset{
+			TaskFileID: taskFile.ID, FilePath: taskFile.FilePath, DownloadURL: firstTaskFileURL(taskFile),
+			MimeType: taskFile.MimeType, FileSize: taskFile.FileSize, ContentHash: taskFile.ContentHash,
+		},
+		Width: req.TargetWidth, Height: req.TargetHeight,
+	}, nil
+}
+
+func (s *TaskImageOperationsService) findCropInput(ctx context.Context, taskID, executionID, inputPath string) (*model.TaskFile, error) {
+	files, err := s.tasks.Repository().TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("find current execution task files: %w", err)
+	}
+	for _, file := range files {
+		if file != nil && file.TaskID == taskID && file.FilePath == inputPath && strings.TrimSpace(file.OSSKey) != "" {
+			return file, nil
+		}
+	}
+	file, err := s.tasks.Repository().TaskFiles().FindExisting(ctx, taskID, inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("find input task image: %w", err)
+	}
+	if file == nil || strings.TrimSpace(file.OSSKey) == "" {
+		return nil, errors.New("input task image not found")
+	}
+	return file, nil
 }
 
 func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTaskImageRequest) (*AnalyzeTaskImageResult, error) {

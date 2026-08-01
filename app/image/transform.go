@@ -24,22 +24,22 @@ const (
 	WeChatCoverHeight = 383
 )
 
-// CropToSize center-crops the image at filePath to exactly targetW×targetH and
-// overwrites filePath atomically (temp file in the same directory → rename).
-//
-// It first crops the source to the TARGET ASPECT RATIO from the center (keeping
-// the maximum possible area, so a centered subject is retained), then resizes
-// to the exact pixel dimensions — no distortion, no letterboxing.
-//
-// Used to force WeChat article covers to the exact 900×383 (2.35:1) spec so
-// WeChat never re-crops the uploaded thumbnail (providers cannot natively emit
-// this ratio; the skill requests 21:9 as the nearest supported generation hint).
 func CropToSize(filePath string, targetW, targetH int) error {
+	return CropToSizeWithAnchor(filePath, filePath, targetW, targetH, "center")
+}
+
+// CropToSizeWithAnchor crops the largest source area matching the target ratio,
+// resizes it exactly, and atomically writes outputPath.
+func CropToSizeWithAnchor(inputPath, outputPath string, targetW, targetH int, anchor string) error {
 	if targetW <= 0 || targetH <= 0 {
 		return fmt.Errorf("invalid target dimensions %dx%d", targetW, targetH)
 	}
+	cropAnchor, err := parseCropAnchor(anchor)
+	if err != nil {
+		return err
+	}
 
-	img, err := imaging.Open(filePath)
+	img, err := imaging.Open(inputPath)
 	if err != nil {
 		return fmt.Errorf("open image: %w", err)
 	}
@@ -63,14 +63,17 @@ func CropToSize(filePath string, targetW, targetH int) error {
 		cropH = min(int(math.Round(float64(srcW)/targetRatio)), srcH)
 	}
 
-	cropped := imaging.CropCenter(img, cropW, cropH)
+	cropped := imaging.CropAnchor(img, cropW, cropH, cropAnchor)
 	resized := imaging.Resize(cropped, targetW, targetH, imaging.Lanczos)
 
 	// Atomic save: write a temp file in the same directory, then rename over the
 	// original so a crash never leaves a half-written cover.
-	dir := filepath.Dir(filePath)
-	ext := strings.ToLower(filepath.Ext(filePath))
-	tmp, err := os.CreateTemp(dir, ".cover-crop-*"+ext)
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+	ext := strings.ToLower(filepath.Ext(outputPath))
+	tmp, err := os.CreateTemp(dir, ".image-crop-*"+ext)
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -90,11 +93,36 @@ func CropToSize(filePath string, targetW, targetH int) error {
 		cleanup()
 		return fmt.Errorf("close temp file: %w", err)
 	}
-	if err := os.Rename(tmpName, filePath); err != nil {
+	if err := os.Rename(tmpName, outputPath); err != nil {
 		cleanup()
-		return fmt.Errorf("rename cropped cover: %w", err)
+		return fmt.Errorf("rename cropped image: %w", err)
 	}
 	return nil
+}
+
+func parseCropAnchor(anchor string) (imaging.Anchor, error) {
+	switch strings.ToLower(strings.TrimSpace(anchor)) {
+	case "", "center":
+		return imaging.Center, nil
+	case "top":
+		return imaging.Top, nil
+	case "bottom":
+		return imaging.Bottom, nil
+	case "left":
+		return imaging.Left, nil
+	case "right":
+		return imaging.Right, nil
+	case "top_left":
+		return imaging.TopLeft, nil
+	case "top_right":
+		return imaging.TopRight, nil
+	case "bottom_left":
+		return imaging.BottomLeft, nil
+	case "bottom_right":
+		return imaging.BottomRight, nil
+	default:
+		return imaging.Center, fmt.Errorf("unsupported crop anchor %q", anchor)
+	}
 }
 
 // encodeTransformedImage writes img to f in the format implied by ext. PNG is

@@ -130,7 +130,7 @@ model_routes:
         response_format: "url"
         features:
           quality_levels: ["auto", "low", "medium", "high"]
-          size_presets: ["auto", "1024x1024", "1536x1024", "1024x1536"]
+          size_presets: ["auto", "1:1", "3:2", "2:3", "1024x1024", "1536x1024", "1024x1536"]
           default_size: "auto"
           max_batch: 10
           max_reference_images: 16

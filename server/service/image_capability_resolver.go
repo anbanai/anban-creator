@@ -57,6 +57,7 @@ type ResolvedImageModel struct {
 	Source             string                 `json:"-"`
 	SupportsReference  bool                   `json:"-"`
 	MaxReferenceImages int                    `json:"-"`
+	SupportedSizes     []string               `json:"-"`
 	SelectionReason    string                 `json:"-"`
 }
 
@@ -96,7 +97,8 @@ func (s *ImageCapabilityResolver) ResolveImageModelForGeneration(
 		Config: runtime, Key: key, BillingSKU: strings.TrimSpace(route.BillingSKU),
 		Provider: strings.TrimSpace(api.Provider), Model: strings.TrimSpace(api.Model),
 		Source: "capability:" + key, SupportsReference: route.Features.SupportsReference,
-		MaxReferenceImages: route.Features.MaxReferenceImages, SelectionReason: "task_capability",
+		MaxReferenceImages: route.Features.MaxReferenceImages,
+		SupportedSizes:     append([]string(nil), route.Features.SizePresets...), SelectionReason: "task_capability",
 	}, nil
 }
 
