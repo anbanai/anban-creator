@@ -124,8 +124,6 @@ type DesignerGenerateRequest struct {
 	ProjectID          string   `json:"project_id"`
 	Prompt             string   `json:"prompt"`
 	CapabilityKey      string   `json:"capability_key"`
-	Provider           string   `json:"-"`
-	Model              string   `json:"-"`
 	Quality            string   `json:"quality,omitempty"`
 	Size               string   `json:"size,omitempty"`
 	N                  int      `json:"n,omitempty"`
@@ -279,57 +277,16 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if s.billingCatalog == nil || s.billingWallet == nil {
 		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
 	}
-	_, authorizedRoute, err := s.authorizeDesignerCapability(ctx, userID, req.CapabilityKey)
+	authorizedConfig, authorizedRoute, err := s.authorizeDesignerCapability(ctx, userID, req.CapabilityKey)
 	if err != nil {
 		return nil, err
 	}
-
-	provider := req.Provider
-	if provider == "" {
-		provider = s.resolveProvider()
+	if err := validateDesignerGenerateRequest(req, authorizedRoute.Features); err != nil {
+		return nil, err
 	}
-	switch provider {
-	case "google":
-		provider = "gemini"
-	case "volc", "seedream":
-		provider = "volcengine"
-	}
-
-	modelName := req.Model
-	if modelName == "" {
-		modelName = s.resolveModel(provider)
-	}
-	if modelName == "" {
-		switch provider {
-		case "openai":
-			modelName = "gpt-image-2"
-		case "gemini":
-			modelName = image.DefaultGeminiModel
-		case "volcengine":
-			modelName = image.DefaultVolcengineModel
-		}
-	}
-
-	var routeName string
-	if req.CapabilityKey != "" {
-		if cfg := s.findDesignerConfigByID(req.CapabilityKey); cfg != nil {
-			if !cfg.IsEnabled() {
-				return nil, fmt.Errorf("image capability %s is disabled", req.CapabilityKey)
-			}
-			provider = cfg.Provider
-			modelName = cfg.Model
-			if route, ok := s.designerRoute(req.CapabilityKey); ok {
-				if err := validateDesignerGenerateRequest(req, route.Features); err != nil {
-					return nil, err
-				}
-				routeName = "image_generation.capabilities." + s.designerInternalID(req.CapabilityKey)
-			} else {
-				return nil, fmt.Errorf("image capability %s route is not configured", req.CapabilityKey)
-			}
-		} else {
-			return nil, fmt.Errorf("image capability %s is not configured", req.CapabilityKey)
-		}
-	}
+	provider := authorizedConfig.Provider
+	modelName := authorizedConfig.Model
+	routeName := "image_generation.capabilities." + s.designerInternalID(req.CapabilityKey)
 	if err := s.validateDesignerReferenceOwnership(ctx, userID, req.ReferenceFileIDs, req.MaskFileID); err != nil {
 		return nil, err
 	}
@@ -484,16 +441,16 @@ func (s *DesignerService) ValidateCapabilitySizeForUser(ctx context.Context, use
 
 func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) string {
 	payload, _ := json.Marshal(struct {
-		Operation, UserID, OperationID, ProjectID, Prompt, CapabilityKey, Provider, Model string
-		Quality, Size, OutputFormat, Background, MaskFileID                               string
-		N, OutputCompression                                                              int
-		ReferenceFileIDs                                                                  []string
-		Watermark                                                                         *bool
+		Operation, UserID, OperationID, ProjectID, Prompt, CapabilityKey string
+		Quality, Size, OutputFormat, Background, MaskFileID              string
+		N, OutputCompression                                             int
+		ReferenceFileIDs                                                 []string
+		Watermark                                                        *bool
 	}{
 		Operation: "image.generate", UserID: strings.TrimSpace(userID), OperationID: strings.TrimSpace(req.OperationID),
 		ProjectID: strings.TrimSpace(req.ProjectID), Prompt: strings.TrimSpace(req.Prompt), CapabilityKey: strings.TrimSpace(req.CapabilityKey),
-		Provider: strings.TrimSpace(req.Provider), Model: strings.TrimSpace(req.Model), Quality: strings.TrimSpace(req.Quality),
-		Size: strings.TrimSpace(req.Size), N: req.N, OutputFormat: strings.TrimSpace(req.OutputFormat), OutputCompression: req.OutputCompression,
+		Quality: strings.TrimSpace(req.Quality), Size: strings.TrimSpace(req.Size), N: req.N,
+		OutputFormat: strings.TrimSpace(req.OutputFormat), OutputCompression: req.OutputCompression,
 		Background: strings.TrimSpace(req.Background), ReferenceFileIDs: req.ReferenceFileIDs, MaskFileID: strings.TrimSpace(req.MaskFileID), Watermark: req.Watermark,
 	})
 	digest := sha256.Sum256(payload)
@@ -1274,28 +1231,11 @@ func (s *DesignerService) resolveBaseURL(provider string) string {
 	return ""
 }
 
-func (s *DesignerService) resolveModel(provider string) string {
-	if p := s.findDesignerConfig(provider); p != nil {
-		return p.Model
-	}
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil {
-		return runtime.API.Model
-	}
-	return ""
-}
-
 func (s *DesignerService) resolveResponseFormat(provider string) string {
 	if p := s.findDesignerConfig(provider); p != nil {
 		return p.ResponseFormat
 	}
 	return ""
-}
-
-func (s *DesignerService) resolveProvider() string {
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil && runtime.API.Provider != "" {
-		return runtime.API.Provider
-	}
-	return "openai"
 }
 
 func (s *DesignerService) materializeDesignerReferences(ctx context.Context, userID string, referenceIDs []string, maskID string) ([]string, string, func(), error) {

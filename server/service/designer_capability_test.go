@@ -3,12 +3,19 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
 func TestDesignerRequestUsesCapabilityKey(t *testing.T) {
+	requestType := reflect.TypeOf(DesignerGenerateRequest{})
+	for _, legacyField := range []string{"Provider", "Model"} {
+		if _, exists := requestType.FieldByName(legacyField); exists {
+			t.Fatalf("DesignerGenerateRequest still exposes legacy field %s", legacyField)
+		}
+	}
 	var req DesignerGenerateRequest
 	if err := json.Unmarshal([]byte(`{"capability_key":"standard","provider_id":"legacy"}`), &req); err != nil {
 		t.Fatal(err)
@@ -80,18 +87,12 @@ func TestDesignerRouteResolvesExactCapabilityKeyOnly(t *testing.T) {
 	}
 }
 
-func TestDesignerDefaultResolversHandleMissingConfig(t *testing.T) {
+func TestDesignerRuntimeConfigResolversHandleMissingConfig(t *testing.T) {
 	svc := &DesignerService{}
 	if got := svc.resolveAPIKey("missing"); got != "" {
 		t.Fatalf("resolveAPIKey() = %q, want empty", got)
 	}
 	if got := svc.resolveBaseURL("missing"); got != "" {
 		t.Fatalf("resolveBaseURL() = %q, want empty", got)
-	}
-	if got := svc.resolveModel("missing"); got != "" {
-		t.Fatalf("resolveModel() = %q, want empty", got)
-	}
-	if got := svc.resolveProvider(); got != "openai" {
-		t.Fatalf("resolveProvider() = %q, want openai fallback", got)
 	}
 }

@@ -136,8 +136,7 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		Str("user_id", userID).
 		Str("gen_id", created.GenerationID).
 		Str("prompt_preview", truncate(req.Prompt, 80)).
-		Str("provider", req.Provider).
-		Str("model", req.Model).
+		Str("capability_key", req.CapabilityKey).
 		Str("size", req.Size).
 		Int("n", req.N).
 		Msg("designer: generation request accepted")
