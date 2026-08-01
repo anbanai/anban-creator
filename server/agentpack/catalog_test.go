@@ -195,6 +195,30 @@ func TestGenerateProducesDeterministicNativeAgentsAndCatalog(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogDigestIgnoresSkillGitMetadata(t *testing.T) {
+	root := writePackFixture(t, validFixtureManifest)
+	gitMetadata := filepath.Join(root, "skills", "demo-skill", ".git")
+	if err := os.WriteFile(gitMetadata, []byte("gitdir: /tmp/checkout-one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog first: %v", err)
+	}
+
+	if err := os.WriteFile(gitMetadata, []byte("gitdir: /tmp/checkout-two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog second: %v", err)
+	}
+
+	if first.Packs[0].Digest != second.Packs[0].Digest {
+		t.Fatalf("digest depends on Skill .git metadata: first=%s second=%s", first.Packs[0].Digest, second.Packs[0].Digest)
+	}
+}
+
 func TestPackDigestIncludesEveryReferencedSkillFile(t *testing.T) {
 	root := writePackFixture(t, validFixtureManifest)
 	scriptDir := filepath.Join(root, "skills", "demo-skill", "scripts")

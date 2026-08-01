@@ -373,7 +373,7 @@ make agent-pack-generate
 make agent-pack-check
 ```
 
-Generation copies native Claude/Codex Agent files and refreshes both `server/agentpack/catalog.generated.json` and the image-consumed `plugins/agent-pack-catalog.json`. Commit all generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), so regenerate after any of them changes.
+Generation copies native Claude/Codex Agent files and refreshes both `server/agentpack/catalog.generated.json` and the image-consumed `plugins/agent-pack-catalog.json`. Commit all generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), excluding checkout-specific `.git` metadata, so regenerate after any of them changes.
 
 Before completing a new scenario, verify every applicable item:
 

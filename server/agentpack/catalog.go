@@ -273,6 +273,12 @@ func digestManifest(pluginRoot string, manifest Manifest, manifestData []byte) (
 			if walkErr != nil {
 				return walkErr
 			}
+			if entry.Name() == ".git" {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 			if entry.Type()&fs.ModeSymlink != 0 {
 				return fmt.Errorf("referenced Skill %q contains symlink %q", skill, path)
 			}

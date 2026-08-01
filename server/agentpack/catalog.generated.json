@@ -84,7 +84,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "4f3c0f18526186836be7b7190bfad1ade1fc1dfa4a9bb3d1f46277c7d74a5ea7"
+      "digest": "bd7a96df2204c94c81a74218cfda203ccb8514812a15e84d837f77c463ef4ea2"
     },
     {
       "id": "designer",
@@ -220,7 +220,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "c1d17f68c727b519fe88eb245a61bd09ed1df73fa64fec6bb5dc9999fb24bfdd"
+      "digest": "124eb355737266a1859ef5cf6d446b112415556caf20e49d95feafa9c899e125"
     },
     {
       "id": "live-slicer",
@@ -365,7 +365,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "94b14f94359bffdb28ceed3d4091e24b172448a7509d951e3b43d84d880e9fd7"
+      "digest": "5bc665916bc6509287aede41fb7c1c4558071674382e1e17a67d4db2608bfc33"
     },
     {
       "id": "montage",
