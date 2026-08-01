@@ -158,12 +158,8 @@ export interface ReferenceUsageSummaryData {
       status: 'passed' | 'warning' | 'failed'
       summary: string
     }
-    provider?: string
-    model?: string
-    selection_reason?: string
   }>
   warnings?: string[]
-  model_fallback_reason?: string
 }
 
 // Bulk operation per-task outcome (mirrors server handler.bulkTaskResult).

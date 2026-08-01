@@ -72,7 +72,6 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
   if (!isRecord(value) || value.version !== '1.0') return false
   if (!Array.isArray(value.inputs) || !Array.isArray(value.outputs)) return false
   if (value.warnings !== undefined && !isStringArray(value.warnings)) return false
-  if (!isOptionalString(value.model_fallback_reason)) return false
 
   const validInputStatuses = new Set(['used', 'excluded', 'analysis_failed'])
   const validVerificationStatuses = new Set(['passed', 'warning', 'failed'])
@@ -107,9 +106,6 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
       && typeof output.verification.status === 'string'
       && validVerificationStatuses.has(output.verification.status)
       && typeof output.verification.summary === 'string'
-      && isOptionalString(output.provider)
-      && isOptionalString(output.model)
-      && isOptionalString(output.selection_reason)
   })
 }
 
@@ -290,18 +286,8 @@ function SummaryContent({
 }) {
   return (
     <>
-        {(summary.model_fallback_reason || summary.warnings?.length) && (
+        {summary.warnings?.length ? (
           <div className={cn('grid gap-2', !compact && 'lg:grid-cols-2')}>
-            {summary.model_fallback_reason && (
-              <Alert className="border-sky-500/25 bg-sky-500/5">
-                <Info />
-                <AlertTitle>模型调整</AlertTitle>
-                <AlertDescription className="break-words">
-                  {summary.model_fallback_reason}
-                </AlertDescription>
-              </Alert>
-            )}
-            {summary.warnings?.length ? (
               <Alert className="border-amber-500/30 bg-amber-500/5">
                 <TriangleAlert />
                 <AlertTitle>执行提醒</AlertTitle>
@@ -309,9 +295,8 @@ function SummaryContent({
                   <Warnings warnings={summary.warnings} />
                 </AlertDescription>
               </Alert>
-            ) : null}
           </div>
-        )}
+        ) : null}
 
         <div className={cn('grid min-w-0 gap-4', !compact && 'xl:grid-cols-2')}>
           <section aria-labelledby="reference-input-decisions" className="min-w-0 space-y-2">
@@ -425,11 +410,6 @@ function SummaryContent({
                       </p>
                       <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
                         <Badge variant="outline">生成 {output.generation_attempts} 次</Badge>
-                        {output.selection_reason && (
-                          <span className="min-w-0 break-all rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                            {output.selection_reason}
-                          </span>
-                        )}
                       </div>
                     </article>
                   )

@@ -19,7 +19,7 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-const validSummary: ReferenceUsageSummaryData = {
+const validSummary = {
   version: '1.0',
   inputs: [{
     attachment_index: 1,
@@ -41,7 +41,7 @@ const validSummary: ReferenceUsageSummaryData = {
   }],
   warnings: ['未使用侧面图，因为与正面包装版本冲突'],
   model_fallback_reason: '首选模型参考图上限不足',
-}
+} as ReferenceUsageSummaryData
 
 const seednoteTask: Task = {
   id: 'task-1',
@@ -103,8 +103,9 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('核验通过')).toBeInTheDocument()
     expect(screen.getByText('产品与文字核验通过')).toBeInTheDocument()
     expect(screen.queryByText('openai / professional')).not.toBeInTheDocument()
-    expect(screen.getByText('reference_compatible_fallback')).toBeInTheDocument()
-    expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
+    expect(screen.queryByText('reference_compatible_fallback')).not.toBeInTheDocument()
+    expect(screen.queryByText('首选模型参考图上限不足')).not.toBeInTheDocument()
+    expect(screen.queryByText('模型调整')).not.toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
     expect(api.tasks.downloadFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
 
@@ -213,8 +214,8 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('核验通过')).toBeInTheDocument()
     expect(screen.getByText('产品与文字核验通过')).toBeInTheDocument()
     expect(screen.queryByText('openai / professional')).not.toBeInTheDocument()
-    expect(screen.getByText('reference_compatible_fallback')).toBeInTheDocument()
-    expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
+    expect(screen.queryByText('reference_compatible_fallback')).not.toBeInTheDocument()
+    expect(screen.queryByText('首选模型参考图上限不足')).not.toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
     expect(screen.getAllByText('1 张')).toHaveLength(2)
 
