@@ -978,6 +978,14 @@ func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
 	}
 }
 
+func TestCreateCurrentExecutionRejectsRuntimeProfileOutsideFrozenPack(t *testing.T) {
+	svc, _, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformMontage, Image: "registry/montage@sha256:test"}
+	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "does not match frozen Agent Pack profile") {
+		t.Fatalf("create error = %v, want frozen runtime profile rejection", err)
+	}
+}
+
 func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
 	profile := testAgentProfiles()[2]
@@ -1045,7 +1053,10 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
-		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:parent",
+		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:parent",
+	}
+	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
+		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, parent); err != nil {
 		t.Fatal(err)
@@ -1117,7 +1128,10 @@ func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:new"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
-		RuntimeProfile: model.PlatformMontage, RuntimeImage: "registry/montage@sha256:original",
+		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:original",
+	}
+	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
+		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
 		t.Fatal(err)

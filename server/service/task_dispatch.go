@@ -389,12 +389,14 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				return err
 			}
 		}
+		if execution.RuntimeProfile != runtime.Profile {
+			return fmt.Errorf("resolved runtime profile %q does not match frozen Agent Pack profile %q", runtime.Profile, execution.RuntimeProfile)
+		}
 		execution.ID = uuid.NewString()
 		execution.TaskID = task.ID
 		execution.Attempt = attempt
 		execution.ParentExecutionID = parentExecutionID
 		execution.ResumeSessionID = resumeSessionID
-		execution.RuntimeProfile = runtime.Profile
 		execution.RuntimeImage = runtime.Image
 		execution.Target = target
 		execution.Status = model.TaskExecutionCreated

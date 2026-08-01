@@ -24,3 +24,27 @@ func TestApplyAgentPackIdentityRejectsUnknownManagedTaskType(t *testing.T) {
 		t.Fatal("unknown task type accepted")
 	}
 }
+
+func TestInheritAgentPackIdentityPreservesRuntimeProfile(t *testing.T) {
+	source := &model.TaskExecution{
+		AgentPackID: "article", AgentPackVersion: "1.0.0", AgentPackDigest: "digest",
+		RuntimeAdapter: "standard", RuntimeProfile: "article",
+	}
+	target := &model.TaskExecution{}
+	if !inheritAgentPackIdentity(target, source) {
+		t.Fatal("expected frozen Agent Pack identity to be inherited")
+	}
+	if target.RuntimeProfile != source.RuntimeProfile {
+		t.Fatalf("RuntimeProfile = %q, want %q", target.RuntimeProfile, source.RuntimeProfile)
+	}
+}
+
+func TestInheritAgentPackIdentityRejectsIncompleteRuntimeIdentity(t *testing.T) {
+	source := &model.TaskExecution{
+		AgentPackID: "article", AgentPackVersion: "1.0.0", AgentPackDigest: "digest",
+		RuntimeAdapter: "standard",
+	}
+	if inheritAgentPackIdentity(&model.TaskExecution{}, source) {
+		t.Fatal("incomplete frozen Agent Pack identity was inherited")
+	}
+}

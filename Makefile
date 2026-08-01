@@ -90,7 +90,7 @@ agent-pack-check:
 	@go run ./server/cmd/agent-pack check
 
 # Run all CI checks (format, vet, test, lint)
-ci: fmt vet test lint
+ci: agent-pack-check fmt vet test lint
 
 # Run tests with coverage report
 coverage:

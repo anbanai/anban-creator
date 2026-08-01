@@ -41,7 +41,7 @@ func Scaffold(pluginRoot string, options ScaffoldOptions) error {
 
 	manifest := fmt.Sprintf("id: %s\nversion: 1.0.0\nkind: %s\ndisplay_name: %s\ndescription: %s Agent Pack\nagent:\n  name: %s\n  claude_source: agent.claude.md\n  codex_source: agent.codex.toml\n  skills: []\n  max_turns: 60\n", options.ID, options.Kind, options.ID, options.ID, options.ID)
 	if options.Kind == KindManaged {
-		manifest += fmt.Sprintf("bindings:\n  task_types: [%s]\nruntime:\n  profile: %s\n  adapter: %s\nsurfaces: [plugin]\n", options.TaskType, options.RuntimeProfile, options.Adapter)
+		manifest += fmt.Sprintf("bindings:\n  task_types: [%s]\nruntime:\n  profile: %s\n  adapter: %s\n  max_turns: 40\nsurfaces: [plugin]\n", options.TaskType, options.RuntimeProfile, options.Adapter)
 	} else {
 		manifest += "bindings: {}\nruntime: {}\nsurfaces: [plugin]\n"
 	}

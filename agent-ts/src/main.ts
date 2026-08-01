@@ -27,7 +27,7 @@ export async function runJob(args: string[], stdout: NodeJS.WritableStream = pro
     const workloadToken = await readWorkloadToken(config.workloadTokenFile);
     const data = await bootstrap(config, workloadToken, controller.signal);
     await materializeBootstrapFiles(config.workspace, data.files, controller.signal);
-    await prepareWorkspace(config.workspace, data.task_type);
+    await prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
     const reporter = new Reporter(config, data.execution_token, data.task_id);
     stopHeartbeat = startHeartbeat(reporter, stderr, controller.signal);
     let result: ExecutionResult;

@@ -30,7 +30,8 @@
       },
       "runtime": {
         "profile": "article",
-        "adapter": "standard"
+        "adapter": "standard",
+        "max_turns": 60
       },
       "surfaces": [
         "plugin",
@@ -83,7 +84,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "af7a846c1057f98478dcd93f3b28b62314fa82afd16943e129c41f47a425bc4d"
+      "digest": "4f3c0f18526186836be7b7190bfad1ade1fc1dfa4a9bb3d1f46277c7d74a5ea7"
     },
     {
       "id": "designer",
@@ -167,7 +168,8 @@
       },
       "runtime": {
         "profile": "article",
-        "adapter": "standard"
+        "adapter": "standard",
+        "max_turns": 90
       },
       "surfaces": [
         "plugin",
@@ -218,7 +220,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "9b174b0eed308f367da7b53d3cf07af5e52bcc80cbd387cd0844833254d5d45d"
+      "digest": "c1d17f68c727b519fe88eb245a61bd09ed1df73fa64fec6bb5dc9999fb24bfdd"
     },
     {
       "id": "live-slicer",
@@ -241,7 +243,8 @@
       },
       "runtime": {
         "profile": "montage",
-        "adapter": "standard"
+        "adapter": "standard",
+        "max_turns": 40
       },
       "surfaces": [
         "plugin"
@@ -285,7 +288,7 @@
         }
       ],
       "ui": {},
-      "digest": "02ca7174ad5f7ab8cad25717c11db0e31761a732f87a56b602c09b571d5e5aaa"
+      "digest": "53653446f738b69507e247e81b511810c83aedfe3f1a116995bfc16e1fec664b"
     },
     {
       "id": "moments",
@@ -311,7 +314,8 @@
       },
       "runtime": {
         "profile": "article",
-        "adapter": "standard"
+        "adapter": "standard",
+        "max_turns": 25
       },
       "surfaces": [
         "plugin",
@@ -361,7 +365,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "bc6ea0d7f03c0ebfaeae20c9204661669b72b9db139609b7143e13ac37ff96c8"
+      "digest": "94b14f94359bffdb28ceed3d4091e24b172448a7509d951e3b43d84d880e9fd7"
     },
     {
       "id": "montage",
@@ -386,7 +390,8 @@
       },
       "runtime": {
         "profile": "montage",
-        "adapter": "openmontage"
+        "adapter": "openmontage",
+        "max_turns": 40
       },
       "surfaces": [
         "plugin",
@@ -438,7 +443,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "5a9db15884dbe9f53f03bb23f079a8816d55f89c61e2ad433660f9bc0c44d8f4"
+      "digest": "3a03125b3627e46536304f2ecb1b37e01b9983db0fd72e049239338a54d55417"
     },
     {
       "id": "seednote",
@@ -468,7 +473,8 @@
       },
       "runtime": {
         "profile": "seednote",
-        "adapter": "standard"
+        "adapter": "standard",
+        "max_turns": 50
       },
       "surfaces": [
         "plugin",
@@ -522,7 +528,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "59f3f77cb27db98fc5c32dd462eb47bffc94a4589c0efbef3d727110afb0a654"
+      "digest": "7b53cb3a4d03b54cc5e250553d43b5430f836cb2e8c8270839a70c0559c141df"
     }
   ]
 }

@@ -230,7 +230,9 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 		replacement.ID = uuid.NewString()
 		replacement.TaskID = task.ID
 		replacement.Attempt = current.Attempt + 1
-		replacement.RuntimeProfile = current.RuntimeProfile
+		if replacement.RuntimeProfile != current.RuntimeProfile {
+			return fmt.Errorf("replacement runtime profile %q does not match frozen profile %q", replacement.RuntimeProfile, current.RuntimeProfile)
+		}
 		replacement.RuntimeImage = current.RuntimeImage
 		replacement.Target = target
 		replacement.Status = model.TaskExecutionCreated

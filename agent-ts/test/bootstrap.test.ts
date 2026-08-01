@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { executionProfileFingerprint, validateBootstrapResponse, type BootstrapResponse } from "../src/bootstrap.js";
+import { readFile } from "node:fs/promises";
+
+import { executionProfileFingerprint, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -31,6 +33,11 @@ const validResponse = (): BootstrapResponse => {
     execution_token: tokenFor({ execution_id: "execution-1", task_id: "task-1", project_id: "project-1" }),
     task_id: "task-1",
     task_type: "article",
+    agent_pack_id: "article",
+    agent_pack_version: "1.0.0",
+    agent_pack_digest: "a".repeat(64),
+    runtime_profile: "article",
+    runtime_adapter: "standard",
     project_id: "project-1",
     prompt: "Write an article",
     execution_profile: {
@@ -54,6 +61,29 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
+  test("accepts and validates the frozen Agent Pack identity against the generated Catalog", async () => {
+    const response = validResponse();
+    const catalog = JSON.parse(await readFile(new URL("../../plugins/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;
+    const article = catalog.packs.find((pack) => pack.id === "article");
+    if (!article) throw new Error("article Agent Pack is missing");
+    response.agent_pack_version = article.version;
+    response.agent_pack_digest = article.digest;
+
+    expect(validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog).id).toBe("article");
+  });
+
+  test("rejects a frozen runtime profile that differs from the generated Catalog", () => {
+    const response = validResponse();
+    response.runtime_profile = "montage";
+    const catalog: AgentPackCatalog = { packs: [{
+      id: "article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "article" }, bindings: { task_types: ["article"] },
+      runtime: { profile: "article", adapter: "standard" },
+    }] };
+
+    expect(() => validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog)).toThrow("Agent Pack identity");
+  });
+
   test("accepts all Claude profile env values without rewriting them", () => {
     const response = validResponse();
     expect(validateBootstrapResponse("execution-1", response).execution_profile.envs).toEqual(response.execution_profile.envs);

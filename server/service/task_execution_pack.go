@@ -24,12 +24,13 @@ func applyAgentPackIdentity(execution *model.TaskExecution, taskType string) err
 }
 
 func inheritAgentPackIdentity(target, source *model.TaskExecution) bool {
-	if target == nil || source == nil || source.AgentPackID == "" || source.AgentPackVersion == "" || source.AgentPackDigest == "" {
+	if target == nil || source == nil || source.AgentPackID == "" || source.AgentPackVersion == "" || source.AgentPackDigest == "" || source.RuntimeAdapter == "" || source.RuntimeProfile == "" {
 		return false
 	}
 	target.AgentPackID = source.AgentPackID
 	target.AgentPackVersion = source.AgentPackVersion
 	target.AgentPackDigest = source.AgentPackDigest
 	target.RuntimeAdapter = source.RuntimeAdapter
+	target.RuntimeProfile = source.RuntimeProfile
 	return true
 }

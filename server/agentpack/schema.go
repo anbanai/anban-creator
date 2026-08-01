@@ -32,8 +32,8 @@ func validateExtensionSchemaDocument(raw json.RawMessage, path string, allowComp
 	if schema.Type != "object" {
 		return fmt.Errorf("%s root type must be \"object\"", path)
 	}
-	if !allowComplex && (schema.AdditionalProperties == nil || *schema.AdditionalProperties) {
-		return fmt.Errorf("%s additionalProperties must be false for the generic form", path)
+	if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+		return fmt.Errorf("%s additionalProperties must be false", path)
 	}
 	return validateSchemaContract(raw, path, 0, allowComplex, true)
 }
@@ -66,6 +66,9 @@ func validateSchemaContract(raw json.RawMessage, path string, depth int, allowCo
 	}
 	switch schema.Type {
 	case "object":
+		if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+			return fmt.Errorf("%s additionalProperties must be false", path)
+		}
 		requiredSet := make(map[string]bool, len(schema.Required))
 		for _, required := range schema.Required {
 			if _, ok := schema.Properties[required]; !ok {

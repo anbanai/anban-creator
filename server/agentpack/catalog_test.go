@@ -28,6 +28,7 @@ bindings:
 runtime:
   profile: article
   adapter: standard
+  max_turns: 40
 surfaces: [project, task, plan]
 billing_operations:
   demo-task: task.demo
@@ -302,6 +303,21 @@ func TestCheckRepositoryDetectsGeneratedDrift(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryDetectsRuntimeCatalogDrift(t *testing.T) {
+	root := writePackFixture(t, validFixtureManifest)
+	catalogPath := filepath.Join(t.TempDir(), "catalog.generated.json")
+	if _, err := GenerateRepository(root, catalogPath); err != nil {
+		t.Fatalf("GenerateRepository: %v", err)
+	}
+	runtimeCatalog := filepath.Join(root, "agent-pack-catalog.json")
+	if err := os.WriteFile(runtimeCatalog, []byte(`{"packs":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckRepository(root, catalogPath); err == nil || !strings.Contains(err.Error(), runtimeCatalog) {
+		t.Fatalf("CheckRepository error = %v, want runtime Catalog drift", err)
+	}
+}
+
 func TestScaffoldCreatesMinimalManagedPackWithoutOverwriting(t *testing.T) {
 	root := t.TempDir()
 	options := ScaffoldOptions{
@@ -442,12 +458,40 @@ func TestLoadCatalogAllowsNestedExtensionSchemaWithCustomRenderer(t *testing.T) 
 	manifest := strings.Replace(validFixtureManifest, "runtime:\n", "schemas:\n  task_input: task-input.schema.json\nui:\n  renderer: custom:demo-pack\nruntime:\n", 1)
 	root := writePackFixture(t, manifest)
 	path := filepath.Join(root, "packs", "demo-pack", "task-input.schema.json")
-	schema := `{"type":"object","properties":{"filters":{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string"}}}}}}`
+	schema := `{"type":"object","additionalProperties":false,"properties":{"filters":{"type":"object","additionalProperties":false,"properties":{"tags":{"type":"array","items":{"type":"string"}}}}}}`
 	if err := os.WriteFile(path, []byte(schema), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadCatalog(root); err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsOpenCustomRendererSchema(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "runtime:\n", "schemas:\n  task_input: task-input.schema.json\nui:\n  renderer: custom:demo-pack\nruntime:\n", 1)
+	root := writePackFixture(t, manifest)
+	path := filepath.Join(root, "packs", "demo-pack", "task-input.schema.json")
+	if err := os.WriteFile(path, []byte(`{"type":"object","properties":{"filters":{"type":"object","properties":{}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "additionalProperties must be false") {
+		t.Fatalf("LoadCatalog error = %v, want closed custom schema rejection", err)
+	}
+}
+
+func TestLoadCatalogRejectsSymlinkedSourceParent(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "agent.claude.md", "sources/agent.claude.md", 1)
+	root := writePackFixture(t, manifest)
+	packDir := filepath.Join(root, "packs", "demo-pack")
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "agent.claude.md"), []byte("---\nname: demo\ndescription: Demo managed workflow\ntools: []\nmodel: inherit\nmaxTurns: 60\n---\nPrompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(packDir, "sources")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("LoadCatalog error = %v, want symlinked parent rejection", err)
 	}
 }
 
@@ -469,6 +513,7 @@ bindings:
 runtime:
   profile: article
   adapter: standard
+  max_turns: 40
 surfaces: [project, task, plan]
 billing_operations:
   demo-task: task.demo

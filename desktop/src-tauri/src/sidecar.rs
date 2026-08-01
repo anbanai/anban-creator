@@ -180,6 +180,8 @@ fn agent_args(
         cfg.agent_pack_digest.clone(),
         "--runtime-adapter".to_string(),
         cfg.runtime_adapter.clone(),
+        "--runtime-profile".to_string(),
+        cfg.runtime_profile.clone(),
         "--topic".to_string(),
         cfg.topic.clone(),
         "--max-turns".to_string(),
@@ -226,6 +228,7 @@ mod tests {
             agent_pack_id: "article".to_string(),
             agent_pack_version: "1.0.0".to_string(),
             agent_pack_digest: "a".repeat(64),
+            runtime_profile: "article".to_string(),
             runtime_adapter: "standard".to_string(),
             topic: "topic".to_string(),
             agent_flag: "anban:article".to_string(),
@@ -249,6 +252,7 @@ mod tests {
         assert_eq!(args.first().map(String::as_str), Some("run"));
         assert!(args.windows(2).any(|pair| pair == ["--agent-pack-id", "article"]));
         assert!(args.windows(2).any(|pair| pair == ["--runtime-adapter", "standard"]));
+        assert!(args.windows(2).any(|pair| pair == ["--runtime-profile", "article"]));
         assert!(args.iter().any(|arg| arg == "--article-with-cover=false"));
         assert!(args
             .iter()

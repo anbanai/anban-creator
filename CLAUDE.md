@@ -339,10 +339,11 @@ The command creates `plugins/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and
 Keep `agent-pack.yaml` declarative and narrow:
 
 - `id`, `version`, `kind`, `display_name`, `description`: stable Pack identity and presentation.
-- `agent`: native source files, Skill dependencies, Agent name, and default `max_turns`.
+- `agent`: native source files, Skill dependencies, Agent name, and native-host `max_turns`.
 - `bindings.project_platforms` / `bindings.task_types`: explicit links to existing business identifiers. A plugin-only Pack has no managed bindings.
 - `runtime.profile`: the dependency image class. Reuse `article`, `seednote`, or `montage` unless the scenario has genuinely different system dependencies.
 - `runtime.adapter`: use `standard` by default. Use `openmontage` only when execution requires the OpenMontage workspace contract; do not create an adapter for ordinary workflow differences.
+- `runtime.max_turns`: the managed Server execution default. Keep it separate from `agent.max_turns`, because native interactive Agents and one-shot managed jobs have different operational budgets. `claude.max_turns` remains an optional operator override keyed by task type or Pack ID.
 - `surfaces`: any subset of `plugin`, `project`, `task`, and `plan`. The list must match implemented Server and Studio capabilities; for example, do not advertise `plan` when plan creation rejects that task type.
 - `billing_operations`: map every managed task type exposed through `project`, `task`, or `plan` to its billing operation. A runtime-only Pack may omit billing only while it remains plugin-only. Never infer billing from Pack ID or runtime profile.
 - `progress`, `artifacts`, and `features`: observable delivery contracts, not workflow orchestration.
@@ -350,7 +351,7 @@ Keep `agent-pack.yaml` declarative and narrow:
 - `schemas.ui` / `schemas.output`: optional declarative UI metadata and output validation contracts when the scenario needs them.
 - `ui.renderer`: omit it for the generic Schema form. Use `custom:<key>` only to declare that an existing typed business form owns the interaction; register that form key explicitly in `studio/src/lib/agent-pack-renderers.ts`. This registry is a guard, not a dynamic React component loader.
 
-The generic Studio form intentionally supports a limited Schema subset: a root object with `additionalProperties: false` whose properties are strings (including `format: textarea`), enums, booleans, numbers, or integers. Every node must declare a supported `type`; unknown Schema keywords fail Catalog loading. Declared defaults are initialized before submit, and required booleans default to `false` when no explicit default exists. Nested objects and arrays require a registered existing typed form. Prefer the generic form for ordinary scenario extensions. Preserve existing typed forms for current first-class scenarios; `agent_config` and `agent_input` only carry new scenario-specific extension data.
+The generic Studio form intentionally supports a limited Schema subset: a root object with `additionalProperties: false` whose properties are strings (including `format: textarea`), enums, booleans, numbers, or integers. Every object, including objects owned by a custom renderer, must declare `additionalProperties: false`. Every node must declare a supported `type`; unknown Schema keywords fail Catalog loading. Declared defaults are initialized before submit, and required booleans default to `false` when no explicit default exists. Nested objects and arrays require a registered existing typed form. Prefer the generic form for ordinary scenario extensions. Preserve existing typed forms for current first-class scenarios; `agent_config` and `agent_input` only carry new scenario-specific extension data.
 
 Agents read frozen scenario extensions through existing MCP contracts: call `get_task` for `agent_input`, and call task-aware `get_project_profile` for `agent_config`. Project configuration is copied into `ProjectSnapshot` when a task is created, so later project edits cannot change an in-flight or historical task.
 
@@ -372,7 +373,7 @@ make agent-pack-generate
 make agent-pack-check
 ```
 
-Generation copies native Claude/Codex Agent files and refreshes `server/agentpack/catalog.generated.json`. Commit generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), so regenerate after any of them changes.
+Generation copies native Claude/Codex Agent files and refreshes both `server/agentpack/catalog.generated.json` and the image-consumed `plugins/agent-pack-catalog.json`. Commit all generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), so regenerate after any of them changes.
 
 Before completing a new scenario, verify every applicable item:
 

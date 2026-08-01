@@ -178,7 +178,7 @@ export function buildQueryOptions(
   reporter: Pick<Reporter, "progress"> = { progress: async () => {} },
   controller = new AbortController(),
 ): Options {
-  const cwd = data.task_type === "montage" ? `${workspace}/openmontage` : workspace;
+  const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   return {
     abortController: controller,
     cwd,

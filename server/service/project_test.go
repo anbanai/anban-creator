@@ -437,6 +437,21 @@ func TestProjectServiceValidatesMontageDefaults(t *testing.T) {
 	}
 }
 
+func TestProjectServiceRevalidatesExistingAgentConfigWhenPlatformChanges(t *testing.T) {
+	svc, repo, ctx, userID := setupProjectServiceTest(t)
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Name: "configured", Platform: model.PlatformArticle,
+		Status: model.ProjectStatusActive,
+	}
+	project.SetAgentConfig(map[string]any{"legacy": true})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, userID, project.ID, &model.Project{Platform: model.PlatformSeednote}); err == nil || !errors.Is(err, ErrInvalidAgentConfig) {
+		t.Fatalf("Update error = %v, want ErrInvalidAgentConfig", err)
+	}
+}
+
 func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)

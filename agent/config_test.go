@@ -17,7 +17,7 @@ func TestParseConfigValidatesFrozenAgentPackIdentity(t *testing.T) {
 		t.Fatal("article Agent Pack is missing")
 	}
 	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
-		if cfg.AgentPackID != pack.ID || cfg.AgentPackVersion != pack.Version || cfg.AgentPackDigest != pack.Digest || cfg.RuntimeAdapter != pack.Runtime.Adapter {
+		if cfg.AgentPackID != pack.ID || cfg.AgentPackVersion != pack.Version || cfg.AgentPackDigest != pack.Digest || cfg.RuntimeAdapter != pack.Runtime.Adapter || cfg.RuntimeProfile != pack.Runtime.Profile {
 			t.Fatalf("Agent Pack identity = %#v, want %#v", cfg, pack)
 		}
 		return nil
@@ -25,7 +25,7 @@ func TestParseConfigValidatesFrozenAgentPackIdentity(t *testing.T) {
 		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
 		"--task-id", "task-1", "--task-type", "article",
 		"--agent-pack-id", pack.ID, "--agent-pack-version", pack.Version,
-		"--agent-pack-digest", pack.Digest, "--runtime-adapter", pack.Runtime.Adapter,
+		"--agent-pack-digest", pack.Digest, "--runtime-adapter", pack.Runtime.Adapter, "--runtime-profile", pack.Runtime.Profile,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestParseConfigValidatesFrozenAgentPackIdentity(t *testing.T) {
 		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
 		"--task-id", "task-1", "--task-type", "article",
 		"--agent-pack-id", pack.ID, "--agent-pack-version", pack.Version,
-		"--agent-pack-digest", strings.Repeat("0", 64), "--runtime-adapter", pack.Runtime.Adapter,
+		"--agent-pack-digest", strings.Repeat("0", 64), "--runtime-adapter", pack.Runtime.Adapter, "--runtime-profile", pack.Runtime.Profile,
 	})
 	if err == nil || !strings.Contains(err.Error(), "Agent Pack identity") {
 		t.Fatalf("error = %v, want frozen Agent Pack identity rejection", err)

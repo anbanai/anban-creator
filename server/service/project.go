@@ -216,6 +216,17 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 			return nil, err
 		}
 	}
+	if ch.AgentConfigSet || (ch.Platform != "" && ch.Platform != existing.Platform) {
+		candidate := *existing
+		candidate.Platform = effectivePlatform
+		candidate.AgentConfigSet = true
+		if ch.AgentConfigSet {
+			candidate.AgentConfig = ch.AgentConfig
+		}
+		if err := validateProjectAgentConfig(&candidate); err != nil {
+			return nil, err
+		}
+	}
 
 	// Apply updatable fields from ch to existing (only non-empty values).
 	if ch.Name != "" {
@@ -272,11 +283,6 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 		existing.MontageDefaults = ch.MontageDefaults
 	}
 	if ch.AgentConfigSet {
-		candidate := *ch
-		candidate.Platform = existing.Platform
-		if err := validateProjectAgentConfig(&candidate); err != nil {
-			return nil, err
-		}
 		existing.AgentConfig = ch.AgentConfig
 	}
 	// Merge Config: unconditionally update AppID to support credential clearing.

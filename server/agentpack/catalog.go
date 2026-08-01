@@ -141,6 +141,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if strings.TrimSpace(manifest.Runtime.Profile) == "" {
 			return fmt.Errorf("managed Pack requires runtime.profile")
 		}
+		if manifest.Runtime.MaxTurns <= 0 {
+			return fmt.Errorf("managed Pack requires positive runtime.max_turns")
+		}
 		if manifest.Runtime.Adapter != AdapterStandard && manifest.Runtime.Adapter != AdapterOpenMontage {
 			return fmt.Errorf("unsupported runtime adapter %q", manifest.Runtime.Adapter)
 		}
@@ -231,6 +234,17 @@ func securePackFile(packDir, relative string) (string, error) {
 		return "", fmt.Errorf("path escapes Pack directory")
 	}
 	path := filepath.Join(packDir, clean)
+	current := packDir
+	for _, component := range strings.Split(clean, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return "", fmt.Errorf("path contains symlink component")
+		}
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err

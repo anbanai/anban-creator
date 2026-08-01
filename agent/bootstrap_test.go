@@ -397,6 +397,7 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"wrong Agent Pack version", func(r *BootstrapResponse) { r.AgentPackVersion = "9.9.9" }},
 		{"wrong Agent Pack digest", func(r *BootstrapResponse) { r.AgentPackDigest = strings.Repeat("0", 64) }},
 		{"wrong runtime adapter", func(r *BootstrapResponse) { r.RuntimeAdapter = agentpack.AdapterOpenMontage }},
+		{"wrong runtime profile", func(r *BootstrapResponse) { r.RuntimeProfile = "montage" }},
 		{"wrong auto memory", func(r *BootstrapResponse) { r.AutoMemoryDirectory = ".claude/other" }},
 		{"invalid resume session", func(r *BootstrapResponse) {
 			r.ResumeSessionID = " invalid-session"
@@ -508,6 +509,7 @@ func setExpectedAgentPackIdentity(t *testing.T, response *BootstrapResponse) {
 	response.AgentPackVersion = pack.Version
 	response.AgentPackDigest = pack.Digest
 	response.RuntimeAdapter = pack.Runtime.Adapter
+	response.RuntimeProfile = pack.Runtime.Profile
 }
 
 func testBootstrapResponseData(t *testing.T, taskType string, data map[string]any) map[string]any {
@@ -520,6 +522,7 @@ func testBootstrapResponseData(t *testing.T, taskType string, data map[string]an
 	data["agent_pack_version"] = pack.Version
 	data["agent_pack_digest"] = pack.Digest
 	data["runtime_adapter"] = pack.Runtime.Adapter
+	data["runtime_profile"] = pack.Runtime.Profile
 	return data
 }
 

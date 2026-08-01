@@ -21,6 +21,7 @@ type Config struct {
 	AgentPackVersion         string
 	AgentPackDigest          string
 	RuntimeAdapter           string
+	RuntimeProfile           string
 	Topic                    string
 	Goal                     string
 	Workspace                string
@@ -56,6 +57,7 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "agent-pack-version", Usage: "frozen Agent Pack version", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "agent-pack-digest", Usage: "frozen Agent Pack digest", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "runtime-adapter", Usage: "frozen runtime adapter", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "runtime-profile", Usage: "frozen runtime profile", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "topic", Usage: "task topic/prompt", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "goal", Usage: "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
@@ -84,6 +86,7 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		AgentPackVersion:         cmd.String("agent-pack-version"),
 		AgentPackDigest:          cmd.String("agent-pack-digest"),
 		RuntimeAdapter:           cmd.String("runtime-adapter"),
+		RuntimeProfile:           cmd.String("runtime-profile"),
 		Topic:                    cmd.String("topic"),
 		Goal:                     cmd.String("goal"),
 		Workspace:                cmd.String("workspace"),
@@ -118,9 +121,9 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 	if !ok {
 		return nil, fmt.Errorf("task-type %q has no Agent Pack", cfg.TaskType)
 	}
-	providedPackIdentity := cfg.AgentPackID != "" || cfg.AgentPackVersion != "" || cfg.AgentPackDigest != "" || cfg.RuntimeAdapter != ""
+	providedPackIdentity := cfg.AgentPackID != "" || cfg.AgentPackVersion != "" || cfg.AgentPackDigest != "" || cfg.RuntimeAdapter != "" || cfg.RuntimeProfile != ""
 	if providedPackIdentity {
-		if cfg.AgentPackID != pack.ID || cfg.AgentPackVersion != pack.Version || cfg.AgentPackDigest != pack.Digest || cfg.RuntimeAdapter != pack.Runtime.Adapter {
+		if cfg.AgentPackID != pack.ID || cfg.AgentPackVersion != pack.Version || cfg.AgentPackDigest != pack.Digest || cfg.RuntimeAdapter != pack.Runtime.Adapter || cfg.RuntimeProfile != pack.Runtime.Profile {
 			return nil, fmt.Errorf("frozen Agent Pack identity does not match runtime Catalog")
 		}
 	} else {
@@ -128,6 +131,7 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		cfg.AgentPackVersion = pack.Version
 		cfg.AgentPackDigest = pack.Digest
 		cfg.RuntimeAdapter = pack.Runtime.Adapter
+		cfg.RuntimeProfile = pack.Runtime.Profile
 	}
 	if cfg.Workspace == "" {
 		return nil, fmt.Errorf("workspace is required")

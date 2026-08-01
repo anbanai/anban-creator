@@ -382,7 +382,7 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 		return fmt.Errorf("bootstrap task type is invalid")
 	}
 	pack, _ := agentpack.Default().ForTaskType(response.TaskType)
-	if response.AgentPackID != pack.ID || response.AgentPackVersion != pack.Version || response.AgentPackDigest != pack.Digest || response.RuntimeAdapter != pack.Runtime.Adapter {
+	if response.AgentPackID != pack.ID || response.AgentPackVersion != pack.Version || response.AgentPackDigest != pack.Digest || response.RuntimeAdapter != pack.Runtime.Adapter || response.RuntimeProfile != pack.Runtime.Profile {
 		return fmt.Errorf("bootstrap Agent Pack identity does not match runtime Catalog")
 	}
 	if response.ArtifactTransport.Mode != ArtifactUploadDirect && response.ArtifactTransport.Mode != ArtifactUploadStream {

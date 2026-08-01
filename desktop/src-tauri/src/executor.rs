@@ -27,6 +27,7 @@ pub struct LocalExecutionConfig {
     pub agent_pack_id: String,
     pub agent_pack_version: String,
     pub agent_pack_digest: String,
+    pub runtime_profile: String,
     pub runtime_adapter: String,
     pub topic: String,
     pub agent_flag: String,

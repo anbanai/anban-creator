@@ -233,10 +233,10 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 	}
 
 	execution := &model.TaskExecution{
-		AgentPackID: "article", AgentPackVersion: "9.9.9", AgentPackDigest: strings.Repeat("a", 64), RuntimeAdapter: "standard",
+		AgentPackID: "article", AgentPackVersion: "9.9.9", AgentPackDigest: strings.Repeat("a", 64), RuntimeAdapter: "standard", RuntimeProfile: "article",
 	}
 	cfg := svc.buildLocalExecutionConfig(task, execution)
-	if cfg.AgentPackID != "article" || cfg.AgentPackVersion != "9.9.9" || cfg.AgentPackDigest != strings.Repeat("a", 64) || cfg.RuntimeAdapter != "standard" {
+	if cfg.AgentPackID != "article" || cfg.AgentPackVersion != "9.9.9" || cfg.AgentPackDigest != strings.Repeat("a", 64) || cfg.RuntimeAdapter != "standard" || cfg.RuntimeProfile != "article" {
 		t.Fatalf("local Agent Pack identity = %#v", cfg)
 	}
 	if cfg.ArticleWithCover {

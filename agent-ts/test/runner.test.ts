@@ -6,6 +6,11 @@ const { buildExecutionEnvironment, terminalModelUsage, validateManagedInit } = r
 
 const validBootstrap = () => ({
   task_type: "article",
+  agent_pack_id: "article",
+  agent_pack_version: "1.0.0",
+  agent_pack_digest: "a".repeat(64),
+  runtime_profile: "article",
+  runtime_adapter: "standard",
   project_id: "project-1",
   max_turns: 10,
   agent_flag: "anban:article",
@@ -78,6 +83,12 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("uses the frozen runtime adapter for the working directory", () => {
+    const data = { ...validBootstrap(), task_type: "montage", runtime_adapter: "standard" };
+    expect(runner.buildQueryOptions(data, "/workspace").cwd).toBe("/workspace");
+    expect(runner.buildQueryOptions({ ...data, runtime_adapter: "openmontage" }, "/workspace").cwd).toBe("/workspace/openmontage");
+  });
+
   test("gives the managed runtime unrestricted tool access", () => {
     const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
 

@@ -16,7 +16,20 @@ func Generate(pluginRoot, outputRoot string) (GenerateResult, error) {
 }
 
 func GenerateRepository(pluginRoot, catalogPath string) (GenerateResult, error) {
-	return generateTo(pluginRoot, filepath.Join(pluginRoot, "agents"), catalogPath)
+	result, err := generateTo(pluginRoot, filepath.Join(pluginRoot, "agents"), catalogPath)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	catalogJSON, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return GenerateResult{}, fmt.Errorf("read generated Catalog: %w", err)
+	}
+	changed, err := writeFileIfChanged(filepath.Join(pluginRoot, "agent-pack-catalog.json"), catalogJSON)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	result.Changed = result.Changed || changed
+	return result, nil
 }
 
 func generateTo(pluginRoot, agentsDir, catalogPath string) (GenerateResult, error) {
@@ -104,6 +117,11 @@ func CheckRepository(pluginRoot, catalogPath string) error {
 	current, err := os.ReadFile(catalogPath)
 	if err != nil || !bytes.Equal(current, catalogJSON) {
 		return fmt.Errorf("generated Catalog drift: %s", catalogPath)
+	}
+	pluginCatalogPath := filepath.Join(pluginRoot, "agent-pack-catalog.json")
+	current, err = os.ReadFile(pluginCatalogPath)
+	if err != nil || !bytes.Equal(current, catalogJSON) {
+		return fmt.Errorf("generated Catalog drift: %s", pluginCatalogPath)
 	}
 	return nil
 }

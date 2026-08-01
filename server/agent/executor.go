@@ -258,8 +258,8 @@ func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
 		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
 			return v
 		}
-		if pack.Agent.MaxTurns > 0 {
-			return pack.Agent.MaxTurns
+		if pack.Runtime.MaxTurns > 0 {
+			return pack.Runtime.MaxTurns
 		}
 	}
 	return 40

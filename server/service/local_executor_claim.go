@@ -57,6 +57,7 @@ type LocalExecutionConfig struct {
 	AgentPackVersion         string `json:"agent_pack_version"`
 	AgentPackDigest          string `json:"agent_pack_digest"`
 	RuntimeAdapter           string `json:"runtime_adapter"`
+	RuntimeProfile           string `json:"runtime_profile"`
 	Topic                    string `json:"topic"`
 	AgentFlag                string `json:"agent_flag"` // "anban:<agent>"
 	MaxTurns                 int    `json:"max_turns"`
@@ -116,7 +117,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 		}
 		execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), claimed.ID, attempt
 		execution.Target, execution.Status = model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning
-		execution.Started, execution.RuntimeProfile = true, "local"
+		execution.Started = true
 		now := time.Now()
 		execution.StartedAt = &now
 		if err := tx.TaskExecutions().Create(ctx, execution); err != nil {
@@ -179,6 +180,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task, execution *mod
 		config.AgentPackVersion = execution.AgentPackVersion
 		config.AgentPackDigest = execution.AgentPackDigest
 		config.RuntimeAdapter = execution.RuntimeAdapter
+		config.RuntimeProfile = execution.RuntimeProfile
 	}
 	return config
 }

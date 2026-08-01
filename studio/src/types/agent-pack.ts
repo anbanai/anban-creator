@@ -33,6 +33,7 @@ export interface AgentPack {
   runtime: {
     profile?: string
     adapter?: 'standard' | 'openmontage'
+    max_turns?: number
   }
   surfaces: AgentPackSurface[]
   features?: string[]
