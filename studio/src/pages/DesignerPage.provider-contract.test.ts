@@ -19,7 +19,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 vi.mock('@/lib/api/designer', () => ({
   designerApi: {
-    getProviders: vi.fn(),
+    getCapabilities: vi.fn(),
     generate: vi.fn(),
     uploadReference: vi.fn(),
     uploadReferenceFromUrl: vi.fn(),
@@ -33,16 +33,17 @@ describe('Designer provider contract', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
-    vi.mocked(designerApi.getProviders).mockResolvedValue([
+    vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [
       {
-        id: 'professional_enhance',
+        id: 'professional',
         name: '专业增强',
         description: '适合复杂构图与高细节视觉任务',
         minTier: 'enterprise',
         credits: 500,
+        priceAvailable: true,
         enabled: true,
         idx: 0,
-        capabilities: {
+        features: {
           qualityLevels: ['auto', 'low', 'medium', 'high'],
           sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
           defaultSize: 'auto',
@@ -55,13 +56,8 @@ describe('Designer provider contract', () => {
           hasCompression: true,
           watermark: false,
         },
-        pricing: {
-          pricingType: 'fixed_sku',
-          currency: 'credits',
-          billingNote: 'fixed retail SKU',
-        },
       },
-    ])
+    ], defaultCapability: 'professional' })
     vi.mocked(designerApi.generate).mockResolvedValue({
       generation_id: 'generation-1',
       status: 'generating',
@@ -69,14 +65,14 @@ describe('Designer provider contract', () => {
     })
   })
 
-  it('sends provider_id with designer generation requests', () => {
+  it('sends capability_key with designer generation requests', () => {
     const types = read('src/types/designer.ts')
-    expect(types).toContain('provider_id: string')
+    expect(types).toContain('capability_key: string')
     expect(types).not.toContain('provider?: string')
     expect(types).not.toContain('model?: string')
 
     const page = read('src/pages/DesignerPage.tsx')
-    expect(page).toContain('provider_id: effectiveProvider.id')
+    expect(page).toContain('capability_key: effectiveCapability.id')
   })
 
   it('floats the prompt bar inside the designer canvas frame', () => {
@@ -98,8 +94,8 @@ describe('Designer provider contract', () => {
   it('does not infer GPT Image sizes in the Studio API client', () => {
     const apiClient = read('src/lib/api/designer.ts')
 
-    expect(apiClient).not.toContain('gpt-image')
-    expect(apiClient).not.toContain('chatgpt-image')
+    expect(apiClient).not.toContain('professional')
+    expect(apiClient).not.toContain('chatprofessional')
     expect(apiClient).not.toContain('GPT_IMAGE_SIZE_PRESETS')
   })
 
@@ -117,21 +113,22 @@ describe('Designer provider contract', () => {
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
     const request = vi.mocked(designerApi.generate).mock.calls[0][0] as GenerateRequest
-    expect(request.provider_id).toBe('professional_enhance')
+    expect(request.capability_key).toBe('professional')
     expect(request.size).toBe('auto')
   })
 
   it('renders ratio presets from configured Seedream capabilities without custom pixel controls', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
+    vi.mocked(designerApi.getCapabilities).mockResolvedValueOnce({ items: [
       {
-        id: 'standard_image',
+        id: 'standard',
         name: '标准图像',
         description: '适合日常内容配图和常规视觉创作',
         minTier: 'free',
         credits: 50,
+        priceAvailable: true,
         enabled: true,
         idx: 0,
-        capabilities: {
+        features: {
           qualityLevels: [],
           sizePresets: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'],
           defaultSize: '1:1',
@@ -144,9 +141,8 @@ describe('Designer provider contract', () => {
           hasCompression: false,
           watermark: true,
         },
-        pricing: { pricingType: 'fixed_sku', currency: 'credits', billingNote: 'fixed retail SKU' },
       },
-    ])
+    ], defaultCapability: 'standard' })
 
     render(createElement(DesignerPage))
 
@@ -154,5 +150,40 @@ describe('Designer provider contract', () => {
     expect(screen.getAllByRole('button', { name: /21:9/ }).length).toBeGreaterThan(0)
     expect(screen.getByText('分辨率')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /自定义\s*W×H/ })).not.toBeInTheDocument()
+  })
+
+  it('uses the configured default capability instead of the first sorted option', async () => {
+    const professional = (await designerApi.getCapabilities()).items[0]
+    vi.mocked(designerApi.getCapabilities).mockResolvedValueOnce({
+      defaultCapability: 'standard',
+      items: [
+        { ...professional, id: 'professional', name: '专业增强', idx: 1 },
+        { ...professional, id: 'standard', name: '标准图像', idx: 2 },
+      ],
+    })
+    render(createElement(DesignerPage))
+
+    await screen.findAllByText('标准图像')
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), { target: { value: '生成海报' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalled())
+    expect(vi.mocked(designerApi.generate).mock.calls[0][0].capability_key).toBe('standard')
+  })
+
+  it('fails closed when capability pricing availability is missing', async () => {
+    const professional = (await designerApi.getCapabilities()).items[0]
+    vi.mocked(designerApi.getCapabilities).mockResolvedValueOnce({
+      defaultCapability: 'professional',
+      items: [{ ...professional, priceAvailable: undefined }],
+    })
+    render(createElement(DesignerPage))
+
+    expect((await screen.findAllByText('暂无可用图像能力')).length).toBeGreaterThan(0)
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), { target: { value: '生成海报' } })
+    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    expect(designerApi.generate).not.toHaveBeenCalled()
   })
 })

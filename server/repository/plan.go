@@ -75,6 +75,7 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 		"execution_profile":           plan.ExecutionProfile,
 		"topic_hint":                  plan.Prompt,
 		"image_capability_key":        plan.ImageCapabilityKey,
+		"image_ratio":                 plan.ImageRatio,
 		"reference_image_asset_id":    plan.ReferenceImageAssetID,
 		"skip_reference_image":        plan.SkipReferenceImage,
 		"watermark":                   plan.Watermark,

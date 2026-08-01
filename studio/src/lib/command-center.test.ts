@@ -209,15 +209,6 @@ describe('command center rules', () => {
     expect(signals.readiness.checks.publishing.description).toContain('发布需审核')
   })
 
-  it('does not treat optional user model overrides as task readiness', () => {
-    const signals = buildCommandCenterSignals({
-      projects: [project()],
-      apiKeysReady: true,
-      localExecutorReady: true,
-    })
-    expect(signals.readiness.checks).not.toHaveProperty('modelConfig')
-  })
-
   it('places setup review before generic creation when platform keys are not ready', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
@@ -229,10 +220,13 @@ describe('command center rules', () => {
       localExecutorReady: true,
     })
 
-    expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
+    const actions = buildNextBestActions(signals)
+    expect(actions.map((action) => action.id)).toEqual([
       'connect-settings',
       'create-task',
     ])
+    expect(actions[0].description).toBe('确认平台密钥和接入状态后再创建任务')
+    expect(actions[0].description).not.toContain('模型配置')
   })
 
 })

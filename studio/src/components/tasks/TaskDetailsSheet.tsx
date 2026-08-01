@@ -125,8 +125,8 @@ function taskChargeLabel(detail: TaskBillingChargeDetail) {
   const sku = detail.sku_id?.toLowerCase() ?? ''
   let label = '增值操作费'
   if (detail.charge_kind === 'task' || detail.policy === 'task_admission' || detail.resource_type === 'task') label = '任务固定费'
-  else if (sku.includes('image.seedream.cover') || sku.includes('image.cover')) label = '封面图生成费'
-  else if (sku.includes('image.seedream.content') || sku.includes('image.content')) label = '内容图生成费'
+  else if (sku === 'image.standard') label = '标准图像生成费'
+  else if (sku === 'image.professional') label = '专业增强生成费'
   else if (sku.includes('image') || detail.resource_type === 'image') label = '图片生成费'
   return detail.charge_kind === 'reversal' ? `${label}退回` : label
 }

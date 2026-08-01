@@ -208,7 +208,7 @@ func (s *TaskImageOperationsService) Crop(ctx context.Context, req CropTaskImage
 		return nil, fmt.Errorf("rewind cropped image: %w", err)
 	}
 	mimeType := http.DetectContentType(header[:n])
-	taskFile, err := s.tasks.UploadExecutionTaskFileFromReader(ctx, req.TaskID, req.UserID, req.ExecutionID, filepath.ToSlash(outputPath), file, mimeType, info.Size())
+	taskFile, err := s.tasks.UploadContentAddressedExecutionTaskFileFromReader(ctx, req.TaskID, req.UserID, req.ExecutionID, filepath.ToSlash(outputPath), file, mimeType, info.Size())
 	if err != nil {
 		return nil, fmt.Errorf("register cropped task image: %w", err)
 	}

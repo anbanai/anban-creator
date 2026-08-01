@@ -26,7 +26,7 @@ import {
   type AttachmentAdmissionPolicy,
   type AttachmentRejection,
 } from '@/types/input-attachment'
-import type { DesignerProvider, DesignerSettings, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
+import type { DesignerCapability, DesignerSettings, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
 import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEditor'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
@@ -46,8 +46,8 @@ const POLL_INTERVAL = 2000
 const MAX_POLLS = 180
 const MAX_CONSECUTIVE_ERRORS = 5
 
-function maxReferenceImagesForProvider(provider?: DesignerProvider): number {
-  const capabilities = provider?.capabilities
+function maxReferenceImagesForCapability(capability?: DesignerCapability): number {
+  const capabilities = capability?.features
   return capabilities?.supportsReference
     ? Math.max(0, capabilities.maxReferenceImages)
     : 0
@@ -98,7 +98,7 @@ function awaitGenerationAttempt<T>(promise: Promise<T>, signal: AbortSignal): Pr
 export default function DesignerPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [selectedProviderId, setSelectedProviderId] = useState('')
+  const [selectedCapabilityKey, setSelectedCapabilityKey] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [settings, setSettings] = useState<DesignerSettings>(DEFAULT_SETTINGS)
   const [promptValue, setPromptValueState] = useState<AgentPromptValue>(EMPTY_PROMPT_VALUE)
@@ -115,7 +115,7 @@ export default function DesignerPage() {
   const abortedRef = useRef(false)
   const generationAttemptRef = useRef(0)
   const generationAbortRef = useRef<AbortController | null>(null)
-  const normalizedProviderIdRef = useRef('')
+  const normalizedCapabilityKeyRef = useRef('')
   const normalizedReferenceCapacityRef = useRef(0)
 
   const setPromptValue = useCallback((next: AgentPromptValue | ((current: AgentPromptValue) => AgentPromptValue)) => {
@@ -126,9 +126,9 @@ export default function DesignerPage() {
     })
   }, [])
 
-  const { data: providers } = useQuery({
-    queryKey: ['designer', 'providers'],
-    queryFn: () => designerApi.getProviders(),
+  const { data: imageCapabilityCatalog } = useQuery({
+    queryKey: ['designer', 'capabilities'],
+    queryFn: () => designerApi.getCapabilities(),
   })
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'designer', 'active'],
@@ -139,14 +139,15 @@ export default function DesignerPage() {
     queryFn: () => api.billing.wallet(),
   })
 
-  const providerList: DesignerProvider[] = providers ?? []
-  const activeProvider = providerList.find((provider) => provider.id === selectedProviderId && provider.enabled && provider.priceAvailable !== false)
-  const effectiveProvider = activeProvider ?? providerList.find((provider) => provider.enabled && provider.priceAvailable !== false)
+  const capabilityList: DesignerCapability[] = imageCapabilityCatalog?.items ?? []
+  const activeCapability = capabilityList.find((capability) => capability.id === selectedCapabilityKey && capability.enabled && capability.priceAvailable === true)
+  const configuredDefaultCapability = capabilityList.find((capability) => capability.id === imageCapabilityCatalog?.defaultCapability && capability.enabled && capability.priceAvailable === true)
+  const effectiveCapability = activeCapability ?? configuredDefaultCapability ?? capabilityList.find((capability) => capability.enabled && capability.priceAvailable === true)
   const hasInsufficientCredits = Boolean(
-    !walletError && wallet && effectiveProvider && wallet.balance < effectiveProvider.credits,
+    !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits,
   )
-  const effectiveCaps = effectiveProvider?.capabilities
-  const maxReferenceImages = maxReferenceImagesForProvider(effectiveProvider)
+  const effectiveCaps = effectiveCapability?.features
+  const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
   const projectID = selectedProjectId ?? 'default'
   const attachmentPolicy = useMemo<AttachmentAdmissionPolicy>(() => ({
@@ -168,8 +169,8 @@ export default function DesignerPage() {
     setSettings((current) => ({ ...current, ...patch }))
   }, [])
 
-  const resetSettingsForProvider = useCallback((provider?: DesignerProvider) => {
-    const capabilities = provider?.capabilities
+  const resetSettingsForCapability = useCallback((capability?: DesignerCapability) => {
+    const capabilities = capability?.features
     setSettings({
       ...DEFAULT_SETTINGS,
       size: capabilities?.defaultSize || DEFAULT_SETTINGS.size,
@@ -200,23 +201,23 @@ export default function DesignerPage() {
   }, [setPromptValue])
 
   useEffect(() => {
-    if (providers === undefined) return
-    const effectiveProviderID = effectiveProvider?.id ?? ''
-    if (selectedProviderId !== effectiveProviderID) setSelectedProviderId(effectiveProviderID)
+    if (imageCapabilityCatalog === undefined) return
+    const effectiveCapabilityKey = effectiveCapability?.id ?? ''
+    if (selectedCapabilityKey !== effectiveCapabilityKey) setSelectedCapabilityKey(effectiveCapabilityKey)
 
-    const providerChanged = normalizedProviderIdRef.current !== effectiveProviderID
+    const capabilityChanged = normalizedCapabilityKeyRef.current !== effectiveCapabilityKey
     const capacityChanged = normalizedReferenceCapacityRef.current !== referenceCapacity
-    if (!providerChanged && !capacityChanged) return
-    normalizedProviderIdRef.current = effectiveProviderID
+    if (!capabilityChanged && !capacityChanged) return
+    normalizedCapabilityKeyRef.current = effectiveCapabilityKey
     normalizedReferenceCapacityRef.current = referenceCapacity
-    if (providerChanged) resetSettingsForProvider(effectiveProvider)
+    if (capabilityChanged) resetSettingsForCapability(effectiveCapability)
 
     const overflow = promptValueRef.current.attachments.slice(referenceCapacity)
     for (const attachment of overflow) attachmentController.remove(attachment.id)
     if (overflow.length > 0) {
       toast.warning(`当前输入最多支持 ${referenceCapacity} 张参考图，已移除 ${overflow.length} 张`)
     }
-  }, [attachmentController, effectiveProvider, providers, referenceCapacity, resetSettingsForProvider, selectedProviderId])
+  }, [attachmentController, effectiveCapability, imageCapabilityCatalog, referenceCapacity, resetSettingsForCapability, selectedCapabilityKey])
 
   useEffect(() => () => {
     generationAttemptRef.current += 1
@@ -359,8 +360,8 @@ export default function DesignerPage() {
   }, [navigate, refreshWallet])
 
   const handleGenerate = useCallback(async (value: AgentPromptValue) => {
-    if (!effectiveProvider) {
-      toast.error('没有可用的图片模型')
+    if (!effectiveCapability) {
+      toast.error('没有可用的图像能力')
       return
     }
     const attempt = startGenerationAttempt()
@@ -390,7 +391,7 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider_id: effectiveProvider.id,
+          capability_key: effectiveCapability.id,
           quality: settings.quality !== 'auto' ? settings.quality : undefined,
           size: buildDesignerRequestSize(settings.size, settings.resolution),
           n: settings.n > 1 ? settings.n : undefined,
@@ -410,10 +411,10 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveProvider, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveCapability, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
-    if (!effectiveProvider || !editingImage) return
+    if (!effectiveCapability || !editingImage) return
     const attempt = startGenerationAttempt()
     const submittedPrompt = value.prompt
     setIsGenerating(true)
@@ -455,7 +456,7 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider_id: effectiveProvider.id,
+          capability_key: effectiveCapability.id,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
         }, attempt.signal),
@@ -469,7 +470,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveProvider, isGenerationAttemptActive, projectID, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, isGenerationAttemptActive, projectID, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
     generationAttemptRef.current += 1
@@ -489,16 +490,16 @@ export default function DesignerPage() {
     if (message) toast.warning(message)
   }, [])
 
-  function handleModelChange(providerID: string) {
-    const provider = providerList.find((candidate) => candidate.id === providerID)
-    setSelectedProviderId(providerID)
-    normalizedProviderIdRef.current = providerID
-    normalizedReferenceCapacityRef.current = maxReferenceImagesForProvider(provider)
-    resetSettingsForProvider(provider)
-    const overflow = promptValueRef.current.attachments.slice(maxReferenceImagesForProvider(provider))
+  function handleCapabilityChange(capabilityKey: string) {
+    const capability = capabilityList.find((candidate) => candidate.id === capabilityKey)
+    setSelectedCapabilityKey(capabilityKey)
+    normalizedCapabilityKeyRef.current = capabilityKey
+    normalizedReferenceCapacityRef.current = maxReferenceImagesForCapability(capability)
+    resetSettingsForCapability(capability)
+    const overflow = promptValueRef.current.attachments.slice(maxReferenceImagesForCapability(capability))
     for (const attachment of overflow) attachmentController.remove(attachment.id)
     if (overflow.length > 0) {
-      toast.warning(`当前模型最多支持 ${maxReferenceImagesForProvider(provider)} 张参考图，已移除 ${overflow.length} 张`)
+      toast.warning(`当前能力最多支持 ${maxReferenceImagesForCapability(capability)} 张参考图，已移除 ${overflow.length} 张`)
     }
   }
 
@@ -522,9 +523,9 @@ export default function DesignerPage() {
       className="relative -mx-4 -my-6 flex h-[calc(100dvh-2.5rem)] flex-col overflow-hidden bg-background md:-mx-8 md:-my-8 md:h-dvh md:flex-row"
     >
       <DesignerToolbar
-        providers={providerList}
-        selectedProviderId={effectiveProvider?.id ?? ''}
-        onModelChange={handleModelChange}
+        imageCapabilities={capabilityList}
+        selectedCapabilityKey={effectiveCapability?.id ?? ''}
+        onCapabilityChange={handleCapabilityChange}
         capabilities={effectiveCaps}
         settings={settings}
         onSettingsChange={updateSettings}
@@ -563,15 +564,15 @@ export default function DesignerPage() {
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}
                 submitting={isGenerating}
-                submitDisabled={!promptValue.prompt.trim() || !effectiveProvider || effectiveProvider.priceAvailable === false || hasInsufficientCredits}
+                submitDisabled={!promptValue.prompt.trim() || !effectiveCapability || effectiveCapability.priceAvailable === false || hasInsufficientCredits}
                 ariaLabel="Designer prompt"
                 acceptedTypesLabel="图片"
                 onAttachmentRejected={handleAttachmentRejected}
                 status={isGenerating ? (
                   <span className="text-xs text-muted-foreground">正在生成...</span>
-                ) : effectiveProvider ? (
+                ) : effectiveCapability ? (
                   <span className="text-xs text-muted-foreground">
-                    {effectiveProvider.credits.toLocaleString()} 积分
+                    每张 {effectiveCapability.credits.toLocaleString()} 积分
                     {!walletError && wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
                   </span>
                 ) : null}
@@ -612,7 +613,7 @@ export default function DesignerPage() {
           images={currentImages}
           initialIndex={Math.max(0, currentImages.findIndex((image) => image.url === previewImage))}
           metadata={{
-            capabilityName: currentGeneration.capability_name ?? effectiveProvider?.name,
+            capabilityName: currentGeneration.capability_name ?? effectiveCapability?.name,
             prompt: currentGeneration.prompt,
             revisedPrompt: currentGeneration.revised_prompt,
             quality: currentGeneration.quality,

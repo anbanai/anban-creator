@@ -18,7 +18,8 @@ export interface Plan {
   next_run_at: string
   project_id: string
   execution_profile: AgentExecutionProfileID
-  image_model_key?: string
+  image_capability_key?: string
+  image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
@@ -42,7 +43,8 @@ export interface CreatePlanRequest {
   cron_expr: string
   prompt?: string
   project_id?: string
-  image_model_key?: string
+  image_capability_key?: string
+  image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
@@ -63,7 +65,8 @@ export interface UpdatePlanRequest {
   execution_profile: AgentExecutionProfileID
   cron_expr?: string
   prompt?: string
-  image_model_key?: string
+  image_capability_key?: string
+  image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]

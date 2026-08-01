@@ -123,24 +123,15 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	}
 
 	// Apply global image API config from server config.
-	if imageAPICfg != nil {
-		if imageAPICfg.Cover != nil {
-			switch ch.Platform {
-			case model.ScopeArticle:
-				cfg.Wechat.Article.Cover.Image = *imageAPICfg.Cover
-			case model.ScopeSeednote:
-				cfg.Seednote.Cover.Image = *imageAPICfg.Cover
-			}
+	if imageAPICfg != nil && imageAPICfg.API != nil {
+		switch ch.Platform {
+		case model.ScopeArticle:
+			cfg.Wechat.Article.Cover.Image = *imageAPICfg.API
+			cfg.Wechat.Article.Content.Image = *imageAPICfg.API
+		case model.ScopeSeednote:
+			cfg.Seednote.Cover.Image = *imageAPICfg.API
+			cfg.Seednote.Content.Image = *imageAPICfg.API
 		}
-		if imageAPICfg.Content != nil {
-			switch ch.Platform {
-			case model.ScopeArticle:
-				cfg.Wechat.Article.Content.Image = *imageAPICfg.Content
-			case model.ScopeSeednote:
-				cfg.Seednote.Content.Image = *imageAPICfg.Content
-			}
-		}
-
 	}
 
 	// Apply image ratio override: task-level > project-level. Business defaults

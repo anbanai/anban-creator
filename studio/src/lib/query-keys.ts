@@ -34,9 +34,6 @@ export const queryKeys = {
   apiKeys: {
     all: ['api-keys'] as const,
   },
-  modelConfig: {
-    all: ['model-config'] as const,
-  },
   resources: {
     themes: ['resources', 'themes'] as const,
     writers: ['resources', 'writers'] as const,
@@ -57,8 +54,8 @@ export const queryKeys = {
       ['designer', 'history', params] as const,
     generation: (id: string) => ['designer', 'generation', id] as const,
   },
-  imageModels: {
-    all: ['image-models'] as const,
+  imageCapabilities: {
+    all: ['image-capabilities'] as const,
   },
   agentProfiles: {
     all: ['agent', 'execution-profiles'] as const,

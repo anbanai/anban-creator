@@ -253,7 +253,7 @@ func (s *AIEntryService) parseIntent(ctx context.Context, project *model.Project
   "selected_modules": {"main_images": 1},
   "target_platform": "电商平台，可选",
   "language": "语言，可选",
-  "image_ratio": "3:4|1:1|4:3|16:9，可选"
+  "image_ratio": "3:4|1:1|4:3|16:9|3:2|2:3|9:16|21:9，可选"
 }
 缺失字段请省略。`)
 	userPrompt := aiEntryPrompt(project, req)

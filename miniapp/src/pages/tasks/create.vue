@@ -51,11 +51,15 @@
       </view>
     </view>
 
-    <!-- Image model -->
+    <!-- Image capability -->
     <view class="task-create__section">
-      <text class="field-label">图片模型 <text class="field-required" v-if="hasImageModels">*</text></text>
-      <ImageModelSelector v-model="form.image_model_key" placeholder="选择生图模型" />
-      <text v-if="errors.image_model_key" class="field-error">{{ errors.image_model_key }}</text>
+      <text class="field-label">图像能力</text>
+      <ImageCapabilitySelector
+        v-model="form.image_capability_key"
+        :options="imageCapabilities"
+        :loading="imageCapabilitiesLoading"
+      />
+      <text v-if="errors.image_capability_key" class="field-error">{{ errors.image_capability_key }}</text>
     </view>
 
     <view class="task-create__advanced-toggle" @tap="advancedOpen = !advancedOpen">
@@ -270,17 +274,11 @@
     <!-- Image ratio selector -->
     <view class="task-create__section" v-if="advancedOpen">
       <text class="field-label">图片比例</text>
-      <view class="ratio-group">
-        <view
-          v-for="ratio in IMAGE_RATIOS"
-          :key="ratio.value"
-          class="ratio-btn"
-          :class="{ 'ratio-btn--active': form.image_ratio === ratio.value }"
-          @tap="form.image_ratio = ratio.value"
-        >
-          <text>{{ ratio.label }}</text>
-        </view>
-      </view>
+      <ImageAspectRatioField
+        v-model="form.image_ratio"
+        :supported-sizes="selectedCapability?.features?.size_presets"
+      />
+      <text v-if="imageRatioUnsupported" class="field-error">当前图像能力不支持所选比例，请重新选择比例或智能适配</text>
     </view>
 
     <!-- Image generation options -->
@@ -392,7 +390,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import type {
   AgentExecutionProfileCapability,
@@ -402,6 +400,7 @@ import type {
   Template,
   ResourceEntry,
   ReferenceImageSelection,
+  ImageCapabilityOption,
 } from '@/types'
 import { agentProfilesApi } from '@/api/agent-profiles'
 import { tasksApi } from '@/api/tasks'
@@ -409,11 +408,12 @@ import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { billingApi } from '@/api/billing'
 import { projectsApi } from '@/api/projects'
+import { imageCapabilitiesApi } from '@/api/image-capabilities'
 import {
   resolveExecutionProfileSelection,
   taskPriceForExecutionProfile,
 } from '@/utils/execution-profiles'
-import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
+import { TASK_QUANTITIES } from '@/utils/constants'
 import {
   contentTypeLabel,
   ecommerceModuleCatalog,
@@ -425,7 +425,8 @@ import AbInput from '@/components/common/AbInput.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
-import ImageModelSelector from '@/components/business/ImageModelSelector.vue'
+import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
+import ImageAspectRatioField from '@/components/business/ImageAspectRatioField.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import ExecutionProfileSelector from '@/components/business/ExecutionProfileSelector.vue'
 
@@ -458,15 +459,17 @@ const referencePreviewUrl = ref('')
 // Loaded on platform change
 const platformTemplates = ref<Template[]>([])
 const platformThemes = ref<ResourceEntry[]>([])
-const hasImageModels = ref(true)
+const imageCapabilities = ref<ImageCapabilityOption[]>([])
+const imageCapabilitiesLoading = ref(false)
+const defaultImageCapability = ref('')
 
 const form = reactive({
   project_id: '',
   execution_profile: '' as AgentExecutionProfileID | '',
   prompt: '',
   quantity: 1,
-  image_ratio: '3:4',
-  image_model_key: '',
+  image_ratio: '',
+  image_capability_key: '',
   visual_style: '',
   writer_key: '',
   theme: '',
@@ -498,6 +501,18 @@ const form = reactive({
 const errors = reactive<Record<string, string>>({})
 
 const platform = computed(() => selectedProject.value?.platform || '')
+const selectedCapability = computed(() => imageCapabilities.value.find((item) => item.key === form.image_capability_key))
+const imageCapabilityUnavailable = computed(() =>
+  !!form.image_capability_key && (
+    !selectedCapability.value
+    || selectedCapability.value.enabled !== true
+    || selectedCapability.value.price_available !== true
+  ),
+)
+const imageRatioUnsupported = computed(() => {
+  const supported = selectedCapability.value?.features?.size_presets
+  return !!form.image_ratio && !!supported && !supported.includes(form.image_ratio)
+})
 const isArticle = computed(() => platform.value === 'article')
 const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
@@ -624,6 +639,8 @@ const creationCost = computed(() => estimatedCost.value)
 const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim() || !form.execution_profile) return false
   if (!selectedExecutionProfileAvailable.value) return false
+  if (imageCapabilityUnavailable.value) return false
+  if (imageRatioUnsupported.value) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
   if (!priceAvailable.value || debt.value > 0 || balance.value < creationCost.value) return false
   return !submitting.value && !referenceUploading.value
@@ -633,17 +650,8 @@ function onProjectChange(project: Project) {
   selectedProject.value = project
   form.project_id = project.id
 
-  if (project.image_ratio) {
-    form.image_ratio = project.image_ratio
-  } else {
-    const defaults: Record<string, string> = {
-      article: '16:9',
-      seednote: '3:4',
-      ecommerce: '1:1',
-      xls: '3:4',
-    }
-    form.image_ratio = defaults[project.platform] || '3:4'
-  }
+  form.image_ratio = project.image_ratio || ''
+  form.image_capability_key = project.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
 
   delete errors.project
   ensureExecutionProfileSelection()
@@ -725,7 +733,7 @@ function applyTemplate(tpl: Template) {
   if (tpl.author_name) form.byline = tpl.author_name
   if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
   if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
-  if (tpl.ecommerce?.image_model_key) form.image_model_key = tpl.ecommerce.image_model_key
+  if (tpl.ecommerce?.image_capability_key) form.image_capability_key = tpl.ecommerce.image_capability_key
   if (tpl.ecommerce?.default_selected_modules) {
     form.selected_modules = { ...tpl.ecommerce.default_selected_modules }
   }
@@ -820,6 +828,16 @@ function validate(): boolean {
     uni.showToast({ title: '请选择可用的执行配置', icon: 'none' })
     return false
   }
+  if (imageCapabilityUnavailable.value) {
+    errors.image_capability_key = '该图像能力已停用，请重新选择'
+    uni.showToast({ title: errors.image_capability_key, icon: 'none' })
+    return false
+  }
+  if (imageRatioUnsupported.value) {
+    errors.image_ratio = '当前图像能力不支持所选比例，请重新选择比例或智能适配'
+    uni.showToast({ title: errors.image_ratio, icon: 'none' })
+    return false
+  }
   if (billableGoalMode.value && !form.goal.trim()) {
     errors.goal = '强目标模式需填写成功目标'
     return false
@@ -867,7 +885,7 @@ async function onSubmit() {
       prompt: form.prompt.trim(),
       quantity: isEcommerce.value ? undefined : form.quantity,
       image_ratio: form.image_ratio,
-      image_model_key: form.image_model_key || undefined,
+      image_capability_key: form.image_capability_key || undefined,
       visual_style: form.visual_style.trim() || undefined,
       writer_key: isArticle.value && form.writer_key.trim() ? form.writer_key.trim() : undefined,
       theme: isArticle.value && form.theme ? form.theme : undefined,
@@ -936,6 +954,20 @@ async function loadExecutionConfiguration() {
   ensureExecutionProfileSelection()
 }
 
+async function loadImageCapabilities() {
+  imageCapabilitiesLoading.value = true
+  try {
+    const response = await imageCapabilitiesApi.list()
+    imageCapabilities.value = response.items || []
+    defaultImageCapability.value = response.default_capability || response.items?.[0]?.key || ''
+    if (!form.image_capability_key) form.image_capability_key = defaultImageCapability.value
+  } catch {
+    imageCapabilities.value = []
+  } finally {
+    imageCapabilitiesLoading.value = false
+  }
+}
+
 function safeDecodeQuery(value: string): string {
   try {
     return decodeURIComponent(value)
@@ -970,6 +1002,7 @@ onShow(() => {
 onMounted(() => {
   loadBalance()
   loadExecutionConfiguration()
+  loadImageCapabilities()
 })
 </script>
 

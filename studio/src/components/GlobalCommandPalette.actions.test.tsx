@@ -77,10 +77,6 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.apiKeys,
         list: vi.fn().mockResolvedValue({ items: [] }),
       },
-      modelConfig: {
-        ...actual.api.modelConfig,
-        get: vi.fn().mockResolvedValue({ text: null, image: null }),
-      },
     },
   }
 })

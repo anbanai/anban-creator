@@ -122,12 +122,6 @@
 			}
 		},
 		{
-			"path": "pages/settings/model-config",
-			"style": {
-				"navigationBarTitleText": "模型配置"
-			}
-		},
-		{
 			"path": "pages/settings/password",
 			"style": {
 				"navigationBarTitleText": "登录密码"

@@ -26,7 +26,7 @@ import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
-import { useImageCapabilities } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -1123,8 +1123,8 @@ export default function TaskDetailPage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">图片模型</p>
-                    <p className="mt-1 text-sm text-foreground"><ImageCapabilityDisplay option={imageCapabilities.find((option) => option.key === projectDialogEcommerceDefaults.image_model_key)} fallback={projectDialogEcommerceDefaults.image_model_key ? '已停用能力' : '标准图像'} /></p>
+                    <p className="text-xs text-muted-foreground">图像能力</p>
+                    <p className="mt-1 text-sm text-foreground"><ImageCapabilityDisplay option={imageCapabilities.find((option) => option.key === projectDialogEcommerceDefaults.image_capability_key)} fallback={projectDialogEcommerceDefaults.image_capability_key ? '已停用能力' : '标准图像'} /></p>
                   </div>
                   <div className="sm:col-span-3">
                     <p className="text-xs text-muted-foreground">品牌 brief</p>

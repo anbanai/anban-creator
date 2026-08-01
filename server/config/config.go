@@ -462,24 +462,10 @@ type StorageConfig struct {
 	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
 }
 
-// SizesConfig is kept for in-memory legacy ImageAPI structs. Semantic server
-// config must not use it; business image ratios live in task/project inputs and
-// Skill workflows.
-type SizesConfig struct {
-	ArticleCover    string `yaml:"article_cover"`
-	ArticleContent  string `yaml:"article_content"`
-	XLSCover        string `yaml:"xls_cover"`
-	XLSContent      string `yaml:"xls_content"`
-	SeednoteCover   string `yaml:"seednote_cover"`
-	SeednoteContent string `yaml:"seednote_content"`
-}
-
 // ImageAPIConfig is an internal runtime adapter for app/image. It is built from
 // one selected capability and is never decoded from server YAML.
 type ImageAPIConfig struct {
-	Cover   *appconfig.ImageAPI
-	Content *appconfig.ImageAPI
-	Sizes   SizesConfig
+	API *appconfig.ImageAPI
 }
 
 // ModelRuntimeConfig is the provider-resolved route used only for synchronous
@@ -1404,7 +1390,7 @@ func (c *Config) ImageAPIForCapability(key string) (*ImageAPIConfig, bool) {
 		return nil, false
 	}
 	api := imageAPIFromCapability(route)
-	return &ImageAPIConfig{Cover: api, Content: api}, true
+	return &ImageAPIConfig{API: api}, true
 }
 
 func providerKind(providerKey string) string {
@@ -1590,6 +1576,11 @@ func (c *Config) Validate() error {
 
 	imageGeneration := c.ModelRoutes.ImageGeneration
 	if strings.TrimSpace(imageGeneration.DefaultCapability) != "" || len(imageGeneration.Capabilities) > 0 {
+		for _, key := range []string{"standard", "professional"} {
+			if _, ok := imageGeneration.Capabilities[key]; !ok {
+				errs = append(errs, "model_routes.image_generation.capabilities."+key+" is required")
+			}
+		}
 		if strings.TrimSpace(imageGeneration.DefaultCapability) == "" {
 			errs = append(errs, "model_routes.image_generation.default_capability is required")
 		} else if route, ok := imageGeneration.Capabilities[imageGeneration.DefaultCapability]; !ok {

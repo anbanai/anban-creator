@@ -44,3 +44,13 @@ func TestDesignerGenerationErrorMessageCleansStructuredLogs(t *testing.T) {
 		}
 	}
 }
+
+func TestDesignerGenerationErrorMessageUsesCapabilityTerminology(t *testing.T) {
+	got := designerGenerationUserError(&image.GenerateError{Code: "endpoint_protocol"})
+	if got != "图像能力配置异常，请联系管理员" {
+		t.Fatalf("message = %q, want capability configuration guidance", got)
+	}
+	if strings.Contains(got, "模型") {
+		t.Fatalf("message = %q, must not expose model terminology", got)
+	}
+}

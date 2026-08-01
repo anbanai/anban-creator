@@ -7,7 +7,6 @@ import { billingApi } from './billing'
 import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
-import { modelConfigApi } from './model-config'
 import { seednoteAnalyticsApi } from './seednote-analytics'
 import { templatesApi } from './templates'
 import { postersApi } from './posters'
@@ -15,7 +14,7 @@ import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
 import { designerApi } from './designer'
-import { imageModelsApi } from './image-models'
+import { imageCapabilitiesApi } from './image-capabilities'
 import { ilinkApi } from './ilink'
 import { aiEntryApi } from './ai-entry'
 import { uploadsApi } from './uploads'
@@ -31,7 +30,6 @@ export const api = {
   apiKeys: apiKeysApi,
   usage: usageApi,
   feedback: feedbackApi,
-  modelConfig: modelConfigApi,
   seednoteAnalytics: seednoteAnalyticsApi,
   templates: templatesApi,
   posters: postersApi,
@@ -39,7 +37,7 @@ export const api = {
   resources: resourcesApi,
   topicPool: topicPoolApi,
   designer: designerApi,
-  imageModels: imageModelsApi,
+  imageCapabilities: imageCapabilitiesApi,
   ilink: ilinkApi,
   aiEntry: aiEntryApi,
   uploads: uploadsApi,

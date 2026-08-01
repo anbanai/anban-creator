@@ -110,6 +110,13 @@ describe('getApiErrorMessage', () => {
     expect(got).not.toContain('{"level"')
   })
 
+  it('describes internal image configuration failures as capability configuration', () => {
+    const got = sanitizeUserFacingErrorMessage('image API key 配置异常', '图片生成失败')
+
+    expect(got).toBe('图像能力配置异常，请联系管理员')
+    expect(got).not.toContain('模型')
+  })
+
   it('does not rewrite ordinary download errors as designer image save failures', () => {
     expect(sanitizeUserFacingErrorMessage('文件下载失败，请稍后重试', '默认')).toBe('文件下载失败，请稍后重试')
   })

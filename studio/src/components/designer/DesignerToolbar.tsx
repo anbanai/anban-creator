@@ -9,13 +9,13 @@ import {
   Stamp,
   SlidersHorizontal,
 } from 'lucide-react'
-import ModelSelector from '@/components/designer/ModelSelector'
+import CapabilitySelector from '@/components/designer/CapabilitySelector'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import type { DesignerSettings, DesignerProvider, ModelCapabilities } from '@/types/designer'
+import type { DesignerSettings, DesignerCapability, DesignerCapabilityFeatures } from '@/types/designer'
 import { api } from '@/lib/api'
 
 const SIZE_OPTIONS = [
@@ -32,7 +32,7 @@ const RESOLUTION_OPTIONS = [
   { value: '4K', label: '4K', desc: '超清' },
 ]
 
-// Size preset labels for GPT-Image pixel sizes
+// Labels for configured pixel-size presets.
 const SIZE_PRESET_LABELS: Record<string, { label: string; desc: string }> = {
   'auto': { label: '自动', desc: '智能选择' },
   '1024x1024': { label: '1:1', desc: '1024×1024' },
@@ -164,19 +164,19 @@ function ResolutionSection({ value, onChange, sectionHeader }: {
 export type DesignerSettingsPatch = Partial<DesignerSettings>
 
 interface DesignerToolbarProps {
-  providers: DesignerProvider[]
-  selectedProviderId: string
-  onModelChange: (id: string) => void
-  capabilities?: ModelCapabilities
+  imageCapabilities: DesignerCapability[]
+  selectedCapabilityKey: string
+  onCapabilityChange: (key: string) => void
+  capabilities?: DesignerCapabilityFeatures
   settings: DesignerSettings
   onSettingsChange: (patch: DesignerSettingsPatch) => void
   onHistoryToggle: () => void
 }
 
 export default function DesignerToolbar({
-  providers,
-  selectedProviderId,
-  onModelChange,
+  imageCapabilities,
+  selectedCapabilityKey,
+  onCapabilityChange,
   capabilities,
   settings,
   onSettingsChange,
@@ -233,11 +233,10 @@ export default function DesignerToolbar({
               </Tooltip>
             </div>
 
-            {/* Model selector */}
-            <ModelSelector
-              providers={providers}
-              selectedProviderId={selectedProviderId}
-              onChange={onModelChange}
+            <CapabilitySelector
+              capabilities={imageCapabilities}
+              selectedCapabilityKey={selectedCapabilityKey}
+              onChange={onCapabilityChange}
             />
 
             <Separator />
@@ -415,11 +414,10 @@ export default function DesignerToolbar({
       {/* Mobile: bottom scrollable panel */}
       <div className="flex max-h-48 shrink-0 overflow-y-auto border-t border-border/50 bg-card/60 px-3 py-2 backdrop-blur-sm md:hidden">
         <div className="w-full space-y-2">
-          {/* Mobile model selector */}
-          <ModelSelector
-            providers={providers}
-            selectedProviderId={selectedProviderId}
-            onChange={onModelChange}
+          <CapabilitySelector
+            capabilities={imageCapabilities}
+            selectedCapabilityKey={selectedCapabilityKey}
+            onChange={onCapabilityChange}
           />
 
           {/* Mobile settings row */}

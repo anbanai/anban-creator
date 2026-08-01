@@ -13,6 +13,10 @@ function assertFile(path) {
   assert.equal(existsSync(resolve(root, path)), true, `${path} should exist`)
 }
 
+function assertNoFile(path) {
+  assert.equal(existsSync(resolve(root, path)), false, `${path} should not exist`)
+}
+
 function assertContains(path, terms) {
   const body = read(path)
   for (const term of terms) {
@@ -25,6 +29,12 @@ function assertNotContains(path, terms) {
   for (const term of terms) {
     assert.equal(body.includes(term), false, `${path} should not contain ${term}`)
   }
+}
+
+function assertOccurrenceCount(path, term, expectedCount) {
+  const body = read(path)
+  const count = body.split(term).length - 1
+  assert.equal(count, expectedCount, `${path} should contain ${term} ${expectedCount} times`)
 }
 
 function filesUnder(dir) {
@@ -55,18 +65,20 @@ for (const path of [
   'src/api/request.ts',
   'src/api/api-keys.ts',
   'src/api/designer.ts',
-  'src/api/model-config.ts',
+  'src/api/image-capabilities.ts',
   'src/api/resources.ts',
   'src/api/topic-pool.ts',
   'src/types/designer.ts',
+  'src/types/imageCapability.ts',
   'src/types/agent-profile.ts',
   'src/types/resource.ts',
   'src/types/topic-pool.ts',
   'src/pages/designer/index.vue',
   'src/pages/connect/claude-code.vue',
   'src/pages/settings/api-keys.vue',
-  'src/pages/settings/model-config.vue',
   'src/pages/settings/password.vue',
+  'src/components/business/ImageCapabilitySelector.vue',
+  'src/components/business/ImageAspectRatioField.vue',
 ]) {
   assertFile(path)
 }
@@ -75,16 +87,21 @@ assertContains('src/pages.json', [
   '"path": "pages/designer/index"',
   '"path": "pages/connect/claude-code"',
   '"path": "pages/settings/api-keys"',
-  '"path": "pages/settings/model-config"',
   '"path": "pages/settings/password"',
 ])
+assertNotContains('src/pages.json', ['"path": "pages/settings/model-config"'])
+assertNoFile('src/api/model-config.ts')
+assertNoFile('src/pages/settings/model-config.vue')
+assertNoFile('src/api/image-models.ts')
+assertNoFile('src/components/business/ImageModelSelector.vue')
+assertNoFile('src/types/imageModel.ts')
 
 assertContains('src/api/index.ts', [
   "export const api",
   'agentProfiles',
   'apiKeys',
   'designer',
-  'modelConfig',
+  'imageCapabilities',
   'resources',
   'topicPool',
 ])
@@ -171,8 +188,6 @@ assertFile('src/components/business/ExecutionProfileSelector.vue')
 assertContains('src/components/business/ExecutionProfileSelector.vue', [
   'v-for="profile in profiles"',
   'profile.display_name',
-  'profile.provider',
-  'profile.model_name',
   'profile.min_tier',
   'profile.available',
   'profile.unavailable_reason',
@@ -181,6 +196,8 @@ assertContains('src/components/business/ExecutionProfileSelector.vue', [
   '最低套餐：Pro 版及以上',
 ])
 assertNotContains('src/components/business/ExecutionProfileSelector.vue', [
+  'profile.provider',
+  'profile.model_name',
   'profile.models',
   'modelRows(profile)',
   'min_tier ===',
@@ -223,16 +240,16 @@ const billedTask = {
   billing_charge_details: [
     { id: 'task-charge', charge_kind: 'task', sku_id: 'task.seednote.standard.v1', credits: 5000 },
     { id: 'analysis-charge', charge_kind: 'operation', sku_id: 'analysis.content.v1', resource_type: 'analysis', tool_call_id: 'analysis:1', credits: 300 },
-    { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.seedream.content.v1', resource_type: 'image', credits: 500, pricing_tier: 'pro', list_price_credits: 600, discount_credits: 100 },
-    { id: 'reversal', charge_kind: 'reversal', sku_id: 'image.seedream.content.v1', resource_type: 'image', reversal_of_id: 'image-charge', credits: -50 },
+    { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.standard', resource_type: 'image', credits: 500, pricing_tier: 'pro', list_price_credits: 600, discount_credits: 100 },
+    { id: 'reversal', charge_kind: 'reversal', sku_id: 'image.standard', resource_type: 'image', reversal_of_id: 'image-charge', credits: -50 },
   ],
 }
 assert.equal(taskBillingTotal(billedTask), 5750)
 assert.equal(taskBillingDetails(billedTask).length, 4)
 assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[0]), '任务固定费')
 assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[1]), '内容分析费')
-assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[2]), '内容图生成费')
-assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[3]), '内容图生成费退回')
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[2]), '标准图像生成费')
+assert.equal(taskBillingChargeLabel(billedTask.billing_charge_details[3]), '标准图像生成费退回')
 assert.equal(taskBillingIdentity(billedTask.billing_charge_details[1]), 'analysis.content.v1 · analysis:1')
 assert.equal(taskBillingPricingEvidence(billedTask.billing_charge_details[2]), '专业版 · 标准价 600，优惠 100')
 assert.equal(taskBillingAmountLabel(billedTask.billing_charge_details[3]), '退回 50 积分')
@@ -255,12 +272,13 @@ assertContains('src/pages/tasks/detail.vue', [
   'agentProfileRows',
 ])
 assertContains('src/pages/tasks/detail.vue', [
-  "envs.ANTHROPIC_MODEL",
   "envs.CLAUDE_CODE_EFFORT_LEVEL",
   "envs.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
   "envs.CLAUDE_CODE_DISABLE_THINKING",
 ])
 assertNotContains('src/pages/tasks/detail.vue', [
+  'task.agent_profile_snapshot.provider',
+  'envs.ANTHROPIC_MODEL',
   'ANTHROPIC_AUTH_TOKEN',
   'snapshot.models',
   'snapshot.claude',
@@ -288,9 +306,33 @@ assertContains('src/types/index.ts', [
   "from './designer'",
 ])
 
-assertContains('src/types/designer.ts', [
-  'provider_id?: string',
+assertContains('src/api/image-capabilities.ts', ["'/image-capabilities'", 'ImageCapabilityListResponse'])
+assertContains('src/types/imageCapability.ts', [
+  'export interface ImageCapabilityOption',
+  'price_credits?: number',
+  'features?: ImageCapabilityFeatures',
+  'size_presets: string[]',
+  'max_reference_images: number',
 ])
+assertContains('src/components/business/ImageCapabilitySelector.vue', [
+  'option.display_name',
+  'option.description',
+  '每张 {{ option.price_credits.toLocaleString() }} 积分',
+  'const retiredValue = computed(() =>',
+  'props.modelValue && !props.options.some((option) => option.key === props.modelValue)',
+  'v-if="retiredValue"',
+  '已停用图像能力（请重新选择）',
+])
+assertNotContains('src/components/business/ImageCapabilitySelector.vue', ['provider', 'model_name'])
+assertContains('src/components/business/ImageAspectRatioField.vue', [
+  '智能适配',
+  'supportedSizes',
+  "value: ''",
+  "value: '21:9'",
+])
+
+assertContains('src/types/designer.ts', ['capability_key: string', 'capability_name?: string'])
+assertNotContains('src/types/designer.ts', ['provider_id', 'provider: string', 'model: string', 'getModelCapabilities'])
 
 for (const path of [
   'src/api/designer.ts',
@@ -335,9 +377,21 @@ assertContains('src/pages/designer/index.vue', [
   'canInpaint',
   'startEdit',
   'mask_file_id',
-  'provider_id: selectedProvider.value.id',
+  'capability_key: selectedCapability.value.id',
   'chooseMask',
   'generateEdit',
+  'const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))',
+  'selectedCapability.value?.priceAvailable === true',
+])
+assertOccurrenceCount('src/pages/designer/index.vue', 'selectedCapability.value?.priceAvailable === true', 2)
+assertContains('src/api/designer.ts', ["'/designer/quote'", "'/designer/generate'", 'request_fingerprint'])
+assertNotContains('src/api/designer.ts', ["'/designer/providers'", 'getProviders'])
+assertNotContains('src/pages/designer/index.vue', [
+  'selectedProvider',
+  'provider_id',
+  'item.provider',
+  'item.model',
+  '模型：',
 ])
 
 assertContains('src/pages/tasks/create.vue', [
@@ -354,8 +408,20 @@ assertContains('src/pages/tasks/create.vue', [
   'resolveExecutionProfileSelection',
   'taskPriceForExecutionProfile',
   'execution_profile: executionProfile',
+  'image_capability_key: form.image_capability_key || undefined',
+  '<ImageCapabilitySelector',
+  '<ImageAspectRatioField',
   'form.execution_profile = String(query.execution_profile) as AgentExecutionProfileID',
   'resolveExecutionProfileSelection',
+  'imageRatioUnsupported',
+  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
+  'const imageCapabilityUnavailable = computed(() =>',
+  'selectedCapability.value.enabled !== true',
+  '该图像能力已停用，请重新选择',
+])
+assertOccurrenceCount('src/pages/tasks/create.vue', 'if (imageCapabilityUnavailable.value)', 2)
+assertNotContains('src/pages/tasks/create.vue', [
+  "if (form.image_ratio && supported && !supported.includes(form.image_ratio)) form.image_ratio = ''",
 ])
 assertNotContains('src/pages/tasks/create.vue', ['provider:', 'models:', 'claude:'])
 
@@ -377,8 +443,20 @@ assertContains('src/pages/plans/create.vue', [
   'resolveExecutionProfileSelection',
   'taskPriceForExecutionProfile',
   'execution_profile: executionProfile',
+  'image_capability_key: form.imageCapabilityKey || undefined',
+  '<ImageCapabilitySelector',
+  '<ImageAspectRatioField',
   'form.executionProfile = plan.execution_profile',
   'resolveExecutionProfileSelection',
+  'imageRatioUnsupported',
+  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
+  'const imageCapabilityUnavailable = computed(() =>',
+  'selectedCapability.value.enabled !== true',
+  '该图像能力已停用，请重新选择',
+])
+assertOccurrenceCount('src/pages/plans/create.vue', 'if (imageCapabilityUnavailable.value)', 2)
+assertNotContains('src/pages/plans/create.vue', [
+  "if (form.imageRatio && supported && !supported.includes(form.imageRatio)) form.imageRatio = ''",
 ])
 assertNotContains('src/pages/plans/create.vue', ['provider:', 'models:', 'claude:'])
 
@@ -391,6 +469,18 @@ assertContains('src/pages/projects/detail.vue', [
   'referencePreviewUrl',
   'upload_session_id: result.upload_session_id',
   'reference_image: form.reference_image',
+  '<ImageCapabilitySelector',
+  '<ImageAspectRatioField',
+  'image_capability_key: form.image_capability_key || undefined',
+  'imageRatioUnsupported',
+  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
+  'const imageCapabilityUnavailable = computed(() =>',
+  'selectedCapability.value.enabled !== true',
+  '该图像能力已停用，请重新选择',
+])
+assertOccurrenceCount('src/pages/projects/detail.vue', 'if (imageCapabilityUnavailable.value)', 1)
+assertNotContains('src/pages/projects/detail.vue', [
+  "if (form.image_ratio && supported && !supported.includes(form.image_ratio)) form.image_ratio = ''",
 ])
 
 assertContains('src/types/asset.ts', [
@@ -414,7 +504,12 @@ assert.match(
 
 for (const path of filesUnder(resolve(root, 'src'))) {
   if (!/\.(ts|vue)$/.test(path)) continue
-  assert.equal(readFileSync(path, 'utf8').includes('reference_image_url'), false, `${path} still uses the removed reference URL field`)
+  const body = readFileSync(path, 'utf8')
+  assert.equal(body.includes('reference_image_url'), false, `${path} still uses the removed reference URL field`)
+  assert.equal(body.includes('image_model_key'), false, `${path} still uses the removed image model field`)
+  assert.equal(body.includes('/image-models'), false, `${path} still uses the removed image models endpoint`)
+  assert.equal(body.includes('/designer/providers'), false, `${path} still uses the removed designer providers endpoint`)
+  assert.equal(body.includes('/model-config'), false, `${path} still uses the removed model config endpoint`)
 }
 
 // === channel→project migration (2026-06-27): miniapp must call /projects, never /channels ===

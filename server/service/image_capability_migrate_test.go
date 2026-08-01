@@ -87,3 +87,27 @@ func TestMigrateImageCapabilitiesRenamesColumnsMapsValuesAndDropsBYOK(t *testing
 		t.Fatalf("second migration unknown values = %d, want 0", second.UnknownValues)
 	}
 }
+
+func TestMigrateImageCapabilitiesPreservesExplicitRatio(t *testing.T) {
+	db := newMigrateTestDB(t)
+	if err := db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, image_model_key TEXT, image_ratio TEXT)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO tasks VALUES ('professional-wide', 'professional_enhance', '16:9')`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := MigrateImageCapabilities(context.Background(), db, "standard", nil); err != nil {
+		t.Fatalf("MigrateImageCapabilities: %v", err)
+	}
+	var migrated struct {
+		ImageCapabilityKey string
+		ImageRatio         string
+	}
+	if readErr := db.Table("tasks").Select("image_capability_key, image_ratio").Where("id = ?", "professional-wide").Scan(&migrated).Error; readErr != nil {
+		t.Fatal(readErr)
+	}
+	if migrated.ImageCapabilityKey != "professional" || migrated.ImageRatio != "16:9" {
+		t.Fatalf("migrated task = %#v, want professional with original explicit ratio", migrated)
+	}
+}

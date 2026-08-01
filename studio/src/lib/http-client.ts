@@ -176,7 +176,7 @@ export function sanitizeUserFacingErrorMessage(message: unknown, fallback: strin
     raw.includes('配置文件') ||
     raw.includes('配置异常')
   ) {
-    return '图片服务配置异常，请联系管理员检查模型配置'
+    return '图像能力配置异常，请联系管理员'
   }
   if (lower.includes('rate limit') || lower.includes('timeout')) {
     return '图片服务繁忙，请稍后重试'
@@ -205,7 +205,7 @@ function isGeneratedImageDownloadError(raw: string, lower: string): boolean {
   return (
     lower.includes('url_download_error') ||
     lower.includes('revisedprompt') ||
-    raw.includes('OpenAI 图片接口返回了 URL') ||
+    raw.includes('图片接口返回了 URL') ||
     raw.includes('下载图片失败')
   )
 }

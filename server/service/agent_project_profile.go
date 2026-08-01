@@ -23,14 +23,15 @@ type AgentProjectProfileRequest struct {
 type AgentProjectProfile map[string]any
 
 type AgentProjectProfileService struct {
-	projects  *ProjectService
-	tasks     *TaskService
-	resources *resources.ResourceManager
-	montage   config.MontageConfig
+	projects          *ProjectService
+	tasks             *TaskService
+	resources         *resources.ResourceManager
+	montage           config.MontageConfig
+	imageCapabilities *ImageCapabilityResolver
 }
 
-func NewAgentProjectProfileService(projects *ProjectService, tasks *TaskService, manager *resources.ResourceManager, montage config.MontageConfig) *AgentProjectProfileService {
-	return &AgentProjectProfileService{projects: projects, tasks: tasks, resources: manager, montage: montage}
+func NewAgentProjectProfileService(projects *ProjectService, tasks *TaskService, manager *resources.ResourceManager, montage config.MontageConfig, imageCapabilities *ImageCapabilityResolver) *AgentProjectProfileService {
+	return &AgentProjectProfileService{projects: projects, tasks: tasks, resources: manager, montage: montage, imageCapabilities: imageCapabilities}
 }
 
 func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectProfileRequest) (*AgentProjectProfile, error) {
@@ -70,6 +71,17 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	if task != nil && strings.TrimSpace(task.ImageRatio) != "" {
 		effectiveImageRatio = strings.TrimSpace(task.ImageRatio)
 	}
+	if s.imageCapabilities == nil {
+		return nil, errors.New("image capability resolver not available")
+	}
+	imageCapabilityKey := ""
+	if task != nil {
+		imageCapabilityKey = strings.TrimSpace(task.ImageCapabilityKey)
+	}
+	imageCapability, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve image capability: %w", err)
+	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
 		"instructions": project.Instructions, "keywords": project.Keywords,
@@ -85,6 +97,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"keywords": project.Keywords, "visual_style": style.VisualStyle,
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
 		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
+		"image_capability_key": imageCapability.Key,
+		"supported_sizes":      append([]string(nil), imageCapability.SupportedSizes...),
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
 			"instructions": agentProfileSource(usesProjectSnapshot),

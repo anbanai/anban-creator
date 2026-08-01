@@ -112,8 +112,8 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.agentProfiles,
         list: vi.fn(),
       },
-      imageModels: {
-        ...actual.api.imageModels,
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
         list: vi.fn(),
       },
       seednoteAnalytics: {
@@ -232,11 +232,12 @@ describe('TaskDetailPage', () => {
       { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
       { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
     ])
-    vi.mocked(api.imageModels.list).mockResolvedValue({
+    vi.mocked(api.imageCapabilities.list).mockResolvedValue({
       tier: 'pro',
+      default_capability: 'standard',
       items: [
-      { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
-      { key: 'source-model', display_name: '源图像', min_tier: 'pro', is_custom: false },
+      { key: 'standard', display_name: '标准图像', min_tier: 'free' },
+      { key: 'source-capability', display_name: '源图像', min_tier: 'pro' },
       ],
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
@@ -279,7 +280,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
   })
 
-  it('shows the frozen task model instead of the current capability catalog', async () => {
+  it('shows the frozen task profile without exposing provider or model details', async () => {
     mockTask(taskWith({
       status: 'completed',
       execution_profile: 'quality',
@@ -302,7 +303,10 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
     await openTaskDetails('配置')
 
-    expect(screen.getByText('kimi-k2.7-code')).toBeInTheDocument()
+    expect(screen.getByText('极致效果')).toBeInTheDocument()
+    expect(screen.getByText('推理强度').nextElementSibling).toHaveTextContent('high')
+    expect(screen.queryByText('moonshot')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k2.7-code')).not.toBeInTheDocument()
     expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
   })
 
@@ -1138,14 +1142,14 @@ describe('TaskDetailPage', () => {
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
-    expect(api.imageModels.list).not.toHaveBeenCalled()
+    expect(api.imageCapabilities.list).not.toHaveBeenCalled()
 
     await openCloneDialog()
 
     await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(1))
     expect(api.billing.wallet).toHaveBeenCalledTimes(1)
     expect(api.billing.catalog).toHaveBeenCalledTimes(1)
-    expect(api.imageModels.list).toHaveBeenCalledTimes(1)
+    expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
   })
 
   it('opens the shared full clone form with editable source defaults and navigates to the first created task', async () => {
@@ -1156,7 +1160,7 @@ describe('TaskDetailPage', () => {
       prompt: '原始任务要求',
       project_id: 'ch-1',
       image_ratio: '16:9',
-      image_model_key: 'source-model',
+      image_capability_key: 'source-capability',
       result: JSON.stringify({ files: null, output: '' }),
     }))
 
@@ -1179,7 +1183,7 @@ describe('TaskDetailPage', () => {
       quantity: 1,
       prompt: '原始任务要求',
       image_ratio: '16:9',
-      image_model_key: 'source-model',
+      image_capability_key: 'source-capability',
     })))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone'))
     expect(toastSuccessMock).toHaveBeenCalledTimes(1)
@@ -1523,7 +1527,7 @@ describe('TaskDetailPage', () => {
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
-    expect(api.imageModels.list).not.toHaveBeenCalled()
+    expect(api.imageCapabilities.list).not.toHaveBeenCalled()
   })
 
   it('shows visible continue, clone, and delete actions for a cancelled task', async () => {
@@ -1596,19 +1600,19 @@ describe('TaskDetailPage', () => {
           created_at: '2026-07-10T00:00:00.000Z',
         },
         {
-          id: 'content-image-charge',
+          id: 'standard-image-charge-1',
           charge_kind: 'operation',
           policy: 'accepted_task_operation',
-          sku_id: 'image.seedream.content.v1',
+          sku_id: 'image.standard',
           credits: 500,
           tool_call_id: 'image:content-1',
           created_at: '2026-07-10T00:01:00.000Z',
         },
         {
-          id: 'cover-image-charge',
+          id: 'standard-image-charge-2',
           charge_kind: 'operation',
           policy: 'accepted_task_operation',
-          sku_id: 'image.seedream.cover.v1',
+          sku_id: 'image.standard',
           credits: 500,
           tool_call_id: 'image:cover-1',
           created_at: '2026-07-10T00:02:00.000Z',
@@ -1663,8 +1667,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('累计扣费')).toBeInTheDocument()
     expect(screen.getByText('7,300 积分')).toBeInTheDocument()
     expect(screen.getByText('任务固定费')).toBeInTheDocument()
-    expect(screen.getByText('内容图生成费')).toBeInTheDocument()
-    expect(screen.getByText('封面图生成费')).toBeInTheDocument()
+    expect(screen.getAllByText('标准图像生成费')).toHaveLength(2)
     expect(screen.getByText('增值操作费')).toBeInTheDocument()
     expect(screen.getByText('6,000 积分')).toBeInTheDocument()
     expect(screen.getAllByText('500 积分')).toHaveLength(2)

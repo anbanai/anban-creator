@@ -23,13 +23,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
-import { useImageCapabilities } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { contentTypeLabel, ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, platformDefaultRatio } from '@/lib/labels'
+import { contentTypeLabel, ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { initialMontageInput } from '@/lib/montage-form'
 import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
@@ -108,7 +108,7 @@ export function TaskFormDialog({
     staleTime: 0,
   })
   const executionProfilesQuery = useAgentExecutionProfiles()
-  const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageCapabilities()
+  const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities()
 
   const form = useForm<TaskFormDefaults>({
     resolver: zodResolver(createTaskSchema) as Resolver<TaskFormDefaults>,
@@ -134,7 +134,8 @@ export function TaskFormDialog({
 
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedPrompt = useWatch({ control: form.control, name: 'prompt' }) ?? ''
-  const watchedImageModelKey = useWatch({ control: form.control, name: 'image_model_key' }) ?? ''
+  const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' }) ?? ''
+  const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' }) ?? ''
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
 
   useEffect(() => {
@@ -167,23 +168,47 @@ export function TaskFormDialog({
     [isViralAnalysisTask, projects],
   )
   const selectedProject = projectMap.get(watchedProjectId ?? '')
-  const imageModelOptionsForValue = useMemo(() => {
-    if (!watchedImageModelKey || imageModelOptions.some((option) => option.key === watchedImageModelKey)) {
-      return imageModelOptions
+  const imageCapabilityOptionsForValue = useMemo(() => {
+    if (!watchedImageCapabilityKey || imageCapabilityOptions.some((option) => option.key === watchedImageCapabilityKey)) {
+      return imageCapabilityOptions
     }
     return [
-      ...imageModelOptions,
+      ...imageCapabilityOptions,
       {
-        key: watchedImageModelKey,
+        key: watchedImageCapabilityKey,
         display_name: '已停用图像能力（当前任务配置）',
-        is_custom: true,
+        enabled: false,
+        features: {
+          quality_levels: [], size_presets: [], default_size: '', max_batch: 1,
+          max_reference_images: 0, supports_reference: false, supports_mask: false,
+          output_formats: [], has_background: false, has_compression: false, watermark: false,
+        },
       },
     ]
-  }, [imageModelOptions, watchedImageModelKey])
-  const imageModelUnavailable = !isViralAnalysisTask && Boolean(watchedImageModelKey)
-    && !imageModelsLoading
-    && !imageModelsError
-    && !imageModelOptions.some((option) => option.key === watchedImageModelKey)
+  }, [imageCapabilityOptions, watchedImageCapabilityKey])
+  const effectiveImageCapabilityKey = watchedImageCapabilityKey || defaultCapability
+  const selectedImageCapability = imageCapabilityOptions.find((option) => option.key === effectiveImageCapabilityKey)
+  const imageCapabilityUnavailable = !isViralAnalysisTask && Boolean(effectiveImageCapabilityKey)
+    && !imageCapabilitiesLoading
+    && !imageCapabilitiesError
+    && (
+      !selectedImageCapability
+      || selectedImageCapability.enabled !== true
+      || selectedImageCapability.price_available !== true
+    )
+  const imageRatioUnsupported = Boolean(
+    watchedImageRatio
+    && selectedImageCapability?.features?.size_presets
+    && !selectedImageCapability.features.size_presets.includes(watchedImageRatio)
+  )
+
+  useEffect(() => {
+    if (imageRatioUnsupported) {
+      form.setError('image_ratio', { type: 'validate', message: '当前图像能力不支持此比例' })
+      return
+    }
+    form.clearErrors('image_ratio')
+  }, [form, imageRatioUnsupported])
   useFormDirtyCheck(form, open)
 
   useEffect(() => {
@@ -344,8 +369,10 @@ export function TaskFormDialog({
           ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
           : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
-              : imageModelUnavailable
+              : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
+                : imageRatioUnsupported
+                  ? { message: '当前图像能力不支持所选比例，请重新选择比例或智能适配。', href: '' }
                 : watchedType !== 'ecommerce' && goalMode && !goal.trim()
                   ? { message: '强目标模式需要填写目标条件。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
@@ -487,29 +514,28 @@ export function TaskFormDialog({
 
                 {!isMontageTask && !isViralAnalysisTask ? (
                   <div className="grid gap-4 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-                    {watchedType !== 'ecommerce' ? (
-                      <FormField control={form.control} name="image_ratio" render={({ field }) => (
+                    <FormField control={form.control} name="image_ratio" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>封面比例</FormLabel>
+                          <FormLabel>图像比例</FormLabel>
                           <FormControl>
                             <ImageAspectRatioField
                               value={field.value || ''}
-                              defaultValue={selectedProject?.image_ratio || platformDefaultRatio[watchedType] || '3:4'}
+                              defaultValue={selectedProject?.image_ratio || ''}
+                              supportedSizes={selectedImageCapability?.features?.size_presets}
                               onChange={field.onChange}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />
-                    ) : <div />}
-                    <FormField control={form.control} name="image_model_key" render={({ field }) => (
+                    <FormField control={form.control} name="image_capability_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>图像能力</FormLabel>
                         <FormControl>
-                          {imageModelsLoading ? (
+                          {imageCapabilitiesLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
                           ) : (
-                            <ImageCapabilitySelector options={imageModelOptionsForValue} value={field.value || ''} onChange={field.onChange} />
+                            <ImageCapabilitySelector options={imageCapabilityOptionsForValue} value={field.value || defaultCapability} onChange={field.onChange} />
                           )}
                         </FormControl>
                         <FormMessage />
@@ -536,7 +562,7 @@ export function TaskFormDialog({
                     <Stamp className={`mt-0.5 h-5 w-5 shrink-0 ${watermark ? 'text-primary' : 'text-muted-foreground'}`} />
                     <div className="min-w-0">
                       <p className={`text-sm font-medium ${watermark ? 'text-foreground' : 'text-muted-foreground'}`}>水印</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">仅在所选图像能力支持水印时生效</p>
                     </div>
                   </button>
                 ) : null}

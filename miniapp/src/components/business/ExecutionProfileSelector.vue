@@ -18,8 +18,6 @@
           <text class="profile-card__name">{{ profile.display_name }}</text>
           <text v-if="!profile.available" class="profile-card__badge">不可用</text>
         </view>
-        <text class="profile-card__provider">Provider：{{ profile.provider }}</text>
-        <text class="profile-card__model">{{ profile.model_name }}</text>
         <text class="profile-card__tier">{{ tierRequirement(profile.min_tier) }}</text>
         <text class="profile-card__description">
           {{ profile.available ? profile.description : unavailableReason(profile) }}
@@ -65,8 +63,8 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
   if (reason === 'requires_pro') return '需要 Pro 套餐'
   if (reason === 'requires_enterprise') return '需要企业版套餐'
   if (reason === 'profile_configuration_missing') return '当前档位尚未配置'
-  if (reason === 'agent_provider_unavailable') return '当前模型服务不可用'
-  if (reason === 'agent_model_cost_unmapped') return '当前模型尚未配置成本'
+  if (reason === 'agent_provider_unavailable') return '当前执行服务不可用'
+  if (reason === 'agent_model_cost_unmapped') return '当前档位尚未配置成本'
   return reason || '当前不可用'
 }
 </script>
@@ -127,8 +125,6 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
     font-size: $ab-text-xs;
   }
 
-  &__provider,
-  &__model,
   &__tier,
   &__description {
     display: block;
@@ -140,12 +136,6 @@ function unavailableReason(profile: AgentExecutionProfileCapability) {
 
   &__description {
     color: $ab-text-tertiary;
-  }
-
-  &__model {
-    font-family: monospace;
-    font-size: $ab-text-xs;
-    overflow-wrap: anywhere;
   }
 
   &__tier {

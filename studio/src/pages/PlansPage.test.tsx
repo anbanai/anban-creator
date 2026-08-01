@@ -1,4 +1,6 @@
 import { act, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
@@ -86,6 +88,14 @@ vi.mock('@/lib/api', async () => {
           { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
+      },
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
+        list: vi.fn().mockResolvedValue({
+          tier: 'pro',
+          default_capability: 'standard',
+          items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }],
+        }),
       },
     },
   }
@@ -287,6 +297,31 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).getByText('2,200')).toBeInTheDocument()
     expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
+  })
+})
+
+describe('PlansPage image capability contract', () => {
+  it('rejects a retired image capability before submission', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
+    expect(source).toContain('该图像能力已停用，请重新选择')
+    expect(source).toContain('submittedImageCapability.price_available !== true')
+    expect(source).toContain('submittedImageCapability.enabled !== true')
+  })
+
+  it('describes watermark support without exposing an image provider', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
+    expect(source).toContain('仅在所选图像能力支持水印时生效')
+    expect(source).not.toContain('火山引擎')
+  })
+
+  it('persists image ratio and constrains it with the effective capability', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
+    expect(source).toContain('image_ratio: normalizeImageRatio(plan.image_ratio)')
+    expect(source).toContain('image_ratio: values.image_ratio')
+    expect(source).toContain('supportedSizes={selectedImageCapability?.features?.size_presets}')
+    expect(source).toContain('normalizeImageRatio(fullProject?.image_ratio)')
+    expect(source).toContain('imageRatioUnsupported')
+    expect(source).toContain('当前图像能力不支持所选比例，请重新选择比例或智能适配')
   })
 })
 

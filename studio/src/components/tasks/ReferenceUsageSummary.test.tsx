@@ -36,7 +36,7 @@ const validSummary: ReferenceUsageSummaryData = {
     generation_attempts: 2,
     verification: { status: 'passed', summary: '产品与文字核验通过' },
     provider: 'openai',
-    model: 'gpt-image-2',
+    model: 'professional',
     selection_reason: 'reference_compatible_fallback',
   }],
   warnings: ['未使用侧面图，因为与正面包装版本冲突'],
@@ -102,7 +102,7 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('生成 2 次')).toBeInTheDocument()
     expect(screen.getByText('核验通过')).toBeInTheDocument()
     expect(screen.getByText('产品与文字核验通过')).toBeInTheDocument()
-    expect(screen.getByText('openai / gpt-image-2')).toBeInTheDocument()
+    expect(screen.queryByText('openai / professional')).not.toBeInTheDocument()
     expect(screen.getByText('reference_compatible_fallback')).toBeInTheDocument()
     expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
@@ -212,7 +212,7 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('生成 2 次')).toBeInTheDocument()
     expect(screen.getByText('核验通过')).toBeInTheDocument()
     expect(screen.getByText('产品与文字核验通过')).toBeInTheDocument()
-    expect(screen.getByText('openai / gpt-image-2')).toBeInTheDocument()
+    expect(screen.queryByText('openai / professional')).not.toBeInTheDocument()
     expect(screen.getByText('reference_compatible_fallback')).toBeInTheDocument()
     expect(screen.getByText('首选模型参考图上限不足')).toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()

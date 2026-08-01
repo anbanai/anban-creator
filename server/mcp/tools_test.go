@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -65,7 +66,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
-	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{})
+	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{}, accountInfoImageCapabilityResolver())
 
 	old := svcs
 	svcs = &Services{
@@ -84,6 +85,31 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 		svcs = old
 	}
 	return taskSvc, projectSvc, repo, cleanup
+}
+
+func accountInfoImageCapabilityResolver() *service.ImageCapabilityResolver {
+	capability := func(sizes ...string) srvconfig.ImageGenerationRouteConfig {
+		return srvconfig.ImageGenerationRouteConfig{
+			Enabled: true, MinTier: "free",
+			Features: srvconfig.DesignerProviderCapabilities{SizePresets: sizes},
+		}
+	}
+	preferred := capability("1:1", "16:9")
+	preferred.Provider = "private-provider"
+	preferred.Model = "private-model"
+	preferred.BaseURL = "https://private-route.invalid/v1"
+	preferred.APIKey = "private-api-key"
+	preferred.BillingSKU = "private-billing-sku"
+	return service.NewImageCapabilityResolver(nil, &srvconfig.Config{ModelRoutes: srvconfig.ModelRoutesConfig{
+		ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "default-route",
+			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+				"default-route":    capability("1:1", "3:4"),
+				"preferred-key":    preferred,
+				"openai-gpt-image": capability("1:1", "3:4", "16:9"),
+			},
+		},
+	}})
 }
 
 func getAgentProjectProfileForTest(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
@@ -881,7 +907,17 @@ func TestAgentProjectProfileDoesNotExposeImageRouteMetadata(t *testing.T) {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
 	raw := mustJSON(t, info)
-	for _, forbidden := range []string{"image_generation", "image_model", "preferred-key", "provider", "selection_reason"} {
+	resolved := info["resolved_profile"].(map[string]any)
+	if got := resolved["image_capability_key"]; got != "preferred-key" {
+		t.Fatalf("image_capability_key = %v, want preferred-key", got)
+	}
+	if got, want := resolved["supported_sizes"], []string{"1:1", "16:9"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("supported_sizes = %#v, want %#v", got, want)
+	}
+	for _, forbidden := range []string{
+		"image_generation", "image_model", "provider", "selection_reason", "base_url", "api_key", "billing_sku",
+		"private-provider", "private-model", "https://private-route.invalid/v1", "private-api-key", "private-billing-sku",
+	} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("profile exposes route metadata %q: %s", forbidden, raw)
 		}
@@ -963,7 +999,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	}
 	SetBillingServices(nil, &srvconfig.Config{Montage: montageConfig})
 	svcs.AgentProjectProfileSvc = service.NewAgentProjectProfileService(
-		svcs.ProjectSvc, svcs.TaskSvc, resources.Manager(), montageConfig,
+		svcs.ProjectSvc, svcs.TaskSvc, resources.Manager(), montageConfig, accountInfoImageCapabilityResolver(),
 	)
 	ctx := context.Background()
 	userID := uuid.New().String()

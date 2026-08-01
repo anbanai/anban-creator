@@ -11,7 +11,7 @@ export interface EcommerceTemplateDefaults {
   default_selected_modules?: Record<string, number>
   target_platform?: string
   brand_brief?: string
-  image_model_key?: string
+  image_capability_key?: string
 }
 
 export interface Template {

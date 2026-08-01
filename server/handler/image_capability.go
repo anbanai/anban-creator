@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -35,6 +36,15 @@ type ImageCapabilityOption struct {
 	Enabled        bool                                `json:"enabled"`
 	SortOrder      int                                 `json:"sort_order"`
 	Features       config.DesignerProviderCapabilities `json:"features"`
+}
+
+type ImageCapabilityRatioError struct {
+	CapabilityKey string `json:"capability_key"`
+	ImageRatio    string `json:"image_ratio"`
+}
+
+func (e *ImageCapabilityRatioError) Error() string {
+	return fmt.Sprintf("image capability %q does not support image_ratio %q", e.CapabilityKey, e.ImageRatio)
 }
 
 func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
@@ -94,6 +104,39 @@ func ValidateImageCapabilityKey(key string, userTier model.Tier, capabilities ma
 		return fmt.Errorf("image capability %q requires %s tier", key, required)
 	}
 	return nil
+}
+
+func ValidateImageRatioForCapability(key, ratio string, routes config.ImageGenerationRoutesConfig) error {
+	ratio = strings.TrimSpace(ratio)
+	if ratio == "" {
+		return nil
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = strings.TrimSpace(routes.DefaultCapability)
+	}
+	route, ok := routes.Capabilities[key]
+	if !ok || !route.Enabled {
+		return fmt.Errorf("unknown image capability key %q", key)
+	}
+	for _, supported := range route.Features.SizePresets {
+		if strings.EqualFold(strings.TrimSpace(supported), ratio) {
+			return nil
+		}
+	}
+	return &ImageCapabilityRatioError{CapabilityKey: key, ImageRatio: ratio}
+}
+
+func respondImageCapabilityRatioError(c fiber.Ctx, err error) error {
+	var ratioErr *ImageCapabilityRatioError
+	if errors.As(err, &ratioErr) {
+		return c.Status(fiber.StatusBadRequest).JSON(Response{
+			Code: fiber.StatusBadRequest * 100,
+			Msg:  "image_capability_ratio_unsupported",
+			Data: ratioErr,
+		})
+	}
+	return Error(c, fiber.StatusBadRequest, err.Error())
 }
 
 func validateImageCapabilityKeyForUser(ctx context.Context, repo repository.Repository, userID, key string, capabilities map[string]config.ImageGenerationRouteConfig) error {

@@ -106,7 +106,13 @@ var ValidImageRatios = map[string]bool{
 	"1:1":  true,
 	"4:3":  true,
 	"16:9": true,
+	"3:2":  true,
+	"2:3":  true,
+	"9:16": true,
+	"21:9": true,
 }
+
+const ValidImageRatioHint = "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9, 3:2, 2:3, 9:16, 21:9"
 
 // DefaultImageRatio returns the default image ratio for a platform.
 func DefaultImageRatio(platform string) string {

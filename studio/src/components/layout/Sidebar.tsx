@@ -110,7 +110,7 @@ export default function Sidebar() {
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Top: Logo + Collapse toggle (ChatGPT-style) */}
+        {/* Top: logo and collapse toggle. */}
         {collapsed ? (
           <>
             <button

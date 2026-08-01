@@ -108,3 +108,34 @@ func TestValidateImageCapabilityKey(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateImageRatioForCapability(t *testing.T) {
+	standard := handlerCapability("Standard", "free", "image.standard", 10)
+	standard.Features.SizePresets = []string{"1:1", "4:3"}
+	professional := handlerCapability("Professional", "enterprise", "image.professional", 20)
+	professional.Features.SizePresets = []string{"1:1", "21:9"}
+	routes := config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": standard, "professional": professional,
+		},
+	}
+
+	for _, tt := range []struct {
+		name, key, ratio string
+		wantErr          bool
+	}{
+		{name: "smart mode", key: "standard", ratio: ""},
+		{name: "explicit supported", key: "standard", ratio: "4:3"},
+		{name: "default capability supported", ratio: "1:1"},
+		{name: "explicit unsupported", key: "standard", ratio: "21:9", wantErr: true},
+		{name: "professional supported", key: "professional", ratio: "21:9"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateImageRatioForCapability(tt.key, tt.ratio, routes)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

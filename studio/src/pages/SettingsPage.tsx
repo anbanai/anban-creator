@@ -21,7 +21,6 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schemas'
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
-import ModelConfigSection from '@/components/settings/ModelConfigSection'
 import LocalExecutorSection from '@/components/settings/LocalExecutorSection'
 import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
 import { isDesktop } from '@/lib/tauri'
@@ -167,13 +166,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <SettingsGroupTitle
-        id="model-key-settings"
-        title="模型与密钥"
-        description="插件访问密钥与自定义图片生成模型覆盖。"
-      />
-      <ModelConfigSection />
-
       {/* Account Quota Card */}
       <Card>
         <div className="border-b border-border px-4 py-3">
@@ -262,7 +254,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* API Keys Card */}
-      <Card>
+      <Card id="api-key-settings">
         <div className="border-b border-border px-4 py-3 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-foreground">平台密钥</h2>

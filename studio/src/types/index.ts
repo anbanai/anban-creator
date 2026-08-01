@@ -106,7 +106,7 @@ export type {
 export type { ResourceEntry, ResourceListResponse } from './resource'
 
 // Image Model
-export type { ImageCapabilityOption, ImageModelOption, ImageModelListResponse } from './imageModel'
+export type { ImageCapabilityFeatures, ImageCapabilityOption, ImageCapabilityListResponse } from './imageCapability'
 
 export type {
   MontageAsset,
@@ -138,8 +138,8 @@ export type {
 
 // Designer
 export type {
-  ModelCapabilities,
-  DesignerProvider,
+  DesignerCapabilityFeatures,
+  DesignerCapability,
   GenerateRequest,
   GenerateImage,
   ImageGeneration,

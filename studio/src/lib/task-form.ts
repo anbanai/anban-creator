@@ -42,7 +42,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     prompt: '',
     quantity: 1,
     image_ratio: defaults.imageRatio as TaskFormDefaults['image_ratio'],
-    image_model_key: defaults.imageModelKey,
+    image_capability_key: defaults.imageCapabilityKey,
     skip_reference_image: false,
     reference_image: null,
     input_attachments: [],
@@ -73,7 +73,7 @@ export function switchTaskFormDefaults(
       ...cloneValue(current),
       project_id: project.id,
       image_ratio: defaults.image_ratio,
-      image_model_key: defaults.image_model_key,
+      image_capability_key: defaults.image_capability_key,
     }
 
     if (current.type === 'ecommerce') {
@@ -139,7 +139,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     prompt: task.prompt,
     quantity: 1,
     image_ratio: (task.image_ratio ?? '') as TaskFormDefaults['image_ratio'],
-    image_model_key: task.image_model_key ?? '',
+    image_capability_key: task.image_capability_key ?? '',
     skip_reference_image: task.skip_reference_image ?? false,
     reference_image: taskReferenceSelection(task),
     input_attachments: clonedAttachments,
@@ -184,7 +184,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     project_id: values.project_id,
     quantity: values.quantity,
     image_ratio: values.image_ratio || undefined,
-    image_model_key: values.image_model_key || undefined,
+    image_capability_key: values.image_capability_key || undefined,
     skip_reference_image: values.skip_reference_image,
     ...(values.skip_reference_image ? { reference_image: null } : {}),
     input_attachments: cloneValue(values.input_attachments),

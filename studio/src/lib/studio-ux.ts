@@ -1,6 +1,5 @@
 import type { AgentExecutionProfileID, BillingCatalog, Project, ProjectStats, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
-import { platformDefaultRatio } from '@/lib/labels'
 import { taskCostFor } from '@/lib/pricing'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 
@@ -38,7 +37,7 @@ export function buildDashboardBlocker({
       id: 'api-key',
       message: '平台密钥未就绪，先补齐接入能力。',
       actionLabel: '去设置',
-      actionHref: '/settings#model-key-settings',
+      actionHref: '/settings#api-key-settings',
       blocking: true,
     }
   }
@@ -48,7 +47,7 @@ export function buildDashboardBlocker({
 export interface ProjectCreationDefaults {
   type: TaskType
   imageRatio: string
-  imageModelKey: string
+  imageCapabilityKey: string
   selectedModules: Record<string, number>
   targetPlatform: string
 }
@@ -57,8 +56,8 @@ export function getProjectCreationDefaults(project?: Project | null): ProjectCre
   const type = (project?.platform || 'seednote') as TaskType
   return {
     type,
-    imageRatio: project?.image_ratio || platformDefaultRatio[type] || '',
-    imageModelKey: project?.ecommerce_defaults?.image_model_key || '',
+    imageRatio: project?.image_ratio || '',
+    imageCapabilityKey: project?.ecommerce_defaults?.image_capability_key || '',
     selectedModules: project?.ecommerce_defaults?.default_selected_modules || {},
     targetPlatform: project?.ecommerce_defaults?.target_platform || '',
   }
@@ -196,7 +195,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
 }
 
 export interface SettingsReadinessListItem {
-  id: 'execution' | 'model-key' | 'publishing' | 'account-security'
+  id: 'execution' | 'api-key' | 'publishing' | 'account-security'
   title: string
   status: string
   impact: string
@@ -225,12 +224,12 @@ export function buildSettingsReadinessItems({
       ready: true,
     },
     {
-      id: 'model-key',
-      title: '模型与密钥',
+      id: 'api-key',
+      title: '平台密钥',
       status: apiKeyCount > 0 ? `${apiKeyCount} 个平台密钥` : '需要创建密钥',
-      impact: '影响 Agent 接入、模型调用和生成能力。',
-      actionLabel: apiKeyCount > 0 ? '检查模型' : '创建密钥',
-      href: '#model-key-settings',
+      impact: '影响 Agent 接入与平台能力调用。',
+      actionLabel: apiKeyCount > 0 ? '检查密钥' : '创建密钥',
+      href: '#api-key-settings',
       ready: apiKeyCount > 0,
     },
     {

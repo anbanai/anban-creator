@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 	"github.com/anbanai/anban-creator/server/resources"
 )
 
-func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing.T) {
+func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	logger := zerolog.Nop()
 	projectSvc := NewProjectService(repo, &logger)
 	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
-	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{})
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
 
 	userID := uuid.NewString()
 	project := &model.Project{
@@ -76,13 +77,83 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	if got := resolved["image_ratio"]; got != "16:9" {
 		t.Fatalf("effective image_ratio = %v, want task value 16:9", got)
 	}
+	if got := resolved["image_capability_key"]; got != "server-owned-route" {
+		t.Fatalf("image_capability_key = %v, want task value server-owned-route", got)
+	}
+	wantSizes := []string{"1:1", "3:4", "16:9"}
+	if got := resolved["supported_sizes"]; !reflect.DeepEqual(got, wantSizes) {
+		t.Fatalf("supported_sizes = %#v, want %#v", got, wantSizes)
+	}
 	raw, err := json.Marshal(profile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"image_generation", "image_model", "server-owned-route", "selection_reason", "provider", "model"} {
+	for _, forbidden := range []string{
+		"image_generation", "image_model", "selection_reason", "provider", "model",
+		"private-provider", "private-model", "https://internal-route.invalid/v1", "private-api-key", "private-billing-sku",
+	} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("profile exposes route metadata %q: %s", forbidden, raw)
 		}
 	}
+}
+
+func TestAgentProjectProfileUsesDefaultImageCapability(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-default.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.Nop()
+	projectSvc := NewProjectService(repo, &logger)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
+
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "default capability"}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: project.ID,
+		Type: model.PlatformSeednote, Status: model.TaskStatusPending,
+	}
+	task.SetProjectSnapshot(model.SnapshotProject(project))
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := (*profile)["resolved_profile"].(map[string]any)
+	if got := resolved["image_capability_key"]; got != "default-route" {
+		t.Fatalf("image_capability_key = %v, want configured default default-route", got)
+	}
+	if got, want := resolved["supported_sizes"], []string{"1:1", "4:3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("supported_sizes = %#v, want %#v", got, want)
+	}
+}
+
+func agentProjectProfileImageCapabilityResolver() *ImageCapabilityResolver {
+	return NewImageCapabilityResolver(nil, &config.Config{ModelRoutes: config.ModelRoutesConfig{
+		ImageGeneration: config.ImageGenerationRoutesConfig{
+			DefaultCapability: "default-route",
+			Capabilities: map[string]config.ImageGenerationRouteConfig{
+				"default-route": {
+					Enabled: true, MinTier: "free",
+					Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "4:3"}},
+				},
+				"server-owned-route": {
+					Provider: "private-provider", Model: "private-model", BaseURL: "https://internal-route.invalid/v1",
+					APIKey: "private-api-key", BillingSKU: "private-billing-sku", Enabled: true, MinTier: "free",
+					Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "3:4", "16:9"}},
+				},
+			},
+		},
+	}})
 }

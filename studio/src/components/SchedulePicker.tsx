@@ -101,11 +101,12 @@ export default function SchedulePicker({ value, onChange, onInteraction }: Sched
         <ToggleGroup
           value={days.map(String)}
           onValueChange={handleDaysChange}
-          multiple
-          variant="outline"
-          size="sm"
-          spacing={1}
-        >
+        multiple
+        variant="outline"
+        size="sm"
+        spacing={1}
+        className="grid w-full grid-cols-4 sm:grid-cols-7"
+      >
           {WEEK_DAYS.map(day => (
             <ToggleGroupItem key={day.value} value={String(day.value)}>
               {day.label}

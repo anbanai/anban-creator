@@ -72,7 +72,7 @@ describe('task form mapping', () => {
       execution_profile: 'effective' as const,
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
       image_ratio: '3:4' as const,
-      image_model_key: 'image-model',
+      image_capability_key: 'image-model',
       skip_reference_image: true,
       reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' } as const,
       watermark: true,
@@ -108,7 +108,7 @@ describe('task form mapping', () => {
       platform: 'ecommerce',
       image_ratio: '1:1',
       ecommerce_defaults: {
-        image_model_key: 'model-ecommerce',
+        image_capability_key: 'model-ecommerce',
         default_selected_modules: { main_image: 2 },
         target_platform: 'tmall',
       },
@@ -121,7 +121,7 @@ describe('task form mapping', () => {
       type: 'ecommerce',
       quantity: 1,
       image_ratio: '1:1',
-      image_model_key: 'model-ecommerce',
+      image_capability_key: 'model-ecommerce',
       watermark: false,
       goal: '',
       goal_mode: false,
@@ -145,7 +145,7 @@ describe('task form mapping', () => {
       platform: 'ecommerce',
       image_ratio: '1:1',
       ecommerce_defaults: {
-        image_model_key: 'project-model',
+        image_capability_key: 'project-model',
         default_selected_modules: { detail_image: 3 },
         target_platform: 'douyin',
       },
@@ -185,7 +185,7 @@ describe('task form mapping', () => {
       goal: 'Keep this goal',
       goal_mode: true,
       image_ratio: '1:1',
-      image_model_key: 'project-model',
+      image_capability_key: 'project-model',
       product_photos: [],
       selected_modules: { detail_image: 3 },
       target_platform: 'douyin',
@@ -206,7 +206,7 @@ describe('task form mapping', () => {
         platform: 'ecommerce',
         image_ratio: '1:1',
         ecommerce_defaults: {
-          image_model_key: 'source-model',
+          image_capability_key: 'source-capability',
           default_selected_modules: { hero: 1 },
           target_platform: 'tmall',
         },
@@ -226,7 +226,7 @@ describe('task form mapping', () => {
       platform: 'ecommerce',
       image_ratio: '4:3',
       ecommerce_defaults: {
-        image_model_key: 'destination-model',
+        image_capability_key: 'destination-capability',
         default_selected_modules: { destination_hero: 1 },
         target_platform: 'douyin',
       },
@@ -242,7 +242,7 @@ describe('task form mapping', () => {
       input_attachments: [{ type: 'document', key: 'brief' }],
       watermark: true,
       image_ratio: '4:3',
-      image_model_key: 'destination-model',
+      image_capability_key: 'destination-capability',
       product_photos: ['oss://product.png'],
       selected_modules: { destination_hero: 1 },
       target_platform: 'douyin',
@@ -257,7 +257,7 @@ describe('task form mapping', () => {
         id: 'source-article',
         platform: 'article',
         image_ratio: '1:1',
-        ecommerce_defaults: { image_model_key: 'source-model' },
+        ecommerce_defaults: { image_capability_key: 'source-capability' },
       })),
       article_with_cover: false,
       article_with_content_images: false,
@@ -266,14 +266,14 @@ describe('task form mapping', () => {
       id: 'destination-article',
       platform: 'article',
       image_ratio: '16:9',
-      ecommerce_defaults: { image_model_key: 'destination-model' },
+      ecommerce_defaults: { image_capability_key: 'destination-capability' },
     })
 
     expect(switchTaskFormDefaults(current, destination)).toMatchObject({
       project_id: 'destination-article',
       type: 'article',
       image_ratio: '16:9',
-      image_model_key: 'destination-model',
+      image_capability_key: 'destination-capability',
       article_with_cover: false,
       article_with_content_images: false,
     })
@@ -285,7 +285,7 @@ describe('task form mapping', () => {
         id: 'source-seednote',
         platform: 'seednote',
         image_ratio: '1:1',
-        ecommerce_defaults: { image_model_key: 'source-model' },
+        ecommerce_defaults: { image_capability_key: 'source-capability' },
       })),
       has_content_image: false,
       has_tail_image: true,
@@ -294,14 +294,14 @@ describe('task form mapping', () => {
       id: 'destination-seednote',
       platform: 'seednote',
       image_ratio: '3:4',
-      ecommerce_defaults: { image_model_key: 'destination-model' },
+      ecommerce_defaults: { image_capability_key: 'destination-capability' },
     })
 
     expect(switchTaskFormDefaults(current, destination)).toMatchObject({
       project_id: 'destination-seednote',
       type: 'seednote',
       image_ratio: '3:4',
-      image_model_key: 'destination-model',
+      image_capability_key: 'destination-capability',
       has_content_image: false,
       has_tail_image: true,
     })
@@ -313,7 +313,7 @@ describe('task form mapping', () => {
         id: 'source-montage',
         platform: 'montage',
         image_ratio: '1:1',
-        ecommerce_defaults: { image_model_key: 'source-model' },
+        ecommerce_defaults: { image_capability_key: 'source-capability' },
       })),
       prompt: 'Keep montage brief',
       montage_input: {
@@ -329,7 +329,7 @@ describe('task form mapping', () => {
       id: 'destination-montage',
       platform: 'montage',
       image_ratio: '16:9',
-      ecommerce_defaults: { image_model_key: 'destination-model' },
+      ecommerce_defaults: { image_capability_key: 'destination-capability' },
       montage_defaults: {
         default_pipeline: 'destination-default',
         preferences: { aspect_ratio: '16:9', duration_seconds: 15, style: 'documentary' },
@@ -344,7 +344,7 @@ describe('task form mapping', () => {
       type: 'montage',
       prompt: 'Keep montage brief',
       image_ratio: '16:9',
-      image_model_key: 'destination-model',
+      image_capability_key: 'destination-capability',
       montage_input: {
         brief: 'Keep montage brief',
         pipeline_key: 'destination-default',
@@ -441,7 +441,7 @@ describe('task form mapping', () => {
       project_id: `${type}-project`,
       prompt: `${type} prompt`,
       image_ratio: '16:9',
-      image_model_key: `${type}-model`,
+      image_capability_key: `${type}-model`,
       skip_reference_image: false,
       watermark: false,
       goal: 'Publish-ready',
@@ -488,7 +488,7 @@ describe('task form mapping', () => {
       prompt: `${type} prompt`,
       quantity: 1,
       image_ratio: '16:9',
-      image_model_key: `${type}-model`,
+      image_capability_key: `${type}-model`,
       skip_reference_image: false,
       execution_profile: 'effective',
       watermark: false,
@@ -707,7 +707,7 @@ describe('task form mapping', () => {
       execution_profile: 'effective',
       quantity: 1,
       image_ratio: '',
-      image_model_key: '',
+      image_capability_key: '',
       reference_image: null,
       skip_reference_image: false,
     }
@@ -723,7 +723,7 @@ describe('task form mapping', () => {
       ...expected,
     })
     expect(request.image_ratio).toBeUndefined()
-    expect(request.image_model_key).toBeUndefined()
+    expect(request.image_capability_key).toBeUndefined()
     expect(request.reference_image).toBeUndefined()
     for (const key of omitted) expect(request).not.toHaveProperty(key)
   })

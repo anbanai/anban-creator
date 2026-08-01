@@ -57,6 +57,7 @@ type CreatePlanParams struct {
 	CronExpr              string
 	Prompt                string
 	ImageCapabilityKey    string
+	ImageRatio            string
 	SkipReferenceImage    *bool
 	ReferenceImageAssetID string
 	Watermark             *bool
@@ -177,6 +178,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		Status:                   model.PlanStatusActive,
 		NextRunAt:                nextRun,
 		ImageCapabilityKey:       p.ImageCapabilityKey,
+		ImageRatio:               p.ImageRatio,
 		ReferenceImageAssetID:    p.ReferenceImageAssetID,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
@@ -253,6 +255,7 @@ type UpdatePlanParams struct {
 	CronExpr                 string
 	Prompt                   string
 	ImageCapabilityKey       *string
+	ImageRatio               *string
 	SkipReferenceImage       *bool
 	ReferenceImageAssetID    *string
 	Watermark                *bool
@@ -334,6 +337,9 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	plan.Goal = p.Goal
 	if p.ImageCapabilityKey != nil {
 		plan.ImageCapabilityKey = *p.ImageCapabilityKey
+	}
+	if p.ImageRatio != nil {
+		plan.ImageRatio = *p.ImageRatio
 	}
 	if p.SkipReferenceImage != nil {
 		plan.SkipReferenceImage = *p.SkipReferenceImage

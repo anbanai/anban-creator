@@ -184,20 +184,23 @@
             <text class="field-hint">上传参考图后可自动识别视觉风格（种草笔记）。</text>
           </view>
 
+          <view v-if="isEcommerce" class="field-group">
+            <text class="field-label">默认图像能力</text>
+            <ImageCapabilitySelector
+              v-model="form.image_capability_key"
+              :options="imageCapabilities"
+              :loading="imageCapabilitiesLoading"
+            />
+          </view>
+
           <!-- Image ratio -->
           <view class="field-group">
             <text class="field-label">图片比例</text>
-            <view class="ratio-group">
-              <view
-                v-for="ratio in IMAGE_RATIOS"
-                :key="ratio.value"
-                class="ratio-btn"
-                :class="{ 'ratio-btn--active': form.image_ratio === ratio.value }"
-                @tap="form.image_ratio = ratio.value"
-              >
-                <text>{{ ratio.label }}</text>
-              </view>
-            </view>
+            <ImageAspectRatioField
+              v-model="form.image_ratio"
+              :supported-sizes="selectedCapability?.features?.size_presets"
+            />
+            <text v-if="imageRatioUnsupported" class="field-error">当前图像能力不支持所选比例，请重新选择比例或智能适配</text>
           </view>
         </view>
       </view>
@@ -529,18 +532,22 @@ import type {
   TopicPool,
   Template,
   ReferenceImageSelection,
+  ImageCapabilityOption,
+  EcommerceProjectDefaults,
 } from '@/types'
 import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
 import { templatesApi } from '@/api/templates'
 import { topicPoolApi } from '@/api/topic-pool'
-import { IMAGE_RATIOS } from '@/utils/constants'
+import { imageCapabilitiesApi } from '@/api/image-capabilities'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbSelect from '@/components/common/AbSelect.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
+import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
+import ImageAspectRatioField from '@/components/business/ImageAspectRatioField.vue'
 import AbBadge from '@/components/common/AbBadge.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import TagInput from '@/components/business/TagInput.vue'
@@ -586,13 +593,18 @@ const form = reactive({
   layout: '',
   image_preset: '',
   reference_image: null as ReferenceImageSelection | null,
-  image_ratio: '3:4',
+  image_ratio: '',
+  image_capability_key: '',
   enable_publishing: false,
   wechat_app_id: '',
   wechat_secret: '',
 })
 
 const referencePreviewUrl = ref('')
+const imageCapabilities = ref<ImageCapabilityOption[]>([])
+const imageCapabilitiesLoading = ref(false)
+const defaultImageCapability = ref('')
+const existingEcommerceDefaults = ref<EcommerceProjectDefaults>({})
 
 const keywordList = ref<string[]>([])
 const themes = ref<ResourceEntry[]>([])
@@ -619,6 +631,18 @@ const sections = reactive({
 const isSeednote = computed(() => form.platform === 'seednote')
 const isArticle = computed(() => form.platform === 'article')
 const isEcommerce = computed(() => form.platform === 'ecommerce')
+const selectedCapability = computed(() => imageCapabilities.value.find((item) => item.key === form.image_capability_key))
+const imageCapabilityUnavailable = computed(() =>
+  isEcommerce.value && !!form.image_capability_key && (
+    !selectedCapability.value
+    || selectedCapability.value.enabled !== true
+    || selectedCapability.value.price_available !== true
+  ),
+)
+const imageRatioUnsupported = computed(() => {
+  const supported = selectedCapability.value?.features?.size_presets
+  return !!form.image_ratio && !!supported && !supported.includes(form.image_ratio)
+})
 
 const themeOptions = computed(() => resourceOptions(themes.value))
 const layoutOptions = computed(() => resourceOptions(layouts.value))
@@ -669,16 +693,7 @@ watch(keywordList, (val) => {
 })
 
 watch(() => form.platform, (val) => {
-  // Reset image ratio to platform default when platform changes
-  const defaults: Record<string, string> = {
-    article: '16:9',
-    seednote: '3:4',
-    ecommerce: '1:1',
-    xls: '3:4',
-  }
-  if (val && defaults[val]) {
-    form.image_ratio = defaults[val]
-  }
+  if (val === 'ecommerce' && !form.image_capability_key) form.image_capability_key = defaultImageCapability.value
   void loadResources(val)
   void loadPlatformTemplates(val)
 })
@@ -760,7 +775,9 @@ async function loadProject(id: string) {
       ? { asset_id: ch.reference_image.asset_id }
       : null
     referencePreviewUrl.value = ch.reference_image?.download_url || ''
-    form.image_ratio = ch.image_ratio || '3:4'
+    form.image_ratio = ch.image_ratio || ''
+    form.image_capability_key = ch.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
+    existingEcommerceDefaults.value = ch.ecommerce_defaults || {}
     form.enable_publishing = ch.config?.enable_publishing || false
     form.wechat_app_id = ch.config?.wechat_app_id || ''
     form.wechat_secret = ch.config?.wechat_secret || ''
@@ -1014,6 +1031,15 @@ function validate(): boolean {
     errors.name = '请输入账号名称'
     return false
   }
+  if (imageCapabilityUnavailable.value) {
+    uni.showToast({ title: '该图像能力已停用，请重新选择', icon: 'none' })
+    return false
+  }
+  if (imageRatioUnsupported.value) {
+    errors.image_ratio = '当前图像能力不支持所选比例，请重新选择比例或智能适配'
+    uni.showToast({ title: errors.image_ratio, icon: 'none' })
+    return false
+  }
   if (form.enable_publishing && isArticle.value && !form.wechat_app_id?.trim()) {
     errors.wechat_app_id = '启用自动发布时，微信 AppID 为必填项'
     return false
@@ -1044,6 +1070,10 @@ function buildPayload(): CreateProjectRequest {
     byline: form.byline || undefined,
     reference_image: form.reference_image,
     image_ratio: form.image_ratio || undefined,
+    ecommerce_defaults: isEcommerce.value ? {
+      ...existingEcommerceDefaults.value,
+      image_capability_key: form.image_capability_key || undefined,
+    } : undefined,
     enable_publishing: form.enable_publishing || undefined,
     wechat_app_id: form.wechat_app_id || undefined,
     wechat_secret: form.wechat_secret || undefined,
@@ -1176,6 +1206,7 @@ function onDelete() {
 }
 
 onLoad((query) => {
+  void loadImageCapabilities()
   if (query?.return_to) {
     returnToUrl.value = safeDecodeQuery(String(query.return_to))
   }
@@ -1188,6 +1219,21 @@ onLoad((query) => {
     loadProject(query.id)
   }
 })
+
+async function loadImageCapabilities() {
+  imageCapabilitiesLoading.value = true
+  try {
+    const response = await imageCapabilitiesApi.list()
+    imageCapabilities.value = response.items || []
+    defaultImageCapability.value = response.default_capability || response.items?.[0]?.key || ''
+    if (isEcommerce.value && !form.image_capability_key) form.image_capability_key = defaultImageCapability.value
+  } catch {
+    imageCapabilities.value = []
+  } finally {
+    imageCapabilitiesLoading.value = false
+  }
+}
+
 </script>
 
 <style lang="scss" scoped>
@@ -1390,6 +1436,14 @@ onLoad((query) => {
   color: $ab-text-tertiary;
   display: block;
   margin-top: $ab-space-xs;
+  line-height: 1.4;
+}
+
+.field-error {
+  display: block;
+  margin-top: $ab-space-xs;
+  color: $ab-danger;
+  font-size: $ab-text-xs;
   line-height: 1.4;
 }
 

@@ -63,7 +63,7 @@ vi.mock('@/lib/api', async () => {
 
 vi.mock('@/lib/api/designer', () => ({
   designerApi: {
-    getProviders: vi.fn(),
+    getCapabilities: vi.fn(),
     generate: vi.fn(),
     registerReference: vi.fn(),
     uploadReferenceFromUrl: vi.fn(),
@@ -73,14 +73,15 @@ vi.mock('@/lib/api/designer', () => ({
 }))
 
 const provider = {
-  id: 'professional_enhance',
+  id: 'professional',
   name: '专业增强',
   description: '适合复杂构图与高细节视觉任务',
   minTier: 'enterprise',
   credits: 500,
+  priceAvailable: true,
   enabled: true,
   idx: 0,
-  capabilities: {
+  features: {
     qualityLevels: ['auto', 'low', 'medium', 'high'],
     sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
     defaultSize: 'auto',
@@ -92,11 +93,6 @@ const provider = {
     hasBackground: true,
     hasCompression: true,
     watermark: false,
-  },
-  pricing: {
-    pricingType: 'fixed_sku' as const,
-    currency: 'credits' as const,
-    billingNote: 'fixed retail SKU',
   },
 }
 
@@ -119,7 +115,10 @@ describe('Designer billing guidance', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
-    vi.mocked(designerApi.getProviders).mockResolvedValue([provider])
+    vi.mocked(designerApi.getCapabilities).mockResolvedValue({
+      items: [provider],
+      defaultCapability: 'professional',
+    })
     vi.mocked(designerApi.generate).mockResolvedValue({
       generation_id: 'generation-1',
       status: 'generating',
@@ -157,7 +156,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    expect(await screen.findByText('500 积分 · 余额 100')).toBeInTheDocument()
+    expect(await screen.findByText('每张 500 积分 · 余额 100')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -191,8 +190,8 @@ describe('Designer billing guidance', () => {
 
     await screen.findAllByText('专业增强')
     await waitFor(() => expect(queryClient.getQueryState(['billing', 'wallet'])?.status).toBe('error'))
-    expect(screen.queryByText('500 积分 · 余额 1,000')).not.toBeInTheDocument()
-    expect(screen.getByText('500 积分')).toBeInTheDocument()
+    expect(screen.queryByText('每张 500 积分 · 余额 1,000')).not.toBeInTheDocument()
+    expect(screen.getByText('每张 500 积分')).toBeInTheDocument()
   })
 
   it('refreshes the wallet after a normal generation is accepted', async () => {
@@ -218,7 +217,7 @@ describe('Designer billing guidance', () => {
       user_id: 'user-1',
       project_id: 'default',
       prompt: '原图',
-      capability_key: 'professional_enhance',
+      capability_key: 'professional',
       capability_name: '专业增强',
       n: 1,
       status: 'completed',

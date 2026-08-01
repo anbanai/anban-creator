@@ -85,7 +85,7 @@ describe('BillingPage', () => {
           debt_delta: 0,
           charge_kind: 'operation',
           charge_policy: 'accepted_task_operation',
-          sku_id: 'image.seedream.content.v1',
+          sku_id: 'image.standard',
           price_credits: 500,
           charge_resource_type: 'image',
           charge_resource_id: 'content-image-id',
@@ -126,7 +126,7 @@ describe('BillingPage', () => {
           debt_delta: -500,
           charge_kind: 'operation',
           charge_policy: 'accepted_task_operation',
-          sku_id: 'image.seedream.cover.v1',
+          sku_id: 'image.professional',
           price_credits: 500,
           resource_type: 'topup',
           resource_id: 'topup-entry',
@@ -142,7 +142,7 @@ describe('BillingPage', () => {
           debt_delta: 500,
           charge_kind: 'operation',
           charge_policy: 'accepted_task_operation',
-          sku_id: 'image.seedream.cover.v1',
+          sku_id: 'image.professional',
           price_credits: 500,
           charge_resource_type: 'image',
           charge_resource_id: 'cover-image-id',
@@ -155,13 +155,13 @@ describe('BillingPage', () => {
 
     render(<BillingPage />)
 
-    expect(await screen.findByText('内容图生成费')).toBeInTheDocument()
+    expect(await screen.findByText('标准图像生成费')).toBeInTheDocument()
     expect(screen.getByText('增值操作费')).toBeInTheDocument()
     expect(screen.getByText('固定价格 300 · 现金积分 -300')).toBeInTheDocument()
     expect(screen.getByText('操作 analysis:paid-content')).toBeInTheDocument()
     expect(screen.getByText('任务固定费')).toBeInTheDocument()
-    expect(screen.getByText('封面图生成费转欠费')).toBeInTheDocument()
-    expect(screen.getByText('补缴封面图欠费')).toBeInTheDocument()
+    expect(screen.getByText('专业增强生成费转欠费')).toBeInTheDocument()
+    expect(screen.getByText('补缴专业增强欠费')).toBeInTheDocument()
     expect(screen.getByText('固定价格 500 · 现金积分 -500')).toBeInTheDocument()
     expect(screen.getByText('充值总额 100,000 · 现金到账 97,000 · 补缴欠费 3,000')).toBeInTheDocument()
     expect(screen.getByText('欠费减少 500 · 已包含在对应充值总额中')).toBeInTheDocument()
@@ -175,7 +175,7 @@ describe('BillingPage', () => {
       limit: 20,
       items: [{
         id: 'tier-charge', event_kind: 'charge', paid_delta: -450, promotional_delta: 0, debt_delta: 0,
-        charge_kind: 'operation', sku_id: 'image.content.v1', price_credits: 450,
+        charge_kind: 'operation', sku_id: 'image.standard', price_credits: 450,
         pricing_tier: 'pro', list_price_credits: 500, discount_credits: 50,
         created_at: '2026-07-27T11:03:30.725Z',
       }],

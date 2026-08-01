@@ -218,6 +218,57 @@ func TestGenerateTaskImageRejectsUnsupportedExplicitSizeWithoutProviderCall(t *t
 	}
 }
 
+func TestGenerateTaskImageRejectsMissingSizeWithoutProviderCall(t *testing.T) {
+	f := newTaskImageFixture(t)
+	req := f.request()
+	req.Size = ""
+	_, err := f.service.Generate(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "size is required") {
+		t.Fatalf("Generate error = %v, want size is required", err)
+	}
+	if f.resolver.calls != 0 || f.generator.calls != 0 {
+		t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
+	}
+}
+
+func TestGenerateTaskImageRejectsBillingSKURouteMismatchWithoutProviderCall(t *testing.T) {
+	for _, tt := range []struct {
+		name, column, value, wantOperation, wantRoute string
+	}{
+		{
+			name: "operation mismatch", column: "operation", value: "task.article",
+			wantOperation: "task.article", wantRoute: "image_generation.capabilities.standard",
+		},
+		{
+			name: "route mismatch", column: "route", value: "image_generation.capabilities.professional",
+			wantOperation: "image.generate", wantRoute: "image_generation.capabilities.professional",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTaskImageFixture(t)
+			if err := f.db.Model(&model.BillingSKU{}).
+				Where("catalog_id = ? AND sk_uid = ?", "retail-task-image-v1", "image.standard").
+				Update(tt.column, tt.value).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := f.service.Generate(context.Background(), f.request())
+			var mismatch *ImageCapabilityBillingSKUError
+			if !errors.As(err, &mismatch) {
+				t.Fatalf("Generate() error = %T %v, want ImageCapabilityBillingSKUError", err, err)
+			}
+			if mismatch.BillingSKU != "image.standard" || mismatch.Operation != tt.wantOperation ||
+				mismatch.Route != tt.wantRoute || mismatch.ExpectedOperation != "image.generate" ||
+				mismatch.ExpectedRoute != "image_generation.capabilities.standard" {
+				t.Fatalf("billing SKU mismatch = %#v", mismatch)
+			}
+			if f.generator.calls != 0 {
+				t.Fatalf("provider calls = %d, want 0", f.generator.calls)
+			}
+		})
+	}
+}
+
 func TestCropTaskImageReadsCurrentExecutionFileAndPersistsOutput(t *testing.T) {
 	f := newTaskImageFixture(t)
 	var encoded bytes.Buffer

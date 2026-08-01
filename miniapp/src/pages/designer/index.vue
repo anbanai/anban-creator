@@ -3,7 +3,7 @@
     <view class="hero-card">
       <view>
         <text class="hero-card__title">设计师</text>
-        <text class="hero-card__subtitle">AI 图片生成、参考图创作与历史追踪</text>
+        <text class="hero-card__subtitle">图片生成、参考图创作与历史追踪</text>
       </view>
       <view class="credit-pill">
         <text>{{ creditsBalance.toLocaleString() }}</text>
@@ -12,24 +12,24 @@
     </view>
 
     <view class="section">
-      <text class="field-label">模型</text>
-      <AbLoading v-if="providersLoading" size="sm" text="加载模型..." />
-      <scroll-view v-else scroll-x class="provider-scroll">
-        <view class="provider-list">
+      <text class="field-label">图像能力</text>
+      <AbLoading v-if="capabilitiesLoading" size="sm" text="加载图像能力..." />
+      <scroll-view v-else scroll-x class="capability-scroll">
+        <view class="capability-list">
           <view
-            v-for="provider in enabledProviders"
-            :key="provider.id"
-            class="provider-card"
-            :class="{ 'provider-card--active': selectedProviderId === provider.id }"
-            @tap="selectProvider(provider.id)"
+            v-for="capability in usableCapabilities"
+            :key="capability.id"
+            class="capability-card"
+            :class="{ 'capability-card--active': selectedCapabilityKey === capability.id }"
+            @tap="selectCapability(capability.id)"
           >
-            <text class="provider-card__name">{{ provider.name }}</text>
-            <text class="provider-card__model">{{ provider.model }}</text>
-            <text class="provider-card__credits">{{ provider.credits }} 积分/次</text>
+            <text class="capability-card__name">{{ capability.name }}</text>
+            <text v-if="capability.description" class="capability-card__description">{{ capability.description }}</text>
+            <text v-if="capability.priceAvailable" class="capability-card__credits">每张 {{ capability.credits.toLocaleString() }} 积分</text>
           </view>
         </view>
       </scroll-view>
-      <AbEmpty v-if="!providersLoading && enabledProviders.length === 0" title="暂无可用图片模型" />
+      <AbEmpty v-if="!capabilitiesLoading && usableCapabilities.length === 0" title="暂无可用图像能力" />
     </view>
 
     <view class="section">
@@ -42,7 +42,7 @@
       />
     </view>
 
-    <view v-if="capabilities" class="section">
+    <view v-if="capabilityFeatures" class="section">
       <view class="field-row">
         <view class="field-row__item">
           <text class="field-label">尺寸</text>
@@ -50,7 +50,7 @@
         </view>
         <view class="field-row__item">
           <text class="field-label">数量</text>
-          <AbSelect v-model="countValue" :options="countOptions" :disabled="!capabilities.batch" />
+          <AbSelect v-model="countValue" :options="countOptions" :disabled="capabilityFeatures.maxBatch <= 1" />
         </view>
       </view>
 
@@ -65,7 +65,7 @@
         </view>
       </view>
 
-      <view v-if="capabilities.watermark" class="switch-row">
+      <view v-if="capabilityFeatures.watermark" class="switch-row">
         <text class="field-label">生成水印</text>
         <AbSwitch v-model="settings.watermark" />
       </view>
@@ -74,7 +74,7 @@
     <view class="section">
       <view class="section-header">
         <text class="field-label">参考图</text>
-        <text class="section-header__hint">{{ referenceFiles.length }}/{{ capabilities?.maxRefImages ?? 0 }}</text>
+        <text class="section-header__hint">{{ referenceFiles.length }}/{{ capabilityFeatures?.maxReferenceImages ?? 0 }}</text>
       </view>
       <scroll-view v-if="referenceFiles.length" scroll-x class="reference-scroll">
         <view class="reference-list">
@@ -173,7 +173,7 @@
       >
         <view class="history-row__body">
           <text class="history-row__prompt">{{ item.prompt }}</text>
-          <text class="history-row__meta">{{ item.provider }} · {{ item.model }}</text>
+          <text v-if="item.capability_name" class="history-row__meta">{{ item.capability_name }}</text>
         </view>
         <AbBadge :variant="statusVariant(item.status)" size="sm">{{ statusLabel(item.status) }}</AbBadge>
       </view>
@@ -196,8 +196,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import type { DesignerProvider, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types'
-import { getModelCapabilities } from '@/types/designer'
+import type { DesignerCapability, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types'
 import { designerApi } from '@/api/designer'
 import { billingApi } from '@/api/billing'
 import { TOKEN_KEY } from '@/utils/constants'
@@ -217,9 +216,9 @@ interface LocalReference {
 const POLL_INTERVAL = 2500
 const MAX_POLLS = 144
 
-const providers = ref<DesignerProvider[]>([])
-const providersLoading = ref(false)
-const selectedProviderId = ref('')
+const capabilities = ref<DesignerCapability[]>([])
+const capabilitiesLoading = ref(false)
+const selectedCapabilityKey = ref('')
 const prompt = ref('')
 const referenceFiles = ref<LocalReference[]>([])
 const generatedImages = ref<GenerateImage[]>([])
@@ -238,28 +237,28 @@ const settings = reactive({
   watermark: false,
 })
 
-const enabledProviders = computed(() => providers.value.filter((provider) => provider.enabled))
-const selectedProvider = computed(() => enabledProviders.value.find((provider) => provider.id === selectedProviderId.value) || enabledProviders.value[0])
-const capabilities = computed(() => getModelCapabilities(selectedProvider.value?.provider || '', selectedProvider.value?.model))
-const canInpaint = computed(() => capabilities.value?.inpainting === true)
+const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))
+const selectedCapability = computed(() => usableCapabilities.value.find((capability) => capability.id === selectedCapabilityKey.value))
+const capabilityFeatures = computed(() => selectedCapability.value?.features)
+const canInpaint = computed(() => capabilityFeatures.value?.supportsMask === true)
 
 const sizeOptions = computed(() => {
-  const presets = capabilities.value?.sizePresets?.length ? capabilities.value.sizePresets : ['auto', '1:1', '3:4', '4:3', '16:9']
+  const presets = capabilityFeatures.value?.sizePresets?.length ? capabilityFeatures.value.sizePresets : ['auto']
   return presets.map((value) => ({ value, label: value === 'auto' ? '自动' : value }))
 })
 
 const qualityOptions = computed(() => {
-  const levels = capabilities.value?.qualityLevels?.length ? capabilities.value.qualityLevels : ['auto']
+  const levels = capabilityFeatures.value?.qualityLevels?.length ? capabilityFeatures.value.qualityLevels : ['auto']
   return levels.map((value) => ({ value, label: value }))
 })
 
 const formatOptions = computed(() => {
-  const formats = capabilities.value?.outputFormats?.length ? capabilities.value.outputFormats : ['png']
+  const formats = capabilityFeatures.value?.outputFormats?.length ? capabilityFeatures.value.outputFormats : ['png']
   return formats.map((value) => ({ value, label: value.toUpperCase() }))
 })
 
 const countOptions = computed(() => {
-  const max = capabilities.value?.batch ? capabilities.value.maxBatch : 1
+  const max = capabilityFeatures.value?.maxBatch ?? 1
   return Array.from({ length: Math.min(max, 4) }, (_, i) => String(i + 1)).map((value) => ({ value, label: value }))
 })
 
@@ -271,12 +270,12 @@ const countValue = computed({
 })
 
 const canAddReference = computed(() => {
-  const max = capabilities.value?.maxRefImages ?? 0
-  return max > 0 && referenceFiles.value.length < max && !isGenerating.value
+  const max = capabilityFeatures.value?.maxReferenceImages ?? 0
+  return capabilityFeatures.value?.supportsReference === true && referenceFiles.value.length < max && !isGenerating.value
 })
 
-const canGenerate = computed(() => !!prompt.value.trim() && !!selectedProvider.value && !isGenerating.value)
-const canSubmitEdit = computed(() => !!editingImage.value && !!editPrompt.value.trim() && !!maskFile.value && !!selectedProvider.value && !isGenerating.value)
+const canGenerate = computed(() => !!prompt.value.trim() && selectedCapability.value?.priceAvailable === true && !isGenerating.value)
+const canSubmitEdit = computed(() => !!editingImage.value && !!editPrompt.value.trim() && !!maskFile.value && selectedCapability.value?.priceAvailable === true && !isGenerating.value)
 
 function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
   if (!results) return []
@@ -290,11 +289,11 @@ function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
     }))
 }
 
-function selectProvider(id: string) {
-  selectedProviderId.value = id
-  const caps = capabilities.value
-  settings.size = caps?.sizePresets?.includes('auto') ? 'auto' : caps?.sizePresets?.[0] || '1:1'
-  settings.n = caps?.batch ? Math.min(settings.n, caps.maxBatch) : 1
+function selectCapability(id: string) {
+  selectedCapabilityKey.value = id
+  const caps = capabilities.value.find((capability) => capability.id === id)?.features
+  settings.size = caps?.defaultSize || caps?.sizePresets?.[0] || 'auto'
+  settings.n = Math.min(settings.n, caps?.maxBatch ?? 1)
   settings.quality = caps?.qualityLevels?.[0] || 'auto'
   settings.outputFormat = caps?.outputFormats?.[0] || 'png'
   settings.watermark = false
@@ -302,7 +301,7 @@ function selectProvider(id: string) {
 
 function chooseReference() {
   if (!canAddReference.value) return
-  const remaining = (capabilities.value?.maxRefImages ?? 0) - referenceFiles.value.length
+  const remaining = (capabilityFeatures.value?.maxReferenceImages ?? 0) - referenceFiles.value.length
   uni.chooseImage({
     count: Math.max(1, Math.min(remaining, 9)),
     sizeType: ['compressed'],
@@ -317,7 +316,7 @@ function chooseReference() {
         path,
         name: `reference-${Date.now()}-${index}`,
       }))
-      referenceFiles.value = [...referenceFiles.value, ...files].slice(0, capabilities.value?.maxRefImages ?? 0)
+      referenceFiles.value = [...referenceFiles.value, ...files].slice(0, capabilityFeatures.value?.maxReferenceImages ?? 0)
     },
   })
 }
@@ -334,7 +333,7 @@ function previewGenerated(index: number) {
 function buildImagePrompt(): string {
   return [
     prompt.value.trim(),
-    selectedProvider.value ? `模型：${selectedProvider.value.name} / ${selectedProvider.value.model}` : '',
+    selectedCapability.value ? `图像能力：${selectedCapability.value.name}` : '',
     `尺寸：${settings.size}`,
     `数量：${settings.n}`,
     `质量：${settings.quality}`,
@@ -432,7 +431,7 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'info
 }
 
 async function generate() {
-  if (!canGenerate.value || !selectedProvider.value) return
+  if (!canGenerate.value || !selectedCapability.value) return
   isGenerating.value = true
   generatedImages.value = []
 
@@ -446,9 +445,7 @@ async function generate() {
     const response = await designerApi.generate({
       project_id: '',
       prompt: prompt.value.trim(),
-      provider: selectedProvider.value.provider,
-      provider_id: selectedProvider.value.id,
-      model: selectedProvider.value.model,
+      capability_key: selectedCapability.value.id,
       size: settings.size,
       n: settings.n > 1 ? settings.n : undefined,
       quality: settings.quality !== 'auto' ? settings.quality : undefined,
@@ -468,7 +465,7 @@ async function generate() {
 }
 
 async function generateEdit() {
-  if (!canSubmitEdit.value || !selectedProvider.value || !editingImage.value || !maskFile.value) return
+  if (!canSubmitEdit.value || !selectedCapability.value || !editingImage.value || !maskFile.value) return
   isGenerating.value = true
 
   try {
@@ -481,9 +478,7 @@ async function generateEdit() {
     const response = await designerApi.generate({
       project_id: '',
       prompt: editPrompt.value.trim(),
-      provider: selectedProvider.value.provider,
-      provider_id: selectedProvider.value.id,
-      model: selectedProvider.value.model,
+      capability_key: selectedCapability.value.id,
       size: settings.size,
       n: 1,
       quality: settings.quality !== 'auto' ? settings.quality : undefined,
@@ -520,17 +515,19 @@ async function pollGeneration(generationId: string) {
   throw new Error('生成超时，请稍后查看历史记录')
 }
 
-async function loadProviders() {
-  providersLoading.value = true
+async function loadCapabilities() {
+  capabilitiesLoading.value = true
   try {
-    providers.value = await designerApi.getProviders()
-    if (!selectedProviderId.value && enabledProviders.value.length) {
-      selectProvider(enabledProviders.value[0].id)
+    const response = await designerApi.getCapabilities()
+    capabilities.value = response.items
+    if (!selectedCapabilityKey.value && usableCapabilities.value.length) {
+      const defaultCapability = usableCapabilities.value.find((item) => item.id === response.defaultCapability)
+      selectCapability((defaultCapability || usableCapabilities.value[0]).id)
     }
   } catch (err) {
-    console.error('load designer providers failed', err)
+    console.error('load designer capabilities failed', err)
   } finally {
-    providersLoading.value = false
+    capabilitiesLoading.value = false
   }
 }
 
@@ -553,7 +550,7 @@ async function loadCredits() {
 }
 
 onMounted(() => {
-  loadProviders()
+  loadCapabilities()
   loadHistory()
   loadCredits()
 })
@@ -616,18 +613,18 @@ onMounted(() => {
   margin-bottom: $ab-space-xs;
 }
 
-.provider-scroll,
+.capability-scroll,
 .reference-scroll {
   white-space: nowrap;
 }
 
-.provider-list,
+.capability-list,
 .reference-list {
   display: flex;
   gap: $ab-space-sm;
 }
 
-.provider-card {
+.capability-card {
   display: inline-flex;
   flex-direction: column;
   width: 260rpx;
@@ -647,7 +644,7 @@ onMounted(() => {
     color: $ab-text;
   }
 
-  &__model,
+  &__description,
   &__credits {
     font-size: $ab-text-xs;
     color: $ab-text-secondary;

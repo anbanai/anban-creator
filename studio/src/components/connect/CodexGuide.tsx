@@ -22,7 +22,7 @@ export default function CodexGuide() {
         <CardContent className="space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Anban 智能创作助手 Codex 插件</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            通过 Codex 原生插件，你可以在 OpenAI Codex CLI 中用自然语言驱动 AI 创作流程，并调用专门的 subagent 完成端到端流水线。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → $setup → 重启 → 开始使用」这条顺序接入。
+            通过 Codex 原生插件，你可以在 Codex CLI 中用自然语言驱动 AI 创作流程，并调用专门的 subagent 完成端到端流水线。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → $setup → 重启 → 开始使用」这条顺序接入。
           </p>
         </CardContent>
       </Card>

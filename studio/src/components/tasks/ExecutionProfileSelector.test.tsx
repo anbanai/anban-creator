@@ -11,17 +11,17 @@ const profiles = [
 ]
 
 describe('ExecutionProfileSelector', () => {
-  it('shows every server profile, provider, availability, and disabled reason', () => {
+  it('shows every public execution profile without internal routing details', () => {
     render(<ExecutionProfileSelector profiles={profiles} value="effective" onChange={() => {}} />)
 
     expect(screen.getByText('性价比')).toBeInTheDocument()
     expect(screen.getByText('平衡型')).toBeInTheDocument()
     expect(screen.getByText('极致效果')).toBeInTheDocument()
-    expect(screen.getByText('deepseek')).toBeInTheDocument()
-    expect(screen.getByText('volcengine_ark')).toBeInTheDocument()
-    expect(screen.getByText('moonshot')).toBeInTheDocument()
-    expect(screen.getByText('doubao-seed-evolving')).toBeInTheDocument()
-    expect(screen.getByText('kimi-k3[1m]')).toBeInTheDocument()
+    expect(screen.queryByText('deepseek')).not.toBeInTheDocument()
+    expect(screen.queryByText('volcengine_ark')).not.toBeInTheDocument()
+    expect(screen.queryByText('moonshot')).not.toBeInTheDocument()
+    expect(screen.queryByText('doubao-seed-evolving')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
     expect(screen.getByText('全部用户')).toBeInTheDocument()
     expect(screen.getByText('Pro 版及以上')).toBeInTheDocument()
     expect(screen.getByText('企业版')).toBeInTheDocument()

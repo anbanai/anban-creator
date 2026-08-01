@@ -9,8 +9,8 @@ describe('ImageAspectRatioField', () => {
 
     render(<ImageAspectRatioField value="3:4" defaultValue="3:4" onChange={onChange} />)
 
-    expect(screen.getByRole('radiogroup')).toBeInTheDocument()
-    expect(screen.getAllByRole('radio')).toHaveLength(4)
+    expect(screen.getByRole('radiogroup')).toHaveClass('overflow-x-clip')
+    expect(screen.getAllByRole('radio')).toHaveLength(9)
 
     const vertical = screen.getByRole('radio', { name: '3:4 vertical default' })
     const square = screen.getByRole('radio', { name: '1:1 square' })
@@ -55,5 +55,23 @@ describe('ImageAspectRatioField', () => {
     expect(screen.getByRole('radio', { name: '1:1 square default' })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: '4:3 horizontal' })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: '16:9 widescreen' })).not.toBeChecked()
+  })
+
+  it('exposes smart adaptation and disables ratios outside the selected capability', () => {
+    const onChange = vi.fn()
+    render(
+      <ImageAspectRatioField
+        value=""
+        defaultValue=""
+        supportedSizes={['auto', '1:1', '3:2', '2:3']}
+        onChange={onChange}
+      />,
+    )
+
+    expect(screen.getByRole('radio', { name: '智能适配' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: '3:2 horizontal' })).not.toBeDisabled()
+    expect(screen.getByRole('radio', { name: '16:9 widescreen' })).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(screen.getByLabelText('16:9 widescreen', { selector: 'label' }))
+    expect(onChange).not.toHaveBeenCalled()
   })
 })

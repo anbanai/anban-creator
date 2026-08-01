@@ -3,7 +3,7 @@
     <view class="intro-card">
       <text class="intro-card__title">Codex 接入</text>
       <text class="intro-card__body">
-        通过 Codex 原生插件，你可以在 OpenAI Codex CLI 中用自然语言驱动 AI 创作流程，并调用专门的 subagent 完成端到端流水线。建议按「注册账号 → 创建 Key → 安装插件 → 配置 Key → $setup → 重启 → 开始使用」的顺序接入。
+        通过 Codex 原生插件，你可以在 Codex CLI 中用自然语言驱动 AI 创作流程，并调用专门的 subagent 完成端到端流水线。建议按「注册账号 → 创建 Key → 安装插件 → 配置 Key → $setup → 重启 → 开始使用」的顺序接入。
       </text>
     </view>
 

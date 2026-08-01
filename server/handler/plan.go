@@ -22,7 +22,7 @@ import (
 type PlanHandler struct {
 	service                 *service.PlanService
 	logger                  *zerolog.Logger
-	imageCapabilities       map[string]config.ImageGenerationRouteConfig
+	imageCapabilityRoutes   config.ImageGenerationRoutesConfig
 	repo                    repository.Repository
 	store                   storage.Provider
 	referenceAssets         *service.ReferenceAssetService
@@ -95,8 +95,8 @@ func (h *PlanHandler) SetStore(s storage.Provider) {
 
 // SetImageCapabilities wires the system-managed image capabilities for tier-gated
 // validation of createPlanRequest/updatePlanRequest.ImageCapabilityKey.
-func (h *PlanHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
-	h.imageCapabilities = capabilities
+func (h *PlanHandler) SetImageCapabilities(routes config.ImageGenerationRoutesConfig) {
+	h.imageCapabilityRoutes = routes
 }
 
 // SetRepository wires the user repository so the handler can resolve the caller's
@@ -127,6 +127,7 @@ type createPlanRequest struct {
 	CronExpr           string                           `json:"cron_expr"`
 	Prompt             string                           `json:"prompt"`
 	ImageCapabilityKey string                           `json:"image_capability_key"`
+	ImageRatio         string                           `json:"image_ratio"`
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	Watermark          *bool                            `json:"watermark"`
@@ -149,6 +150,7 @@ type updatePlanRequest struct {
 	CronExpr                 string                           `json:"cron_expr"`
 	Prompt                   string                           `json:"prompt"`
 	ImageCapabilityKey       *string                          `json:"image_capability_key"`
+	ImageRatio               *string                          `json:"image_ratio"`
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet        bool                             `json:"-"`
@@ -165,7 +167,7 @@ type updatePlanRequest struct {
 
 // Create handles POST /api/v1/plans.
 func (h *PlanHandler) Create(c fiber.Ctx) error {
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req createPlanRequest
@@ -180,6 +182,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
+	}
+	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
+		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
@@ -210,6 +215,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	// Validate image_capability_key against the caller's tier.
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+	if err := ValidateImageRatioForCapability(req.ImageCapabilityKey, req.ImageRatio, h.imageCapabilityRoutes); err != nil {
+		return respondImageCapabilityRatioError(c, err)
 	}
 
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
@@ -244,6 +252,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
 		ImageCapabilityKey:       req.ImageCapabilityKey,
+		ImageRatio:               req.ImageRatio,
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
@@ -354,7 +363,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req updatePlanRequest
@@ -370,6 +379,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
+	}
+	if req.ImageRatio != nil && *req.ImageRatio != "" && !model.ValidImageRatios[*req.ImageRatio] {
+		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 
 	// Verify ownership before update.
@@ -408,6 +420,17 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			return Error(c, fiber.StatusForbidden, err.Error())
 		}
 	}
+	effectiveCapabilityKey := existing.ImageCapabilityKey
+	if req.ImageCapabilityKey != nil {
+		effectiveCapabilityKey = *req.ImageCapabilityKey
+	}
+	effectiveImageRatio := existing.ImageRatio
+	if req.ImageRatio != nil {
+		effectiveImageRatio = *req.ImageRatio
+	}
+	if err := ValidateImageRatioForCapability(effectiveCapabilityKey, effectiveImageRatio, h.imageCapabilityRoutes); err != nil {
+		return respondImageCapabilityRatioError(c, err)
+	}
 
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
@@ -442,6 +465,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
 		ImageCapabilityKey:       req.ImageCapabilityKey,
+		ImageRatio:               req.ImageRatio,
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
@@ -563,7 +587,7 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 // this handler's repository and image capabilities. See
 // validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
 func (h *PlanHandler) validateImageCapabilityKeyForUser(c fiber.Ctx, userID, key string) error {
-	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
+	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilityRoutes.Capabilities)
 }
 
 // Resume handles POST /api/v1/plans/:id/resume.

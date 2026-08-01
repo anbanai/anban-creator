@@ -1,4 +1,4 @@
-export interface ModelCapabilities {
+export interface DesignerCapabilityFeatures {
   qualityLevels: string[]
   sizePresets: string[]
   defaultSize: string
@@ -12,50 +12,7 @@ export interface ModelCapabilities {
   watermark: boolean
 }
 
-export interface DesignerProviderPricing {
-  pricingType: 'fixed_sku'
-  currency: 'credits'
-  billingNote: string
-  pricingTier?: 'free' | 'pro' | 'enterprise'
-  listPriceCredits?: number
-  discountCredits?: number
-}
-
-export interface RawDesignerProvider {
-  id: string
-  name: string
-  alias?: string
-  description?: string
-  min_tier?: string
-  credits: number
-  price_available?: boolean
-  enabled: boolean
-  idx: number
-  capabilities?: {
-    quality_levels?: string[]
-    size_presets?: string[]
-    default_size?: string
-    max_batch?: number
-    max_reference_images?: number
-    supports_reference?: boolean
-    supports_mask?: boolean
-    output_formats?: string[]
-    has_background?: boolean
-    has_compression?: boolean
-    watermark?: boolean
-  }
-  pricing?: {
-    pricing_type: 'fixed_sku'
-    currency: 'credits'
-    billing_note: string
-    pricing_tier?: 'free' | 'pro' | 'enterprise'
-    list_price_credits?: number
-    discount_credits?: number
-  }
-}
-
-// Dynamic provider info from backend API
-export interface DesignerProvider {
+export interface DesignerCapability {
   id: string
   name: string
   alias?: string
@@ -65,8 +22,7 @@ export interface DesignerProvider {
   priceAvailable?: boolean
   enabled: boolean
   idx: number
-  capabilities: ModelCapabilities
-  pricing: DesignerProviderPricing
+  features: DesignerCapabilityFeatures
 }
 
 export interface DesignerSettings {
@@ -83,7 +39,7 @@ export interface DesignerSettings {
 export interface GenerateRequest {
   project_id: string
   prompt: string
-  provider_id: string
+  capability_key: string
   quality?: string
   size?: string
   n?: number

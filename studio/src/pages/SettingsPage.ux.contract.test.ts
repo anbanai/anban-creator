@@ -11,7 +11,8 @@ describe('SettingsPage readiness center contract', () => {
 
     expect(source).toContain('接入就绪中心')
     expect(source).toContain('执行环境')
-    expect(source).toContain('模型与密钥')
+    expect(source).toContain('平台密钥')
+    expect(source).not.toContain('ModelConfigSection')
     expect(source).toContain('发布渠道')
     expect(source).toContain('账号安全')
     expect(source).toContain('SettingsReadinessItem')

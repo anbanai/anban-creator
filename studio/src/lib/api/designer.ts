@@ -1,46 +1,44 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { DesignerProvider, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration, RawDesignerProvider } from '@/types/designer'
+import type { ImageCapabilityListResponse, ImageCapabilityOption } from '@/types'
+import type { DesignerCapability, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration } from '@/types/designer'
 
-export function normalizeProvider(raw: RawDesignerProvider): DesignerProvider {
-  const caps = raw.capabilities ?? {}
-  const pricing = raw.pricing
+export function normalizeCapability(raw: ImageCapabilityOption): DesignerCapability {
+  const features = raw.features ?? {
+    quality_levels: [], size_presets: [], default_size: 'auto', max_batch: 1,
+    max_reference_images: 0, supports_reference: false, supports_mask: false,
+    output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
+  }
   return {
-    id: raw.id,
-    name: raw.name,
-    alias: raw.alias,
+    id: raw.key,
+    name: raw.display_name,
     description: raw.description,
     minTier: raw.min_tier,
-    credits: raw.credits,
+    credits: raw.price_credits ?? 0,
     priceAvailable: raw.price_available,
-    enabled: raw.enabled,
-    idx: raw.idx,
-    capabilities: {
-      qualityLevels: caps.quality_levels ?? [],
-      sizePresets: caps.size_presets ?? [],
-      defaultSize: caps.default_size ?? 'auto',
-      maxBatch: caps.max_batch ?? 1,
-      maxReferenceImages: caps.max_reference_images ?? 0,
-      supportsReference: caps.supports_reference ?? false,
-      supportsMask: caps.supports_mask ?? false,
-      outputFormats: caps.output_formats ?? ['png'],
-      hasBackground: caps.has_background ?? false,
-      hasCompression: caps.has_compression ?? false,
-      watermark: caps.watermark ?? false,
-    },
-    pricing: {
-      pricingType: pricing?.pricing_type ?? 'fixed_sku',
-      currency: pricing?.currency ?? 'credits',
-      billingNote: pricing?.billing_note ?? 'fixed retail SKU',
-      pricingTier: pricing?.pricing_tier,
-      listPriceCredits: pricing?.list_price_credits,
-      discountCredits: pricing?.discount_credits,
+    enabled: raw.enabled !== false,
+    idx: raw.sort_order ?? 0,
+    features: {
+      qualityLevels: features.quality_levels ?? [],
+      sizePresets: features.size_presets ?? [],
+      defaultSize: features.default_size ?? 'auto',
+      maxBatch: features.max_batch ?? 1,
+      maxReferenceImages: features.max_reference_images ?? 0,
+      supportsReference: features.supports_reference ?? false,
+      supportsMask: features.supports_mask ?? false,
+      outputFormats: features.output_formats ?? ['png'],
+      hasBackground: features.has_background ?? false,
+      hasCompression: features.has_compression ?? false,
+      watermark: features.watermark ?? false,
     },
   }
 }
 
 export const designerApi = {
-  getProviders: () =>
-    unwrap<RawDesignerProvider[]>(http.get('/designer/providers')).then((items) => items.map(normalizeProvider)),
+  getCapabilities: () =>
+    unwrap<ImageCapabilityListResponse>(http.get('/image-capabilities')).then((response) => ({
+      items: response.items.map(normalizeCapability),
+      defaultCapability: response.default_capability,
+    })),
 
   generate: async (req: GenerateRequest, signal?: AbortSignal) => {
     const operation_id = crypto.randomUUID()

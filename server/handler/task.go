@@ -35,14 +35,14 @@ const (
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
-	service           *service.TaskService
-	logger            *zerolog.Logger
-	dataDir           string // local storage data directory (for ServeLocalFile)
-	taskLogDir        string // task log directory (for GetLog)
-	imageCapabilities map[string]config.ImageGenerationRouteConfig
-	repo              repository.Repository
-	store             storage.Provider
-	referenceAssets   *service.ReferenceAssetService
+	service               *service.TaskService
+	logger                *zerolog.Logger
+	dataDir               string // local storage data directory (for ServeLocalFile)
+	taskLogDir            string // task log directory (for GetLog)
+	imageCapabilityRoutes config.ImageGenerationRoutesConfig
+	repo                  repository.Repository
+	store                 storage.Provider
+	referenceAssets       *service.ReferenceAssetService
 }
 
 func (h *TaskHandler) SetReferenceAssetService(referenceAssets *service.ReferenceAssetService) {
@@ -67,8 +67,8 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 
 // SetImageCapabilities wires the system-managed image capabilities for tier-gated
 // validation of createTaskRequest.ImageCapabilityKey.
-func (h *TaskHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
-	h.imageCapabilities = capabilities
+func (h *TaskHandler) SetImageCapabilities(routes config.ImageGenerationRoutesConfig) {
+	h.imageCapabilityRoutes = routes
 }
 
 // SetRepository wires the user repository so the handler can resolve the caller's
@@ -262,7 +262,7 @@ type taskBillingChargeDetailResponse struct {
 
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req createTaskRequest
@@ -548,7 +548,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		return nil, Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
 	}
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return nil, Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+		return nil, Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 	for _, u := range req.ProductPhotos {
 		if !validAttachmentURL(u) {
@@ -558,8 +558,14 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if strings.TrimSpace(req.ImageCapabilityKey) == "" && project.Platform == model.PlatformEcommerce {
+		req.ImageCapabilityKey = strings.TrimSpace(project.EcommerceDefaults.Data().ImageCapabilityKey)
+	}
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return nil, Error(c, fiber.StatusForbidden, err.Error())
+	}
+	if err := ValidateImageRatioForCapability(req.ImageCapabilityKey, req.ImageRatio, h.imageCapabilityRoutes); err != nil {
+		return nil, respondImageCapabilityRatioError(c, err)
 	}
 	if req.GoalMode {
 		goalText := strings.TrimSpace(req.Goal)
@@ -902,7 +908,7 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 // It creates a fresh task from a terminal task's configuration and enqueues it.
 // The original task is preserved and the new task is billed as a new run.
 func (h *TaskHandler) Clone(c fiber.Ctx) error {
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	id, err := validateUUIDParam(c, "id")
@@ -1374,9 +1380,9 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "not_cloneable"})
 			continue
 		}
-		// Re-validate the image model against the caller's current tier.
+		// Re-validate the image capability against the caller's current tier.
 		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
-			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
+			results = append(results, bulkTaskResult{ID: id, Reason: "image_capability_unavailable"})
 			continue
 		}
 		if _, err := h.presentCloneTaskReference(c.Context(), userID, task); err != nil {
@@ -2000,7 +2006,7 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 // this handler's repository and image capabilities. See
 // validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
 func (h *TaskHandler) validateImageCapabilityKeyForUser(c fiber.Ctx, userID, key string) error {
-	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
+	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilityRoutes.Capabilities)
 }
 
 // validateUUIDParam extracts and validates that a path parameter is a valid UUID.

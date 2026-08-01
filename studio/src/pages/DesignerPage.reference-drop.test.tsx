@@ -11,7 +11,7 @@ import { api } from '@/lib/api'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { createTestQueryClient, render } from '@/test/test-utils'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
-import type { DesignerProvider, ImageGeneration } from '@/types/designer'
+import type { DesignerCapability, ImageGeneration } from '@/types/designer'
 
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const exportMaskMock = vi.hoisted(() => vi.fn())
@@ -23,7 +23,7 @@ vi.mock('@/lib/direct-upload', async (importOriginal) => {
 })
 vi.mock('@/lib/api/designer', () => ({
   designerApi: {
-    getProviders: vi.fn(),
+    getCapabilities: vi.fn(),
     generate: vi.fn(),
     registerReference: vi.fn(),
     uploadReferenceFromUrl: vi.fn(),
@@ -59,22 +59,21 @@ vi.mock('@/components/designer/InlineMaskEditor', async () => {
   }
 })
 
-function provider(overrides: Partial<DesignerProvider['capabilities']> = {}): DesignerProvider {
+function provider(overrides: Partial<DesignerCapability['features']> = {}): DesignerCapability {
   return {
-    id: 'professional_enhance',
+    id: 'professional',
     name: '专业增强',
     description: '适合复杂构图与高细节视觉任务',
     minTier: 'enterprise',
     credits: 0,
     enabled: true,
     idx: 0,
-    capabilities: {
+    features: {
       qualityLevels: ['auto'], sizePresets: ['auto'], defaultSize: 'auto', maxBatch: 1,
       maxReferenceImages: 3, supportsReference: true, supportsMask: true,
       outputFormats: ['png'], hasBackground: false, hasCompression: false, watermark: false,
       ...overrides,
     },
-    pricing: { pricingType: 'fixed_sku', currency: 'credits', billingNote: 'fixed retail SKU' },
   }
 }
 
@@ -104,11 +103,11 @@ function deferred<T>() {
 function SubmitBeforeProviderReconciliation() {
   const submitted = useRef(false)
   const { data } = useQuery({
-    queryKey: ['designer', 'providers'],
-    queryFn: () => designerApi.getProviders(),
+    queryKey: ['designer', 'capabilities'],
+    queryFn: () => designerApi.getCapabilities(),
   })
   useLayoutEffect(() => {
-    if (submitted.current || data?.[0]?.capabilities.maxReferenceImages !== 1) return
+    if (submitted.current || data?.items[0]?.features.maxReferenceImages !== 1) return
     submitted.current = true
     screen.getByRole('button', { name: '生成' }).click()
   }, [data])
@@ -134,7 +133,10 @@ describe('Designer shared prompt composer', () => {
       configurable: true,
       value: vi.fn(() => []),
     })
-    vi.mocked(designerApi.getProviders).mockResolvedValue([provider()])
+    vi.mocked(designerApi.getCapabilities).mockResolvedValue({
+      items: [provider()],
+      defaultCapability: 'professional',
+    })
     exportMaskMock.mockResolvedValue(new File(['mask'], 'mask.png', { type: 'image/png' }))
     vi.mocked(api.projects.list).mockResolvedValue([
       { id: 'project-1', name: '品牌项目', platform: 'article' } as never,
@@ -223,7 +225,10 @@ describe('Designer shared prompt composer', () => {
     await waitFor(() => expect(screen.getByText('third.png')).toBeInTheDocument())
 
     await act(async () => {
-      queryClient.setQueryData(['designer', 'providers'], [provider({ maxReferenceImages: 1 })])
+      queryClient.setQueryData(['designer', 'capabilities'], {
+        items: [provider({ maxReferenceImages: 1 })],
+        defaultCapability: 'professional',
+      })
     })
     await waitFor(() => expect(pending.get('second.png')?.signal?.aborted).toBe(true))
     expect(pending.get('third.png')?.signal?.aborted).toBe(true)
@@ -239,7 +244,10 @@ describe('Designer shared prompt composer', () => {
   })
 
   it('clears references when the provider does not support them', async () => {
-    vi.mocked(designerApi.getProviders).mockResolvedValueOnce([provider({ supportsReference: false, maxReferenceImages: 9 })])
+    vi.mocked(designerApi.getCapabilities).mockResolvedValueOnce({
+      items: [provider({ supportsReference: false, maxReferenceImages: 9 })],
+      defaultCapability: 'professional',
+    })
     render(<DesignerPage />)
     await screen.findByLabelText('Designer prompt')
     expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
@@ -291,7 +299,10 @@ describe('Designer shared prompt composer', () => {
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '只用新容量' } })
 
     await act(async () => {
-      queryClient.setQueryData(['designer', 'providers'], [provider({ maxReferenceImages: 1 })])
+      queryClient.setQueryData(['designer', 'capabilities'], {
+        items: [provider({ maxReferenceImages: 1 })],
+        defaultCapability: 'professional',
+      })
     })
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
@@ -318,7 +329,7 @@ describe('Designer shared prompt composer', () => {
 
   it('restores a history prompt without losing current references', async () => {
     const generation = {
-      id: 'history-1', user_id: 'user-1', project_id: 'default', prompt: '历史提示词', capability_key: 'professional_enhance',
+      id: 'history-1', user_id: 'user-1', project_id: 'default', prompt: '历史提示词', capability_key: 'professional',
       capability_name: '专业增强', n: 1, status: 'completed', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     } satisfies ImageGeneration
     vi.mocked(api.designer.getHistory).mockResolvedValue({ items: [generation], total: 1, page: 1, page_size: 50 })
@@ -420,7 +431,7 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消生成' }))
     poll.resolve({
       id: 'late-generation', user_id: 'user-1', project_id: 'default', prompt: '等待轮询',
-      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'completed',
+      capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'completed',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'late-generation', image_url: 'https://example.com/late.png', index: 0 }],
     })
@@ -439,7 +450,7 @@ describe('Designer shared prompt composer', () => {
     const firstPoll = deferred<ImageGeneration>()
     const completed = {
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '串行轮询',
-      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'completed' as const,
+      capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'completed' as const,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'generation-1', image_url: 'https://example.com/final.png', index: 0 }],
     }
@@ -471,7 +482,7 @@ describe('Designer shared prompt composer', () => {
   it('finalizes a failed generation exactly once', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '失败轮询',
-      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'failed', error: '生成失败',
+      capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'failed', error: '生成失败',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
     render(<DesignerPage />)
@@ -492,7 +503,7 @@ describe('Designer shared prompt composer', () => {
   it('finalizes polling timeout exactly once', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
       id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '超时轮询',
-      capability_key: 'professional_enhance', capability_name: '专业增强', n: 1, status: 'generating',
+      capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'generating',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
     render(<DesignerPage />)

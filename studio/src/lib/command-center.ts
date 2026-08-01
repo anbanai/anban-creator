@@ -326,7 +326,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
     actions.push({
       id: 'connect-settings',
       label: '检查接入设置',
-      description: '确认平台密钥和模型配置后再创建任务',
+      description: '确认平台密钥和接入状态后再创建任务',
       href: '/settings',
       kind: 'neutral',
     })

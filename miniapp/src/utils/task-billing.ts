@@ -37,10 +37,10 @@ export function taskBillingChargeLabel(detail: TaskBillingChargeDetail): string 
 
   if (detail.charge_kind === 'task' || detail.policy === 'task_admission' || resourceType === 'task') {
     label = '任务固定费'
-  } else if (sku.includes('image.seedream.cover') || sku.includes('image.cover')) {
-    label = '封面图生成费'
-  } else if (sku.includes('image.seedream.content') || sku.includes('image.content')) {
-    label = '内容图生成费'
+  } else if (sku === 'image.standard') {
+    label = '标准图像生成费'
+  } else if (sku === 'image.professional') {
+    label = '专业增强生成费'
   } else if (sku.includes('image') || resourceType === 'image') {
     label = '图片生成费'
   } else if (sku.includes('analysis') || resourceType === 'analysis') {

@@ -105,6 +105,7 @@ type TaskService struct {
 	billingWalletSvc  *BillingWalletService
 	billingCatalogSvc *BillingCatalogService
 	agentProfiles     *AgentProfileRegistry
+	imageCapabilities *ImageCapabilityResolver
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -203,6 +204,12 @@ func (s *TaskService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
 		if s.billingCatalogSvc != nil {
 			s.billingCatalogSvc.SetAgentProfileRegistry(registry)
 		}
+	}
+}
+
+func (s *TaskService) SetImageCapabilityResolver(resolver *ImageCapabilityResolver) {
+	if s != nil {
+		s.imageCapabilities = resolver
 	}
 }
 
@@ -868,6 +875,17 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
+	effectiveImageCapabilityKey := strings.TrimSpace(plan.ImageCapabilityKey)
+	if s.imageCapabilities != nil {
+		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plan image capability: %w", err)
+		}
+		if plan.ImageRatio != "" && !stringInSet(plan.ImageRatio, resolved.SupportedSizes) {
+			return nil, &ImageCapabilitySizeError{Requested: plan.ImageRatio, SupportedSizes: append([]string(nil), resolved.SupportedSizes...)}
+		}
+		effectiveImageCapabilityKey = resolved.Key
+	}
 	var planMontageInput *model.MontageInput
 	montageExecutionTarget := model.ExecutionTargetCloud
 	if model.IsMontagePlatform(taskType) {
@@ -897,7 +915,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Type:                     taskType,
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
-		ImageCapabilityKey:       plan.ImageCapabilityKey,
+		ImageCapabilityKey:       effectiveImageCapabilityKey,
+		ImageRatio:               plan.ImageRatio,
 		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,

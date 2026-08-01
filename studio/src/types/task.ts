@@ -40,7 +40,7 @@ export interface ProjectSnapshot {
     default_selected_modules?: Record<string, number>
     target_platform?: string
     brand_brief?: string
-    image_model_key?: string
+    image_capability_key?: string
   }
 }
 
@@ -60,7 +60,7 @@ export interface Task {
     percent?: number
   }
   image_ratio?: string
-  image_model_key?: string
+  image_capability_key?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
@@ -207,7 +207,7 @@ export interface CreateTaskRequest {
   project_id: string
   quantity?: number
   image_ratio?: string
-  image_model_key?: string
+  image_capability_key?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]

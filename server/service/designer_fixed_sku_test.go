@@ -208,6 +208,20 @@ func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testi
 	}
 }
 
+func TestDesignerValidateCapabilitySizeForUser(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 1000)
+	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
+	route.Features.SizePresets = []string{"1:1", "4:3"}
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
+
+	if err := f.service.ValidateCapabilitySizeForUser(context.Background(), f.userID, "standard", "4:3"); err != nil {
+		t.Fatalf("supported size error = %v", err)
+	}
+	if err := f.service.ValidateCapabilitySizeForUser(context.Background(), f.userID, "standard", "21:9"); err == nil {
+		t.Fatal("unsupported size was accepted")
+	}
+}
+
 func TestDesignerCreateGenerationRollsBackWalletAndQuoteWhenRecordInsertFails(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 500)
 	req := f.request(t)

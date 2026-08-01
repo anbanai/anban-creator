@@ -48,6 +48,7 @@ var ErrDesignerCapabilityUnavailable = errors.New("designer capability unavailab
 
 var ErrDesignerReferenceUnsupported = errors.New("selected image capability does not support reference images")
 var ErrDesignerReferenceLimitExceeded = errors.New("selected image capability reference limit exceeded")
+var ErrDesignerCapabilitySizeUnsupported = errors.New("selected image capability does not support the requested size")
 
 type DesignerReferenceLimitError struct {
 	Requested          int `json:"requested"`
@@ -460,6 +461,25 @@ func (s *DesignerService) ValidateCapabilityForUser(ctx context.Context, userID,
 	}
 	_, _, err := s.authorizeDesignerCapability(ctx, userID, capabilityID)
 	return err
+}
+
+func (s *DesignerService) ValidateCapabilitySizeForUser(ctx context.Context, userID, capabilityID, size string) error {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return nil
+	}
+	capabilityID = strings.TrimSpace(capabilityID)
+	if capabilityID == "" && s != nil && s.fullCfg != nil {
+		capabilityID = strings.TrimSpace(s.fullCfg.ModelRoutes.ImageGeneration.DefaultCapability)
+	}
+	_, route, err := s.authorizeDesignerCapability(ctx, userID, capabilityID)
+	if err != nil {
+		return err
+	}
+	if !stringInSet(size, route.Features.SizePresets) {
+		return fmt.Errorf("%w: capability %q, size %q", ErrDesignerCapabilitySizeUnsupported, capabilityID, size)
+	}
+	return nil
 }
 
 func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) string {
@@ -1155,7 +1175,7 @@ func designerGenerationUserError(err error) string {
 		case "no_image":
 			return "图片服务没有返回图片，请调整提示词后重试"
 		case "endpoint_protocol", "usage_required_missing":
-			return "图片服务配置异常，请联系管理员检查模型配置"
+			return "图像能力配置异常，请联系管理员"
 		}
 		return sanitizeDesignerGenerationError(genErr.Message, fallback)
 	}
@@ -1179,7 +1199,7 @@ func sanitizeDesignerGenerationError(raw, fallback string) string {
 	}
 	if strings.Contains(lower, "api key") || strings.Contains(lower, "base url") || strings.Contains(lower, "endpoint") ||
 		strings.Contains(msg, "配置文件") || strings.Contains(msg, "配置异常") {
-		return "图片服务配置异常，请联系管理员检查模型配置"
+		return "图像能力配置异常，请联系管理员"
 	}
 	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "timeout") ||
 		strings.Contains(msg, "稍后重试") {
@@ -1238,8 +1258,8 @@ func (s *DesignerService) resolveAPIKey(provider string) string {
 	if p := s.findDesignerConfig(provider); p != nil {
 		return p.Key
 	}
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.Cover != nil {
-		return runtime.Cover.Key
+	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil {
+		return runtime.API.Key
 	}
 	return ""
 }
@@ -1248,8 +1268,8 @@ func (s *DesignerService) resolveBaseURL(provider string) string {
 	if p := s.findDesignerConfig(provider); p != nil {
 		return p.BaseURL
 	}
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.Cover != nil {
-		return runtime.Cover.BaseURL
+	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil {
+		return runtime.API.BaseURL
 	}
 	return ""
 }
@@ -1258,8 +1278,8 @@ func (s *DesignerService) resolveModel(provider string) string {
 	if p := s.findDesignerConfig(provider); p != nil {
 		return p.Model
 	}
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.Cover != nil {
-		return runtime.Cover.Model
+	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil {
+		return runtime.API.Model
 	}
 	return ""
 }
@@ -1272,8 +1292,8 @@ func (s *DesignerService) resolveResponseFormat(provider string) string {
 }
 
 func (s *DesignerService) resolveProvider() string {
-	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.Cover != nil && runtime.Cover.Provider != "" {
-		return runtime.Cover.Provider
+	if runtime, ok := s.fullCfg.ImageAPIForCapability(""); ok && runtime.API != nil && runtime.API.Provider != "" {
+		return runtime.API.Provider
 	}
 	return "openai"
 }

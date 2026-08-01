@@ -71,8 +71,16 @@ func TestImageCapabilityRuntimeAndTimeoutDefaults(t *testing.T) {
 	cfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
 	cfg.applyDefaults()
 	runtime, ok := cfg.ImageAPIForCapability("")
-	if !ok || runtime.Cover == nil || runtime.Content == nil || runtime.Cover.TimeoutSec != 300 {
+	if !ok || runtime == nil {
 		t.Fatalf("default capability runtime = %#v", runtime)
+	}
+	runtimeValue := reflect.ValueOf(*runtime)
+	if runtimeValue.FieldByName("Cover").IsValid() || runtimeValue.FieldByName("Content").IsValid() {
+		t.Fatalf("runtime adapter still exposes cover/content routes: %#v", runtime)
+	}
+	api := runtimeValue.FieldByName("API")
+	if !api.IsValid() || api.IsNil() || api.Elem().FieldByName("TimeoutSec").Int() != 300 {
+		t.Fatalf("default capability API = %#v", runtime)
 	}
 }
 
@@ -110,6 +118,59 @@ func TestValidateImageCapabilities(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
 			cfg.ModelRoutes.ImageGeneration = ImageGenerationRoutesConfig{DefaultCapability: tt.defaultKey, Capabilities: map[string]ImageGenerationRouteConfig{"standard": tt.route}}
 			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateImageCapabilitiesRequiresFixedKeysAndAllowsCustomCapabilities(t *testing.T) {
+	professional := validCapabilityForConfigTest()
+	professional.Alias = "Professional"
+	professional.Description = "Detailed image creation"
+	professional.MinTier = "enterprise"
+	professional.BillingSKU = "image.professional"
+	custom := validCapabilityForConfigTest()
+	custom.Alias = "Editorial"
+	custom.Description = "Editorial illustration"
+	custom.BillingSKU = "image.editorial"
+
+	for _, tt := range []struct {
+		name         string
+		capabilities map[string]ImageGenerationRouteConfig
+		want         string
+	}{
+		{
+			name:         "missing standard",
+			capabilities: map[string]ImageGenerationRouteConfig{"professional": professional},
+			want:         "capabilities.standard is required",
+		},
+		{
+			name:         "missing professional",
+			capabilities: map[string]ImageGenerationRouteConfig{"standard": validCapabilityForConfigTest()},
+			want:         "capabilities.professional is required",
+		},
+		{
+			name: "custom capability remains allowed",
+			capabilities: map[string]ImageGenerationRouteConfig{
+				"standard": validCapabilityForConfigTest(), "professional": professional, "editorial": custom,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.ModelRoutes.ImageGeneration = ImageGenerationRoutesConfig{
+				DefaultCapability: "standard",
+				Capabilities:      tt.capabilities,
+			}
+			err := cfg.Validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Validate() error = %v, want %q", err, tt.want)
 			}

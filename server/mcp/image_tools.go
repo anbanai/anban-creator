@@ -298,7 +298,7 @@ func generateImageInputSchema() map[string]any {
 			"ref_image_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional ordered reference image paths"},
 			"watermark":       map[string]any{"type": "boolean", "description": "Whether the generated image should include a watermark", "default": false},
 		},
-		"required": []any{"project_id", "task_id", "prompt", "output_path"},
+		"required": []any{"project_id", "task_id", "prompt", "output_path", "size"},
 	}
 }
 

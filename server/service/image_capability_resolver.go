@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -16,8 +15,24 @@ type ImageCapabilityResolver struct {
 	cfg  *config.Config
 }
 
+type PublicImageCapability struct {
+	Key            string
+	SupportedSizes []string
+}
+
 func NewImageCapabilityResolver(repo repository.Repository, cfg *config.Config) *ImageCapabilityResolver {
 	return &ImageCapabilityResolver{repo: repo, cfg: cfg}
+}
+
+func (s *ImageCapabilityResolver) ResolvePublicImageCapability(ctx context.Context, userID, capabilityKey string) (*PublicImageCapability, error) {
+	route, key, err := s.resolveRoute(ctx, userID, capabilityKey)
+	if err != nil {
+		return nil, err
+	}
+	return &PublicImageCapability{
+		Key:            key,
+		SupportedSizes: append([]string(nil), route.Features.SizePresets...),
+	}, nil
 }
 
 func (s *ImageCapabilityResolver) ResolveImageConfigForTaskKey(ctx context.Context, userID, capabilityKey string) (*config.ImageAPIConfig, string, error) {
@@ -89,7 +104,7 @@ func (s *ImageCapabilityResolver) ResolveImageModelForGeneration(
 	if !ok || runtime == nil {
 		return nil, fmt.Errorf("image capability %q has no runtime configuration", key)
 	}
-	api := imageAPIForType(runtime, imageType)
+	api := runtime.API
 	if api == nil || strings.TrimSpace(api.Provider) == "" || strings.TrimSpace(api.Model) == "" {
 		return nil, fmt.Errorf("image capability %q is incomplete", key)
 	}
@@ -137,16 +152,6 @@ func normalizeGenerationImageType(imageType string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported image_type %q", imageType)
 	}
-}
-
-func imageAPIForType(cfg *config.ImageAPIConfig, imageType string) *appconfig.ImageAPI {
-	if cfg == nil {
-		return nil
-	}
-	if imageType == "cover" {
-		return cfg.Cover
-	}
-	return cfg.Content
 }
 
 func imageProviderKind(provider string) string {

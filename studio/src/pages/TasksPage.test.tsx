@@ -367,7 +367,8 @@ describe('TasksPage bulk clone execution profile', () => {
     const dialog = await openBulkCloneDialog()
 
     expect(within(dialog).getByText('执行配置')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /^性价比，deepseek，deepseek-v4-flash/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByRole('button', { name: /^性价比，全部用户/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
     expect(within(dialog).getByText('预计总计 4,800 积分')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认克隆' }))
@@ -396,7 +397,7 @@ describe('TasksPage bulk clone execution profile', () => {
       ],
     })
     const dialog = await openBulkCloneDialog()
-    const balanced = within(dialog).getByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ })
+    const balanced = within(dialog).getByRole('button', { name: /^平衡型，Pro 版及以上/ })
 
     fireEvent.click(balanced)
 

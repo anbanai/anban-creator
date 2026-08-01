@@ -484,6 +484,46 @@ func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	}
 }
 
+func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		ExecutionProfile: "effective",
+		UserID:           "user-1",
+		ProjectID:        projectID,
+		CronExpr:         "0 9 * * *",
+		ImageRatio:       "21:9",
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if plan.ImageRatio != "21:9" {
+		t.Fatalf("created image ratio = %q, want 21:9", plan.ImageRatio)
+	}
+
+	nextRatio := "9:16"
+	updated, err := svc.Update(ctx, UpdatePlanParams{
+		ID:               plan.ID,
+		ExecutionProfile: "effective",
+		ImageRatio:       &nextRatio,
+	})
+	if err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+	if updated.ImageRatio != nextRatio {
+		t.Fatalf("updated image ratio = %q, want %q", updated.ImageRatio, nextRatio)
+	}
+	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("find plan: %v", err)
+	}
+	if persisted.ImageRatio != nextRatio {
+		t.Fatalf("persisted image ratio = %q, want %q", persisted.ImageRatio, nextRatio)
+	}
+}
+
 func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

@@ -195,9 +195,10 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('group', { name: 'Agent 执行配置' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^性价比，deepseek，deepseek-v4-flash/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /^性价比，全部用户/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
     expect(screen.getByText('4,000 积分')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
     expect(await screen.findByText('6,000 积分')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
@@ -224,7 +225,7 @@ describe('DashboardPage AI entry', () => {
     })
     render(<DashboardPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，volcengine_ark，doubao-seed-evolving/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，Pro 版及以上/ }))
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })

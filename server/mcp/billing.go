@@ -63,8 +63,8 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 	if billSvc == nil || billSvc.config == nil {
 		return "", "", ""
 	}
-	if cfg, ok := billSvc.config.ImageAPIForCapability(""); ok && cfg.Cover != nil {
-		return cfg.Cover.Provider, cfg.Cover.Model, "capability:" + billSvc.config.ModelRoutes.ImageGeneration.DefaultCapability
+	if cfg, ok := billSvc.config.ImageAPIForCapability(""); ok && cfg.API != nil {
+		return cfg.API.Provider, cfg.API.Model, "capability:" + billSvc.config.ModelRoutes.ImageGeneration.DefaultCapability
 	}
 	return "", "", ""
 }
@@ -82,11 +82,8 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
 	if task != nil && billSvc != nil && billSvc.capabilityResolver != nil {
 		if cfg, _, err := billSvc.capabilityResolver.ResolveImageConfigForTaskKey(ctx, userID, task.ImageCapabilityKey); err == nil && cfg != nil {
-			if cfg.Cover != nil && cfg.Cover.Provider != "" {
-				return cfg.Cover.Provider, cfg.Cover.Model
-			}
-			if cfg.Content != nil && cfg.Content.Provider != "" {
-				return cfg.Content.Provider, cfg.Content.Model
+			if cfg.API != nil && cfg.API.Provider != "" {
+				return cfg.API.Provider, cfg.API.Model
 			}
 		}
 	}

@@ -2,7 +2,7 @@ import { Separator } from '@/components/ui/separator'
 import { contentTypeLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
-import { useImageCapabilities } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
 
 export interface TaskConfigurationDetailsProps {
@@ -84,7 +84,6 @@ function formatTokenCount(value: string | undefined): string | undefined {
 function AgentProfileDetails({ task }: { task: Task }) {
   const snapshot = task.agent_profile_snapshot
   if (!snapshot) return null
-  const modelName = snapshot.envs.ANTHROPIC_MODEL
   const effort = snapshot.envs.CLAUDE_CODE_EFFORT_LEVEL
   const context = formatTokenCount(snapshot.envs.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
   const thinking = snapshot.envs.CLAUDE_CODE_DISABLE_THINKING
@@ -94,8 +93,6 @@ function AgentProfileDetails({ task }: { task: Task }) {
       <h3 id="task-agent-profile" className="text-sm font-semibold">Agent 执行配置</h3>
       <dl className="grid gap-3 sm:grid-cols-2">
         <Detail label="档位" value={snapshot.display_name} />
-        <Detail label="Provider" value={snapshot.provider} />
-        {modelName ? <Detail label="模型" value={modelName} wide /> : null}
         {effort ? <Detail label="推理强度" value={effort} /> : null}
         {context ? <Detail label="最大上下文" value={context} /> : null}
         {thinking === 'true' || thinking === 'false' ? (
@@ -116,11 +113,11 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
     : task.overrides?.visual_style || project?.visual_style || '—'
   const imageRatio = task.image_ratio
     || (hasSnapshot ? snapshot?.image_ratio || '—' : project?.image_ratio || '—')
-  const imageModel = task.image_model_key
+  const imageCapabilityKey = task.image_capability_key
     || (hasSnapshot
-      ? snapshot?.ecommerce_defaults?.image_model_key || '—'
-      : project?.ecommerce_defaults?.image_model_key || '—')
-  const imageCapability = imageCapabilities.find((option) => option.key === imageModel)
+      ? snapshot?.ecommerce_defaults?.image_capability_key || '—'
+      : project?.ecommerce_defaults?.image_capability_key || '—')
+  const imageCapability = imageCapabilities.find((option) => option.key === imageCapabilityKey)
   const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
 
   return (
@@ -140,7 +137,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
           <Detail label="图片比例" value={imageRatio} />
           <div className="flex min-w-0 flex-col gap-1">
             <dt className="text-xs text-muted-foreground">图像能力</dt>
-            <dd className="break-words text-sm text-foreground"><ImageCapabilityDisplay option={imageCapability} fallback={imageModel === '—' || imageModel === '' ? '标准图像' : '已停用能力'} /></dd>
+            <dd className="break-words text-sm text-foreground"><ImageCapabilityDisplay option={imageCapability} fallback={imageCapabilityKey === '—' || imageCapabilityKey === '' ? '标准图像' : '已停用能力'} /></dd>
           </div>
         </dl>
       </section>

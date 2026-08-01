@@ -70,6 +70,18 @@ func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageP
 	return app, repo
 }
 
+func TestTemplateCreateRejectsRemovedImageModelField(t *testing.T) {
+	app, _ := setupTemplateHandlerTest(t)
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", uuid.NewString(), map[string]any{
+		"name": "legacy", "type": "article", "visibility": "private", "image_model_key": "standard_image",
+	})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusBadRequest || !bytes.Contains(body, []byte("use image_capability_key")) {
+		t.Fatalf("status/body = %d, %s; want 400 with migration hint", resp.StatusCode, body)
+	}
+}
+
 func doRequest(t *testing.T, app *fiber.App, method, path, userID string, body any) *http.Response {
 	t.Helper()
 	var reqBody io.Reader

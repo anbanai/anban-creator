@@ -4,6 +4,8 @@ import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
 import type { Project } from '@/types'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
@@ -62,8 +64,8 @@ vi.mock('@/lib/api', async () => {
         update: vi.fn(),
         delete: vi.fn(),
       },
-      imageModels: {
-        ...actual.api.imageModels,
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
     },
@@ -99,6 +101,38 @@ describe('ProjectsPage deletion feedback', () => {
       size: 9,
     })
     window.history.pushState({}, '', '/projects')
+  })
+
+  it('constrains project ratios with the selected image capability features', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'ProjectsPage.tsx'), 'utf8')
+    expect(source).toContain('supportedSizes={selectedImageCapability?.features?.size_presets}')
+    expect(source).toContain('imageRatioUnsupported')
+    expect(source).toContain('当前图像能力不支持所选比例，请重新选择比例或智能适配')
+    expect(source).toContain('该图像能力已停用，请重新选择')
+    expect(source).toContain('submittedImageCapability.price_available !== true')
+    expect(source).toContain('submittedImageCapability.enabled !== true')
+  })
+
+  it('shows the catalog default capability for a new ecommerce project', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
+      tier: 'pro',
+      default_capability: 'catalog-default',
+      items: [
+        { key: 'first-sorted', display_name: '首个排序能力', min_tier: 'free', sort_order: 1, enabled: true, price_available: true },
+        { key: 'catalog-default', display_name: '目录默认能力', min_tier: 'free', sort_order: 2, enabled: true, price_available: true },
+      ],
+    })
+    window.history.pushState({}, '', '/projects?create=true&type=ecommerce&intent=new')
+
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    await waitFor(() => {
+      const selector = Array.from(dialog.querySelectorAll('[role="combobox"]')).find((element) =>
+        element.textContent?.includes('目录默认能力'),
+      )
+      expect(selector).toBeDefined()
+    })
   })
 
   it('creates a project with a reference session and no legacy URL field', async () => {

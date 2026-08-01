@@ -4,8 +4,7 @@ import { authApi } from './auth'
 import { projectsApi } from './projects'
 import { billingApi } from './billing'
 import { designerApi } from './designer'
-import { imageModelsApi } from './image-models'
-import { modelConfigApi } from './model-config'
+import { imageCapabilitiesApi } from './image-capabilities'
 import { plansApi } from './plans'
 import { postersApi } from './posters'
 import { resourcesApi } from './resources'
@@ -25,8 +24,7 @@ export const api = {
   projects: projectsApi,
   billing: billingApi,
   designer: designerApi,
-  imageModels: imageModelsApi,
-  modelConfig: modelConfigApi,
+  imageCapabilities: imageCapabilitiesApi,
   plans: plansApi,
   posters: postersApi,
   resources: resourcesApi,

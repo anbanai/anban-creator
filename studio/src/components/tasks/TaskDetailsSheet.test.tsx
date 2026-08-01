@@ -45,7 +45,7 @@ const articleTask: Task = {
     writer: '真诚叙事',
     theme: '简约留白',
   },
-  image_model_key: 'gpt-image-2',
+  image_capability_key: 'professional',
   input_attachments: [{
     type: 'image',
     file_name: 'summer-reference.png',
@@ -154,13 +154,14 @@ describe('TaskDetailsSheet', () => {
         billing_total_credits: 5850,
         billing_charge_details: [
           { id: 'task-charge', charge_kind: 'task', credits: 5400, pricing_tier: 'pro', list_price_credits: 6000, discount_credits: 600 },
-          { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.content.v1', credits: 450, pricing_tier: 'pro', list_price_credits: 500, discount_credits: 50 },
+          { id: 'image-charge', charge_kind: 'operation', sku_id: 'image.standard', credits: 450, pricing_tier: 'pro', list_price_credits: 500, discount_credits: 50 },
         ],
       },
     })} />)
 
     const billing = screen.getByRole('region', { name: '积分明细' })
     expect(within(billing).getByText('5,850 积分')).toBeInTheDocument()
+    expect(within(billing).getByText('标准图像生成费')).toBeInTheDocument()
     expect(within(billing).getAllByText(/专业版/)).toHaveLength(2)
     expect(within(billing).getByText(/标准价 6,000，优惠 600/)).toBeInTheDocument()
     expect(within(billing).getByText(/标准价 500，优惠 50/)).toBeInTheDocument()
@@ -262,7 +263,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('3:2')).toBeInTheDocument()
     expect(screen.getByText('已停用能力')).toBeInTheDocument()
-    expect(screen.queryByText('gpt-image-2')).not.toBeInTheDocument()
+    expect(screen.queryByText('professional')).not.toBeInTheDocument()
     expect(screen.getByText('安班编辑部')).toBeInTheDocument()
     expect(screen.getByText('真诚叙事')).toBeInTheDocument()
     expect(screen.getByText('简约留白')).toBeInTheDocument()
@@ -277,11 +278,11 @@ describe('TaskDetailsSheet', () => {
       author: '后来修改的作者',
       writer: '后来修改的写作风格',
       theme: '后来修改的排版',
-      ecommerce_defaults: { image_model_key: 'later-image-model' },
+      ecommerce_defaults: { image_capability_key: 'later-image-capability' },
     }
     const partialSnapshotTask: Task = {
       ...articleTask,
-      image_model_key: undefined,
+      image_capability_key: undefined,
       project_snapshot: { platform: 'article' },
     }
     render(
@@ -297,7 +298,7 @@ describe('TaskDetailsSheet', () => {
       '后来修改的项目名',
       '后来修改的视觉风格',
       '1:1',
-      'later-image-model',
+      'later-image-capability',
       '后来修改的作者',
       '后来修改的写作风格',
       '后来修改的排版',
@@ -315,11 +316,11 @@ describe('TaskDetailsSheet', () => {
       author: '旧任务作者',
       writer: '旧任务写作风格',
       theme: '旧任务排版',
-      ecommerce_defaults: { image_model_key: 'legacy-image-model' },
+      ecommerce_defaults: { image_capability_key: 'legacy-image-capability' },
     }
     const legacyTask: Task = {
       ...articleTask,
-      image_model_key: undefined,
+      image_capability_key: undefined,
       project_snapshot: undefined,
     }
     render(
@@ -334,7 +335,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('旧任务视觉风格')).toBeInTheDocument()
     expect(screen.getByText('4:3')).toBeInTheDocument()
     expect(screen.getByText('已停用能力')).toBeInTheDocument()
-    expect(screen.queryByText('legacy-image-model')).not.toBeInTheDocument()
+    expect(screen.queryByText('legacy-image-capability')).not.toBeInTheDocument()
     expect(screen.getByText('旧任务作者')).toBeInTheDocument()
     expect(screen.getByText('旧任务写作风格')).toBeInTheDocument()
     expect(screen.getByText('旧任务排版')).toBeInTheDocument()
@@ -349,11 +350,11 @@ describe('TaskDetailsSheet', () => {
       author: '当前项目作者不应覆盖',
       writer: '当前项目写作不应覆盖',
       theme: '当前项目排版不应覆盖',
-      ecommerce_defaults: { image_model_key: 'empty-snapshot-image-model' },
+      ecommerce_defaults: { image_capability_key: 'empty-snapshot-image-capability' },
     }
     const legacyTask: Task = {
       ...articleTask,
-      image_model_key: undefined,
+      image_capability_key: undefined,
       project_snapshot: {},
       overrides: {
         visual_style: '旧任务覆盖视觉',
@@ -377,7 +378,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('旧任务覆盖排版')).toBeInTheDocument()
     expect(screen.getByText('5:4')).toBeInTheDocument()
     expect(screen.getByText('已停用能力')).toBeInTheDocument()
-    expect(screen.queryByText('empty-snapshot-image-model')).not.toBeInTheDocument()
+    expect(screen.queryByText('empty-snapshot-image-capability')).not.toBeInTheDocument()
     expect(screen.queryByText('当前项目视觉不应覆盖')).not.toBeInTheDocument()
   })
 
@@ -513,7 +514,7 @@ describe('TaskDetailsSheet', () => {
 })
 
 describe('TaskConfigurationDetails', () => {
-  it('renders the frozen task profile instead of the current capability catalog', () => {
+  it('renders the frozen task profile without exposing provider or model details', () => {
     const frozenTask: Task = {
       ...articleTask,
       execution_profile: 'quality',
@@ -538,8 +539,9 @@ describe('TaskConfigurationDetails', () => {
     render(<TaskConfigurationDetails task={frozenTask} project={project} />)
 
     expect(screen.getByRole('heading', { name: 'Agent 执行配置' })).toBeInTheDocument()
-    expect(screen.getByText('moonshot')).toBeInTheDocument()
-    expect(screen.getByText('kimi-k2.7-code')).toBeInTheDocument()
+    expect(screen.getByText('极致效果')).toBeInTheDocument()
+    expect(screen.queryByText('moonshot')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k2.7-code')).not.toBeInTheDocument()
     expect(screen.getByText('推理强度').nextElementSibling).toHaveTextContent('high')
     expect(screen.getByText('最大上下文').nextElementSibling).toHaveTextContent('9,223,372,036,854,775,807')
     expect(screen.getByText('思考模式').nextElementSibling).toHaveTextContent('开启')
@@ -555,14 +557,14 @@ describe('TaskConfigurationDetails', () => {
         target_platform: '后来修改的平台',
         default_selected_modules: { current_module: 9 },
         brand_brief: '后来修改的品牌简述',
-        image_model_key: 'later-ecommerce-model',
+        image_capability_key: 'later-ecommerce-capability',
       },
     }
     const ecommerceTask: Task = {
       ...articleTask,
       id: 'ecommerce-task',
       type: 'ecommerce',
-      image_model_key: undefined,
+      image_capability_key: undefined,
       project_snapshot: {
         project_name: '电商创建快照',
         platform: 'ecommerce',
@@ -581,6 +583,6 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.queryByText('后来修改的平台')).not.toBeInTheDocument()
     expect(screen.queryByText('current_module x9')).not.toBeInTheDocument()
     expect(screen.queryByText('后来修改的品牌简述')).not.toBeInTheDocument()
-    expect(screen.queryByText('later-ecommerce-model')).not.toBeInTheDocument()
+    expect(screen.queryByText('later-ecommerce-capability')).not.toBeInTheDocument()
   })
 })

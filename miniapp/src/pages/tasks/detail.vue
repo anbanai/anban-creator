@@ -58,10 +58,6 @@
             <text class="agent-profile-details__label">档位</text>
             <text class="agent-profile-details__value">{{ task.agent_profile_snapshot.display_name }}</text>
           </view>
-          <view class="agent-profile-details__item">
-            <text class="agent-profile-details__label">Provider</text>
-            <text class="agent-profile-details__value">{{ task.agent_profile_snapshot.provider }}</text>
-          </view>
           <view
             v-for="row in agentProfileRows"
             :key="row.label"
@@ -563,7 +559,6 @@ const agentProfileRows = computed(() => {
   const envs = task.value?.agent_profile_snapshot?.envs
   if (!envs) return []
   const rows: Array<{ label: string; value: string }> = []
-  if (envs.ANTHROPIC_MODEL) rows.push({ label: '模型', value: envs.ANTHROPIC_MODEL })
   if (envs.CLAUDE_CODE_EFFORT_LEVEL) rows.push({ label: '推理强度', value: envs.CLAUDE_CODE_EFFORT_LEVEL })
   const context = formatTokenCount(envs.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
   if (context) rows.push({ label: '最大上下文', value: context })

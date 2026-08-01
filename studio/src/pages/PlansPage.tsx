@@ -13,6 +13,7 @@ import type { AgentExecutionProfileID, Project, Plan, PlanType, CreatePlanReques
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
+import { ImageAspectRatioField } from '@/components/tasks/ImageAspectRatioField'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
@@ -30,11 +31,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
-import { planSchema, type PlanFormValues } from '@/lib/schemas'
+import { normalizeImageRatio, planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { useImageCapabilities } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
@@ -63,7 +64,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
-    image_model_key: plan.image_model_key || '',
+    image_capability_key: plan.image_capability_key || '',
+    image_ratio: normalizeImageRatio(plan.image_ratio),
     skip_reference_image: plan.skip_reference_image || false,
     reference_image: plan.reference_image ?? null,
     input_attachments: plan.input_attachments ?? [],
@@ -109,7 +111,11 @@ export default function PlansPage() {
   const [montageUploading, setMontageUploading] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const { submit } = useSubmitLock()
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageCapabilities()
+  const {
+    items: imageCapabilityOptions,
+    defaultCapability: defaultImageCapability,
+    isLoading: imageCapabilitiesLoading,
+  } = useImageCapabilities()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
@@ -125,7 +131,8 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
-      image_model_key: '',
+      image_capability_key: '',
+      image_ratio: '',
       reference_image: null,
       input_attachments: [],
       has_content_image: true,
@@ -172,7 +179,18 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
+  const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' })
+  const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
   const isMontagePlan = watchedType === 'montage'
+  const selectedImageCapability = useMemo(
+    () => imageCapabilityOptions.find((option) => option.key === (watchedImageCapabilityKey || defaultImageCapability)),
+    [defaultImageCapability, imageCapabilityOptions, watchedImageCapabilityKey],
+  )
+  const imageRatioUnsupported = Boolean(
+    watchedImageRatio
+    && selectedImageCapability?.features?.size_presets
+    && !selectedImageCapability.features.size_presets.includes(watchedImageRatio),
+  )
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -339,7 +357,8 @@ export default function PlansPage() {
       type: requestedType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
-      image_model_key: '',
+      image_capability_key: '',
+      image_ratio: normalizeImageRatio(selectedIntentProject?.image_ratio),
       reference_image: null,
       input_attachments: [],
       has_content_image: true,
@@ -411,7 +430,8 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
-      image_model_key: '',
+      image_capability_key: '',
+      image_ratio: '',
       reference_image: null,
       input_attachments: [],
       has_content_image: true,
@@ -427,7 +447,26 @@ export default function PlansPage() {
       ?.find((profile) => profile.id === values.execution_profile)
       ?.available === true
     if (!submittedProfileAvailable) return
-    // For edit (PUT), image_model_key is a *string on the backend: nil = leave
+    const submittedImageCapability = imageCapabilityOptions.find(
+      (option) => option.key === (values.image_capability_key || defaultImageCapability),
+    )
+    if (
+      !submittedImageCapability
+      || submittedImageCapability.enabled !== true
+      || submittedImageCapability.price_available !== true
+    ) {
+      toast.error('该图像能力已停用，请重新选择')
+      return
+    }
+    if (
+      values.image_ratio
+      && submittedImageCapability?.features?.size_presets
+      && !submittedImageCapability.features.size_presets.includes(values.image_ratio)
+    ) {
+      toast.error('当前图像能力不支持所选比例，请重新选择比例或智能适配')
+      return
+    }
+    // For edit (PUT), image_capability_key is a *string on the backend: nil = leave
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
     // For create (POST), "" is also valid (means system default).
@@ -450,7 +489,8 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
-      image_model_key: values.image_model_key,
+      image_capability_key: values.image_capability_key,
+      image_ratio: values.image_ratio,
       ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
       watermark: values.watermark || undefined,
       goal_mode: values.type !== 'montage' && values.goal_mode ? true : undefined,
@@ -515,6 +555,7 @@ export default function PlansPage() {
             const nextType = project.platform as PlanType
             const fullProject = projectMap[id]
             form.setValue('type', nextType, { shouldDirty: true })
+            form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
             form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
           }}
         />
@@ -743,20 +784,39 @@ export default function PlansPage() {
 
               {!isMontagePlan ? promptComposer : null}
 
-              {!isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {!isMontagePlan && <FormField control={form.control} name="image_capability_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像能力</FormLabel>
                   <FormControl>
-                    {imageModelsLoading ? (
+                    {imageCapabilitiesLoading ? (
                       <Skeleton className="h-10 w-full rounded-xl" />
                     ) : (
                       <ImageCapabilitySelector
-                        options={imageModelOptions}
-                        value={field.value || ''}
+                        options={imageCapabilityOptions}
+                        value={field.value || defaultImageCapability}
                         onChange={field.onChange}
                       />
                     )}
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />}
+
+              {!isMontagePlan && <FormField control={form.control} name="image_ratio" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>图像比例</FormLabel>
+                  <FormControl>
+                    <ImageAspectRatioField
+                      value={field.value || ''}
+                      defaultValue={selectedProject?.image_ratio || ''}
+                      supportedSizes={selectedImageCapability?.features?.size_presets}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+                  <FormDescription>智能适配时，由创作流程为每张产物选择当前能力支持的比例。</FormDescription>
+                  {imageRatioUnsupported && (
+                    <p className="text-sm font-medium text-destructive">当前图像能力不支持所选比例，请重新选择比例或智能适配</p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />}
@@ -786,7 +846,7 @@ export default function PlansPage() {
                       <p className={`text-sm font-medium ${field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
                         水印
                       </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">仅在所选图像能力支持水印时生效</p>
                     </div>
                   </button>
                   <FormMessage />

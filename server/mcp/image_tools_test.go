@@ -96,7 +96,7 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 		}
 	}
 	required := schema["required"].([]any)
-	for _, name := range []string{"project_id", "task_id", "prompt", "output_path"} {
+	for _, name := range []string{"project_id", "task_id", "prompt", "output_path", "size"} {
 		if !containsAnyString(required, name) {
 			t.Fatalf("generate_image schema must require %s, got %#v", name, required)
 		}

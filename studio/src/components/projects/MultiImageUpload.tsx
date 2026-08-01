@@ -12,7 +12,7 @@ interface MultiImageUploadProps {
   value?: string[]
   onChange?: (urls: string[]) => void
   purpose?: string
-  /** Max number of images. Defaults to 16 (OpenAI GPT Image multi-reference cap). */
+  /** Maximum number of images accepted by the selected capability. */
   max?: number
 }
 

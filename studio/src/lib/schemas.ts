@@ -20,6 +20,14 @@ const executionProfileSchema = z
   .or(z.literal(''))
   .refine((value): boolean => value !== '', '请选择执行配置')
 
+export const imageRatioSchema = z.enum(['', '3:4', '1:1', '4:3', '16:9', '3:2', '2:3', '9:16', '21:9'])
+export type ImageRatio = z.infer<typeof imageRatioSchema>
+
+export function normalizeImageRatio(value: unknown): ImageRatio {
+  const parsed = imageRatioSchema.safeParse(value)
+  return parsed.success ? parsed.data : ''
+}
+
 export const agentExecutionProfileCapabilitySchema = z.object({
   id: z.enum(['effective', 'balanced', 'quality']),
   display_name: z.string().min(1),
@@ -118,8 +126,8 @@ export const createTaskSchema = z.object({
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
-  image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
-  image_model_key: z.string().max(50).optional(),
+  image_ratio: imageRatioSchema.default(''),
+  image_capability_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
@@ -218,7 +226,8 @@ export const planSchema = z.object({
   type: z.enum(["seednote", "article", "montage"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
-  image_model_key: z.string().max(50).optional(),
+  image_capability_key: z.string().max(50).optional(),
+  image_ratio: imageRatioSchema.default(''),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
@@ -280,7 +289,7 @@ export const projectSchema = z.object({
   ecommerce_default_selected_modules: z.record(z.string(), z.number().int().min(0)).default({}),
   ecommerce_target_platform: z.string().optional(),
   ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
-  ecommerce_image_model_key: z.string().max(50).optional(),
+  ecommerce_image_capability_key: z.string().max(50).optional(),
   montage_defaults: z.object({
     default_pipeline: z.string().max(100).optional(),
     preferences: montagePreferencesSchema,
@@ -288,7 +297,7 @@ export const projectSchema = z.object({
     delivery_targets: z.array(z.string()).default([]),
   }).optional(),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
-  image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
+  image_ratio: imageRatioSchema.optional(),
 }).refine((data) => {
   if (data.enable_publishing) {
     return !!data.wechat_app_id?.trim()

@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -217,7 +218,7 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	plan := &model.Plan{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic",
+		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic", ImageRatio: "21:9",
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
@@ -226,6 +227,75 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	}
 	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("plan task profile = %#v", task)
+	}
+	if task.ImageRatio != "21:9" {
+		t.Fatalf("plan task image ratio = %q, want 21:9", task.ImageRatio)
+	}
+}
+
+func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
+			"standard":     {Enabled: true, MinTier: "free", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+		},
+	}}}
+	setter, ok := any(svc).(interface {
+		SetImageCapabilityResolver(*ImageCapabilityResolver)
+	})
+	if !ok {
+		t.Fatal("TaskService does not expose image capability revalidation")
+	}
+	setter.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ExecutionProfile: "effective", Status: model.PlanStatusActive,
+		ImageCapabilityKey: "professional", ImageRatio: "1:1",
+	}
+
+	if task, err := svc.CreateFromPlan(ctx, plan); err == nil || task != nil || !strings.Contains(err.Error(), "requires enterprise tier") {
+		t.Fatalf("CreateFromPlan = task %#v, err %v; want current-tier rejection", task, err)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("persisted tasks = %#v, err=%v; want none", tasks, err)
+	}
+}
+
+func TestTaskServiceCreateFromPlanRejectsRatioNoLongerSupported(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierEnterprise}); err != nil {
+		t.Fatal(err)
+	}
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
+			"standard":     {Enabled: true, MinTier: "free", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+		},
+	}}}
+	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ExecutionProfile: "effective", Status: model.PlanStatusActive,
+		ImageCapabilityKey: "professional", ImageRatio: "21:9",
+	}
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	var sizeErr *ImageCapabilitySizeError
+	if !errors.As(err, &sizeErr) || task != nil || sizeErr.Requested != "21:9" {
+		t.Fatalf("CreateFromPlan = task %#v, err %#v; want unsupported ratio error", task, err)
 	}
 }
 

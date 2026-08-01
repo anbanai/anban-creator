@@ -233,16 +233,13 @@ func tinyImagePNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// TestBuildProcessor_EcommerceResolvesImageAPI is a regression test for the
-// ecommerce gap-closure blocker: ecommerce has no platform-specific app-config
-// section (unlike article/seednote), so resolveAppImageAPI returns nil.
-// buildProcessor must fall back to the already-resolved effectiveCfg or every
-// ecommerce generate_image MCP call errors with "no image API config available".
+// TestBuildProcessor_EcommerceResolvesImageAPI verifies ecommerce uses the same
+// capability API as every other artifact role.
 func TestBuildProcessor_EcommerceResolvesImageAPI(t *testing.T) {
 	logger := zerolog.Nop()
 	svc := &ImageService{
 		imageCfg: &srvconfig.ImageAPIConfig{
-			Cover: &appconfig.ImageAPI{
+			API: &appconfig.ImageAPI{
 				Provider: "openai",
 				Key:      "test-key",
 				Model:    "gpt-image-2",
@@ -254,21 +251,18 @@ func TestBuildProcessor_EcommerceResolvesImageAPI(t *testing.T) {
 
 	proc, err := svc.buildProcessor(context.Background(), ch, "cover", "")
 	if err != nil {
-		t.Fatalf("buildProcessor(ecommerce) error = %v, want nil (Cover fallback should resolve a config)", err)
+		t.Fatalf("buildProcessor(ecommerce) error = %v, want nil", err)
 	}
 	if proc == nil {
 		t.Fatal("buildProcessor(ecommerce) returned nil processor, want non-nil")
 	}
 }
 
-// TestBuildProcessor_EcommerceFallsBackToContent verifies the Cover→Content
-// precedence matches resolveEcommerceImageProvider (billing.go), so the provider
-// get_project_profile reports is the one generate_image actually uses.
-func TestBuildProcessor_EcommerceFallsBackToContent(t *testing.T) {
+func TestBuildProcessor_EcommerceContentRoleUsesSameAPI(t *testing.T) {
 	logger := zerolog.Nop()
 	svc := &ImageService{
 		imageCfg: &srvconfig.ImageAPIConfig{
-			Content: &appconfig.ImageAPI{
+			API: &appconfig.ImageAPI{
 				Provider: "volcengine",
 				Key:      "test-key",
 				Model:    "seedream-3.0",
@@ -278,9 +272,9 @@ func TestBuildProcessor_EcommerceFallsBackToContent(t *testing.T) {
 	}
 	ch := &model.Project{Platform: model.ScopeEcommerce, UserID: "u1"}
 
-	proc, err := svc.buildProcessor(context.Background(), ch, "cover", "")
+	proc, err := svc.buildProcessor(context.Background(), ch, "content", "")
 	if err != nil {
-		t.Fatalf("buildProcessor(ecommerce, content-only) error = %v, want nil", err)
+		t.Fatalf("buildProcessor(ecommerce content role) error = %v, want nil", err)
 	}
 	if proc == nil {
 		t.Fatal("buildProcessor(ecommerce, content-only) returned nil processor, want non-nil")
@@ -304,7 +298,7 @@ func TestBuildProcessor_EcommerceErrorsWhenNoImageAPI(t *testing.T) {
 	}
 }
 
-func TestBuildProcessorForResolvedUsesImageTypeDescriptor(t *testing.T) {
+func TestBuildProcessorForResolvedUsesCapabilityDescriptorForEveryImageType(t *testing.T) {
 	logger := zerolog.Nop()
 	svc := &ImageService{logger: &logger}
 	ch := &model.Project{
@@ -314,13 +308,7 @@ func TestBuildProcessorForResolvedUsesImageTypeDescriptor(t *testing.T) {
 	}
 	resolved := &ResolvedImageModel{
 		Config: &srvconfig.ImageAPIConfig{
-			Cover: &appconfig.ImageAPI{
-				Provider: "openai",
-				Key:      "openai-key",
-				BaseURL:  "https://openai.example/v1",
-				Model:    "gpt-image-2",
-			},
-			Content: &appconfig.ImageAPI{
+			API: &appconfig.ImageAPI{
 				Provider: "volcengine",
 				Key:      "volc-key",
 				BaseURL:  "https://ark.example/v3",
@@ -339,9 +327,9 @@ func TestBuildProcessorForResolvedUsesImageTypeDescriptor(t *testing.T) {
 		t.Fatal("buildProcessorForResolved(content) returned nil processor")
 	}
 
-	_, err = svc.buildProcessorForResolved(ch, "cover", resolved)
-	if err == nil || !strings.Contains(err.Error(), "resolved image model does not match image type configuration") {
-		t.Fatalf("buildProcessorForResolved(cover) error = %v, want descriptor mismatch", err)
+	coverProcessor, err := svc.buildProcessorForResolved(ch, "cover", resolved)
+	if err != nil || coverProcessor == nil {
+		t.Fatalf("buildProcessorForResolved(cover) = %#v, %v", coverProcessor, err)
 	}
 }
 
@@ -368,13 +356,7 @@ func TestGenerateImageUsesResolvedDescriptor(t *testing.T) {
 	svc := &ImageService{repo: repo, logger: &logger}
 	resolved := &ResolvedImageModel{
 		Config: &srvconfig.ImageAPIConfig{
-			Cover: &appconfig.ImageAPI{
-				Provider: "openai",
-				Key:      "openai-key",
-				BaseURL:  "https://openai.example/v1",
-				Model:    "gpt-image-2",
-			},
-			Content: &appconfig.ImageAPI{
+			API: &appconfig.ImageAPI{
 				Provider: "volcengine",
 				Key:      "volc-key",
 				BaseURL:  "https://ark.example/v3",
@@ -398,11 +380,10 @@ func TestGenerateImageUsesResolvedDescriptor(t *testing.T) {
 
 func TestProviderAttemptTimeoutUsesResolvedImageType(t *testing.T) {
 	resolved := &ResolvedImageModel{Config: &srvconfig.ImageAPIConfig{
-		Cover:   &appconfig.ImageAPI{TimeoutSec: 120},
-		Content: &appconfig.ImageAPI{TimeoutSec: 180},
+		API: &appconfig.ImageAPI{TimeoutSec: 180},
 	}}
-	if got := providerAttemptTimeout(resolved, "cover"); got != 2*time.Minute {
-		t.Fatalf("cover attempt timeout = %s, want 2m", got)
+	if got := providerAttemptTimeout(resolved, "cover"); got != 3*time.Minute {
+		t.Fatalf("cover attempt timeout = %s, want 3m", got)
 	}
 	if got := providerAttemptTimeout(resolved, "content"); got != 3*time.Minute {
 		t.Fatalf("content attempt timeout = %s, want 3m", got)

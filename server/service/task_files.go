@@ -179,6 +179,22 @@ func (s *TaskService) UploadExecutionTaskFileFromReader(ctx context.Context, tas
 	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, nil, taskFileUploadOptions{})
 }
 
+// UploadContentAddressedExecutionTaskFileFromReader persists an MCP-produced
+// artifact without reusing a mutable object key for same-path replacements.
+func (s *TaskService) UploadContentAddressedExecutionTaskFileFromReader(ctx context.Context, taskID, userID, executionID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	task, err := s.ValidateAgentTaskAccess(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, taskID, executionID); err != nil {
+		return nil, err
+	}
+	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, executionID, relPath, reader, mimeType, fileSize, nil, taskFileUploadOptions{
+		ContentAddressedObject:  true,
+		CleanupOnPersistFailure: true,
+	})
+}
+
 type ImageOperationVerificationSnapshot struct {
 	Passed          bool     `json:"passed"`
 	Score           string   `json:"score"`

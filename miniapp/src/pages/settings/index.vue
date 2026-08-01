@@ -70,11 +70,6 @@
     <view class="section">
       <text class="section__title">账号与接入</text>
       <AbCard :padding="0">
-        <view class="list-item" @tap="navigateTo('/pages/settings/model-config')">
-          <text class="list-item__icon">AI</text>
-          <text class="list-item__title">模型配置</text>
-          <text class="list-item__arrow">&#8250;</text>
-        </view>
         <view class="list-item" @tap="navigateTo('/pages/settings/api-keys')">
           <text class="list-item__icon">钥</text>
           <text class="list-item__title">平台密钥</text>

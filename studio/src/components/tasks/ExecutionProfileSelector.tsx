@@ -15,8 +15,8 @@ const unavailableReasonLabel: Record<string, string> = {
   requires_pro: '需要 Pro 版或企业版',
   requires_enterprise: '需要企业版',
   profile_configuration_missing: '当前档位尚未配置',
-  agent_provider_unavailable: '当前模型服务不可用',
-  agent_model_cost_unmapped: '当前模型尚未配置成本',
+  agent_provider_unavailable: '当前执行服务不可用',
+  agent_model_cost_unmapped: '当前档位尚未配置成本',
 }
 
 function unavailableReason(profile: AgentExecutionProfileCapability): string {
@@ -73,7 +73,7 @@ export function ExecutionProfileSelector({
             key={profile.id}
             value={profile.id}
             disabled={!profile.available}
-            aria-label={`${profile.display_name}，${profile.provider}，${profile.model_name}，${minimumTierLabel[profile.min_tier]}${profile.available ? '' : `，不可用：${reason}`}`}
+            aria-label={`${profile.display_name}，${minimumTierLabel[profile.min_tier]}${profile.available ? '' : `，不可用：${reason}`}`}
             className="h-auto min-h-24 w-full min-w-0 flex-col items-start justify-start gap-1 whitespace-normal px-3 py-2 text-left"
           >
             <span className="flex w-full items-center justify-between gap-2">
@@ -83,8 +83,6 @@ export function ExecutionProfileSelector({
                 {!profile.available ? <Badge variant="secondary">不可用</Badge> : null}
               </span>
             </span>
-            <span className="text-xs text-muted-foreground">{profile.provider}</span>
-            <span className="break-all font-mono text-[11px] text-muted-foreground">{profile.model_name}</span>
             <span className="text-xs text-muted-foreground">
               {profile.available ? profile.description : reason}
             </span>

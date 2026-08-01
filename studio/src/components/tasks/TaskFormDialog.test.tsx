@@ -57,7 +57,7 @@ const fixtures = vi.hoisted(() => {
     platform: 'seednote',
     name: '种草项目',
     image_ratio: '3:4',
-    ecommerce_defaults: { image_model_key: 'destination-model' },
+    ecommerce_defaults: { image_capability_key: 'destination-capability' },
   } as Project
   const montageProject = {
     ...articleProject,
@@ -77,7 +77,7 @@ const fixtures = vi.hoisted(() => {
     prompt: '复制后的完整创作要求',
     status: 'completed',
     image_ratio: '16:9',
-    image_model_key: 'source-model',
+    image_capability_key: 'source-capability',
     input_attachments: [
       { type: 'document', upload_id: 'keep-upload', key: 'uploads/pending/keep.pdf', file_name: 'keep.pdf', content_type: 'application/pdf', size: 42 },
       { type: 'text', text: 'continue', file_name: 'resume.txt', role: 'resume_latest' },
@@ -133,8 +133,8 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.agentProfiles,
         list: vi.fn(),
       },
-      imageModels: {
-        ...actual.api.imageModels,
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
         list: vi.fn(),
       },
     },
@@ -193,12 +193,13 @@ beforeEach(() => {
     { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
     { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
   ])
-  vi.mocked(api.imageModels.list).mockResolvedValue({
+  vi.mocked(api.imageCapabilities.list).mockResolvedValue({
     tier: 'pro',
+    default_capability: 'standard',
     items: [
-      { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
-      { key: 'source-model', display_name: '源图像', min_tier: 'pro', is_custom: false },
-      { key: 'destination-model', display_name: '目标图像', min_tier: 'pro', is_custom: false },
+      { key: 'standard', display_name: '标准图像', min_tier: 'free', enabled: true, price_available: true },
+      { key: 'source-capability', display_name: '源图像', min_tier: 'pro', enabled: true, price_available: true },
+      { key: 'destination-capability', display_name: '目标图像', min_tier: 'pro', enabled: true, price_available: true },
     ],
   })
   vi.mocked(api.tasks.create).mockResolvedValue(fixtures.createdTask)
@@ -316,19 +317,42 @@ describe('TaskFormDialog', () => {
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     expect(screen.getByLabelText('选择附件文件')).toBeInTheDocument()
     expect(within(dialog).getByText('数量')).toBeInTheDocument()
-    expect(within(dialog).getAllByRole('radio')).toHaveLength(4)
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(9)
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    const imageModelSelector = within(dialog).getAllByRole('combobox').find((element) => element.textContent?.includes('标准图像'))
-    expect(imageModelSelector).toBeDefined()
-    fireEvent.click(imageModelSelector!)
+    const imageCapabilitySelector = within(dialog).getAllByRole('combobox').find((element) => element.textContent?.includes('标准图像'))
+    expect(imageCapabilitySelector).toBeDefined()
+    fireEvent.click(imageCapabilitySelector!)
     expect(await screen.findByPlaceholderText('搜索图像能力...')).toBeInTheDocument()
-    fireEvent.click(imageModelSelector!)
+    fireEvent.click(imageCapabilitySelector!)
     expect(within(dialog).queryByText('任务参考图')).not.toBeInTheDocument()
     expect(within(dialog).getByText('水印')).toBeInTheDocument()
+    expect(within(dialog).getByText('仅在所选图像能力支持水印时生效')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/火山引擎/)).not.toBeInTheDocument()
     expect(within(dialog).getByText('强目标模式')).toBeInTheDocument()
     expect(within(dialog).getByText('正文配图')).toBeInTheDocument()
     expect(within(dialog).queryByText('01 类型')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('选择项目后自动匹配任务类型')).not.toBeInTheDocument()
+  })
+
+  it('shows the catalog default capability when the form value is empty', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
+      tier: 'pro',
+      default_capability: 'catalog-default',
+      items: [
+        { key: 'first-sorted', display_name: '首个排序能力', min_tier: 'free', sort_order: 1, enabled: true, price_available: true },
+        { key: 'catalog-default', display_name: '目录默认能力', min_tier: 'free', sort_order: 2, enabled: true, price_available: true },
+      ],
+    })
+
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await waitFor(() => {
+      const selector = within(dialog).getAllByRole('combobox').find((element) =>
+        element.textContent?.includes('目录默认能力'),
+      )
+      expect(selector).toBeDefined()
+    })
   })
 
   it('uses the selected project platform when initial type and project disagree', async () => {
@@ -409,7 +433,7 @@ describe('TaskFormDialog', () => {
       prompt: '复制后的完整创作要求',
       quantity: 1,
       image_ratio: '16:9',
-      image_model_key: 'source-model',
+      image_capability_key: 'source-capability',
       watermark: true,
       goal_mode: true,
       goal: '必须包含三个案例',
@@ -440,11 +464,12 @@ describe('TaskFormDialog', () => {
   })
 
   it('shows and blocks an inherited image model that is no longer available', async () => {
-    vi.mocked(api.imageModels.list).mockResolvedValue({
+    vi.mocked(api.imageCapabilities.list).mockResolvedValue({
       tier: 'pro',
+      default_capability: 'standard',
       items: [
-        { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
-        { key: 'destination-model', display_name: '目标图像', min_tier: 'pro', is_custom: false },
+        { key: 'standard', display_name: '标准图像', min_tier: 'free' },
+        { key: 'destination-capability', display_name: '目标图像', min_tier: 'pro' },
       ],
     })
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
@@ -452,7 +477,61 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     expect(await within(dialog).findByText('已停用图像能力（当前任务配置）')).toBeInTheDocument()
     expect(within(dialog).getByText('当前图像能力不可用，请重新选择。')).toBeInTheDocument()
-    expect(within(dialog).queryByText('source-model')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('source-capability')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+  })
+
+  it('blocks an inherited image capability whose price is unavailable', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValue({
+      tier: 'pro',
+      default_capability: 'standard',
+      items: [
+        { key: 'standard', display_name: '标准图像', enabled: true, price_available: true },
+        { key: 'source-capability', display_name: '源图像', enabled: true, price_available: false },
+      ],
+    })
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('当前图像能力不可用，请重新选择。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+  })
+
+  it('blocks an inherited image capability whose enabled flag is missing', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValue({
+      tier: 'pro',
+      default_capability: 'standard',
+      items: [
+        { key: 'standard', display_name: '标准图像', enabled: true, price_available: true },
+        { key: 'source-capability', display_name: '源图像', price_available: true },
+      ],
+    })
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('当前图像能力不可用，请重新选择。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
+  })
+
+  it('blocks submission when the explicit ratio is unsupported by the selected capability', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValue({
+      tier: 'pro',
+      default_capability: 'standard',
+      items: [
+        { key: 'standard', display_name: '标准图像', enabled: true, price_available: true },
+        {
+          key: 'source-capability',
+          display_name: '源图像',
+          enabled: true,
+          price_available: true,
+          features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: false, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
+        },
+      ],
+    })
+    renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByText('当前图像能力不支持所选比例，请重新选择比例或智能适配。')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '克隆' })).toBeDisabled()
   })
 

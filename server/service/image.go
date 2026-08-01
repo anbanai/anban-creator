@@ -241,48 +241,6 @@ func saveGeneratedImageBytes(outputPath string, data []byte) (string, error) {
 	return outputMIME, nil
 }
 
-// resolveAppImageAPI extracts the ImageAPI config from a project-aware appCfg
-// (built by BuildAppConfig) based on platform and image type.
-func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *appconfig.ImageAPI {
-	switch platform {
-	case model.ScopeArticle:
-		if imageType == "cover" {
-			return &appCfg.Wechat.Article.Cover.Image
-		}
-		return &appCfg.Wechat.Article.Content.Image
-	case model.ScopeSeednote:
-		if appCfg.Seednote == nil {
-			return nil
-		}
-		if imageType == "cover" {
-			return &appCfg.Seednote.Cover.Image
-		}
-		return &appCfg.Seednote.Content.Image
-	}
-	return nil
-}
-
-func resolveProjectImageAPI(
-	appCfg *appconfig.Config,
-	effectiveCfg *srvconfig.ImageAPIConfig,
-	platform string,
-	imageType string,
-) *appconfig.ImageAPI {
-	apiCfg := resolveAppImageAPI(appCfg, platform, imageType)
-	if apiCfg == nil && platform == model.ScopeEcommerce {
-		// Ecommerce has no platform-specific app-config section. Keep the
-		// historical Cover→Content precedence used by project profiles/billing.
-		if effectiveCfg != nil {
-			if effectiveCfg.Cover != nil {
-				apiCfg = effectiveCfg.Cover
-			} else if effectiveCfg.Content != nil {
-				apiCfg = effectiveCfg.Content
-			}
-		}
-	}
-	return apiCfg
-}
-
 // buildProcessor creates a new image.Processor for the given project and image type.
 // imageCapabilityKey routes through the server-owned capability catalog.
 func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageCapabilityKey string) (*image.Processor, error) {
@@ -311,7 +269,10 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
 
-	apiCfg := resolveProjectImageAPI(appCfg, effectiveCfg, ch.Platform, imageType)
+	var apiCfg *appconfig.ImageAPI
+	if effectiveCfg != nil {
+		apiCfg = effectiveCfg.API
+	}
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}
@@ -320,8 +281,8 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 }
 
 // buildProcessorForResolved builds the generation processor from an immutable
-// descriptor selected before billing. The selected project/image-type slot must
-// still match the descriptor exactly, preventing cover/content route drift.
+// descriptor selected before billing. Image type is an artifact role and never
+// changes the capability provider route.
 func (s *ImageService) buildProcessorForResolved(
 	ch *model.Project,
 	imageType string,
@@ -342,7 +303,7 @@ func (s *ImageService) buildProcessorForResolved(
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
-	apiCfg := resolveProjectImageAPI(appCfg, resolved.Config, ch.Platform, imageType)
+	apiCfg := resolved.Config.API
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}
@@ -393,10 +354,7 @@ func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time
 	if resolved == nil || resolved.Config == nil {
 		return fallback
 	}
-	apiCfg := resolved.Config.Content
-	if imageType == "cover" {
-		apiCfg = resolved.Config.Cover
-	}
+	apiCfg := resolved.Config.API
 	if apiCfg == nil || apiCfg.TimeoutSec <= 0 {
 		return fallback
 	}
@@ -618,22 +576,14 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 	// Determine max size from config; fall back to 5MB if not configured.
 	// Prefer Content config as standalone compression is more commonly used for content images.
 	var maxSize int64 = 5 * 1024 * 1024
-	if s.imageCfg != nil {
-		if cfg := s.imageCfg.Content; cfg != nil && cfg.MaxSizeMB > 0 {
-			maxSize = cfg.MaxSizeBytes()
-		} else if cfg := s.imageCfg.Cover; cfg != nil && cfg.MaxSizeMB > 0 {
-			maxSize = cfg.MaxSizeBytes()
-		}
+	if s.imageCfg != nil && s.imageCfg.API != nil && s.imageCfg.API.MaxSizeMB > 0 {
+		maxSize = s.imageCfg.API.MaxSizeBytes()
 	}
 
 	if maxWidth <= 0 {
 		// Try to get max width from config.
-		if s.imageCfg != nil {
-			if cfg := s.imageCfg.Content; cfg != nil && cfg.MaxWidth > 0 {
-				maxWidth = cfg.MaxWidth
-			} else if cfg := s.imageCfg.Cover; cfg != nil && cfg.MaxWidth > 0 {
-				maxWidth = cfg.MaxWidth
-			}
+		if s.imageCfg != nil && s.imageCfg.API != nil && s.imageCfg.API.MaxWidth > 0 {
+			maxWidth = s.imageCfg.API.MaxWidth
 		}
 		// Ultimate fallback.
 		if maxWidth <= 0 {

@@ -100,7 +100,7 @@ describe('tasksApi', () => {
       prompt: '',
       quantity: 1,
       image_ratio: '9:16',
-      image_model_key: 'video-model',
+      image_capability_key: 'video-model',
       skip_reference_image: false,
       reference_image: { asset_id: 'asset-1' },
       input_attachments: [],

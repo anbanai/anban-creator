@@ -25,6 +25,7 @@ import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
 import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
+import { ImageAspectRatioField } from '@/components/tasks/ImageAspectRatioField'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
@@ -34,7 +35,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
-import { useImageCapabilities } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
@@ -70,7 +71,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   ecommerce_default_selected_modules: {},
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
-  ecommerce_image_model_key: '',
+  ecommerce_image_capability_key: '',
   montage_defaults: {
     default_pipeline: '',
     preferences: {
@@ -121,7 +122,7 @@ function projectToForm(ch: Project): ProjectFormValues {
     ecommerce_default_selected_modules: ch.ecommerce_defaults?.default_selected_modules || {},
     ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
     ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
-    ecommerce_image_model_key: ch.ecommerce_defaults?.image_model_key || '',
+    ecommerce_image_capability_key: ch.ecommerce_defaults?.image_capability_key || '',
     montage_defaults: {
       ...CHANNEL_FORM_DEFAULTS.montage_defaults,
       ...(ch.montage_defaults || {}),
@@ -132,7 +133,7 @@ function projectToForm(ch: Project): ProjectFormValues {
       delivery_targets: ch.montage_defaults?.delivery_targets || [],
     },
     reference_image: ch.reference_image ?? null,
-    image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
+    image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
     require_publish_approval: ch.config?.require_publish_approval ?? false,
   }
@@ -182,7 +183,23 @@ export default function ProjectsPage() {
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
   const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageCapabilities()
+  const ecommerceImageCapabilityKey = useWatch({ control: form.control, name: 'ecommerce_image_capability_key' })
+  const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
+  const {
+    items: imageCapabilityOptions,
+    defaultCapability: defaultImageCapability,
+    isLoading: imageCapabilitiesLoading,
+  } = useImageCapabilities()
+  const selectedImageCapability = useMemo(
+    () => imageCapabilityOptions.find((option) => option.key === (ecommerceImageCapabilityKey || defaultImageCapability)),
+    [defaultImageCapability, ecommerceImageCapabilityKey, imageCapabilityOptions],
+  )
+  const imageRatioUnsupported = Boolean(
+    isEcommerce
+    && watchedImageRatio
+    && selectedImageCapability?.features?.size_presets
+    && !selectedImageCapability.features.size_presets.includes(watchedImageRatio),
+  )
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -486,6 +503,29 @@ export default function ProjectsPage() {
   }
 
   async function onSubmit(values: ProjectFormValues) {
+    const submittedImageCapability = imageCapabilityOptions.find(
+      (option) => option.key === (values.ecommerce_image_capability_key || defaultImageCapability),
+    )
+    if (
+      values.platform === 'ecommerce'
+      && (
+        !submittedImageCapability
+        || submittedImageCapability.enabled !== true
+        || submittedImageCapability.price_available !== true
+      )
+    ) {
+      toast.error('该图像能力已停用，请重新选择')
+      return
+    }
+    if (
+      values.platform === 'ecommerce'
+      && values.image_ratio
+      && submittedImageCapability?.features?.size_presets
+      && !submittedImageCapability.features.size_presets.includes(values.image_ratio)
+    ) {
+      toast.error('当前图像能力不支持所选比例，请重新选择比例或智能适配')
+      return
+    }
     const payload: CreateProjectRequest = {
       platform: values.platform,
       name: values.name?.trim() || undefined,
@@ -509,7 +549,7 @@ export default function ProjectsPage() {
         default_selected_modules: values.ecommerce_default_selected_modules || {},
         target_platform: values.ecommerce_target_platform || undefined,
         brand_brief: values.ecommerce_brand_brief?.trim() || undefined,
-        image_model_key: values.ecommerce_image_model_key || undefined,
+        image_capability_key: values.ecommerce_image_capability_key || undefined,
       }
     }
     if (values.platform === 'montage') {
@@ -527,15 +567,6 @@ export default function ProjectsPage() {
         delivery_targets: values.montage_defaults?.delivery_targets || [],
       }
     }
-    // Auto-set image_ratio based on platform if not specified
-    if (!payload.image_ratio) {
-      if (payload.platform === 'article') {
-        payload.image_ratio = '16:9'
-      } else if (payload.platform === 'seednote' || payload.platform === 'moments') {
-        payload.image_ratio = '3:4'
-      }
-    }
-
     // Disable publishing flag when unchecked (credentials preserved)
     if (!values.enable_publishing) {
       payload.enable_publishing = false
@@ -912,6 +943,7 @@ export default function ProjectsPage() {
               )}
 
               {!isMontage ? (
+                <>
                 <FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
                     <FormLabel>视觉风格</FormLabel>
@@ -954,6 +986,25 @@ export default function ProjectsPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
+                <FormField control={form.control} name="image_ratio" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>默认图像比例</FormLabel>
+                    <FormControl>
+                      <ImageAspectRatioField
+                        value={field.value || ''}
+                        defaultValue=""
+                        supportedSizes={selectedImageCapability?.features?.size_presets}
+                        onChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormDescription>选择智能适配时，每个任务可再明确指定，或由创作流程按产物决定。</FormDescription>
+                    {imageRatioUnsupported && (
+                      <p className="text-sm font-medium text-destructive">当前图像能力不支持所选比例，请重新选择比例或智能适配</p>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                </>
               ) : null}
 
               {isMontage && <MontageProjectDefaultsPanel form={form} />}
@@ -1009,14 +1060,14 @@ export default function ProjectsPage() {
                         <FormMessage />
                       </FormItem>
                     )} />
-                    <FormField control={form.control} name="ecommerce_image_model_key" render={({ field }) => (
+                    <FormField control={form.control} name="ecommerce_image_capability_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>默认图像能力</FormLabel>
                         <FormControl>
-                          {imageModelsLoading ? (
+                          {imageCapabilitiesLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
                           ) : (
-                            <ImageCapabilitySelector options={imageModelOptions} value={field.value || ''} onChange={field.onChange} />
+                            <ImageCapabilitySelector options={imageCapabilityOptions} value={field.value || defaultImageCapability} onChange={field.onChange} />
                           )}
                         </FormControl>
                         <FormMessage />

@@ -157,6 +157,9 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	var req createTemplateRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -216,6 +219,9 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 	if _, err := uuid.Parse(id); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid template id format")
+	}
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
 	}
 
 	var req updateTemplateRequest

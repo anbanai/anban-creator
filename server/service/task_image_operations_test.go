@@ -1,21 +1,30 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeTaskImageOperationsImage struct {
@@ -53,6 +62,280 @@ type fakeTaskImageOperationsCost struct {
 	recorded     *RecordProviderTokenCostRequest
 	unreconciled *RecordMediaUnreconciledRequest
 	recordErr    error
+}
+
+type recordingCropStorage struct {
+	storage.Provider
+
+	mu             sync.Mutex
+	uploadKeys     []string
+	deletedKeys    []string
+	blockFirst     bool
+	firstStarted   chan struct{}
+	releaseFirst   chan struct{}
+	firstBlockOnce sync.Once
+}
+
+func (s *recordingCropStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	if s.isCropOutput(key) {
+		s.mu.Lock()
+		s.uploadKeys = append(s.uploadKeys, key)
+		s.mu.Unlock()
+		if s.blockFirst {
+			blocked := false
+			s.firstBlockOnce.Do(func() {
+				blocked = true
+				close(s.firstStarted)
+			})
+			if blocked {
+				select {
+				case <-ctx.Done():
+					return nil, context.Cause(ctx)
+				case <-s.releaseFirst:
+				}
+			}
+		}
+	}
+	return s.Provider.Upload(ctx, key, reader, contentType)
+}
+
+func (s *recordingCropStorage) Delete(ctx context.Context, key string) error {
+	s.mu.Lock()
+	s.deletedKeys = append(s.deletedKeys, key)
+	s.mu.Unlock()
+	return s.Provider.Delete(ctx, key)
+}
+
+func (s *recordingCropStorage) outputUploadKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.uploadKeys...)
+}
+
+func (s *recordingCropStorage) outputDeletedKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deletedKeys...)
+}
+
+func (s *recordingCropStorage) isCropOutput(key string) bool {
+	return strings.Contains(filepath.ToSlash(key), "/mcp/output/cropped")
+}
+
+type cropPersistenceFailureRepository struct {
+	repository.Repository
+	taskFiles repository.TaskFileRepository
+	err       error
+}
+
+func (r *cropPersistenceFailureRepository) TaskFiles() repository.TaskFileRepository {
+	return r.taskFiles
+}
+
+func (r *cropPersistenceFailureRepository) WithTx(context.Context, func(repository.Repository) error) error {
+	return r.err
+}
+
+type cropPersistenceFailureTaskFiles struct {
+	repository.TaskFileRepository
+	err error
+}
+
+func (r *cropPersistenceFailureTaskFiles) InsertIfAbsent(context.Context, *model.TaskFile) (*model.TaskFile, bool, error) {
+	return nil, false, r.err
+}
+
+func (r *cropPersistenceFailureTaskFiles) ReplaceIfCurrent(context.Context, *model.TaskFile, *model.TaskFile) (*model.TaskFile, bool, error) {
+	return nil, false, r.err
+}
+
+type taskImageOperationsCropFixture struct {
+	service     *TaskImageOperationsService
+	tasks       *TaskService
+	repo        repository.Repository
+	store       *recordingCropStorage
+	task        *model.Task
+	userID      string
+	executionID string
+}
+
+func newTaskImageOperationsCropFixture(t *testing.T) *taskImageOperationsCropFixture {
+	t.Helper()
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.Nop()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executionID := startTaskArtifactExecution(t, repo, task)
+	local, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingCropStorage{Provider: local}
+	for index, source := range [][]byte{
+		cropTestPNG(t, color.NRGBA{R: 0xff, A: 0xff}),
+		cropTestPNG(t, color.NRGBA{B: 0xff, A: 0xff}),
+	} {
+		relPath := []string{"output/source-a.png", "output/source-b.png"}[index]
+		key := "fixtures/" + filepath.Base(relPath)
+		if _, err := local.Upload(ctx, key, bytes.NewReader(source), "image/png"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, task.ID, executionID, &model.TaskFile{
+			TaskID: task.ID, ExecutionID: executionID, Role: model.FileRoleImage,
+			FilePath: relPath, FileName: filepath.Base(relPath), MimeType: "image/png",
+			FileSize: int64(len(source)), ContentHash: hashTaskFileContent(source),
+			OSSKey: key, OSSURL: local.GetURL(key), StorageProvider: local.Name(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tasks := newTestTaskService(repo, nil, store, &logger, "", nil, nil)
+	return &taskImageOperationsCropFixture{
+		service: NewTaskImageOperationsService(tasks, nil, nil, nil, TaskImageOperationsConfig{}, &logger),
+		tasks:   tasks, repo: repo, store: store, task: task, userID: userID, executionID: executionID,
+	}
+}
+
+func cropTestPNG(t *testing.T, fill color.Color) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			img.Set(x, y, fill)
+		}
+	}
+	var out bytes.Buffer
+	if err := png.Encode(&out, img); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+func findCropOutputFile(t *testing.T, repo repository.Repository, executionID string) *model.TaskFile {
+	t.Helper()
+	files, err := repo.TaskFiles().FindByExecutionID(context.Background(), executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.FilePath == "output/cropped.png" {
+			return file
+		}
+	}
+	t.Fatal("cropped task file was not persisted")
+	return nil
+}
+
+func cropRequest(f *taskImageOperationsCropFixture, inputPath string) CropTaskImageRequest {
+	return CropTaskImageRequest{
+		UserID: f.userID, TaskID: f.task.ID, ExecutionID: f.executionID,
+		InputPath: inputPath, OutputPath: "output/cropped.png",
+		TargetWidth: 1, TargetHeight: 1, Anchor: "center",
+	}
+}
+
+func TestTaskImageOperationsCropUsesContentAddressedObject(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	result, err := f.service.Crop(context.Background(), cropRequest(f, "output/source-a.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := findCropOutputFile(t, f.repo, f.executionID)
+	if !strings.Contains(persisted.OSSKey, "-"+result.ContentHash+"-") {
+		t.Fatalf("cropped object key = %q, want content hash %q in immutable key", persisted.OSSKey, result.ContentHash)
+	}
+	plainKey := buildTaskMCPArtifactStoragePrefix(f.task, f.executionID) + "output/cropped.png"
+	if persisted.OSSKey == plainKey {
+		t.Fatalf("cropped object reused mutable path key %q", plainKey)
+	}
+}
+
+func TestTaskImageOperationsCropCleansObjectWhenPersistenceFails(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	wantErr := errors.New("forced crop persistence failure")
+	failingTaskFiles := &cropPersistenceFailureTaskFiles{TaskFileRepository: f.repo.TaskFiles(), err: wantErr}
+	failingRepo := &cropPersistenceFailureRepository{Repository: f.repo, taskFiles: failingTaskFiles, err: wantErr}
+	logger := zerolog.Nop()
+	tasks := newTestTaskService(failingRepo, nil, f.store, &logger, "", nil, nil)
+	service := NewTaskImageOperationsService(tasks, nil, nil, nil, TaskImageOperationsConfig{}, &logger)
+
+	if _, err := service.Crop(context.Background(), cropRequest(f, "output/source-a.png")); !errors.Is(err, wantErr) {
+		t.Fatalf("Crop error = %v, want %v", err, wantErr)
+	}
+	uploaded := f.store.outputUploadKeys()
+	if len(uploaded) != 1 {
+		t.Fatalf("cropped uploads = %#v, want one attempted object", uploaded)
+	}
+	if deleted := f.store.outputDeletedKeys(); len(deleted) != 1 || deleted[0] != uploaded[0] {
+		t.Fatalf("deleted cropped objects = %#v, want %#v", deleted, uploaded)
+	}
+	if _, err := f.store.Read(context.Background(), uploaded[0]); err == nil {
+		t.Fatalf("unpersisted cropped object %q remains readable", uploaded[0])
+	}
+}
+
+func TestTaskImageOperationsConcurrentCropNeverReusesObjectKey(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.store.blockFirst = true
+	f.store.firstStarted = make(chan struct{})
+	f.store.releaseFirst = make(chan struct{})
+	type cropResult struct {
+		result *CropTaskImageResult
+		err    error
+	}
+	firstDone := make(chan cropResult, 1)
+	go func() {
+		result, err := f.service.Crop(context.Background(), cropRequest(f, "output/source-a.png"))
+		firstDone <- cropResult{result: result, err: err}
+	}()
+	select {
+	case <-f.store.firstStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first crop did not reach storage upload")
+	}
+	secondDone := make(chan cropResult, 1)
+	go func() {
+		result, err := f.service.Crop(context.Background(), cropRequest(f, "output/source-b.png"))
+		secondDone <- cropResult{result: result, err: err}
+	}()
+	var second cropResult
+	select {
+	case second = <-secondDone:
+	case <-time.After(5 * time.Second):
+		close(f.store.releaseFirst)
+		t.Fatal("second crop did not complete while the first upload was blocked")
+	}
+	close(f.store.releaseFirst)
+	first := <-firstDone
+	if first.err != nil || first.result == nil || second.err != nil || second.result == nil {
+		t.Fatalf("concurrent Crop results = first %#v/%v second %#v/%v", first.result, first.err, second.result, second.err)
+	}
+
+	uploaded := f.store.outputUploadKeys()
+	unique := make(map[string]struct{}, len(uploaded))
+	for _, key := range uploaded {
+		if _, exists := unique[key]; exists {
+			t.Fatalf("concurrent crops reused mutable object key %q: %#v", key, uploaded)
+		}
+		unique[key] = struct{}{}
+	}
+	persisted := findCropOutputFile(t, f.repo, f.executionID)
+	body, err := f.store.Read(context.Background(), persisted.OSSKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hashTaskFileContent(body); got != persisted.ContentHash {
+		t.Fatalf("persisted crop metadata hash = %q, object hash = %q", persisted.ContentHash, got)
+	}
 }
 
 func (f *fakeTaskImageOperationsCost) CatalogID() string { return "catalog" }

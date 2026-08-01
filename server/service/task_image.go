@@ -61,6 +61,18 @@ type ImageCapabilitySizeError struct {
 	SupportedSizes []string `json:"supported_sizes"`
 }
 
+type ImageCapabilityBillingSKUError struct {
+	BillingSKU        string `json:"billing_sku"`
+	Operation         string `json:"operation"`
+	Route             string `json:"route"`
+	ExpectedOperation string `json:"expected_operation"`
+	ExpectedRoute     string `json:"expected_route"`
+}
+
+func (e *ImageCapabilityBillingSKUError) Error() string {
+	return fmt.Sprintf("image capability billing_sku %q resolves to %s/%s, want %s/%s", e.BillingSKU, e.Operation, e.Route, e.ExpectedOperation, e.ExpectedRoute)
+}
+
 func (e *ImageCapabilitySizeError) Error() string {
 	return fmt.Sprintf("requested image size %q is not supported by the selected capability", e.Requested)
 }
@@ -78,6 +90,9 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, errors.New("prompt is required")
+	}
+	if strings.TrimSpace(req.Size) == "" {
+		return nil, errors.New("size is required")
 	}
 	outputPath, err := CleanTaskFileRelativePath(req.OutputPath)
 	if err != nil {
@@ -138,6 +153,19 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve fixed image SKU: %w", err)
+	}
+	expectedOperation := "image.generate"
+	expectedRoute := "image_generation.capabilities." + resolved.Key
+	if pricing == nil || pricing.SKU == nil || pricing.SKU.Operation != expectedOperation || pricing.SKU.Route != expectedRoute {
+		mismatch := &ImageCapabilityBillingSKUError{
+			BillingSKU: resolved.BillingSKU, ExpectedOperation: expectedOperation, ExpectedRoute: expectedRoute,
+		}
+		if pricing != nil && pricing.SKU != nil {
+			mismatch.BillingSKU = pricing.SKU.SKUID
+			mismatch.Operation = pricing.SKU.Operation
+			mismatch.Route = pricing.SKU.Route
+		}
+		return nil, mismatch
 	}
 	operationID, fingerprint, err := taskImageOperationIdentity(req)
 	if err != nil {

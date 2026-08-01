@@ -1,24 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { normalizeProvider } from './designer'
+import { normalizeCapability } from './designer'
 import { http } from '@/lib/http-client'
-import type { RawDesignerProvider } from '@/types/designer'
 
 describe('designer API normalization', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
+  it('preserves the server default capability independently from list order', async () => {
+    vi.spyOn(http, 'get').mockResolvedValue({
+      data: { code: 0, msg: 'success', data: {
+        default_capability: 'standard',
+        tier: 'enterprise',
+        items: [
+          { key: 'professional', display_name: '专业增强' },
+          { key: 'standard', display_name: '标准图像' },
+        ],
+      } },
+    })
+    const { designerApi } = await import('./designer')
+
+    await expect(designerApi.getCapabilities()).resolves.toMatchObject({
+      defaultCapability: 'standard',
+      items: [{ id: 'professional' }, { id: 'standard' }],
+    })
+  })
+
   it('maps public capability metadata without internal provider identity', () => {
-    const provider = normalizeProvider({
-      id: 'professional_enhance',
-      name: '专业增强',
+    const capability = normalizeCapability({
+      key: 'professional',
+      display_name: '专业增强',
       description: '适合复杂构图与高细节视觉任务',
       min_tier: 'enterprise',
-      credits: 0,
+      price_credits: 500,
+      price_available: true,
       enabled: true,
-      idx: 0,
-      capabilities: {
+      sort_order: 2,
+      features: {
         quality_levels: ['auto', 'low', 'medium', 'high'],
         size_presets: ['1024x1024', '1536x1024', '1024x1536'],
         default_size: '1024x1024',
@@ -29,19 +48,20 @@ describe('designer API normalization', () => {
         output_formats: ['png', 'jpeg', 'webp'],
         has_background: true,
         has_compression: true,
+        watermark: false,
       },
-    } satisfies RawDesignerProvider)
+    })
 
-    expect(provider.capabilities.defaultSize).toBe('1024x1024')
-    expect(provider.capabilities.sizePresets).toEqual([
+    expect(capability.features.defaultSize).toBe('1024x1024')
+    expect(capability.features.sizePresets).toEqual([
       '1024x1024',
       '1536x1024',
       '1024x1536',
     ])
-    expect(provider).not.toHaveProperty('provider')
-    expect(provider).not.toHaveProperty('providerKey')
-    expect(provider).not.toHaveProperty('route')
-    expect(provider).not.toHaveProperty('model')
+    expect(capability).not.toHaveProperty('provider')
+    expect(capability).not.toHaveProperty('providerKey')
+    expect(capability).not.toHaveProperty('route')
+    expect(capability).not.toHaveProperty('model')
   })
 
   it('registers an immutable direct upload identity without multipart data', async () => {
@@ -76,7 +96,7 @@ describe('designer API normalization', () => {
     const controller = new AbortController()
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', provider_id: 'professional_enhance' }, controller.signal)
+    await designerApi.generate({ project_id: 'default', prompt: 'test', capability_key: 'professional' }, controller.signal)
     await designerApi.registerReference({ upload_id: 'upload-1', key: 'uploads/finalized/reference.png' }, controller.signal)
     await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
     await designerApi.getGeneration('generation-1', controller.signal)
@@ -106,7 +126,7 @@ describe('designer API normalization', () => {
       })
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', provider_id: 'professional_enhance' })
+    await designerApi.generate({ project_id: 'default', prompt: 'test', capability_key: 'professional' })
 
     const quoteRequest = post.mock.calls[0]?.[1]
     const generateRequest = post.mock.calls[1]?.[1]

@@ -383,6 +383,9 @@ func main() {
 	}
 
 	imageCapabilityResolver := service.NewImageCapabilityResolver(repo, cfg)
+	if taskSvc != nil {
+		taskSvc.SetImageCapabilityResolver(imageCapabilityResolver)
+	}
 
 	var serverInternalLLMClient service.ResultLLMClient
 	if route := cfg.ServerInternal; route.BaseURL != "" && route.Key != "" && route.Model != "" {
@@ -557,13 +560,13 @@ func main() {
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
 	// Wire image presets + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
-		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration.Capabilities)
+		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
 		if repo != nil {
 			taskHandler.SetRepository(repo)
 		}
 	}
 	if planHandler != nil {
-		planHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration.Capabilities)
+		planHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
 		if repo != nil {
 			planHandler.SetRepository(repo)
 		}
@@ -631,7 +634,7 @@ func main() {
 			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
 			TopicPoolSvc:           topicPoolSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
-			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage),
+			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver),
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),

@@ -381,7 +381,6 @@ function SummaryContent({
               <div className="space-y-2">
                 {summary.outputs.map((output, index) => {
                   const verification = verificationMeta[output.verification.status]
-                  const providerModel = [output.provider, output.model].filter(Boolean).join(' / ')
                   return (
                     <article
                       key={`${output.file_name}-${index}`}
@@ -426,7 +425,6 @@ function SummaryContent({
                       </p>
                       <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
                         <Badge variant="outline">生成 {output.generation_attempts} 次</Badge>
-                        {providerModel && <span className="break-all text-muted-foreground">{providerModel}</span>}
                         {output.selection_reason && (
                           <span className="min-w-0 break-all rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
                             {output.selection_reason}

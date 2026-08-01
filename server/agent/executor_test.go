@@ -139,26 +139,16 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 		wantContentSize string
 	}{
 		{
-			name:     "article model config does not inject business defaults",
-			platform: model.ScopeArticle,
-			imageAPICfg: &srvconfig.ImageAPIConfig{
-				Sizes: srvconfig.SizesConfig{
-					ArticleCover:   "16:9",
-					ArticleContent: "16:9",
-				},
-			},
+			name:            "article model config does not inject business defaults",
+			platform:        model.ScopeArticle,
+			imageAPICfg:     &srvconfig.ImageAPIConfig{},
 			wantCoverSize:   "",
 			wantContentSize: "",
 		},
 		{
-			name:     "seednote model config does not inject business defaults",
-			platform: model.ScopeSeednote,
-			imageAPICfg: &srvconfig.ImageAPIConfig{
-				Sizes: srvconfig.SizesConfig{
-					SeednoteCover:   "3:4",
-					SeednoteContent: "3:4",
-				},
-			},
+			name:            "seednote model config does not inject business defaults",
+			platform:        model.ScopeSeednote,
+			imageAPICfg:     &srvconfig.ImageAPIConfig{},
 			wantCoverSize:   "",
 			wantContentSize: "",
 		},
@@ -166,18 +156,14 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 			name:     "explicit image config size is preserved",
 			platform: model.ScopeArticle,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
-				Cover: &appconfig.ImageAPI{
+				API: &appconfig.ImageAPI{
 					Provider: "gemini",
 					Key:      "test-key",
 					Size:     "9:16",
 				},
-				Sizes: srvconfig.SizesConfig{
-					ArticleCover:   "16:9",
-					ArticleContent: "16:9",
-				},
 			},
 			wantCoverSize:   "9:16",
-			wantContentSize: "",
+			wantContentSize: "9:16",
 		},
 		{
 			name:            "nil imageAPICfg does not panic",

@@ -89,7 +89,7 @@ describe('studio business UX helpers', () => {
           ecommerce_defaults: {
             default_selected_modules: { main_image: 2 },
             target_platform: 'tmall',
-            image_model_key: 'gpt-image',
+            image_capability_key: 'professional',
             brand_brief: '极简',
           },
         }),
@@ -97,7 +97,7 @@ describe('studio business UX helpers', () => {
     ).toMatchObject({
       type: 'ecommerce',
       imageRatio: '1:1',
-      imageModelKey: 'gpt-image',
+      imageCapabilityKey: 'professional',
       selectedModules: { main_image: 2 },
       targetPlatform: 'tmall',
     })
@@ -213,9 +213,15 @@ describe('studio business UX helpers', () => {
       }).map((item) => [item.id, item.ready, item.actionLabel]),
     ).toEqual([
       ['execution', true, '查看执行说明'],
-      ['model-key', false, '创建密钥'],
+      ['api-key', false, '创建密钥'],
       ['publishing', false, '检查发布'],
       ['account-security', false, '设置密码'],
     ])
+  })
+
+  it('links platform keys without reviving the removed model configuration section', () => {
+    const item = buildSettingsReadinessItems({ isDesktopApp: false, apiKeyCount: 1, hasPassword: true })
+      .find((entry) => entry.id === 'api-key')
+    expect(item).toMatchObject({ title: '平台密钥', actionLabel: '检查密钥', href: '#api-key-settings' })
   })
 })

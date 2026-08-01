@@ -75,10 +75,16 @@ func (h *ProjectHandler) SetDesignerService(svc *service.DesignerService) {
 }
 
 func (h *ProjectHandler) validateProjectImageCapability(ctx context.Context, userID string, req *projectRequest) error {
-	if req == nil || req.EcommerceDefaults == nil || strings.TrimSpace(req.EcommerceDefaults.ImageCapabilityKey) == "" || h.designerSvc == nil {
+	if req == nil || req.EcommerceDefaults == nil || h.designerSvc == nil {
 		return nil
 	}
-	return h.designerSvc.ValidateCapabilityForUser(ctx, userID, req.EcommerceDefaults.ImageCapabilityKey)
+	key := strings.TrimSpace(req.EcommerceDefaults.ImageCapabilityKey)
+	if key != "" {
+		if err := h.designerSvc.ValidateCapabilityForUser(ctx, userID, key); err != nil {
+			return err
+		}
+	}
+	return h.designerSvc.ValidateCapabilitySizeForUser(ctx, userID, key, req.ImageRatio)
 }
 
 // signProjectURLs resolves the stored avatar URL to
@@ -328,7 +334,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req projectRequest
@@ -359,7 +365,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	}
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
@@ -373,6 +379,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
 		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
 			return Forbidden(c, "image capability is not available for your tier")
+		}
+		if errors.Is(err, service.ErrDesignerCapabilitySizeUnsupported) {
+			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "image_capability_ratio_unsupported", Data: fiber.Map{"capability_key": req.EcommerceDefaults.ImageCapabilityKey, "image_ratio": req.ImageRatio}})
 		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
@@ -471,7 +480,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	if err := rejectRemovedReferenceImageField(c.Body()); err != nil {
+	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	var req projectRequest
@@ -484,7 +493,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
@@ -503,6 +512,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
 		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
 			return Forbidden(c, "image capability is not available for your tier")
+		}
+		if errors.Is(err, service.ErrDesignerCapabilitySizeUnsupported) {
+			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "image_capability_ratio_unsupported", Data: fiber.Map{"capability_key": req.EcommerceDefaults.ImageCapabilityKey, "image_ratio": req.ImageRatio}})
 		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}

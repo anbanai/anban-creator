@@ -9,6 +9,13 @@ export interface ProjectConfig {
   enable_publishing?: boolean
 }
 
+export interface EcommerceProjectDefaults {
+  default_selected_modules?: Record<string, number>
+  target_platform?: string
+  brand_brief?: string
+  image_capability_key?: string
+}
+
 export interface Project {
   id: string
   user_id: string
@@ -35,6 +42,7 @@ export interface Project {
   byline: string
   reference_image?: ReferenceAssetView | null
   image_ratio: string
+  ecommerce_defaults?: EcommerceProjectDefaults
   layout: string
   image_preset: string
   max_concurrent_tasks: number
@@ -79,6 +87,7 @@ export interface CreateProjectRequest {
   byline?: string
   reference_image?: ReferenceImageSelection | null
   image_ratio?: string
+  ecommerce_defaults?: EcommerceProjectDefaults
   layout?: string
   image_preset?: string
   max_concurrent_tasks?: number

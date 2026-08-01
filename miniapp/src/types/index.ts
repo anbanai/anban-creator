@@ -15,11 +15,18 @@ export type {
   ReferenceImageValue,
 } from './asset'
 
+export type {
+  ImageCapabilityFeatures,
+  ImageCapabilityOption,
+  ImageCapabilityListResponse,
+} from './imageCapability'
+
 // Project
 export type {
   ProjectPlatform,
   ProjectStatus,
   ProjectConfig,
+  EcommerceProjectDefaults,
   Project,
   ProjectStats,
   ProjectDetail,
@@ -135,14 +142,12 @@ export type {
 
 // Designer
 export type {
-  ModelCapabilities,
-  DesignerProvider,
+  DesignerCapabilityFeatures,
+  DesignerCapability,
   GenerateRequest,
+  GenerateQuote,
   GenerateImage,
   ImageGeneration,
   ImageGenerationResult,
   HistoryResponse,
 } from './designer'
-
-// Image Models
-export type { ImageModelOption, ImageModelListResponse } from './imageModel'

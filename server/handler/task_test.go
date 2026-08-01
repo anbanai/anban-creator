@@ -799,7 +799,7 @@ func TestCreateTask_ImageCapabilityKeyTierForbidden(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
-	h.SetImageCapabilities(capabilities)
+	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: capabilities})
 	h.SetRepository(repo)
 
 	app := fiber.New()
@@ -1041,6 +1041,50 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	}
 }
 
+func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "ecomcap", Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformEcommerce, Name: "Ecommerce", Status: model.ProjectStatusActive}
+	project.SetEcommerceDefaults(model.EcommerceProjectDefaults{
+		DefaultSelectedModules: map[string]int{"main_images": 1},
+		ImageCapabilityKey:     "professional",
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	routes := config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]config.ImageGenerationRouteConfig{
+		"standard":     {Enabled: true, MinTier: "free", Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+		"professional": {Enabled: true, MinTier: "free", Features: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
+	}}
+	logger := zerolog.New(io.Discard)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetImageCapabilities(routes)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"21:9","product_photos":["https://cdn.example.com/cup.png"]}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, project.ID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, err=%v", tasks, err)
+	}
+	if tasks[0].ImageCapabilityKey != "professional" || tasks[0].ImageRatio != "21:9" {
+		t.Fatalf("frozen image config = %q/%q", tasks[0].ImageCapabilityKey, tasks[0].ImageRatio)
+	}
+}
+
 func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -1170,7 +1214,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
-	h.SetImageCapabilities(map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true}})
+	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
@@ -1374,6 +1418,33 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	}
 	if taskCount() != 4 {
 		t.Fatalf("task count after bulk clone-of-clone = %d, want 4", taskCount())
+	}
+
+	retiredCapabilityTask, err := repo.Tasks().FindByID(ctx, exactEnvelope.Data.ID)
+	if err != nil {
+		t.Fatalf("find task for retired capability bulk clone: %v", err)
+	}
+	retiredCapabilityTask.Status = model.TaskStatusFailed
+	retiredCapabilityTask.ImageCapabilityKey = "retired-capability"
+	if err := repo.Tasks().Update(ctx, retiredCapabilityTask); err != nil {
+		t.Fatalf("mark retired capability task failed: %v", err)
+	}
+	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+retiredCapabilityTask.ID+`"],"execution_profile":"effective"}`)
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("retired capability bulk clone status = %d, want 200 body=%s", resp.StatusCode, body)
+	}
+	bulkEnvelope = struct {
+		Data bulkTasksResponse `json:"data"`
+	}{}
+	if err := json.NewDecoder(resp.Body).Decode(&bulkEnvelope); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode retired capability bulk clone: %v", err)
+	}
+	resp.Body.Close()
+	if bulkEnvelope.Data.Succeeded != 0 || len(bulkEnvelope.Data.Results) != 1 || bulkEnvelope.Data.Results[0].Reason != "image_capability_unavailable" {
+		t.Fatalf("retired capability bulk clone result = %#v, want image_capability_unavailable", bulkEnvelope.Data)
 	}
 
 	for _, test := range []struct {
@@ -2189,7 +2260,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			h.SetRepository(repo)
 			h.SetStore(store)
 			h.SetReferenceAssetService(referenceSvc)
-			h.SetImageCapabilities(map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true}})
+			h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
 			app := fiber.New()
 			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 

@@ -5,6 +5,7 @@ import {
   createTaskSchema as rawCreateTaskSchema,
   planSchema as rawPlanSchema,
   projectSchema,
+  normalizeImageRatio,
 } from './schemas'
 
 function withExecutionProfile(input: unknown) {
@@ -376,6 +377,14 @@ describe('createTaskSchema', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+})
+
+describe('normalizeImageRatio', () => {
+  it('keeps supported ratios and maps unknown stored values to smart mode', () => {
+    expect(normalizeImageRatio('21:9')).toBe('21:9')
+    expect(normalizeImageRatio('900x383')).toBe('')
+    expect(normalizeImageRatio(undefined)).toBe('')
   })
 })
 

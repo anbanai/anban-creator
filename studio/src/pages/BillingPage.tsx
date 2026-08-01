@@ -33,8 +33,8 @@ function entryBalanceDelta(entry: BillingTransaction) {
 
 function chargeItemName(entry: BillingTransaction) {
   const sku = entry.sku_id?.toLowerCase() ?? ''
-  if (sku.includes('image.seedream.cover') || sku.includes('image.cover')) return '封面图生成费'
-  if (sku.includes('image.seedream.content') || sku.includes('image.content')) return '内容图生成费'
+  if (sku === 'image.standard') return '标准图像生成费'
+  if (sku === 'image.professional') return '专业增强生成费'
   if (sku.includes('image') || entry.charge_resource_type === 'image') return '图片生成费'
   if (entry.charge_kind === 'task' || entry.charge_policy === 'task_admission') return '任务固定费'
   if (entry.charge_kind === 'operation') return '增值操作费'
@@ -45,8 +45,8 @@ function entryLabel(entry: BillingTransaction) {
   const chargeName = chargeItemName(entry)
   if (entry.event_kind === 'debt_created') return `${chargeName}转欠费`
   if (entry.event_kind === 'debt_repayment') {
-    if (chargeName === '封面图生成费') return '补缴封面图欠费'
-    if (chargeName === '内容图生成费') return '补缴内容图欠费'
+    if (chargeName === '标准图像生成费') return '补缴标准图像欠费'
+    if (chargeName === '专业增强生成费') return '补缴专业增强欠费'
     if (chargeName === '图片生成费') return '补缴图片欠费'
     return `补缴${chargeName.replace(/费$/, '')}欠费`
   }
