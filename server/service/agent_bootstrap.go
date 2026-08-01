@@ -56,6 +56,10 @@ type AgentBootstrapResponse struct {
 	ExecutionToken      string              `json:"execution_token"`
 	TaskID              string              `json:"task_id"`
 	TaskType            string              `json:"task_type"`
+	AgentPackID         string              `json:"agent_pack_id,omitempty"`
+	AgentPackVersion    string              `json:"agent_pack_version,omitempty"`
+	AgentPackDigest     string              `json:"agent_pack_digest,omitempty"`
+	RuntimeAdapter      string              `json:"runtime_adapter,omitempty"`
 	ProjectID           string              `json:"project_id"`
 	Prompt              string              `json:"prompt"`
 	ExecutionProfile    AgentRuntimeProfile `json:"execution_profile"`
@@ -338,7 +342,10 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
 	return &AgentBootstrapResponse{
-		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type, ProjectID: task.ProjectID, Prompt: prompt,
+		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type,
+		AgentPackID: execution.AgentPackID, AgentPackVersion: execution.AgentPackVersion,
+		AgentPackDigest: execution.AgentPackDigest, RuntimeAdapter: execution.RuntimeAdapter,
+		ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
 			ProfileID: profile.ID, Provider: profile.Provider, Protocol: profile.Protocol,
 			DisplayName: profile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,

@@ -1,6 +1,12 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
 export type {
+  AgentPack,
+  AgentPackCatalog,
+  AgentPackJSONSchema,
+  AgentPackSurface,
+} from './agent-pack'
+export type {
   AgentExecutionProfileID,
   AgentExecutionProfileCapability,
   AgentProfileSnapshot,

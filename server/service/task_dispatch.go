@@ -384,6 +384,11 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		}
 		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 		execution = &profiledExecution
+		if parent == nil || refreshRuntime || !inheritAgentPackIdentity(execution, parent) {
+			if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+				return err
+			}
+		}
 		execution.ID = uuid.NewString()
 		execution.TaskID = task.ID
 		execution.Attempt = attempt

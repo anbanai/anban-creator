@@ -24,6 +24,10 @@ const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 pub struct LocalExecutionConfig {
     pub task_id: String,
     pub task_type: String,
+    pub agent_pack_id: String,
+    pub agent_pack_version: String,
+    pub agent_pack_digest: String,
+    pub runtime_adapter: String,
     pub topic: String,
     pub agent_flag: String,
     pub max_turns: i64,

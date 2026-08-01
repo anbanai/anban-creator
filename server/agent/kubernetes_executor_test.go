@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -176,7 +177,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 }
 
 func TestWorkspaceInitScript(t *testing.T) {
-	content := kubernetesWorkspaceInitScript(model.PlatformSeednote)
+	content := kubernetesWorkspaceInitScript(agentpack.AdapterStandard)
 	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, kubernetesMemoryMountPath, "/workspace/output"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content init script missing %q: %s", want, content)
@@ -186,7 +187,7 @@ func TestWorkspaceInitScript(t *testing.T) {
 		t.Fatalf("content init script references Montage: %s", content)
 	}
 
-	montage := kubernetesWorkspaceInitScript(model.PlatformMontage)
+	montage := kubernetesWorkspaceInitScript(agentpack.AdapterOpenMontage)
 	for _, want := range []string{
 		"template=/opt/montage-template",
 		"runtime=/workspace/openmontage",
@@ -202,11 +203,14 @@ func TestWorkspaceInitScript(t *testing.T) {
 			t.Fatalf("Montage init script missing %q: %s", want, montage)
 		}
 	}
+	if liveSlicer := kubernetesWorkspaceInitScript(agentpack.AdapterStandard); strings.Contains(liveSlicer, "runtime=/workspace/openmontage") {
+		t.Fatal("standard live-slicer adapter received OpenMontage workspace initialization")
+	}
 }
 
 func TestWorkspaceInitScriptRejectsUnsafeCanonicalOutput(t *testing.T) {
 	var outputGuard string
-	for _, line := range strings.Split(kubernetesWorkspaceInitScript(model.PlatformSeednote), "\n") {
+	for _, line := range strings.Split(kubernetesWorkspaceInitScript(agentpack.AdapterStandard), "\n") {
 		if strings.Contains(line, "runtime output must be a real directory") {
 			outputGuard = line
 			break
@@ -284,6 +288,7 @@ func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t
 	execution := testExecution()
 	execution.RuntimeProfile = model.PlatformMontage
 	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
+	execution.RuntimeAdapter = agentpack.AdapterOpenMontage
 	job := buildKubernetesJob(testJobConfig(), execution, task)
 	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
 	for _, want := range []string{"/opt/montage-template", "/workspace/openmontage", `cp -a "$template/."`} {
@@ -295,6 +300,16 @@ func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("Montage Job init script retains revision contract %q: %s", forbidden, script)
 		}
+	}
+}
+
+func TestBuildKubernetesJobUsesFrozenRuntimeAdapter(t *testing.T) {
+	execution := testExecution()
+	execution.RuntimeAdapter = agentpack.AdapterOpenMontage
+	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
+	if !strings.Contains(script, "runtime=/workspace/openmontage") {
+		t.Fatalf("frozen OpenMontage adapter was ignored: %s", script)
 	}
 }
 
@@ -1581,7 +1596,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, RuntimeScope: "anban", RuntimeWorkload: kubernetesJobName("execution-1"),
-		RuntimeProfile: "article", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformArticle).Image,
+		RuntimeAdapter: agentpack.AdapterStandard, RuntimeProfile: "article", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformArticle).Image,
 	}
 }
 

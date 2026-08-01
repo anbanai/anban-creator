@@ -380,9 +380,13 @@ type CreateManualParams struct {
 	// InputAttachments stores the original AI-entry attachments on the task so
 	// executors can materialize them into the agent workspace.
 	InputAttachments []model.EntryAttachment
-	Watermark        *bool
-	Goal             string
-	GoalMode         bool
+	// AgentInput carries Pack-defined extension fields. Existing typed business
+	// fields remain authoritative; this map is accepted only when the resolved
+	// Pack declares a task_input Schema.
+	AgentInput map[string]any
+	Watermark  *bool
+	Goal       string
+	GoalMode   bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -533,6 +537,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
+	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
+	if err != nil {
+		return nil, err
+	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
 	}
@@ -675,6 +683,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if len(p.InputAttachments) > 0 {
 			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
+		}
+		if agentInput != nil {
+			task.SetAgentInput(agentInput)
 		}
 		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
@@ -910,6 +921,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ExecutionProfile:         profile.ID,
 		AgentProfileSnapshot:     profileSnapshot,
 		AgentProfileFingerprint:  profileFingerprint,
+	}
+	agentInput, err := validateAndCloneAgentInput(taskType, plan.AgentInput.Data())
+	if err != nil {
+		return nil, err
+	}
+	if agentInput != nil {
+		task.SetAgentInput(agentInput)
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if model.IsMontagePlatform(taskType) {

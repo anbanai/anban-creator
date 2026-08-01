@@ -222,6 +222,11 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 		}
 		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot, currentTask.AgentProfileFingerprint)
 		replacement = &profiledExecution
+		if !inheritAgentPackIdentity(replacement, current) {
+			if err := applyAgentPackIdentity(replacement, currentTask.Type); err != nil {
+				return err
+			}
+		}
 		replacement.ID = uuid.NewString()
 		replacement.TaskID = task.ID
 		replacement.Attempt = current.Attempt + 1

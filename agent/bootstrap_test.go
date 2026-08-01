@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
@@ -75,12 +76,12 @@ func TestBootstrapJobUsesProjectedTokenAndMaterializesFiles(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["execution_id"] != "execution-1" {
 			t.Fatalf("body=%#v err=%v", body, err)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": testBootstrapResponseData(t, "article", map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
 			"prompt": "write", "execution_profile": testAgentRuntimeProfile(), "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": ".anban-creator/runtime-note.txt", "text": "managed\n", "mode": 420}},
 			"artifact_transport": map[string]any{"mode": "direct"},
-		}})
+		})})
 	}))
 	defer server.Close()
 
@@ -113,12 +114,12 @@ func TestBootstrapCreatesRuntimeOwnedOutput(t *testing.T) {
 	}
 	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": testBootstrapResponseData(t, "article", map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "article", "project_id": "project-1",
 			"prompt": "write", "execution_profile": testAgentRuntimeProfile(), "max_turns": 12, "agent_flag": "anban:article",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
 			"artifact_transport": map[string]any{"mode": "stream"},
-		}})
+		})})
 	}))
 	defer server.Close()
 
@@ -141,12 +142,12 @@ func TestBootstrapCreatesLiveSlicerOutputTree(t *testing.T) {
 	}
 	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": testBootstrapResponseData(t, model.TaskTypeLiveSlicer, map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": model.TaskTypeLiveSlicer, "project_id": "project-1",
 			"prompt": "slice", "execution_profile": testAgentRuntimeProfile(), "max_turns": 160, "agent_flag": "anban:live-slicer",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{},
 			"artifact_transport": map[string]any{"mode": "stream"},
-		}})
+		})})
 	}))
 	defer server.Close()
 
@@ -180,12 +181,12 @@ func TestBootstrapJobMaterializesMontageInputsInsideRuntime(t *testing.T) {
 	}
 	executionToken := testExecutionToken(t, "execution-1", "task-1", "project-1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": testBootstrapResponseData(t, "montage", map[string]any{
 			"execution_token": executionToken, "task_id": "task-1", "task_type": "montage", "project_id": "project-1",
 			"prompt": "render", "execution_profile": testAgentRuntimeProfile(), "max_turns": 40, "agent_flag": "anban:montage",
 			"auto_memory_directory": ".claude/memory", "files": []map[string]any{{"path": "montage-input.json", "text": "{}", "mode": 420}},
 			"artifact_transport": map[string]any{"mode": "stream"},
-		}})
+		})})
 	}))
 	defer server.Close()
 
@@ -372,12 +373,14 @@ func TestDecodeBoundedJSONRejectsUnknownFields(t *testing.T) {
 
 func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 	valid := func() BootstrapResponse {
-		return BootstrapResponse{
+		response := BootstrapResponse{
 			ExecutionToken: testExecutionToken(t, "execution-1", "task-1", "project-1"),
 			TaskID:         "task-1", TaskType: "article", ProjectID: "project-1", Prompt: "write",
 			ExecutionProfile: testAgentRuntimeProfile(), MaxTurns: 40, AgentFlag: "anban:article", AutoMemoryDirectory: ".claude/memory",
 			ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
 		}
+		setExpectedAgentPackIdentity(t, &response)
+		return response
 	}
 	tests := []struct {
 		name   string
@@ -390,6 +393,10 @@ func TestValidateBootstrapResponseRejectsInvalidRuntimeContracts(t *testing.T) {
 		{"excess max turns", func(r *BootstrapResponse) { r.MaxTurns = maxBootstrapTurns + 1 }},
 		{"empty agent flag", func(r *BootstrapResponse) { r.AgentFlag = "" }},
 		{"wrong agent flag", func(r *BootstrapResponse) { r.AgentFlag = "anban:seednote" }},
+		{"wrong Agent Pack ID", func(r *BootstrapResponse) { r.AgentPackID = "seednote" }},
+		{"wrong Agent Pack version", func(r *BootstrapResponse) { r.AgentPackVersion = "9.9.9" }},
+		{"wrong Agent Pack digest", func(r *BootstrapResponse) { r.AgentPackDigest = strings.Repeat("0", 64) }},
+		{"wrong runtime adapter", func(r *BootstrapResponse) { r.RuntimeAdapter = agentpack.AdapterOpenMontage }},
 		{"wrong auto memory", func(r *BootstrapResponse) { r.AutoMemoryDirectory = ".claude/other" }},
 		{"invalid resume session", func(r *BootstrapResponse) {
 			r.ResumeSessionID = " invalid-session"
@@ -444,6 +451,7 @@ func TestValidateBootstrapRuntimeAcceptsViralAnalysisSeednoteAgent(t *testing.T)
 		ExecutionProfile: testAgentRuntimeProfile(), MaxTurns: 40, AgentFlag: "anban:seednote", AutoMemoryDirectory: ".claude/memory",
 		ArtifactTransport: service.ArtifactTransport{Mode: ArtifactUploadDirect},
 	}
+	setExpectedAgentPackIdentity(t, response)
 	if err := validateBootstrapRuntime("execution-1", response); err != nil {
 		t.Fatalf("viral analysis bootstrap rejected: %v", err)
 	}
@@ -484,9 +492,35 @@ func TestValidateBootstrapResponseAcceptsArbitraryMontageEnv(t *testing.T) {
 		Env:                 map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 		ArtifactTransport:   service.ArtifactTransport{Mode: ArtifactUploadStream},
 	}
+	setExpectedAgentPackIdentity(t, &response)
 	if err := validateBootstrapResponse("execution-1", &response); err != nil {
 		t.Fatalf("validate bootstrap response: %v", err)
 	}
+}
+
+func setExpectedAgentPackIdentity(t *testing.T, response *BootstrapResponse) {
+	t.Helper()
+	pack, ok := agentpack.Default().ForTaskType(response.TaskType)
+	if !ok {
+		t.Fatalf("no test Agent Pack for task type %q", response.TaskType)
+	}
+	response.AgentPackID = pack.ID
+	response.AgentPackVersion = pack.Version
+	response.AgentPackDigest = pack.Digest
+	response.RuntimeAdapter = pack.Runtime.Adapter
+}
+
+func testBootstrapResponseData(t *testing.T, taskType string, data map[string]any) map[string]any {
+	t.Helper()
+	pack, ok := agentpack.Default().ForTaskType(taskType)
+	if !ok {
+		t.Fatalf("no test Agent Pack for task type %q", taskType)
+	}
+	data["agent_pack_id"] = pack.ID
+	data["agent_pack_version"] = pack.Version
+	data["agent_pack_digest"] = pack.Digest
+	data["runtime_adapter"] = pack.Runtime.Adapter
+	return data
 }
 
 func TestValidateBootstrapIdentityRejectsOversizedOrNonCompactJWT(t *testing.T) {

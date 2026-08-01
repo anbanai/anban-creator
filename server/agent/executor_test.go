@@ -356,6 +356,7 @@ func TestDefaultMaxTurns(t *testing.T) {
 		{model.ScopeSeednote, 60},
 		{model.TaskTypeViralAnalysis, 60},
 		{"unknown", 40},
+		{model.PlatformMontage, 180},
 	}
 
 	for _, tt := range tests {

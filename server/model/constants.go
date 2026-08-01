@@ -96,6 +96,23 @@ const (
 	PlatformMontage   = "montage"
 )
 
+// IsProjectPlatform reports whether value is an explicitly implemented
+// first-class project platform. Agent Pack bindings may reference these
+// identities, but must not create new business identities by themselves.
+func IsProjectPlatform(value string) bool {
+	switch value {
+	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTaskType reports whether value is an explicitly implemented task type.
+func IsTaskType(value string) bool {
+	return IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis
+}
+
 func IsMontagePlatform(platform string) bool {
 	return platform == PlatformMontage
 }

@@ -47,6 +47,7 @@ export interface ProjectSnapshot {
 export interface Task {
   id: string
   type: TaskType
+  agent_input?: Record<string, unknown>
   title?: string
   topic?: string
   prompt: string
@@ -211,6 +212,7 @@ export interface CreateTaskRequest {
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
+  agent_input?: Record<string, unknown>
   watermark?: boolean
   goal?: string
   goal_mode?: boolean

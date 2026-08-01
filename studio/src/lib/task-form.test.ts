@@ -51,6 +51,13 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task form mapping', () => {
+  /* Agent Pack extension snapshots remain separate from typed business fields. */
+  it('preserves agent_input through clone defaults and request mapping', () => {
+    const defaults = cloneTaskFormDefaults(task({ agent_input: {} }))
+    expect(defaults.agent_input).toEqual({})
+    expect(taskFormValuesToRequest(defaults).agent_input).toEqual({})
+  })
+
   it('keeps viral_analysis when selecting a seednote project', () => {
     const seednoteProject = project({ id: 'seednote-project', platform: 'seednote' })
     const current = {
@@ -85,6 +92,7 @@ describe('task form mapping', () => {
       project_id: 'project-1',
       quantity: 1,
       input_attachments: [],
+      agent_input: {},
     })
   })
 

@@ -46,6 +46,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     skip_reference_image: false,
     reference_image: null,
     input_attachments: [],
+    agent_input: {},
     watermark: false,
     goal: '',
     goal_mode: false,
@@ -143,6 +144,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     skip_reference_image: task.skip_reference_image ?? false,
     reference_image: taskReferenceSelection(task),
     input_attachments: clonedAttachments,
+    agent_input: cloneValue(task.agent_input ?? {}),
     watermark: task.watermark ?? false,
     goal: task.goal ?? '',
     goal_mode: task.goal_mode ?? false,
@@ -171,6 +173,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
       project_id: values.project_id,
       quantity: values.quantity,
       input_attachments: [],
+      agent_input: cloneValue(values.agent_input),
     }
   }
   const goal = values.goal?.trim() || undefined
@@ -188,6 +191,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     skip_reference_image: values.skip_reference_image,
     ...(values.skip_reference_image ? { reference_image: null } : {}),
     input_attachments: cloneValue(values.input_attachments),
+    agent_input: cloneValue(values.agent_input),
     watermark: values.watermark,
     ...(values.type !== 'ecommerce'
       ? {

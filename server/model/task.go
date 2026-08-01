@@ -86,6 +86,7 @@ type ProjectSnapshot struct {
 	Author                string                   `json:"author,omitempty"`
 	EcommerceDefaults     EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults       MontageDefaults          `json:"montage_defaults,omitempty"`
+	AgentConfig           map[string]any           `json:"agent_config,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -136,6 +137,7 @@ type Task struct {
 	Ecommerce            datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments     datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Progress             int                                   `gorm:"default:0" json:"progress,omitempty"`
 	LatestProgress       datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
@@ -277,6 +279,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		Author:                p.Author,
 		EcommerceDefaults:     p.EcommerceDefaults.Data(),
 		MontageDefaults:       p.MontageDefaults.Data(),
+		AgentConfig:           cloneAgentExtensionMap(p.AgentConfig.Data()),
 	}
 }
 
@@ -302,5 +305,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Author = snap.Author
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
 	p.SetMontageDefaults(snap.MontageDefaults)
+	p.SetAgentConfig(cloneAgentExtensionMap(snap.AgentConfig))
 	return &p
 }

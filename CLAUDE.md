@@ -314,6 +314,83 @@ Codex install flow: `codex plugin marketplace add ./plugins && codex plugin inst
 
 Both adapters use the `creator` MCP server key. Skills must remain host-neutral; unavoidable host syntax belongs in a manifest, Agent, MCP, Hook, or install adapter. Agents must call MCP tools directly, with no ad-hoc HTTP clients.
 
+### Adding a New Business Scenario with an Agent Pack
+
+Agent Packs are the canonical execution, distribution, and extension units for Agents. They do not replace business identity: keep or add an explicit `Project.Platform` and `Task.Type` for every first-class scenario. Never introduce ambiguous compatibility fields such as `platform_or_type`, and do not move established typed business fields into `agent_config` or `agent_input`.
+
+Choose the smallest integration level that satisfies the product requirement:
+
+1. **Skill-only**: add a host-neutral `plugins/skills/<id>/SKILL.md`; no Pack is required unless the Skill needs its own invokable Agent.
+2. **Plugin Agent**: scaffold a `kind: plugin` Pack. It is distributed to Claude Code and Codex but has no managed task binding or runtime.
+3. **Managed Agent**: scaffold a `kind: managed` Pack and bind an execution route to a reusable runtime profile. The scaffold starts plugin-only; expose product surfaces only after business validation and billing are implemented.
+4. **First-class business scenario**: in addition to the managed Pack, add explicit Server model/service validation and Studio project/task/plan behavior. Only expose a surface that the corresponding service actually supports.
+
+Scaffold from the repository root:
+
+```bash
+make agent-pack-new ARGS="-id <kebab-id> -kind plugin"
+make agent-pack-new ARGS="-id <kebab-id> -kind managed -task-type <task-type> -runtime-profile article"
+```
+
+The command creates `plugins/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and `agent.codex.toml`. Treat these as canonical sources; never edit generated `plugins/agents/<name>.md` or `.toml` directly. Put reusable, host-neutral workflow knowledge under `plugins/skills/` and reference Skill IDs from `agent.skills`.
+
+#### Manifest contract
+
+Keep `agent-pack.yaml` declarative and narrow:
+
+- `id`, `version`, `kind`, `display_name`, `description`: stable Pack identity and presentation.
+- `agent`: native source files, Skill dependencies, Agent name, and default `max_turns`.
+- `bindings.project_platforms` / `bindings.task_types`: explicit links to existing business identifiers. A plugin-only Pack has no managed bindings.
+- `runtime.profile`: the dependency image class. Reuse `article`, `seednote`, or `montage` unless the scenario has genuinely different system dependencies.
+- `runtime.adapter`: use `standard` by default. Use `openmontage` only when execution requires the OpenMontage workspace contract; do not create an adapter for ordinary workflow differences.
+- `surfaces`: any subset of `plugin`, `project`, `task`, and `plan`. The list must match implemented Server and Studio capabilities; for example, do not advertise `plan` when plan creation rejects that task type.
+- `billing_operations`: map every managed task type exposed through `project`, `task`, or `plan` to its billing operation. A runtime-only Pack may omit billing only while it remains plugin-only. Never infer billing from Pack ID or runtime profile.
+- `progress`, `artifacts`, and `features`: observable delivery contracts, not workflow orchestration.
+- `schemas.project_config` / `schemas.task_input`: optional relative JSON Schema files for scenario-specific JSON extensions. When a Schema is absent, the Server rejects non-empty `agent_config` or `agent_input`.
+- `schemas.ui` / `schemas.output`: optional declarative UI metadata and output validation contracts when the scenario needs them.
+- `ui.renderer`: omit it for the generic Schema form. Use `custom:<key>` only to declare that an existing typed business form owns the interaction; register that form key explicitly in `studio/src/lib/agent-pack-renderers.ts`. This registry is a guard, not a dynamic React component loader.
+
+The generic Studio form intentionally supports a limited Schema subset: a root object with `additionalProperties: false` whose properties are strings (including `format: textarea`), enums, booleans, numbers, or integers. Every node must declare a supported `type`; unknown Schema keywords fail Catalog loading. Declared defaults are initialized before submit, and required booleans default to `false` when no explicit default exists. Nested objects and arrays require a registered existing typed form. Prefer the generic form for ordinary scenario extensions. Preserve existing typed forms for current first-class scenarios; `agent_config` and `agent_input` only carry new scenario-specific extension data.
+
+Agents read frozen scenario extensions through existing MCP contracts: call `get_task` for `agent_input`, and call task-aware `get_project_profile` for `agent_config`. Project configuration is copied into `ProjectSnapshot` when a task is created, so later project edits cannot change an in-flight or historical task.
+
+#### When a new runtime is justified
+
+Do not add a Docker image for a new Agent by default. Add a runtime profile/image only when it requires system packages, language runtimes, large pinned sources, or isolation/release behavior that existing profiles cannot provide. When necessary:
+
+1. Add an independent `deploy/docker/Dockerfile.agent-<profile>` using the repository root as build context.
+2. Add explicit Server configuration, image validation, Compose/Kubernetes selection, and build/release targets.
+3. Build or publish the image before dispatch; production uses immutable digests.
+4. Add a runtime adapter only for an unavoidable execution-layout contract, not for business workflow sequencing.
+
+#### Generate and verify
+
+After editing a Pack, its Agent sources, referenced Skills, or Schemas:
+
+```bash
+make agent-pack-generate
+make agent-pack-check
+```
+
+Generation copies native Claude/Codex Agent files and refreshes `server/agentpack/catalog.generated.json`. Commit generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), so regenerate after any of them changes.
+
+Before completing a new scenario, verify every applicable item:
+
+- [ ] Product scope is classified as Skill-only, plugin Agent, managed Agent, or first-class scenario.
+- [ ] `Project.Platform` and `Task.Type` remain explicit and strongly typed; no compatibility naming was added.
+- [ ] A first-class scenario updates the Go business constants/validation plus Studio `ProjectPlatform`, `TaskType`, `PlanType`, labels, and Zod enums explicitly. Catalog data must not bypass these typed authorities.
+- [ ] Manifest bindings, surfaces, billing operations, progress, artifacts, runtime profile, and adapter match real behavior.
+- [ ] Claude and Codex canonical Agent sources stay semantically aligned and use MCP tools directly.
+- [ ] Referenced Skills exist and remain host-neutral.
+- [ ] Scenario-only JSON fields have restricted Schemas; invalid, omitted, empty, update, clone, and plan-to-task behavior are tested.
+- [ ] Generic Schema UI is used unless a registered existing typed form (`custom:<key>`) is necessary; existing form fields and interactions are preserved.
+- [ ] Server Catalog routing, task execution Pack identity/version/digest, bootstrap, runner validation, and runtime workspace behavior are tested.
+- [ ] Every managed task type exposed through `project`, `task`, or `plan` has an explicit billing mapping and real SKU coverage. Runtime-only Packs remain plugin-only. Every advertised surface has valid service support.
+- [ ] A new runtime image/profile is added only when dependency isolation requires it, with Docker/Kubernetes configuration and smoke validation.
+- [ ] `make agent-pack-generate` and `make agent-pack-check` pass without unexpected generated drift.
+- [ ] Targeted tests, `go test ./...`, Server and Agent builds, Studio tests, and Studio build pass.
+- [ ] Both `plugins/.claude-plugin/plugin.json` and `plugins/.codex-plugin/plugin.json` receive the same semantic-version bump, and `plugins/CHANGELOG.md` documents the release.
+
 ## Notes
 
 - CLI uses zerolog logging — all components use zerolog, never mix with zap

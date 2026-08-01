@@ -241,6 +241,7 @@ describe('TaskFormDialog', () => {
       project_id: 'seednote-project',
       quantity: 1,
       input_attachments: [],
+      agent_input: {},
     }))
   })
 

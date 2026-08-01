@@ -7,6 +7,7 @@ import { Images, Minus, Package, Plus, Stamp, Target } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
@@ -25,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useImageModels } from '@/hooks/useImageModels'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
+import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
@@ -105,6 +107,7 @@ export function TaskFormDialog({
     queryFn: () => api.billing.catalog(),
   })
   const executionProfilesQuery = useAgentExecutionProfiles()
+  const agentPacksQuery = useAgentPacks()
   const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageModels()
 
   const form = useForm<TaskFormDefaults>({
@@ -141,6 +144,7 @@ export function TaskFormDialog({
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
   const articleWithContentImages = useWatch({ control: form.control, name: 'article_with_content_images' }) ?? true
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
+  const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
@@ -152,6 +156,10 @@ export function TaskFormDialog({
     [isViralAnalysisTask, projects],
   )
   const selectedProject = projectMap.get(watchedProjectId ?? '')
+  const selectedAgentPack = useMemo(
+    () => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+    [agentPacksQuery.data, watchedType],
+  )
   const imageModelOptionsForValue = useMemo(() => {
     if (!watchedImageModelKey || imageModelOptions.some((option) => option.key === watchedImageModelKey)) {
       return imageModelOptions
@@ -682,6 +690,13 @@ export function TaskFormDialog({
                     )} />
                   </div>
                 ) : null}
+
+                <AgentPackSchemaFields
+                  pack={selectedAgentPack}
+                  surface="task"
+                  value={watchedAgentInput}
+                  onChange={(value) => setFormValue('agent_input', value)}
+                />
 
                 {watchedType !== 'ecommerce' && !isMontageTask && !isViralAnalysisTask ? (
                   <div className={`rounded-lg border p-3 transition-colors ${goalMode ? 'border-primary bg-primary/5' : 'border-border'}`}>

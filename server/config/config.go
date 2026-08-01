@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -848,16 +849,10 @@ type RuntimeImageSelection struct {
 type RuntimeImages map[string]string
 
 func canonicalRuntimeProfile(taskType string) string {
-	switch strings.TrimSpace(taskType) {
-	case model.PlatformSeednote, model.TaskTypeViralAnalysis:
-		return model.PlatformSeednote
-	case model.PlatformMontage:
-		return model.PlatformMontage
-	case model.TaskTypeLiveSlicer:
-		return model.PlatformMontage
-	default:
-		return model.PlatformArticle
+	if pack, ok := agentpack.Default().ForTaskType(strings.TrimSpace(taskType)); ok {
+		return pack.Runtime.Profile
 	}
+	return model.PlatformArticle
 }
 
 func (c RuntimeImages) ForTask(taskType string) RuntimeImageSelection {
@@ -1269,22 +1264,8 @@ func (c *Config) applyDefaults() {
 		c.Ilink.AssistantName = "Anban 微信助手"
 	}
 
-	// Claude executor defaults.
-	defaultMaxTurns := map[string]int{
-		"moments":   25,
-		"seednote":  50,
-		"article":   60,
-		"ecommerce": 90,
-	}
-	if c.Claude.MaxTurns == nil {
-		c.Claude.MaxTurns = defaultMaxTurns
-	} else {
-		for taskType, maxTurns := range defaultMaxTurns {
-			if _, ok := c.Claude.MaxTurns[taskType]; !ok {
-				c.Claude.MaxTurns[taskType] = maxTurns
-			}
-		}
-	}
+	// Agent Packs own default turn budgets. Claude.MaxTurns contains only
+	// explicit operator overrides and is intentionally left sparse.
 	if c.Claude.Docker.Network == "" {
 		c.Claude.Docker.Network = "anban-creator-network"
 	}

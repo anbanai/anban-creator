@@ -1,0 +1,528 @@
+{
+  "packs": [
+    {
+      "id": "article",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "微信公众号文章",
+      "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
+      "agent": {
+        "name": "article",
+        "skills": [
+          "content-writing",
+          "humanizer",
+          "article-visual-design",
+          "article-cover-design",
+          "topic-research",
+          "seo-optimization",
+          "article-publishing",
+          "article-viral-strategy"
+        ],
+        "max_turns": 300
+      },
+      "bindings": {
+        "project_platforms": [
+          "article"
+        ],
+        "task_types": [
+          "article"
+        ]
+      },
+      "runtime": {
+        "profile": "article",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "publishing",
+        "image-generation",
+        "reference-images"
+      ],
+      "billing_operations": {
+        "article": "task.article"
+      },
+      "progress": [
+        {
+          "id": "research",
+          "title": "选题研究"
+        },
+        {
+          "id": "writing",
+          "title": "内容创作"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "final_markdown",
+          "path": "output/04-article-final.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "html",
+          "path": "output/05-article.html",
+          "mime_type": "text/html",
+          "required": true
+        },
+        {
+          "role": "review",
+          "path": "output/final-review.md",
+          "mime_type": "text/markdown",
+          "required": true
+        }
+      ],
+      "ui": {
+        "renderer": "custom:article"
+      },
+      "digest": "af7a846c1057f98478dcd93f3b28b62314fa82afd16943e129c41f47a425bc4d"
+    },
+    {
+      "id": "designer",
+      "version": "1.0.0",
+      "kind": "plugin",
+      "display_name": "线稿设计",
+      "description": "线稿上色、配色纪律与跨图视觉一致性设计流程。",
+      "agent": {
+        "name": "designer",
+        "skills": [
+          "line-art-coloring"
+        ],
+        "max_turns": 120
+      },
+      "bindings": {},
+      "runtime": {},
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "image-generation",
+        "reference-images"
+      ],
+      "progress": [
+        {
+          "id": "design",
+          "title": "视觉设计"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "color_bible",
+          "path": "output/color-bible.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "first_image",
+          "path": "output/colored_00.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "report",
+          "path": "output/consistency-report.md",
+          "mime_type": "text/markdown",
+          "required": true
+        }
+      ],
+      "ui": {},
+      "digest": "a352731289be9b4908ced527813c9a6a71f810fe3ec5dcb433d387c470a6a381"
+    },
+    {
+      "id": "ecommerce",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "电商素材",
+      "description": "基于产品图片生成完整电商文案和视觉素材包。",
+      "agent": {
+        "name": "ecommerce",
+        "skills": [
+          "ecommerce-product-analysis",
+          "ecommerce-copywriting",
+          "humanizer",
+          "ecommerce-visual-design",
+          "ecommerce-platform-specs"
+        ],
+        "max_turns": 120
+      },
+      "bindings": {
+        "project_platforms": [
+          "ecommerce"
+        ],
+        "task_types": [
+          "ecommerce"
+        ]
+      },
+      "runtime": {
+        "profile": "article",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task"
+      ],
+      "features": [
+        "image-generation",
+        "product-assets"
+      ],
+      "billing_operations": {
+        "ecommerce": "task.ecommerce"
+      },
+      "progress": [
+        {
+          "id": "analysis",
+          "title": "产品分析"
+        },
+        {
+          "id": "production",
+          "title": "素材生产"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "product_bible",
+          "path": "output/product-bible.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "copywriting",
+          "path": "output/copywriting.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "manifest",
+          "path": "output/manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        }
+      ],
+      "ui": {
+        "renderer": "custom:ecommerce"
+      },
+      "digest": "9b174b0eed308f367da7b53d3cf07af5e52bcc80cbd387cd0844833254d5d45d"
+    },
+    {
+      "id": "live-slicer",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "直播切片",
+      "description": "从直播视频转写、规划并批量导出短视频切片。",
+      "agent": {
+        "name": "live-slicer",
+        "skills": [
+          "live-slice",
+          "capcut-draft"
+        ],
+        "max_turns": 160
+      },
+      "bindings": {
+        "task_types": [
+          "live-slicer"
+        ]
+      },
+      "runtime": {
+        "profile": "montage",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "video-processing",
+        "transcription"
+      ],
+      "progress": [
+        {
+          "id": "transcription",
+          "title": "视频转写"
+        },
+        {
+          "id": "slicing",
+          "title": "切片导出"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "summary",
+          "path": "output/summary.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "manifest",
+          "path": "output/clip-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "plan",
+          "path": "output/clip-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        }
+      ],
+      "ui": {},
+      "digest": "02ca7174ad5f7ab8cad25717c11db0e31761a732f87a56b602c09b571d5e5aaa"
+    },
+    {
+      "id": "moments",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "朋友圈素材包",
+      "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
+      "agent": {
+        "name": "moments",
+        "skills": [
+          "moments",
+          "humanizer"
+        ],
+        "max_turns": 20
+      },
+      "bindings": {
+        "project_platforms": [
+          "moments"
+        ],
+        "task_types": [
+          "moments"
+        ]
+      },
+      "runtime": {
+        "profile": "article",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task"
+      ],
+      "features": [
+        "reference-images"
+      ],
+      "billing_operations": {
+        "moments": "task.moments"
+      },
+      "progress": [
+        {
+          "id": "analysis",
+          "title": "素材分析"
+        },
+        {
+          "id": "writing",
+          "title": "内容创作"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "analysis",
+          "path": "output/material-analysis.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "final_markdown",
+          "path": "output/content.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "review",
+          "path": "output/quality-review.md",
+          "mime_type": "text/markdown",
+          "required": true
+        }
+      ],
+      "ui": {
+        "renderer": "custom:moments"
+      },
+      "digest": "bc6ea0d7f03c0ebfaeae20c9204661669b72b9db139609b7143e13ac37ff96c8"
+    },
+    {
+      "id": "montage",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "Montage 视频",
+      "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
+      "agent": {
+        "name": "montage",
+        "skills": [
+          "montage"
+        ],
+        "max_turns": 180
+      },
+      "bindings": {
+        "project_platforms": [
+          "montage"
+        ],
+        "task_types": [
+          "montage"
+        ]
+      },
+      "runtime": {
+        "profile": "montage",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "video-generation",
+        "source-assets"
+      ],
+      "billing_operations": {
+        "montage": "task.montage"
+      },
+      "progress": [
+        {
+          "id": "prepare",
+          "title": "准备 Montage 项目"
+        },
+        {
+          "id": "production",
+          "title": "视频生产"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "project_manifest",
+          "path": "output/montage-project.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        }
+      ],
+      "ui": {
+        "renderer": "custom:montage"
+      },
+      "digest": "5a9db15884dbe9f53f03bb23f079a8816d55f89c61e2ad433660f9bc0c44d8f4"
+    },
+    {
+      "id": "seednote",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "种草笔记",
+      "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
+      "agent": {
+        "name": "seednote",
+        "skills": [
+          "agent-reach",
+          "seednote-research",
+          "seednote-viral-analysis",
+          "seednote-writing",
+          "seednote-visual-design"
+        ],
+        "max_turns": 20
+      },
+      "bindings": {
+        "project_platforms": [
+          "seednote"
+        ],
+        "task_types": [
+          "seednote",
+          "viral_analysis"
+        ]
+      },
+      "runtime": {
+        "profile": "seednote",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "research",
+        "image-generation",
+        "reference-images"
+      ],
+      "billing_operations": {
+        "seednote": "task.seednote",
+        "viral_analysis": "task.viral_analysis"
+      },
+      "progress": [
+        {
+          "id": "research",
+          "title": "素材研究"
+        },
+        {
+          "id": "writing",
+          "title": "笔记创作"
+        },
+        {
+          "id": "delivery",
+          "title": "交付验收"
+        }
+      ],
+      "artifacts": [
+        {
+          "role": "final_markdown",
+          "path": "output/content.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "image_plan",
+          "path": "output/image-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "ui": {
+        "renderer": "custom:seednote"
+      },
+      "digest": "59f3f77cb27db98fc5c32dd462eb47bffc94a4589c0efbef3d727110afb0a654"
+    }
+  ]
+}

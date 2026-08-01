@@ -43,6 +43,7 @@ type Services struct {
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	AgentProfileHandler      *handler.AgentProfileHandler
+	AgentPackHandler         *handler.AgentPackHandler
 	BillingHandler           *handler.BillingHandler
 	BillingAdminHandler      *handler.BillingAdminHandler
 	ProjectHandler           *handler.ProjectHandler
@@ -206,6 +207,9 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ProjectHandler != nil {
 		app.Get("/api/v1/projects/platform-configs", svc.ProjectHandler.GetPlatformConfigs)
+	}
+	if svc.AgentPackHandler != nil {
+		app.Get("/api/v1/agent-packs", svc.AgentPackHandler.List)
 	}
 
 	// Public resource catalog endpoint (no auth required).

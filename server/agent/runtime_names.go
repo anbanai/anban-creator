@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
@@ -32,14 +33,26 @@ const (
 var dockerNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
 func containerRuntimePath(taskType string) string {
-	switch taskType {
+	pack, ok := agentpack.Default().ForTaskType(taskType)
+	if !ok {
+		return ContainerContentRuntimePath
+	}
+	if pack.Runtime.Adapter == agentpack.AdapterOpenMontage {
+		return ContainerMontageRuntimePath
+	}
+	switch pack.Runtime.Profile {
 	case "seednote":
 		return ContainerSeednoteRuntimePath
-	case "montage":
-		return ContainerMontageRuntimePath
 	default:
 		return ContainerContentRuntimePath
 	}
+}
+
+func runtimeAdapterForTaskType(taskType string) string {
+	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
+		return pack.Runtime.Adapter
+	}
+	return agentpack.AdapterStandard
 }
 
 func RuntimeImageForTask(images srvconfig.RuntimeImages, taskType string) srvconfig.RuntimeImageSelection {

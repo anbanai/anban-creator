@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/urfave/cli/v3"
 )
 
@@ -59,6 +60,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		TaskID:              response.TaskID,
 		ProjectID:           response.ProjectID,
 		TaskType:            response.TaskType,
+		RuntimeAdapter:      response.RuntimeAdapter,
 		Topic:               response.Prompt,
 		BootstrapPrompt:     response.Prompt,
 		RuntimeEnv:          serveragent.ClaudeRuntimeEnv(response.ExecutionProfile.Envs),
@@ -71,7 +73,7 @@ func jobRuntimeConfig(jobCfg JobConfig, response *BootstrapResponse) *Config {
 		MaxTurns:            response.MaxTurns,
 		ArtifactUploadMode:  response.ArtifactTransport.Mode,
 	}
-	if response.TaskType == "montage" {
+	if response.RuntimeAdapter == agentpack.AdapterOpenMontage {
 		cfg.Env = response.Env
 	}
 	return cfg

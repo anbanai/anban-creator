@@ -66,6 +66,10 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	}
 
 	style := ResolveStyle(project, task)
+	agentConfig := project.AgentConfig.Data()
+	if agentConfig == nil {
+		agentConfig = map[string]any{}
+	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
 		"instructions": project.Instructions, "keywords": project.Keywords,
@@ -73,6 +77,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"writer": style.Writer, "author": style.Author, "theme": style.Theme,
 		"visual_style_source": style.VisualStyleSource, "writer_source": style.WriterSource,
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
+		"agent_config": agentConfig,
 	}
 	resolvedProfile := map[string]any{
 		"id": project.ID, "name": project.Name, "platform": project.Platform,
@@ -81,6 +86,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"keywords": project.Keywords, "visual_style": style.VisualStyle,
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
 		"image_ratio": project.ImageRatio, "uses_project_snapshot": usesProjectSnapshot,
+		"agent_config": agentConfig,
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
 			"instructions": agentProfileSource(usesProjectSnapshot),

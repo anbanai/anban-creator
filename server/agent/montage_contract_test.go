@@ -26,6 +26,24 @@ func TestMontageIsCanonicalAgentName(t *testing.T) {
 	}
 }
 
+func TestContainerRuntimePathUsesPackRuntimeAdapter(t *testing.T) {
+	if got := runtimeAdapterForTaskType(model.PlatformMontage); got != "openmontage" {
+		t.Fatalf("montage adapter = %q", got)
+	}
+	if got := runtimeAdapterForTaskType(model.TaskTypeLiveSlicer); got != "standard" {
+		t.Fatalf("live-slicer adapter = %q", got)
+	}
+	if got := containerRuntimePath(model.PlatformSeednote); got != ContainerSeednoteRuntimePath {
+		t.Fatalf("seednote runtime PATH = %q", got)
+	}
+	if got := containerRuntimePath(model.PlatformMontage); got != ContainerMontageRuntimePath {
+		t.Fatalf("montage runtime PATH = %q", got)
+	}
+	if got := containerRuntimePath(model.TaskTypeLiveSlicer); got != ContainerContentRuntimePath {
+		t.Fatalf("live-slicer runtime PATH = %q, standard adapter must not inherit OpenMontage PATH", got)
+	}
+}
+
 func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	workDir := t.TempDir()
 	task := &model.Task{Type: model.PlatformMontage}

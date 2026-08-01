@@ -53,6 +53,10 @@ const LocalClaimWindow = 30 * time.Second
 type LocalExecutionConfig struct {
 	TaskID                   string `json:"task_id"`
 	TaskType                 string `json:"task_type"`
+	AgentPackID              string `json:"agent_pack_id"`
+	AgentPackVersion         string `json:"agent_pack_version"`
+	AgentPackDigest          string `json:"agent_pack_digest"`
+	RuntimeAdapter           string `json:"runtime_adapter"`
 	Topic                    string `json:"topic"`
 	AgentFlag                string `json:"agent_flag"` // "anban:<agent>"
 	MaxTurns                 int    `json:"max_turns"`
@@ -88,6 +92,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 		return nil, fmt.Errorf("marshal executor info: %w", err)
 	}
 	var task *model.Task
+	var execution *model.TaskExecution
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		claimed, err := tx.Tasks().ClaimNextLocalTask(ctx, userID, canonical)
 		if err != nil || claimed == nil {
@@ -105,7 +110,10 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 			return fmt.Errorf("allocate local task execution attempt: %w", err)
 		}
 		profiledExecution := model.NewTaskExecutionAgentProfile(claimed.AgentProfileSnapshot, claimed.AgentProfileFingerprint)
-		execution := &profiledExecution
+		execution = &profiledExecution
+		if err := applyAgentPackIdentity(execution, claimed.Type); err != nil {
+			return err
+		}
 		execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), claimed.ID, attempt
 		execution.Target, execution.Status = model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning
 		execution.Started, execution.RuntimeProfile = true, "local"
@@ -131,7 +139,7 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 	if task == nil {
 		return nil, nil
 	}
-	return s.buildLocalExecutionConfig(task), nil
+	return s.buildLocalExecutionConfig(task, execution), nil
 }
 
 func hasManagedAgentProfile(task *model.Task) bool {
@@ -148,11 +156,11 @@ func hasManagedAgentProfile(task *model.Task) bool {
 		strings.TrimSpace(snapshot.Protocol) != ""
 }
 
-// buildLocalExecutionConfig resolves the agent argv inputs for a task the same
-// way managed runtime bootstrap does (default model from config, per-type
-// max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
-func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutionConfig {
-	return &LocalExecutionConfig{
+// buildLocalExecutionConfig resolves the agent argv inputs for a task and copies
+// the already-frozen Pack identity from the claimed execution. The desktop must
+// pass that identity to the runner instead of re-resolving only from task type.
+func (s *TaskService) buildLocalExecutionConfig(task *model.Task, execution *model.TaskExecution) *LocalExecutionConfig {
+	config := &LocalExecutionConfig{
 		TaskID:                   task.ID,
 		TaskType:                 task.Type,
 		Topic:                    task.Prompt,
@@ -166,6 +174,13 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		ArticleWithContentImages: task.ArticleWithContentImages == nil || *task.ArticleWithContentImages,
 		ProjectID:                task.ProjectID,
 	}
+	if execution != nil {
+		config.AgentPackID = execution.AgentPackID
+		config.AgentPackVersion = execution.AgentPackVersion
+		config.AgentPackDigest = execution.AgentPackDigest
+		config.RuntimeAdapter = execution.RuntimeAdapter
+	}
+	return config
 }
 
 // ReclaimExpiredLocalTasks flips pending local-target tasks past their claim

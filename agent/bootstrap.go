@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
@@ -114,13 +115,13 @@ func bootstrapJobWithPolicy(ctx context.Context, cfg JobConfig, policy bootstrap
 	if err := materializeBootstrap(ctx, cfg.Workspace, envelope.Data.Files, bootstrapDownloadClient()); err != nil {
 		return &envelope.Data, fmt.Errorf("materialize bootstrap workspace: %w", err)
 	}
-	if err := prepareRuntimeWorkspace(cfg.Workspace, envelope.Data.TaskType); err != nil {
+	if err := prepareRuntimeWorkspace(cfg.Workspace, envelope.Data.TaskType, envelope.Data.RuntimeAdapter); err != nil {
 		return &envelope.Data, fmt.Errorf("prepare runtime workspace: %w", err)
 	}
 	return &envelope.Data, nil
 }
 
-func prepareRuntimeWorkspace(workspace, profile string) error {
+func prepareRuntimeWorkspace(workspace, taskType, runtimeAdapter string) error {
 	root, err := validateWorkspaceRoot(workspace)
 	if err != nil {
 		return err
@@ -130,8 +131,8 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 		return err
 	}
 
-	profile = strings.TrimSpace(profile)
-	if profile == model.TaskTypeLiveSlicer {
+	taskType = strings.TrimSpace(taskType)
+	if taskType == model.TaskTypeLiveSlicer {
 		exportsPath := filepath.Join(outputPath, "exports")
 		if err := ensureRuntimeDirectory(exportsPath, "live-slicer exports"); err != nil {
 			return err
@@ -141,7 +142,7 @@ func prepareRuntimeWorkspace(workspace, profile string) error {
 		}
 	}
 
-	if !model.IsMontagePlatform(profile) {
+	if strings.TrimSpace(runtimeAdapter) != agentpack.AdapterOpenMontage {
 		return nil
 	}
 	runtimePath, err := materializeMontageRuntime(root)
@@ -380,6 +381,10 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if !validBootstrapTaskType(response.TaskType) {
 		return fmt.Errorf("bootstrap task type is invalid")
 	}
+	pack, _ := agentpack.Default().ForTaskType(response.TaskType)
+	if response.AgentPackID != pack.ID || response.AgentPackVersion != pack.Version || response.AgentPackDigest != pack.Digest || response.RuntimeAdapter != pack.Runtime.Adapter {
+		return fmt.Errorf("bootstrap Agent Pack identity does not match runtime Catalog")
+	}
 	if response.ArtifactTransport.Mode != ArtifactUploadDirect && response.ArtifactTransport.Mode != ArtifactUploadStream {
 		return fmt.Errorf("bootstrap artifact transport is invalid")
 	}
@@ -389,7 +394,7 @@ func validateBootstrapRuntime(executionID string, response *BootstrapResponse) e
 	if response.MaxTurns <= 0 || response.MaxTurns > maxBootstrapTurns {
 		return fmt.Errorf("bootstrap max turns is invalid")
 	}
-	expectedAgent := "anban:" + serveragent.TaskTypeToAgent(response.TaskType)
+	expectedAgent := "anban:" + pack.Agent.Name
 	if response.AgentFlag != expectedAgent {
 		return fmt.Errorf("bootstrap agent flag is invalid")
 	}
@@ -496,12 +501,8 @@ func validBootstrapProfileFingerprint(fingerprint string) bool {
 }
 
 func validBootstrapTaskType(taskType string) bool {
-	switch taskType {
-	case model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.TaskTypeLiveSlicer, model.TaskTypeViralAnalysis:
-		return true
-	default:
-		return false
-	}
+	_, ok := agentpack.Default().ForTaskType(taskType)
+	return ok
 }
 
 func bootstrapDownloadClient() *http.Client {

@@ -35,6 +35,7 @@ export interface Project {
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
+  agent_config?: Record<string, unknown>
   max_concurrent_tasks: number
   config: ProjectConfig
   status: ProjectStatus
@@ -90,6 +91,7 @@ export interface CreateProjectRequest {
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
+  agent_config?: Record<string, unknown>
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string

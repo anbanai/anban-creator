@@ -1210,6 +1210,68 @@ func TestCreatePlanClonesInputAttachments(t *testing.T) {
 	}
 }
 
+func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	_, err := svc.Create(ctx, CreatePlanParams{
+		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
+		CronExpr: "0 9 * * *", AgentInput: map[string]any{"tone": "concise"},
+	})
+	if !errors.Is(err, ErrInvalidAgentInput) {
+		t.Fatalf("Create error = %v, want ErrInvalidAgentInput", err)
+	}
+}
+
+func TestCreatePlanPersistsEmptyAgentInputSnapshot(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
+		CronExpr: "0 9 * * *", AgentInput: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if plan.AgentInput.Data() == nil {
+		t.Fatal("plan agent_input was not persisted")
+	}
+}
+
+func TestUpdatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, nil)
+	input := map[string]any{"tone": "concise"}
+
+	_, err := svc.Update(context.Background(), UpdatePlanParams{
+		ExecutionProfile: "effective", ID: plan.ID, AgentInput: &input,
+	})
+	if !errors.Is(err, ErrInvalidAgentInput) {
+		t.Fatalf("Update error = %v, want ErrInvalidAgentInput", err)
+	}
+}
+
+func TestUpdatePlanClearsAgentInputWithExplicitEmptyObject(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	plan := createSeednotePlanWithInputAttachments(t, svc, repo, nil)
+	empty := map[string]any{}
+
+	updated, err := svc.Update(context.Background(), UpdatePlanParams{
+		ExecutionProfile: "effective", ID: plan.ID, AgentInput: &empty,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.AgentInput.Data() == nil {
+		t.Fatal("explicit empty agent_input was not applied")
+	}
+}
+
 func TestUpdatePlanInputAttachmentsOmittedRetainsExisting(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	plan := createSeednotePlanWithInputAttachments(t, svc, repo, []model.EntryAttachment{{

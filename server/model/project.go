@@ -87,6 +87,8 @@ type Project struct {
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
 	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
+	AgentConfig          datatypes.JSONType[map[string]any]           `gorm:"type:json" json:"agent_config"`
+	AgentConfigSet       bool                                         `gorm:"-" json:"-"`
 	MontageDefaultsSet   bool                                         `gorm:"-" json:"-"`
 	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
 	DeletingAt           *time.Time                                   `gorm:"index" json:"-"`

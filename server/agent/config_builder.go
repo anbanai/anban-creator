@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resolver"
@@ -227,24 +228,10 @@ func TaskTypeToAgent(taskType string) string {
 }
 
 func taskTypeToAgentRoute(taskType string) (string, bool) {
-	switch taskType {
-	case model.ScopeArticle:
-		return "article", true
-	case model.ScopeSeednote:
-		return "seednote", true
-	case model.ScopeMoments:
-		return "moments", true
-	case model.ScopeEcommerce:
-		return "ecommerce", true
-	case model.ScopeMontage:
-		return "montage", true
-	case model.TaskTypeLiveSlicer:
-		return model.TaskTypeLiveSlicer, true
-	case model.TaskTypeViralAnalysis:
-		return model.PlatformSeednote, true
-	default:
-		return model.PlatformSeednote, false
+	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
+		return pack.Agent.Name, true
 	}
+	return model.PlatformSeednote, false
 }
 
 // TaskToAgent maps a full task snapshot to the Claude Code agent name.

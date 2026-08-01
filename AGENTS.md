@@ -167,6 +167,9 @@ Current major agents:
 
 Development rules:
 
+- Agent Packs under `plugins/packs/<id>/` are the canonical execution and distribution units. They never replace strong business identity: first-class scenarios keep explicit `Project.Platform` and `Task.Type`; do not add compatibility fields such as `platform_or_type`.
+- Use `make agent-pack-new`, then `make agent-pack-generate` and `make agent-pack-check`. Managed scaffolds start with plugin-only surfaces; add `project`, `task`, or `plan` only after the typed Go/Studio business fields, Schema validation, billing operation/SKUs, and service/UI surface are implemented.
+- Runtime profiles express dependency images; runtime adapters express exceptional workspace layouts. Keep ordinary workflow sequencing in Agents/Skills, not adapters or MCP handlers.
 - Agents must use MCP tools directly, not ad hoc HTTP clients.
 - Local media work in live-slicer uses `ffmpeg` and `ffprobe`.
 - Do not reintroduce legacy Python helper scripts for live slicing.

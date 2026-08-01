@@ -246,6 +246,32 @@ func TestTaskAndPlanCreateRejectLegacyExecutionProfileIDs(t *testing.T) {
 	}
 }
 
+func TestCreateTaskRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "taskagentinput"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","execution_profile":"effective","agent_input":{"tone":"concise"}}`)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(string(body), "invalid_agent_input") {
+		t.Fatalf("status/body = %d/%s, want 400 invalid_agent_input", resp.StatusCode, body)
+	}
+}
+
 func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

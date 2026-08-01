@@ -8,7 +8,39 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 )
+
+func TestParseConfigValidatesFrozenAgentPackIdentity(t *testing.T) {
+	pack, ok := agentpack.Default().ForTaskType("article")
+	if !ok {
+		t.Fatal("article Agent Pack is missing")
+	}
+	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
+		if cfg.AgentPackID != pack.ID || cfg.AgentPackVersion != pack.Version || cfg.AgentPackDigest != pack.Digest || cfg.RuntimeAdapter != pack.Runtime.Adapter {
+			t.Fatalf("Agent Pack identity = %#v, want %#v", cfg, pack)
+		}
+		return nil
+	}).Run(context.Background(), []string{
+		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
+		"--task-id", "task-1", "--task-type", "article",
+		"--agent-pack-id", pack.ID, "--agent-pack-version", pack.Version,
+		"--agent-pack-digest", pack.Digest, "--runtime-adapter", pack.Runtime.Adapter,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = newAgentCommand(nil, nil, func(_ context.Context, _ *Config) error { return nil }).Run(context.Background(), []string{
+		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
+		"--task-id", "task-1", "--task-type", "article",
+		"--agent-pack-id", pack.ID, "--agent-pack-version", pack.Version,
+		"--agent-pack-digest", strings.Repeat("0", 64), "--runtime-adapter", pack.Runtime.Adapter,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Agent Pack identity") {
+		t.Fatalf("error = %v, want frozen Agent Pack identity rejection", err)
+	}
+}
 
 func TestParseConfigModelUsageAliases(t *testing.T) {
 	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
@@ -38,6 +70,16 @@ func TestParseConfigRejectsInvalidModelUsageAlias(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "model-usage-alias") {
 		t.Fatalf("error = %v, want model-usage-alias validation error", err)
+	}
+}
+
+func TestParseConfigRejectsTaskTypeWithoutAgentPack(t *testing.T) {
+	err := newAgentCommand(nil, nil, func(_ context.Context, _ *Config) error { return nil }).Run(context.Background(), []string{
+		"anban", "run", "--server-url", "http://localhost:18060", "--api-key", "key",
+		"--task-id", "task-1", "--task-type", "unknown",
+	})
+	if err == nil || !strings.Contains(err.Error(), "task-type") {
+		t.Fatalf("error = %v, want task-type validation error", err)
 	}
 }
 

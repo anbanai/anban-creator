@@ -125,6 +125,7 @@ export const createTaskSchema = z.object({
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
+  agent_input: z.record(z.string(), z.unknown()).default({}),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -224,6 +225,7 @@ export const planSchema = z.object({
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
+  agent_input: z.record(z.string(), z.unknown()).default({}),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -262,6 +264,7 @@ export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
   platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage"]),
+  agent_config: z.record(z.string(), z.unknown()).default({}),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),

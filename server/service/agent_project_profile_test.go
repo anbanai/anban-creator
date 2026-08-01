@@ -37,6 +37,7 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote,
 		Name: "current", Instructions: "current instructions", VisualStyle: "current style",
 	}
+	project.SetAgentConfig(map[string]any{"audience": "current"})
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	task.SetProjectSnapshot(model.ProjectSnapshot{
 		ProjectName: "snapshot", Platform: model.PlatformSeednote,
 		Instructions: "snapshot instructions", VisualStyle: "snapshot style",
-		ReferenceImageAssetID: "asset-id",
+		ReferenceImageAssetID: "asset-id", AgentConfig: map[string]any{"audience": "snapshot"},
 	})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -69,7 +70,13 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	if got := (*profile)["visual_style_source"]; got != "snapshot" {
 		t.Fatalf("visual_style_source = %v, want snapshot", got)
 	}
+	if got := (*profile)["agent_config"].(map[string]any)["audience"]; got != "snapshot" {
+		t.Fatalf("agent_config.audience = %v, want frozen snapshot", got)
+	}
 	resolved := (*profile)["resolved_profile"].(map[string]any)
+	if got := resolved["agent_config"].(map[string]any)["audience"]; got != "snapshot" {
+		t.Fatalf("resolved_profile.agent_config.audience = %v, want frozen snapshot", got)
+	}
 	if got := resolved["reference_image_path"]; got != ".anban-creator/reference.png" {
 		t.Fatalf("reference_image_path = %v", got)
 	}

@@ -43,6 +43,7 @@ type Plan struct {
 	ArticleWithContentImages *bool                                 `gorm:"default:true;not null" json:"article_with_content_images"`
 	InputAttachments         datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	AgentInput               datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 
 	// Legacy style/author/theme columns. New code no longer writes or reads these;
 	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.

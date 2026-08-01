@@ -48,6 +48,8 @@ import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
+import { useAgentPacks } from '@/hooks/useAgentPacks'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -66,6 +68,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     skip_reference_image: plan.skip_reference_image || false,
     reference_image: plan.reference_image ?? null,
     input_attachments: plan.input_attachments ?? [],
+    agent_input: plan.agent_input ?? {},
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -78,6 +81,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
 }
 
 export default function PlansPage() {
+  const agentPacksQuery = useAgentPacks()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const createIntent = parseCreationIntent(searchParams)
@@ -109,6 +113,7 @@ export default function PlansPage() {
       image_model_key: '',
       reference_image: null,
       input_attachments: [],
+      agent_input: {},
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -153,7 +158,12 @@ export default function PlansPage() {
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
   const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
+  const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const isMontagePlan = watchedType === 'montage'
+  const selectedAgentPack = useMemo(
+    () => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+    [agentPacksQuery.data, watchedType],
+  )
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -309,6 +319,7 @@ export default function PlansPage() {
       image_model_key: '',
       reference_image: null,
       input_attachments: [],
+      agent_input: {},
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -404,6 +415,7 @@ export default function PlansPage() {
       project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
       ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
+      agent_input: values.agent_input,
       watermark: values.watermark || undefined,
       goal_mode: values.type !== 'montage' && values.goal_mode ? true : undefined,
       goal: values.type !== 'montage' && values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
@@ -467,6 +479,7 @@ export default function PlansPage() {
             const nextType = project.platform as PlanType
             const fullProject = projectMap[id]
             form.setValue('type', nextType, { shouldDirty: true })
+            form.setValue('agent_input', {}, { shouldDirty: true })
             form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
           }}
         />
@@ -636,6 +649,7 @@ export default function PlansPage() {
                       onValueChange={(v) => {
                         const nextType = v as PlanType
                         field.onChange(nextType)
+                        form.setValue('agent_input', {}, { shouldDirty: true })
                         setMontageUploading(false)
                         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
                       }}
@@ -836,6 +850,13 @@ export default function PlansPage() {
                   )
                 }} />
               )}
+
+              <AgentPackSchemaFields
+                pack={selectedAgentPack}
+                surface="plan"
+                value={watchedAgentInput}
+                onChange={(value) => form.setValue('agent_input', value, { shouldDirty: true, shouldValidate: true })}
+              />
 
 
               {!isMontagePlan && <FormField control={form.control} name="goal_mode" render={({ field }) => (

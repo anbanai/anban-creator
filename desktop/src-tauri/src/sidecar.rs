@@ -172,6 +172,14 @@ fn agent_args(
         cfg.task_id.clone(),
         "--task-type".to_string(),
         cfg.task_type.clone(),
+        "--agent-pack-id".to_string(),
+        cfg.agent_pack_id.clone(),
+        "--agent-pack-version".to_string(),
+        cfg.agent_pack_version.clone(),
+        "--agent-pack-digest".to_string(),
+        cfg.agent_pack_digest.clone(),
+        "--runtime-adapter".to_string(),
+        cfg.runtime_adapter.clone(),
         "--topic".to_string(),
         cfg.topic.clone(),
         "--max-turns".to_string(),
@@ -215,6 +223,10 @@ mod tests {
         let cfg = LocalExecutionConfig {
             task_id: "task-1".to_string(),
             task_type: "article".to_string(),
+            agent_pack_id: "article".to_string(),
+            agent_pack_version: "1.0.0".to_string(),
+            agent_pack_digest: "a".repeat(64),
+            runtime_adapter: "standard".to_string(),
             topic: "topic".to_string(),
             agent_flag: "anban:article".to_string(),
             max_turns: 12,
@@ -235,6 +247,8 @@ mod tests {
         );
 
         assert_eq!(args.first().map(String::as_str), Some("run"));
+        assert!(args.windows(2).any(|pair| pair == ["--agent-pack-id", "article"]));
+        assert!(args.windows(2).any(|pair| pair == ["--runtime-adapter", "standard"]));
         assert!(args.iter().any(|arg| arg == "--article-with-cover=false"));
         assert!(args
             .iter()

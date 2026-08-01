@@ -355,14 +355,9 @@ claude:
       montage:
         requests: { cpu: "2", memory: "4Gi" }
         limits: { cpu: "4", memory: "7Gi" }
-  max_turns:
-    moments: 25
-    # 热门内容研究、多图生成与交付需要更完整的 Agent 工具调用预算。
-    seednote: 100
-    article: 60
-    ecommerce: 90
-    # Montage pipeline 编排通常会调用多轮 MCP/文件登记，生产建议 90 起。
-    montage: 90
+  # Agent Pack 的 agent.max_turns 是默认值；这里只填写运维层显式覆盖。
+  # 示例：max_turns: { montage: 120 }
+  max_turns: {}
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -231,7 +232,13 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 		ArticleWithContentImages: &content,
 	}
 
-	cfg := svc.buildLocalExecutionConfig(task)
+	execution := &model.TaskExecution{
+		AgentPackID: "article", AgentPackVersion: "9.9.9", AgentPackDigest: strings.Repeat("a", 64), RuntimeAdapter: "standard",
+	}
+	cfg := svc.buildLocalExecutionConfig(task, execution)
+	if cfg.AgentPackID != "article" || cfg.AgentPackVersion != "9.9.9" || cfg.AgentPackDigest != strings.Repeat("a", 64) || cfg.RuntimeAdapter != "standard" {
+		t.Fatalf("local Agent Pack identity = %#v", cfg)
+	}
 	if cfg.ArticleWithCover {
 		t.Fatal("expected article_with_cover=false to be carried to local executor config")
 	}
@@ -248,7 +255,7 @@ func TestBuildLocalExecutionConfigDefaultsArticleImageSwitchesOn(t *testing.T) {
 		Prompt: "时间管理",
 	}
 
-	cfg := svc.buildLocalExecutionConfig(task)
+	cfg := svc.buildLocalExecutionConfig(task, &model.TaskExecution{})
 	if !cfg.ArticleWithCover || !cfg.ArticleWithContentImages {
 		t.Fatalf("article image switches should default true for local executor config, got cover=%v content=%v", cfg.ArticleWithCover, cfg.ArticleWithContentImages)
 	}
