@@ -552,8 +552,7 @@ func main() {
 		agentFeedbackSvc = service.NewAgentFeedbackService(repo, log)
 	}
 	resourceHandler = handler.NewResourceHandler(log)
-	// Image model options handler (tier-gated listing). Always available so the
-	// frontend can render the create-task/plan dropdown even without presets.
+	// Public image capability catalog. Provider and model routing stay server-side.
 	var imageCatalog *service.BillingCatalogService
 	if fixedBilling != nil {
 		imageCatalog = fixedBilling.Catalog

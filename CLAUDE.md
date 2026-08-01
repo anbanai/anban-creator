@@ -172,7 +172,8 @@ All routes are registered in `server/router/router.go`. Everything under `/api/v
 - `POST /api/v1/agent/*` — Agent↔server protocol (API-key auth): upload, progress, claim, complete
 - `/api/v1/projects` — Project CRUD + fetch-profile, analyze-image, archive/restore, stats (formerly `/channels`)
 - `/api/v1/projects/:project_id/topics` — Topic pool (create/list/delete/reset)
-- `/api/v1/designer/*` — Image generation studio (providers, generate, upload-reference, history)
+- `GET /api/v1/image-capabilities` — Tier-filtered public image capability catalog
+- `/api/v1/designer/*` — Image generation studio (quote, generate, upload-reference, history)
 - `/api/v1/plans` — Plan CRUD + pause/resume
 - `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), seednote-analytics
 - `/api/v1/ilink/*` — ilink 微信助手 binding + commands + task terminal notifications
@@ -222,9 +223,9 @@ All implement `Provider` interface (`app/image/provider.go`).
 
 | Provider | Value | Notes |
 |----------|-------|-------|
-| OpenAI | `openai` (default) | Synchronous, dall-e-2/dall-e-3 |
+| OpenAI-compatible | `openai`, `wangcai_openai` | Synchronous image generation |
 | Google Gemini | `gemini` or `google` | Inline image data |
-| Volcengine/Seedream | `volcengine`, `vol`, `seedream` | Async polling |
+| Volcengine/Seedream | `volcengine`, `volcengine_ark`, `vol`, `seedream` | Async polling |
 
 ## Important Constraints
 

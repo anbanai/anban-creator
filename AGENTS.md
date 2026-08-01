@@ -103,12 +103,12 @@ secret, and execution-token Secret settings in `server/Deployment.yaml`.
 The server follows a layered structure:
 
 - `server/handler`: HTTP handlers and request/response glue.
-- `server/service`: business logic for tasks, channels, credits, publishing, model config, live slicing, and writing.
+- `server/service`: business logic for tasks, channels, credits, publishing, image capabilities, live slicing, and writing.
 - `server/repository`: GORM persistence layer.
 - `server/model`: database models.
 - `server/mcp`: MCP tools exposed to connected agents.
 - `server/agent`: Claude Code execution support and config builders.
-- `server/resources`: embedded themes, layouts, writer configs, and image presets.
+- `server/resources`: embedded themes, layouts, and writer configs.
 - `server/scheduler`: Asynq/cron-style plan checking.
 - `server/storage`: local and OSS storage implementations.
 
