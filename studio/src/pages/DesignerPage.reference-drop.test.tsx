@@ -66,6 +66,7 @@ function provider(overrides: Partial<DesignerCapability['features']> = {}): Desi
     description: '适合复杂构图与高细节视觉任务',
     minTier: 'enterprise',
     credits: 0,
+    priceAvailable: true,
     enabled: true,
     idx: 0,
     features: {
@@ -232,8 +233,10 @@ describe('Designer shared prompt composer', () => {
     })
     await waitFor(() => expect(pending.get('second.png')?.signal?.aborted).toBe(true))
     expect(pending.get('third.png')?.signal?.aborted).toBe(true)
-    pending.get('first.png')?.resolve(uploadResult(image('first.png')))
-    await waitFor(() => expect(screen.getByText('first.png')).toBeInTheDocument())
+    await act(async () => {
+      pending.get('first.png')?.resolve(uploadResult(image('first.png')))
+    })
+    await waitFor(() => expect(screen.getByRole('status', { name: 'first.png 状态' })).toHaveTextContent('已上传'))
     expect(screen.queryByText('second.png')).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '只用第一张' } })

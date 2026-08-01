@@ -374,6 +374,9 @@ assertContains('src/pages/tasks/detail.vue', [
 ])
 
 assertContains('src/pages/designer/index.vue', [
+  '<ImageCapabilitySelector',
+  ':model-value="selectedCapabilityKey"',
+  '@update:model-value="selectCapability"',
   'canInpaint',
   'startEdit',
   'mask_file_id',
@@ -384,9 +387,14 @@ assertContains('src/pages/designer/index.vue', [
   'selectedCapability.value?.priceAvailable === true',
 ])
 assertOccurrenceCount('src/pages/designer/index.vue', 'selectedCapability.value?.priceAvailable === true', 2)
+assertContains('src/components/business/ImageCapabilitySelector.vue', [
+  "option.enabled !== true || option.price_available !== true",
+  'capability-option--disabled',
+])
 assertContains('src/api/designer.ts', ["'/designer/quote'", "'/designer/generate'", 'request_fingerprint'])
 assertNotContains('src/api/designer.ts', ["'/designer/providers'", 'getProviders'])
 assertNotContains('src/pages/designer/index.vue', [
+  'class="capability-card"',
   'selectedProvider',
   'provider_id',
   'item.provider',

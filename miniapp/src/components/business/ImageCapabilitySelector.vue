@@ -9,7 +9,10 @@
         v-for="option in sortedOptions"
         :key="option.key"
         class="capability-option"
-        :class="{ 'capability-option--active': modelValue === option.key }"
+        :class="{
+          'capability-option--active': modelValue === option.key,
+          'capability-option--disabled': option.enabled !== true || option.price_available !== true,
+        }"
         @tap="select(option.key)"
       >
         <view class="capability-option__header">
@@ -50,6 +53,8 @@ const retiredValue = computed(() =>
 )
 
 function select(key: string) {
+  const option = props.options.find((candidate) => candidate.key === key)
+  if (!option || option.enabled !== true || option.price_available !== true) return
   emit('update:modelValue', key)
 }
 </script>
@@ -59,6 +64,7 @@ function select(key: string) {
 .capability-selector__loading { color: $ab-text-tertiary; font-size: $ab-text-sm; }
 .capability-option { padding: $ab-space-sm $ab-space-md; border: 2rpx solid $ab-border; border-radius: $ab-radius-sm; background: $ab-surface; }
 .capability-option--active { border-color: $ab-primary; background: $ab-primary-bg; }
+.capability-option--disabled { opacity: 0.55; }
 .capability-option--retired { border-color: $ab-danger; background: $ab-danger-bg; }
 .capability-option__header { display: flex; align-items: center; justify-content: space-between; gap: $ab-space-sm; }
 .capability-option__name { color: $ab-text; font-size: $ab-text-base; font-weight: $ab-font-medium; }

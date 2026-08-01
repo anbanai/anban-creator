@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
-import type { ReferenceUsageSummaryData, Task, TaskFile } from '@/types'
+import type { Task, TaskFile } from '@/types'
 import ReferenceUsageSummary from './ReferenceUsageSummary'
 
 vi.mock('@/lib/api', async () => {
@@ -41,7 +41,7 @@ const validSummary = {
   }],
   warnings: ['未使用侧面图，因为与正面包装版本冲突'],
   model_fallback_reason: '首选模型参考图上限不足',
-} as ReferenceUsageSummaryData
+}
 
 const seednoteTask: Task = {
   id: 'task-1',

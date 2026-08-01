@@ -13,23 +13,12 @@
 
     <view class="section">
       <text class="field-label">图像能力</text>
-      <AbLoading v-if="capabilitiesLoading" size="sm" text="加载图像能力..." />
-      <scroll-view v-else scroll-x class="capability-scroll">
-        <view class="capability-list">
-          <view
-            v-for="capability in usableCapabilities"
-            :key="capability.id"
-            class="capability-card"
-            :class="{ 'capability-card--active': selectedCapabilityKey === capability.id }"
-            @tap="selectCapability(capability.id)"
-          >
-            <text class="capability-card__name">{{ capability.name }}</text>
-            <text v-if="capability.description" class="capability-card__description">{{ capability.description }}</text>
-            <text v-if="capability.priceAvailable" class="capability-card__credits">每张 {{ capability.credits.toLocaleString() }} 积分</text>
-          </view>
-        </view>
-      </scroll-view>
-      <AbEmpty v-if="!capabilitiesLoading && usableCapabilities.length === 0" title="暂无可用图像能力" />
+      <ImageCapabilitySelector
+        :model-value="selectedCapabilityKey"
+        :options="imageCapabilityOptions"
+        :loading="capabilitiesLoading"
+        @update:model-value="selectCapability"
+      />
     </view>
 
     <view class="section">
@@ -196,17 +185,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import type { DesignerCapability, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types'
+import type { DesignerCapability, GenerateImage, ImageCapabilityOption, ImageGeneration, ImageGenerationResult } from '@/types'
 import { designerApi } from '@/api/designer'
 import { billingApi } from '@/api/billing'
 import { TOKEN_KEY } from '@/utils/constants'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbButton from '@/components/common/AbButton.vue'
-import AbEmpty from '@/components/common/AbEmpty.vue'
-import AbLoading from '@/components/common/AbLoading.vue'
 import AbSelect from '@/components/common/AbSelect.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
+import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
 
 interface LocalReference {
   path: string
@@ -238,6 +226,16 @@ const settings = reactive({
 })
 
 const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))
+const imageCapabilityOptions = computed<ImageCapabilityOption[]>(() => usableCapabilities.value.map((capability) => ({
+  key: capability.id,
+  display_name: capability.name,
+  description: capability.description,
+  min_tier: capability.minTier,
+  sort_order: capability.idx,
+  price_credits: capability.credits,
+  price_available: capability.priceAvailable,
+  enabled: capability.enabled,
+})))
 const selectedCapability = computed(() => usableCapabilities.value.find((capability) => capability.id === selectedCapabilityKey.value))
 const capabilityFeatures = computed(() => selectedCapability.value?.features)
 const canInpaint = computed(() => capabilityFeatures.value?.supportsMask === true)
@@ -613,45 +611,13 @@ onMounted(() => {
   margin-bottom: $ab-space-xs;
 }
 
-.capability-scroll,
 .reference-scroll {
   white-space: nowrap;
 }
 
-.capability-list,
 .reference-list {
   display: flex;
   gap: $ab-space-sm;
-}
-
-.capability-card {
-  display: inline-flex;
-  flex-direction: column;
-  width: 260rpx;
-  padding: $ab-space-sm;
-  border: 2rpx solid $ab-border;
-  border-radius: $ab-radius-sm;
-  gap: 6rpx;
-
-  &--active {
-    border-color: $ab-primary;
-    background-color: $ab-primary-bg;
-  }
-
-  &__name {
-    font-size: $ab-text-base;
-    font-weight: $ab-font-semibold;
-    color: $ab-text;
-  }
-
-  &__description,
-  &__credits {
-    font-size: $ab-text-xs;
-    color: $ab-text-secondary;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 .field-row {

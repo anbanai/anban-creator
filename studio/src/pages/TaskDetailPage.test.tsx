@@ -236,8 +236,24 @@ describe('TaskDetailPage', () => {
       tier: 'pro',
       default_capability: 'standard',
       items: [
-      { key: 'standard', display_name: '标准图像', min_tier: 'free' },
-      { key: 'source-capability', display_name: '源图像', min_tier: 'pro' },
+      {
+        key: 'standard', display_name: '标准图像', min_tier: 'free', enabled: true,
+        price_available: true, price_credits: 500,
+        features: {
+          quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
+          max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
+          output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
+        },
+      },
+      {
+        key: 'source-capability', display_name: '源图像', min_tier: 'pro', enabled: true,
+        price_available: true, price_credits: 500,
+        features: {
+          quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
+          max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
+          output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
+        },
+      },
       ],
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
