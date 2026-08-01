@@ -40,7 +40,7 @@ var (
 )
 
 type UploadTaskImageRequest struct {
-	UserID, ProjectID, TaskID, FilePath string
+	UserID, ExecutionID, ProjectID, TaskID, FilePath string
 }
 
 type CompressTaskImageRequest struct {
@@ -123,11 +123,66 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
 	}
-	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, req.FilePath)
+	filePath, cleanup, err := s.resolveUploadPath(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
 	}
 	return result, nil
+}
+
+func (s *TaskImageOperationsService) resolveUploadPath(ctx context.Context, req UploadTaskImageRequest) (string, func(), error) {
+	filePath := strings.TrimSpace(req.FilePath)
+	if strings.TrimSpace(req.TaskID) != "" && strings.TrimSpace(req.ExecutionID) != "" {
+		if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+			return "", nil, fmt.Errorf("authorize task image upload execution: %w", err)
+		}
+	}
+	if filepath.IsAbs(filePath) {
+		return filePath, nil, nil
+	}
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return "", nil, errors.New("task_id and current execution identity are required for a task-relative file_path")
+	}
+	if s == nil || s.tasks == nil || s.tasks.Repository() == nil || s.tasks.Storage() == nil {
+		return "", nil, errors.New("task image storage is not available")
+	}
+	normalized := strings.ReplaceAll(filePath, "\\", "/")
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == ".." {
+			return "", nil, errors.New("file_path must not contain directory traversal")
+		}
+	}
+	cleanPath, err := CleanTaskFileRelativePath(normalized)
+	if err != nil {
+		return "", nil, fmt.Errorf("file_path: %w", err)
+	}
+	cleanPath = filepath.ToSlash(cleanPath)
+	files, err := s.tasks.Repository().TaskFiles().FindByExecutionID(ctx, req.ExecutionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("find current execution task files: %w", err)
+	}
+	var taskFile *model.TaskFile
+	for _, file := range files {
+		if file != nil && file.TaskID == req.TaskID && file.FilePath == cleanPath && strings.TrimSpace(file.OSSKey) != "" {
+			taskFile = file
+			break
+		}
+	}
+	if taskFile == nil {
+		return "", nil, errors.New("task image file not found in current execution")
+	}
+	data, err := s.tasks.Storage().Read(ctx, taskFile.OSSKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("read task image file: %w", err)
+	}
+	return writeTaskImageTemp(data, cleanPath)
 }
 
 func (s *TaskImageOperationsService) Compress(ctx context.Context, req CompressTaskImageRequest) (*CompressTaskImageResult, error) {

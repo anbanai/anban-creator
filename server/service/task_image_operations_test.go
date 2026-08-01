@@ -29,11 +29,24 @@ import (
 
 type fakeTaskImageOperationsImage struct {
 	uploadPath   string
+	uploadData   []byte
+	readUpload   bool
+	uploadErr    error
 	compressPath string
 }
 
 func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, filePath string) (*UploadImageResult, error) {
 	f.uploadPath = filePath
+	if f.readUpload {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
+		f.uploadData = data
+	}
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
 	return &UploadImageResult{URL: "https://cdn.example/image.png"}, nil
 }
 
@@ -259,6 +272,87 @@ func TestTaskImageOperationsCropUsesContentAddressedObject(t *testing.T) {
 	}
 }
 
+func TestTaskImageOperationsUploadMaterializesCurrentExecutionTaskFile(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	images := &fakeTaskImageOperationsImage{readUpload: true}
+	f.service.images = images
+
+	cropped, err := f.service.Crop(context.Background(), cropRequest(f, "output/source-a.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := findCropOutputFile(t, f.repo, f.executionID)
+	wantData, err := f.store.Read(context.Background(), persisted.OSSKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, FilePath: cropped.FilePath,
+	}); err != nil {
+		t.Fatalf("Upload cropped task image: %v", err)
+	}
+	if !filepath.IsAbs(images.uploadPath) {
+		t.Fatalf("upload path = %q, want materialized absolute path", images.uploadPath)
+	}
+	if !bytes.Equal(images.uploadData, wantData) {
+		t.Fatalf("uploaded bytes differ from task file: got %d bytes, want %d", len(images.uploadData), len(wantData))
+	}
+	if _, err := os.Stat(images.uploadPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("materialized upload path still exists after Upload: %v", err)
+	}
+}
+
+func TestTaskImageOperationsUploadRejectsUnsafeTaskRelativePathsBeforeDelegation(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	tests := []struct {
+		name        string
+		executionID string
+		filePath    string
+	}{
+		{name: "directory traversal", executionID: f.executionID, filePath: "../outside.png"},
+		{name: "foreign execution", executionID: uuid.NewString(), filePath: "output/source-a.png"},
+		{name: "foreign execution with absolute path", executionID: uuid.NewString(), filePath: filepath.Join(t.TempDir(), "outside.png")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			images := &fakeTaskImageOperationsImage{}
+			f.service.images = images
+			_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+				UserID: f.userID, ExecutionID: tt.executionID, ProjectID: f.task.ProjectID,
+				TaskID: f.task.ID, FilePath: tt.filePath,
+			})
+			if err == nil {
+				t.Fatal("Upload accepted unsafe task-relative path")
+			}
+			if images.uploadPath != "" {
+				t.Fatalf("unsafe upload delegated with path %q", images.uploadPath)
+			}
+		})
+	}
+}
+
+func TestTaskImageOperationsUploadCleansMaterializedFileWhenDelegationFails(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	wantErr := errors.New("forced upload failure")
+	images := &fakeTaskImageOperationsImage{readUpload: true, uploadErr: wantErr}
+	f.service.images = images
+
+	_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID,
+		TaskID: f.task.ID, FilePath: "output/source-a.png",
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Upload error = %v, want %v", err, wantErr)
+	}
+	if !filepath.IsAbs(images.uploadPath) || len(images.uploadData) == 0 {
+		t.Fatalf("upload did not read materialized file: path=%q bytes=%d", images.uploadPath, len(images.uploadData))
+	}
+	if _, err := os.Stat(images.uploadPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("materialized upload path still exists after failed Upload: %v", err)
+	}
+}
+
 func TestTaskImageOperationsCropCleansObjectWhenPersistenceFails(t *testing.T) {
 	f := newTaskImageOperationsCropFixture(t)
 	wantErr := errors.New("forced crop persistence failure")
@@ -375,11 +469,11 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 		UnderstandingProvider: "provider", UnderstandingModel: "model",
 	}, &logger)
 
-	if _, err := svc.Upload(ctx, UploadTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: "output/image.png"}); err != nil {
+	if _, err := svc.Upload(ctx, UploadTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: imagePath}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
-	if images.uploadPath != "output/image.png" {
-		t.Fatalf("upload path = %q, want runtime-relative path", images.uploadPath)
+	if images.uploadPath != imagePath {
+		t.Fatalf("upload path = %q, want explicit server-local path %q", images.uploadPath, imagePath)
 	}
 	if _, err := svc.Compress(ctx, CompressTaskImageRequest{UserID: userID, TaskID: taskID, FilePath: "output/image.png"}); err != nil {
 		t.Fatalf("Compress: %v", err)

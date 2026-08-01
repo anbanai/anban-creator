@@ -31,13 +31,13 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload an absolute server-local file path to WeChat CDN or configured storage. The path is not the agent client's current working directory. task_id only associates and authorizes the operation. Returns upload metadata.",
+		Description: "Upload an absolute server-local file path or a task-relative file_path owned by the current task execution to WeChat CDN or configured storage. Agent client working-directory paths are not server-local paths. Returns upload metadata.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
-				"file_path":  map[string]any{"type": "string", "description": "Server-local file path of the image to upload"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task ID used to associate and authorize the upload"},
+				"file_path":  map[string]any{"type": "string", "description": "Absolute server-local path or task-relative path returned by an image tool"},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID required when file_path is task-relative"},
 			},
 			"required": []any{"project_id", "file_path"},
 		},
@@ -229,7 +229,7 @@ func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 	args := parseArgs(req.Params.Arguments)
 	result, err := svcs.TaskImageOperationsSvc.Upload(ctx, service.UploadTaskImageRequest{
-		UserID: getUserID(ctx), ProjectID: stringArg(args, "project_id"),
+		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), ProjectID: stringArg(args, "project_id"),
 		TaskID: stringArg(args, "task_id"), FilePath: stringArg(args, "file_path"),
 	})
 	if err != nil {
