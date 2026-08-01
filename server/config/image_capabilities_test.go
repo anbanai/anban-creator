@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -175,6 +176,42 @@ func TestValidateImageCapabilitiesRequiresFixedKeysAndAllowsCustomCapabilities(t
 				t.Fatalf("Validate() error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateEnabledImageCapabilitiesRequireBillingCostIdentity(t *testing.T) {
+	standard := validCapabilityForConfigTest()
+	standard.Provider = "volcengine_ark"
+	standard.Model = "image-standard"
+	professional := validCapabilityForConfigTest()
+	professional.Provider = "wangcai_openai"
+	professional.Model = "image-professional"
+	professional.Alias = "Professional"
+	professional.Description = "Detailed image creation"
+	professional.MinTier = "enterprise"
+	professional.BillingSKU = "image.professional"
+
+	cfg := baseKubernetesConfigForTest()
+	cfg.ModelRoutes.ImageGeneration = ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]ImageGenerationRouteConfig{
+			"standard":     standard,
+			"professional": professional,
+		},
+	}
+	cfg.BillingBundle = &serverbilling.Bundle{Costs: serverbilling.CostCatalog{Models: map[string]serverbilling.ModelCostConfig{
+		"volcengine_ark/image-standard": {},
+	}}}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), `model_routes.image_generation.capabilities.professional provider/model "wangcai_openai/image-professional" is missing from billing costs.models`) {
+		t.Fatalf("Validate() error = %v, want missing professional cost identity", err)
+	}
+
+	professional.Enabled = false
+	cfg.ModelRoutes.ImageGeneration.Capabilities["professional"] = professional
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected disabled capability without a cost identity: %v", err)
 	}
 }
 

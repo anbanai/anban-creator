@@ -166,20 +166,20 @@ func truncateRunes(s string, maxRunes int) string {
 // NewProvider 根据 ImageAPI 配置创建对应的 Provider
 func NewProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (Provider, error) {
 	switch apiCfg.Provider {
-	case "openai", "":
+	case "openai", "wangcai_openai", "":
 		if err := validateOpenAIConfig(apiCfg); err != nil {
 			return nil, err
 		}
 		return NewOpenAIProvider(apiCfg, log)
 	case "gemini", "google":
 		return NewGeminiProvider(apiCfg, log)
-	case "volcengine", "volc", "seedream":
+	case "volcengine", "volcengine_ark", "volc", "seedream":
 		return NewVolcengineProvider(apiCfg, log)
 	default:
 		return nil, &config.ConfigError{
 			Field:   "ImageProvider",
 			Message: fmt.Sprintf("未知的图片服务提供者: %s", apiCfg.Provider),
-			HintMsg: "支持的提供者: openai, gemini (google), volcengine (volc, seedream)",
+			HintMsg: "支持的提供者: openai (wangcai_openai), gemini (google), volcengine (volcengine_ark, volc, seedream)",
 		}
 	}
 }

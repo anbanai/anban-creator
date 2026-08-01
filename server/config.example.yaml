@@ -96,7 +96,7 @@ model_routes:
         description: "适合日常内容配图和常规视觉创作"
         billing_sku: "image.standard"
         sort_order: 10
-        provider: "volcengine"
+        provider: "volcengine_ark"
         model: "doubao-seedream-5-0-pro-260628"
         base_url: "https://ark.cn-beijing.volces.com/api/v3"
         api_key: "${VOLCENGINE_ARK_API_KEY}"
@@ -120,8 +120,8 @@ model_routes:
         description: "更适合复杂构图、细节表现和高要求视觉任务"
         billing_sku: "image.professional"
         sort_order: 20
-        provider: "openai"
-        model: "gpt-image-2"
+        provider: "wangcai_openai"
+        model: "gpt-image-2-t"
         base_url: "http://18.141.196.64:18888/v1"
         api_key: "${WANGCAI_OPENAI_API_KEY}"
         timeout: 5m

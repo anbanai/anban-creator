@@ -80,6 +80,15 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d execution_profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
 	}
+	for key, capability := range cfg.ModelRoutes.ImageGeneration.Capabilities {
+		if !capability.Enabled {
+			continue
+		}
+		modelID := strings.TrimSpace(capability.Provider) + "/" + strings.TrimSpace(capability.Model)
+		if _, ok := cfg.BillingBundle.Costs.Models[modelID]; !ok {
+			t.Fatalf("enabled image capability %q uses %q, which is missing from billing costs.models", key, modelID)
+		}
+	}
 	expectedRuntimeControls := map[string]map[string]string{
 		"effective": {
 			"CLAUDE_CODE_EFFORT_LEVEL":                 "medium",

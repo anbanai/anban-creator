@@ -1576,6 +1576,15 @@ func (c *Config) Validate() error {
 		if err := validateEnabledImageCapability("model_routes.image_generation.capabilities."+key, key, route); err != nil {
 			errs = append(errs, err.Error())
 		}
+		if c.BillingBundle != nil && route.Enabled {
+			modelID := strings.TrimSpace(route.Provider) + "/" + strings.TrimSpace(route.Model)
+			if _, ok := c.BillingBundle.Costs.Models[modelID]; !ok {
+				errs = append(errs, fmt.Sprintf(
+					"model_routes.image_generation.capabilities.%s provider/model %q is missing from billing costs.models",
+					key, modelID,
+				))
+			}
+		}
 	}
 
 	for key, route := range imageGeneration.Capabilities {

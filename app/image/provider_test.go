@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anbanai/anban-creator/app/config"
+	"github.com/rs/zerolog"
 )
 
 func TestReadRefImage_FileNotFound(t *testing.T) {
@@ -65,6 +68,54 @@ func TestReadRefImage_MIMETypes(t *testing.T) {
 			if mimeType != tt.wantMIME {
 				t.Errorf("ReadRefImage(%q) mimeType = %q, want %q", tt.ext, mimeType, tt.wantMIME)
 			}
+		})
+	}
+}
+
+func TestNewProviderAcceptsBillingCatalogProviderIdentities(t *testing.T) {
+	log := zerolog.Nop()
+	for _, tt := range []struct {
+		name     string
+		provider string
+		model    string
+		assert   func(*testing.T, Provider)
+	}{
+		{
+			name:     "wangcai OpenAI",
+			provider: "wangcai_openai",
+			model:    "gpt-image-2-t",
+			assert: func(t *testing.T, provider Provider) {
+				t.Helper()
+				openAI, ok := provider.(*OpenAIProvider)
+				if !ok || openAI.model != "gpt-image-2-t" {
+					t.Fatalf("provider = %#v, want OpenAI implementation with configured model", provider)
+				}
+			},
+		},
+		{
+			name:     "Volcengine Ark",
+			provider: "volcengine_ark",
+			model:    "doubao-seedream-5-0-pro-260628",
+			assert: func(t *testing.T, provider Provider) {
+				t.Helper()
+				volcengine, ok := provider.(*VolcengineProvider)
+				if !ok || volcengine.model != "doubao-seedream-5-0-pro-260628" {
+					t.Fatalf("provider = %#v, want Volcengine implementation with configured model", provider)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewProvider(&config.ImageAPI{
+				Provider: tt.provider,
+				Model:    tt.model,
+				Key:      "test-key",
+				BaseURL:  "https://images.example.com/v1",
+			}, &log)
+			if err != nil {
+				t.Fatalf("NewProvider() error = %v", err)
+			}
+			tt.assert(t, provider)
 		})
 	}
 }
