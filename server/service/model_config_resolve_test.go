@@ -9,7 +9,6 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -32,79 +31,25 @@ func setupResolveTestService(t *testing.T) (*ModelConfigService, repository.Repo
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 	cfg := &srvconfig.Config{
-		ImageAPI: srvconfig.ImageAPIConfig{
-			Cover: &appconfig.ImageAPI{
-				Provider: "openai",
-				Key:      "system-key",
-				BaseURL:  "https://system.example",
-				Model:    "gpt-image-2",
-			},
-			Content: &appconfig.ImageAPI{
-				Provider: "volcengine",
-				Key:      "system-key",
-				BaseURL:  "https://system.example",
-				Model:    "doubao-seedream",
-			},
-		},
 		ModelRoutes: srvconfig.ModelRoutesConfig{
 			ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
-				Designer: map[string]srvconfig.ImageGenerationRouteConfig{
-					"seedream": {
-						Provider:     "volcengine_ark",
-						Model:        "doubao-seedream",
-						QualityRank:  100,
-						Capabilities: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 10},
+				DefaultCapability: "standard",
+				Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+					"standard": {
+						Provider: "volcengine", Model: "doubao-seedream", BaseURL: "https://ark.volces.com", APIKey: "volc-key",
+						MinTier: "free", BillingSKU: "image.standard", Enabled: true, QualityRank: 100,
+						Features: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 10},
 					},
-					"gpt_image_2": {
-						Provider:     "wangcai_openai",
-						Model:        "gpt-image-2",
-						QualityRank:  200,
-						Capabilities: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16},
+					"gemini-pro": {
+						Provider: "gemini", Model: "gemini-3-pro-image-preview", BaseURL: "https://generativelanguage.googleapis.com", APIKey: "gemini-key",
+						MinTier: "pro", BillingSKU: "image.professional", Enabled: true, QualityRank: 150,
+						Features: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 4},
 					},
-				},
-			},
-		},
-		ImagePresets: []srvconfig.ImageModelPreset{
-			{
-				Key:         "volcengine-standard",
-				DisplayName: "Volcengine Standard",
-				Provider:    "volcengine",
-				Model:       "doubao-seedream",
-				Endpoint:    "https://ark.volces.com",
-				APIKey:      "volc-key",
-				MinTier:     "free",
-				QualityRank: 100,
-				Capabilities: srvconfig.DesignerProviderCapabilities{
-					SupportsReference:  true,
-					MaxReferenceImages: 10,
-				},
-			},
-			{
-				Key:         "gemini-pro",
-				DisplayName: "Gemini Pro",
-				Provider:    "gemini",
-				Model:       "gemini-3-pro-image-preview",
-				Endpoint:    "https://generativelanguage.googleapis.com",
-				APIKey:      "gemini-key",
-				MinTier:     "pro",
-				QualityRank: 150,
-				Capabilities: srvconfig.DesignerProviderCapabilities{
-					SupportsReference:  true,
-					MaxReferenceImages: 4,
-				},
-			},
-			{
-				Key:         "openai-standard",
-				DisplayName: "OpenAI Standard",
-				Provider:    "openai",
-				Model:       "gpt-image-2",
-				Endpoint:    "https://openai.example/v1",
-				APIKey:      "openai-key",
-				MinTier:     "pro",
-				QualityRank: 200,
-				Capabilities: srvconfig.DesignerProviderCapabilities{
-					SupportsReference:  true,
-					MaxReferenceImages: 16,
+					"professional": {
+						Provider: "openai", Model: "gpt-image-2", BaseURL: "https://openai.example/v1", APIKey: "openai-key",
+						MinTier: "pro", BillingSKU: "image.professional", Enabled: true, QualityRank: 200,
+						Features: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16},
+					},
 				},
 			},
 		},
@@ -207,8 +152,8 @@ func TestResolveImageConfigForKey(t *testing.T) {
 		{
 			name:       "preset key satisfied by tier uses preset config",
 			userID:     freeUser,
-			key:        "volcengine-standard",
-			wantSource: "preset:volcengine-standard",
+			key:        "standard",
+			wantSource: "capability:standard",
 			provider:   "volcengine",
 			model:      "doubao-seedream",
 			apiKey:     "volc-key",
@@ -217,7 +162,7 @@ func TestResolveImageConfigForKey(t *testing.T) {
 			name:       "preset key at exact tier uses preset config",
 			userID:     proUser,
 			key:        "gemini-pro",
-			wantSource: "preset:gemini-pro",
+			wantSource: "capability:gemini-pro",
 			provider:   "gemini",
 			model:      "gemini-3-pro-image-preview",
 			apiKey:     "gemini-key",
@@ -239,8 +184,8 @@ func TestResolveImageConfigForKey(t *testing.T) {
 		{
 			name:       "nonexistent user: preset free key still resolves (tier defaults Free)",
 			userID:     nonexistentUser,
-			key:        "volcengine-standard",
-			wantSource: "preset:volcengine-standard",
+			key:        "standard",
+			wantSource: "capability:standard",
 			provider:   "volcengine",
 			model:      "doubao-seedream",
 			apiKey:     "volc-key",
@@ -361,12 +306,12 @@ func TestResolveImageModelForGenerationRetainsPreferredWithoutReferences(t *test
 	createResolveTestUser(t, repo, "generation-free", model.TierFree)
 
 	resolved, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "generation-free", "volcengine-standard", "content", 0,
+		context.Background(), "generation-free", "standard", "content", 0,
 	)
 	if err != nil {
 		t.Fatalf("ResolveImageModelForGeneration() error = %v", err)
 	}
-	if resolved.Key != "volcengine-standard" || resolved.Provider != "volcengine" || resolved.Model != "doubao-seedream" {
+	if resolved.Key != "standard" || resolved.Provider != "volcengine" || resolved.Model != "doubao-seedream" {
 		t.Fatalf("resolved preferred model = %#v", resolved)
 	}
 	if resolved.SelectionReason != "preferred" {
@@ -374,40 +319,30 @@ func TestResolveImageModelForGenerationRetainsPreferredWithoutReferences(t *test
 	}
 }
 
-func TestResolveImageModelForGenerationUsesImageTypeCapabilities(t *testing.T) {
+func TestResolveImageModelForGenerationUsesUnifiedCapabilityFeatures(t *testing.T) {
 	svc, repo, _ := setupResolveTestService(t)
 	createResolveTestUser(t, repo, "generation-pro", model.TierPro)
 	ctx := context.Background()
 
-	cover, err := svc.ResolveImageModelForGeneration(ctx, "generation-pro", "", "cover", 11)
-	if err != nil {
-		t.Fatalf("cover resolution error = %v", err)
-	}
-	if cover.Source != "system_default" || cover.Provider != "openai" || cover.Model != "gpt-image-2" {
-		t.Fatalf("cover resolution = %#v, want preferred cover slot", cover)
-	}
-
-	content, err := svc.ResolveImageModelForGeneration(ctx, "generation-pro", "", "content", 11)
-	if err != nil {
-		t.Fatalf("content resolution error = %v", err)
-	}
-	if content.Source != "preset:openai-standard" || content.SelectionReason != "reference_compatible_fallback" {
-		t.Fatalf("content resolution = %#v, want compatible fallback", content)
+	for _, imageType := range []string{"cover", "content"} {
+		_, err := svc.ResolveImageModelForGeneration(ctx, "generation-pro", "", imageType, 11)
+		var limitErr *ImageReferenceLimitError
+		if !errors.As(err, &limitErr) || limitErr.MaxReferenceImages != 10 {
+			t.Fatalf("%s error = %v, want selected standard limit 10", imageType, err)
+		}
 	}
 }
 
-func TestResolveImageModelForGenerationChoosesHighestQualityCompatiblePreset(t *testing.T) {
+func TestResolveImageModelForGenerationDoesNotSwitchCapabilityForReferences(t *testing.T) {
 	svc, repo, _ := setupResolveTestService(t)
 	createResolveTestUser(t, repo, "quality-pro", model.TierPro)
 
-	resolved, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "quality-pro", "volcengine-standard", "content", 11,
+	_, err := svc.ResolveImageModelForGeneration(
+		context.Background(), "quality-pro", "standard", "content", 11,
 	)
-	if err != nil {
-		t.Fatalf("ResolveImageModelForGeneration() error = %v", err)
-	}
-	if resolved.Key != "openai-standard" || resolved.SelectionReason != "reference_compatible_fallback" {
-		t.Fatalf("resolved fallback = %#v", resolved)
+	var limitErr *ImageReferenceLimitError
+	if !errors.As(err, &limitErr) || limitErr.MaxReferenceImages != 10 {
+		t.Fatalf("error = %v, want exact selected capability limit", err)
 	}
 }
 
@@ -416,7 +351,7 @@ func TestResolveImageModelForGenerationFiltersByTierAndReturnsAccessibleLimit(t 
 	createResolveTestUser(t, repo, "limit-free", model.TierFree)
 
 	_, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "limit-free", "volcengine-standard", "content", 11,
+		context.Background(), "limit-free", "standard", "content", 11,
 	)
 	var limitErr *ImageReferenceLimitError
 	if !errors.As(err, &limitErr) {
@@ -432,14 +367,14 @@ func TestResolveImageModelForGenerationReturnsMaximumAccessibleLimit(t *testing.
 	createResolveTestUser(t, repo, "limit-pro", model.TierPro)
 
 	_, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "limit-pro", "volcengine-standard", "content", 17,
+		context.Background(), "limit-pro", "standard", "content", 17,
 	)
 	var limitErr *ImageReferenceLimitError
 	if !errors.As(err, &limitErr) {
 		t.Fatalf("error = %v, want ImageReferenceLimitError", err)
 	}
-	if limitErr.MaxReferenceImages != 16 {
-		t.Fatalf("MaxReferenceImages = %d, want 16", limitErr.MaxReferenceImages)
+	if limitErr.MaxReferenceImages != 10 {
+		t.Fatalf("MaxReferenceImages = %d, want selected capability limit 10", limitErr.MaxReferenceImages)
 	}
 }
 
@@ -468,39 +403,26 @@ func TestResolveImageModelForGenerationTreatsUnknownCustomCapabilitiesConservati
 		t.Fatalf("unknown custom capabilities = %#v, want conservative zero support", preferred)
 	}
 
-	fallback, err := svc.ResolveImageModelForGeneration(
+	_, err = svc.ResolveImageModelForGeneration(
 		context.Background(), userID, model.ImageModelKeyCustom, "content", 1,
 	)
-	if err != nil {
-		t.Fatalf("reference custom resolution error = %v", err)
-	}
-	if fallback.Key != "openai-standard" || fallback.SelectionReason != "reference_compatible_fallback" {
-		t.Fatalf("custom fallback = %#v", fallback)
+	if err == nil || !strings.Contains(err.Error(), "does not support reference images") {
+		t.Fatalf("custom reference error = %v, want unsupported without fallback", err)
 	}
 }
 
-func TestResolveImageModelForGenerationBreaksEqualRankTiesByPresetKey(t *testing.T) {
+func TestResolveImageModelForGenerationIgnoresOtherEqualRankCapabilities(t *testing.T) {
 	svc, repo, _ := setupResolveTestService(t)
 	createResolveTestUser(t, repo, "tie-pro", model.TierPro)
-	svc.cfg.ImagePresets = append(svc.cfg.ImagePresets,
-		srvconfig.ImageModelPreset{
-			Key: "z-compatible", Provider: "openai", Model: "z-model", Endpoint: "https://z.example", APIKey: "z", MinTier: "pro",
-			QualityRank: 300, Capabilities: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16},
-		},
-		srvconfig.ImageModelPreset{
-			Key: "a-compatible", Provider: "openai", Model: "a-model", Endpoint: "https://a.example", APIKey: "a", MinTier: "pro",
-			QualityRank: 300, Capabilities: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16},
-		},
-	)
+	svc.cfg.ModelRoutes.ImageGeneration.Capabilities["z-compatible"] = srvconfig.ImageGenerationRouteConfig{Provider: "openai", Model: "z-model", BaseURL: "https://z.example", APIKey: "z", MinTier: "pro", Enabled: true, QualityRank: 300, Features: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16}}
+	svc.cfg.ModelRoutes.ImageGeneration.Capabilities["a-compatible"] = srvconfig.ImageGenerationRouteConfig{Provider: "openai", Model: "a-model", BaseURL: "https://a.example", APIKey: "a", MinTier: "pro", Enabled: true, QualityRank: 300, Features: srvconfig.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 16}}
 
-	resolved, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "tie-pro", "volcengine-standard", "content", 11,
+	_, err := svc.ResolveImageModelForGeneration(
+		context.Background(), "tie-pro", "standard", "content", 11,
 	)
-	if err != nil {
-		t.Fatalf("ResolveImageModelForGeneration() error = %v", err)
-	}
-	if resolved.Key != "a-compatible" {
-		t.Fatalf("resolved key = %q, want a-compatible", resolved.Key)
+	var limitErr *ImageReferenceLimitError
+	if !errors.As(err, &limitErr) || limitErr.MaxReferenceImages != 10 {
+		t.Fatalf("error = %v, want selected standard limit without rank fallback", err)
 	}
 }
 
@@ -509,7 +431,7 @@ func TestResolveImageModelForGenerationRejectsUnsupportedImageType(t *testing.T)
 	createResolveTestUser(t, repo, "invalid-type-free", model.TierFree)
 
 	_, err := svc.ResolveImageModelForGeneration(
-		context.Background(), "invalid-type-free", "volcengine-standard", "thumbnail", 0,
+		context.Background(), "invalid-type-free", "standard", "thumbnail", 0,
 	)
 	if err == nil || !strings.Contains(err.Error(), "unsupported image type") {
 		t.Fatalf("error = %v, want unsupported image type", err)
@@ -519,13 +441,12 @@ func TestResolveImageModelForGenerationRejectsUnsupportedImageType(t *testing.T)
 func TestResolveImageModelForGenerationReturnsNoCapableModelError(t *testing.T) {
 	svc, repo, _ := setupResolveTestService(t)
 	createResolveTestUser(t, repo, "no-capability-free", model.TierFree)
-	svc.cfg.ModelRoutes.ImageGeneration.Designer = nil
-	svc.cfg.ImagePresets = nil
+	svc.cfg.ModelRoutes.ImageGeneration = srvconfig.ImageGenerationRoutesConfig{}
 
 	_, err := svc.ResolveImageModelForGeneration(
 		context.Background(), "no-capability-free", "", "content", 1,
 	)
-	if err == nil || !strings.Contains(err.Error(), "no accessible image model supports reference images") {
-		t.Fatalf("error = %v, want no-capable-model error", err)
+	if err == nil || !strings.Contains(err.Error(), "default image capability is unavailable") {
+		t.Fatalf("error = %v, want unavailable default capability", err)
 	}
 }

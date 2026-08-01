@@ -367,10 +367,8 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		priceCredits     int64
 	}
 	want := map[string]skuSnapshot{
-		"image.seedream.cover":       {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.cover", delivery: "persisted_image"},
-		"image.seedream.content":     {operation: "mcp.generate_image", chargePolicy: "accepted_task_operation", priceCredits: 500, route: "image_generation.content", delivery: "persisted_image"},
-		"image.seedream.designer":    {operation: "designer.generate_image", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.designer.seedream", delivery: "persisted_image"},
-		"image.gpt-image-2.designer": {operation: "designer.generate_image", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.designer.gpt_image_2", delivery: "persisted_image"},
+		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
+		"image.professional": {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.professional", delivery: "persisted_image"},
 	}
 	taskTypes := []struct {
 		id, operation, delivery string

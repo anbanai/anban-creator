@@ -181,11 +181,11 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.article", ""); !errors.Is(err, ErrBillingSKUNotFound) {
 		t.Fatalf("route resolution matched task profile SKU: %v", err)
 	}
-	cover, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "mcp.generate_image", "image_generation.cover")
-	if err != nil || cover.SKUID != "image.seedream.cover" {
-		t.Fatalf("ResolveSKU cover = %+v, %v", cover, err)
+	standard, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "image.generate", "image_generation.capabilities.standard")
+	if err != nil || standard.SKUID != "image.standard" {
+		t.Fatalf("ResolveSKU standard = %+v, %v", standard, err)
 	}
-	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "mcp.generate_image", ""); !errors.Is(err, ErrBillingSKUNotFound) {
+	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "image.generate", ""); !errors.Is(err, ErrBillingSKUNotFound) {
 		t.Fatalf("empty route fallback error = %v, want ErrBillingSKUNotFound", err)
 	}
 	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "missing", ""); !errors.Is(err, ErrBillingSKUNotFound) {
@@ -204,11 +204,11 @@ func TestBillingCatalogResolvesPriceBySKUIdentity(t *testing.T) {
 	if _, err := svc.Publish(ctx); err != nil {
 		t.Fatal(err)
 	}
-	price, err := svc.ResolvePriceBySKUID(ctx, bundle.Products.CatalogID, "image.seedream.designer", model.TierFree)
+	price, err := svc.ResolvePriceBySKUID(ctx, bundle.Products.CatalogID, "image.standard", model.TierFree)
 	if err != nil {
 		t.Fatalf("ResolvePriceBySKUID: %v", err)
 	}
-	if price.SKU == nil || price.SKU.SKUID != "image.seedream.designer" || price.PriceCredits <= 0 {
+	if price.SKU == nil || price.SKU.SKUID != "image.standard" || price.PriceCredits <= 0 {
 		t.Fatalf("price = %+v, want positive price for exact SKU", price)
 	}
 	if _, err := svc.ResolvePriceBySKUID(ctx, bundle.Products.CatalogID, "missing-capability", model.TierFree); !errors.Is(err, ErrBillingSKUNotFound) {
@@ -243,14 +243,14 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 			req.Route = "legacy"
 		}},
 		{name: "operation rejects profile", mutate: func(req *QuoteRequest) {
-			req.Operation = "mcp.generate_image"
-			req.ExecutionProfile = "balanced"
-			req.Route = "image_generation.cover"
+				req.Operation = "image.generate"
+				req.ExecutionProfile = "balanced"
+				req.Route = "image_generation.capabilities.standard"
 		}},
 		{name: "designer rejects profile", mutate: func(req *QuoteRequest) {
-			req.Operation = "designer.generate_image"
-			req.ExecutionProfile = "balanced"
-			req.Route = "image_generation.designer.seedream"
+				req.Operation = "image.generate"
+				req.ExecutionProfile = "balanced"
+				req.Route = "image_generation.capabilities.professional"
 		}},
 	}
 	for _, tt := range tests {

@@ -55,12 +55,6 @@ func (h *DesignerHandler) SetDirectUploadDependencies(repo repository.Repository
 	h.store = store
 }
 
-// GetProviders handles GET /api/v1/designer/providers
-func (h *DesignerHandler) GetProviders(c fiber.Ctx) error {
-	providers := h.svc.GetProviders(c.Context(), GetUserID(c))
-	return Success(c, providers)
-}
-
 func (h *DesignerHandler) Quote(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
@@ -72,6 +66,16 @@ func (h *DesignerHandler) Quote(c fiber.Ctx) error {
 	}
 	quote, err := h.svc.CreateGenerationQuote(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrDesignerReferenceUnsupported) {
+			return Error(c, fiber.StatusBadRequest, "designer_reference_unsupported")
+		}
+		var limitErr *service.DesignerReferenceLimitError
+		if errors.As(err, &limitErr) {
+			return Error(c, fiber.StatusBadRequest, "designer_reference_limit_exceeded")
+		}
+		if errors.Is(err, service.ErrDesignerCapabilityUnavailable) {
+			return Error(c, fiber.StatusBadRequest, "designer_capability_unavailable")
+		}
 		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
 			return Forbidden(c, "designer capability is not available for your tier")
 		}
@@ -98,6 +102,16 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 
 	created, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrDesignerReferenceUnsupported) {
+			return Error(c, fiber.StatusBadRequest, "designer_reference_unsupported")
+		}
+		var limitErr *service.DesignerReferenceLimitError
+		if errors.As(err, &limitErr) {
+			return Error(c, fiber.StatusBadRequest, "designer_reference_limit_exceeded")
+		}
+		if errors.Is(err, service.ErrDesignerCapabilityUnavailable) {
+			return Error(c, fiber.StatusBadRequest, "designer_capability_unavailable")
+		}
 		if errors.Is(err, service.ErrProjectNotFound) {
 			return Error(c, fiber.StatusNotFound, "project not found")
 		}

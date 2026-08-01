@@ -53,7 +53,7 @@ type Services struct {
 	AIEntryHandler           *handler.AIEntryHandler
 	FeedbackHandler          *handler.FeedbackHandler
 	ModelConfigHandler       *handler.ModelConfigHandler
-	ImageModelHandler        *handler.ImageModelHandler
+	ImageCapabilityHandler   *handler.ImageCapabilityHandler
 	TemplateHandler          *handler.TemplateHandler
 	ViralAnalysisHandler     *handler.ViralAnalysisHandler
 	PosterHandler            *handler.PosterHandler
@@ -292,7 +292,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.DesignerHandler != nil {
 		designer := apiV1.Group("/designer")
-		designer.Get("/providers", svc.DesignerHandler.GetProviders)
 		designer.Post("/quote", svc.DesignerHandler.Quote)
 		designer.Post("/generate", svc.DesignerHandler.Generate)
 		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
@@ -416,9 +415,8 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Delete("/model-config", svc.ModelConfigHandler.Delete)
 	}
 
-	// Image model options endpoint (tier-gated listing for create-task/plan dropdowns).
-	if svc.ImageModelHandler != nil {
-		apiV1.Get("/image-models", svc.ImageModelHandler.List)
+	if svc.ImageCapabilityHandler != nil {
+		apiV1.Get("/image-capabilities", svc.ImageCapabilityHandler.List)
 	}
 
 	// ---------------------------------------------------------------------------

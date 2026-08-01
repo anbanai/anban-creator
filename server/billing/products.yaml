@@ -121,29 +121,15 @@ skus:
     price_credits: 1200
     delivery: "viral_analysis_report_verified"
 
-  - id: "image.seedream.cover"
-    operation: "mcp.generate_image"
-    charge_policy: "accepted_task_operation"
-    price_credits: 500
-    route: "image_generation.cover"
-    delivery: "persisted_image"
-  - id: "image.seedream.content"
-    operation: "mcp.generate_image"
-    charge_policy: "accepted_task_operation"
-    price_credits: 500
-    route: "image_generation.content"
-    delivery: "persisted_image"
-
-  - id: "image.seedream.designer"
-    operation: "designer.generate_image"
+  - id: "image.standard"
+    operation: "image.generate"
     charge_policy: "image_operation"
     price_credits: 500
-    route: "image_generation.designer.seedream"
+    route: "image_generation.capabilities.standard"
     delivery: "persisted_image"
-
-  - id: "image.gpt-image-2.designer"
-    operation: "designer.generate_image"
+  - id: "image.professional"
+    operation: "image.generate"
     charge_policy: "image_operation"
     price_credits: 500
-    route: "image_generation.designer.gpt_image_2"
+    route: "image_generation.capabilities.professional"
     delivery: "persisted_image"

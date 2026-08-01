@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -28,9 +27,7 @@ type Config struct {
 	WeChat             WeChatConfig                    `yaml:"wechat"`
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
-	ImageAPI           ImageAPIConfig                  `yaml:"-"`
 	Montage            MontageConfig                   `yaml:"montage"`
-	ImagePresets       []ImageModelPreset              `yaml:"-"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
@@ -73,93 +70,6 @@ func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceC
 		}
 	}
 	return errs
-}
-
-// ImageModelPreset defines a system-managed image model that users can select
-// when creating tasks or plans. Each preset has a minimum tier that gates access.
-type ImageModelPreset struct {
-	Key           string                       `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
-	DisplayName   string                       `yaml:"display_name"`   // user-facing label
-	Description   string                       `yaml:"description"`    // neutral user-facing capability description
-	SortOrder     int                          `yaml:"sort_order"`     // stable public catalog order
-	BillingSKU    string                       `yaml:"billing_sku"`    // retail billing catalog identity
-	ProviderRoute string                       `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
-	Provider      string                       `yaml:"provider"`       // derived provider kind or legacy direct provider
-	Model         string                       `yaml:"model"`          // concrete model id
-	Endpoint      string                       `yaml:"endpoint"`
-	APIKey        string                       `yaml:"api_key"`
-	Timeout       time.Duration                `yaml:"timeout"`
-	MinTier       string                       `yaml:"min_tier"` // free / pro / enterprise
-	QualityRank   int                          `yaml:"quality_rank"`
-	Capabilities  DesignerProviderCapabilities `yaml:"capabilities"`
-}
-
-// maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
-const maxImageModelKeyLen = 50
-
-// NormalizeImageModelKey keeps already-persisted tasks and plans executable
-// after public capability keys are renamed. These aliases are server-side only
-// and are never returned by the public catalog.
-func NormalizeImageModelKey(key string) string {
-	switch strings.TrimSpace(key) {
-	case "volcengine-standard":
-		return "standard_image"
-	case "openai-standard", "gpt-image-2":
-		return "professional_enhance"
-	default:
-		return strings.TrimSpace(key)
-	}
-}
-
-func NormalizeImageModelKeyForPresets(key string, presets []ImageModelPreset) string {
-	original := strings.TrimSpace(key)
-	normalized := NormalizeImageModelKey(original)
-	if normalized == original {
-		return original
-	}
-	for _, preset := range presets {
-		if preset.Key == normalized {
-			return normalized
-		}
-	}
-	return original
-}
-
-// ValidateImagePresets checks that preset keys fit the Task/Plan ImageModelKey
-// column (varchar(50)) and are globally unique. Returns the first error found.
-// Call this at startup so a malformed config fails fast instead of surfacing
-// as a 500 on first task create.
-func ValidateImagePresets(presets []ImageModelPreset) error {
-	const blockedPublicBrandHint = "openai, chatgpt, gpt, gemini, claude, seedream, doubao"
-	seen := make(map[string]bool, len(presets))
-	for i, p := range presets {
-		if p.Key == "" {
-			return fmt.Errorf("image_presets[%d]: key is required", i)
-		}
-		if len(p.Key) > maxImageModelKeyLen {
-			return fmt.Errorf("image_presets[%d]: key %q exceeds %d characters (DB column varchar(50))", i, p.Key, maxImageModelKeyLen)
-		}
-		if strings.ContainsAny(p.Key, " \t\n\r") {
-			return fmt.Errorf("image_presets[%d]: key %q must not contain whitespace", i, p.Key)
-		}
-		if p.Key == "custom" {
-			return fmt.Errorf("image_presets[%d]: key %q is reserved", i, p.Key)
-		}
-		if seen[p.Key] {
-			return fmt.Errorf("image_presets[%d]: duplicate key %q", i, p.Key)
-		}
-		if strings.TrimSpace(p.BillingSKU) == "" {
-			return fmt.Errorf("image_presets[%d]: billing_sku is required", i)
-		}
-		publicText := strings.ToLower(p.Key + "\n" + p.DisplayName + "\n" + p.Description)
-		for _, term := range []string{"openai", "chatgpt", "gpt", "gemini", "claude", "seedream", "doubao"} {
-			if strings.Contains(publicText, term) {
-				return fmt.Errorf("image_presets[%d]: public display text contains blocked brand %q (allowed terms: %s)", i, term, blockedPublicBrandHint)
-			}
-		}
-		seen[p.Key] = true
-	}
-	return nil
 }
 
 // SeednoteConfig holds Seednote (种草笔记) sidecar configuration.
@@ -410,28 +320,29 @@ type VideoUnderstandingRouteConfig struct {
 }
 
 type ImageGenerationRouteConfig struct {
-	Provider       string                       `yaml:"provider"`
-	Model          string                       `yaml:"model"`
-	Timeout        time.Duration                `yaml:"timeout"`
-	SelectionKey   string                       `yaml:"selection_key" json:"selection_key"`
+	Provider       string                       `yaml:"provider" json:"-"`
+	Model          string                       `yaml:"model" json:"-"`
+	Timeout        time.Duration                `yaml:"timeout" json:"-"`
 	MinTier        string                       `yaml:"min_tier" json:"min_tier"`
 	Alias          string                       `yaml:"alias"`
 	Description    string                       `yaml:"description"`
 	SortOrder      int                          `yaml:"sort_order" json:"sort_order"`
-	BillingSKU     string                       `yaml:"billing_sku" json:"billing_sku"`
+	BillingSKU     string                       `yaml:"billing_sku" json:"-"`
 	Enabled        bool                         `yaml:"enabled"`
 	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
-	ResponseFormat string                       `yaml:"response_format"`
-	Capabilities   DesignerProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+	ResponseFormat string                       `yaml:"response_format" json:"-"`
+	BaseURL        string                       `yaml:"base_url" json:"-"`
+	APIKey         string                       `yaml:"api_key" json:"-"`
+	Features       DesignerProviderCapabilities `yaml:"features" json:"features"`
 }
 
 func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := validateYAMLMappingFields(value, "image generation route", map[string]bool{
 		"provider": true, "model": true, "timeout": true,
-		"selection_key": true, "min_tier": true, "alias": true,
+		"min_tier": true, "alias": true,
 		"description": true, "sort_order": true, "billing_sku": true,
 		"enabled": true, "quality_rank": true, "response_format": true,
-		"capabilities": true,
+		"base_url": true, "api_key": true, "features": true,
 	}); err != nil {
 		return err
 	}
@@ -440,9 +351,19 @@ func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type ImageGenerationRoutesConfig struct {
-	Cover    ImageGenerationRouteConfig            `yaml:"cover"`
-	Content  ImageGenerationRouteConfig            `yaml:"content"`
-	Designer map[string]ImageGenerationRouteConfig `yaml:"designer"`
+	DefaultCapability string                                `yaml:"default_capability" json:"default_capability"`
+	Capabilities      map[string]ImageGenerationRouteConfig `yaml:"capabilities" json:"-"`
+}
+
+func (c *ImageGenerationRoutesConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "model_routes.image_generation", map[string]bool{
+		"default_capability": true,
+		"capabilities":       true,
+	}); err != nil {
+		return err
+	}
+	type plain ImageGenerationRoutesConfig
+	return value.Decode((*plain)(c))
 }
 
 type DesignerProviderCapabilities struct {
@@ -553,49 +474,12 @@ type SizesConfig struct {
 	SeednoteContent string `yaml:"seednote_content"`
 }
 
-// ImageAPIConfig holds global image generation API configuration.
-// All projects share this server-level config.
+// ImageAPIConfig is an internal runtime adapter for app/image. It is built from
+// one selected capability and is never decoded from server YAML.
 type ImageAPIConfig struct {
-	Cover    *appconfig.ImageAPI            `yaml:"cover"`
-	Content  *appconfig.ImageAPI            `yaml:"content"`
-	Designer map[string]*appconfig.ImageAPI `yaml:"designer"`
-	Sizes    SizesConfig                    `yaml:"sizes"`
-
-	// designerOrder preserves the insertion order of Designer keys as written
-	// in the YAML file. Populated by UnmarshalYAML; not serialized.
-	designerOrder []string
-}
-
-// UnmarshalYAML decodes the YAML node and additionally captures the
-// insertion order of the designer mapping so callers can iterate in a
-// deterministic, file-order sequence.
-func (c *ImageAPIConfig) UnmarshalYAML(value *yaml.Node) error {
-	type plain ImageAPIConfig
-	if err := value.Decode((*plain)(c)); err != nil {
-		return err
-	}
-	for i := 0; i+1 < len(value.Content); i += 2 {
-		if value.Content[i].Value != "designer" {
-			continue
-		}
-		mapping := value.Content[i+1]
-		if mapping == nil || mapping.Kind != yaml.MappingNode {
-			continue
-		}
-		for j := 0; j+1 < len(mapping.Content); j += 2 {
-			c.designerOrder = append(c.designerOrder, mapping.Content[j].Value)
-		}
-	}
-	return nil
-}
-
-// DesignerOrder returns enabled designer route keys in the derived selection
-// order: quality rank descending, selection key ascending, then route key.
-func (c *ImageAPIConfig) DesignerOrder() []string {
-	if c == nil {
-		return nil
-	}
-	return c.designerOrder
+	Cover   *appconfig.ImageAPI
+	Content *appconfig.ImageAPI
+	Sizes   SizesConfig
 }
 
 // ModelRuntimeConfig is the provider-resolved route used only for synchronous
@@ -1190,16 +1074,10 @@ func (c *Config) applyDefaults() {
 	if c.MCP.ToolTimeouts.GenerateImage == 0 {
 		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
 	}
-	if c.ModelRoutes.ImageGeneration.Cover.Timeout == 0 {
-		c.ModelRoutes.ImageGeneration.Cover.Timeout = 5 * time.Minute
-	}
-	if c.ModelRoutes.ImageGeneration.Content.Timeout == 0 {
-		c.ModelRoutes.ImageGeneration.Content.Timeout = 5 * time.Minute
-	}
-	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+	for key, route := range c.ModelRoutes.ImageGeneration.Capabilities {
 		if route.Timeout == 0 {
 			route.Timeout = 5 * time.Minute
-			c.ModelRoutes.ImageGeneration.Designer[key] = route
+			c.ModelRoutes.ImageGeneration.Capabilities[key] = route
 		}
 	}
 	c.Montage.ApplyDefaults()
@@ -1384,111 +1262,36 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			MaxRecommendedResolution: c.ModelRoutes.VideoUnderstanding.MaxRecommendedResolution,
 		}
 	}
-	if c.ModelRoutes.ImageGeneration.Cover.Model != "" || c.ModelRoutes.ImageGeneration.Cover.Provider != "" {
-		cfg, err := c.imageAPIFromRoute("model_routes.image_generation.cover", c.ModelRoutes.ImageGeneration.Cover)
-		if err != nil {
+	for key, route := range c.ModelRoutes.ImageGeneration.Capabilities {
+		if err := validateEnabledImageCapability("model_routes.image_generation.capabilities."+key, key, route); err != nil {
 			return err
 		}
-		c.ImageAPI.Cover = cfg
-	}
-	if c.ModelRoutes.ImageGeneration.Content.Model != "" || c.ModelRoutes.ImageGeneration.Content.Provider != "" {
-		cfg, err := c.imageAPIFromRoute("model_routes.image_generation.content", c.ModelRoutes.ImageGeneration.Content)
-		if err != nil {
-			return err
-		}
-		c.ImageAPI.Content = cfg
-	}
-	if len(c.ModelRoutes.ImageGeneration.Designer) > 0 {
-		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
-		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
-		c.ImagePresets = make([]ImageModelPreset, 0, len(c.ModelRoutes.ImageGeneration.Designer))
-		routeKeys := make([]string, 0, len(c.ModelRoutes.ImageGeneration.Designer))
-		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-			if !route.Enabled {
-				continue
-			}
-			routeKeys = append(routeKeys, key)
-		}
-		sort.Slice(routeKeys, func(i, j int) bool {
-			left := c.ModelRoutes.ImageGeneration.Designer[routeKeys[i]]
-			right := c.ModelRoutes.ImageGeneration.Designer[routeKeys[j]]
-			if left.SortOrder > 0 || right.SortOrder > 0 {
-				if left.SortOrder == 0 {
-					return false
-				}
-				if right.SortOrder == 0 {
-					return true
-				}
-				if left.SortOrder != right.SortOrder {
-					return left.SortOrder < right.SortOrder
-				}
-			}
-			if left.QualityRank != right.QualityRank {
-				return left.QualityRank > right.QualityRank
-			}
-			if left.SelectionKey != right.SelectionKey {
-				return left.SelectionKey < right.SelectionKey
-			}
-			return routeKeys[i] < routeKeys[j]
-		})
-		for _, key := range routeKeys {
-			route := c.ModelRoutes.ImageGeneration.Designer[key]
-			routeName := "model_routes.image_generation.designer." + key
-			if err := validateEnabledDesignerRoute(routeName, route); err != nil {
-				return err
-			}
-			cfg, err := c.imageAPIFromRoute(routeName, route)
-			if err != nil {
-				return err
-			}
-			c.ImageAPI.Designer[key] = cfg
-			c.ImageAPI.designerOrder = append(c.ImageAPI.designerOrder, key)
-			providerConfig := c.ModelProviders[route.Provider]
-			c.ImagePresets = append(c.ImagePresets, ImageModelPreset{
-				Key: route.SelectionKey, DisplayName: route.Alias,
-				Description: route.Description, SortOrder: route.SortOrder, BillingSKU: route.BillingSKU,
-				ProviderRoute: "image_generation.designer." + key,
-				Provider:      providerKind(route.Provider), Model: route.Model,
-				Endpoint: providerConfig.BaseURL, APIKey: providerConfig.APIKey,
-				Timeout: route.Timeout, MinTier: route.MinTier,
-				QualityRank: route.QualityRank, Capabilities: route.Capabilities,
-			})
-		}
-	}
-	sort.Slice(c.ImagePresets, func(i, j int) bool {
-		left, right := c.ImagePresets[i], c.ImagePresets[j]
-		if left.SortOrder > 0 || right.SortOrder > 0 {
-			if left.SortOrder == 0 {
-				return false
-			}
-			if right.SortOrder == 0 {
-				return true
-			}
-			if left.SortOrder != right.SortOrder {
-				return left.SortOrder < right.SortOrder
-			}
-		}
-		if left.QualityRank != right.QualityRank {
-			return left.QualityRank > right.QualityRank
-		}
-		return left.Key < right.Key
-	})
-	if err := ValidateImagePresets(c.ImagePresets); err != nil {
-		return err
 	}
 	return nil
 }
 
-func validateEnabledDesignerRoute(path string, route ImageGenerationRouteConfig) error {
+func validateEnabledImageCapability(path, key string, route ImageGenerationRouteConfig) error {
 	var errs []string
+	if key == "" || len(key) > 50 || strings.ContainsAny(key, " \t\n\r") || key == "custom" {
+		errs = append(errs, path+" key must be a non-reserved value up to 50 characters without whitespace")
+	}
+	publicText := strings.ToLower(key + "\n" + route.Alias + "\n" + route.Description)
+	for _, term := range []string{"openai", "chatgpt", "gpt", "gemini", "claude", "seedream", "doubao"} {
+		if strings.Contains(publicText, term) {
+			errs = append(errs, fmt.Sprintf("%s public text contains blocked brand %q", path, term))
+		}
+	}
 	if strings.TrimSpace(route.Provider) == "" {
 		errs = append(errs, path+".provider is required")
 	}
 	if strings.TrimSpace(route.Model) == "" {
 		errs = append(errs, path+".model is required")
 	}
-	if strings.TrimSpace(route.SelectionKey) == "" {
-		errs = append(errs, path+".selection_key is required")
+	if strings.TrimSpace(route.BaseURL) == "" {
+		errs = append(errs, path+".base_url is required")
+	}
+	if strings.TrimSpace(route.APIKey) == "" {
+		errs = append(errs, path+".api_key is required")
 	}
 	switch route.MinTier {
 	case "free", "pro", "enterprise":
@@ -1498,10 +1301,16 @@ func validateEnabledDesignerRoute(path string, route ImageGenerationRouteConfig)
 	if strings.TrimSpace(route.Alias) == "" {
 		errs = append(errs, path+".alias is required")
 	}
+	if strings.TrimSpace(route.Description) == "" {
+		errs = append(errs, path+".description is required")
+	}
+	if strings.TrimSpace(route.BillingSKU) == "" {
+		errs = append(errs, path+".billing_sku is required")
+	}
 	if route.QualityRank <= 0 {
 		errs = append(errs, path+".quality_rank must be positive")
 	}
-	if err := validateDesignerProviderCapabilities(path+".capabilities", route.Capabilities); err != nil {
+	if err := validateDesignerProviderCapabilities(path+".features", route.Features); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
@@ -1559,23 +1368,43 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 	return nil
 }
 
-func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteConfig) (*appconfig.ImageAPI, error) {
-	p, ok := c.ModelProviders[route.Provider]
-	if !ok {
-		return nil, fmt.Errorf("%s.provider %q is not configured in model_providers", routeName, route.Provider)
-	}
+func imageAPIFromCapability(route ImageGenerationRouteConfig) *appconfig.ImageAPI {
 	enable := route.Enabled
-	cfg := &appconfig.ImageAPI{
+	return &appconfig.ImageAPI{
 		Alias:          route.Alias,
 		Enable:         &enable,
-		Key:            p.APIKey,
-		BaseURL:        p.BaseURL,
-		Provider:       providerKind(route.Provider),
+		Key:            route.APIKey,
+		BaseURL:        route.BaseURL,
+		Provider:       route.Provider,
 		Model:          route.Model,
 		TimeoutSec:     int(route.Timeout / time.Second),
 		ResponseFormat: route.ResponseFormat,
 	}
-	return cfg, nil
+}
+
+func (route ImageGenerationRouteConfig) RuntimeImageAPI() *appconfig.ImageAPI {
+	return imageAPIFromCapability(route)
+}
+
+func (c *Config) ImageCapability(key string) (ImageGenerationRouteConfig, bool) {
+	if c == nil {
+		return ImageGenerationRouteConfig{}, false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || key == model.ImageModelKeySystemDefault {
+		key = c.ModelRoutes.ImageGeneration.DefaultCapability
+	}
+	route, ok := c.ModelRoutes.ImageGeneration.Capabilities[key]
+	return route, ok
+}
+
+func (c *Config) ImageAPIForCapability(key string) (*ImageAPIConfig, bool) {
+	route, ok := c.ImageCapability(key)
+	if !ok || !route.Enabled {
+		return nil, false
+	}
+	api := imageAPIFromCapability(route)
+	return &ImageAPIConfig{Cover: api, Content: api}, true
 }
 
 func providerKind(providerKey string) string {
@@ -1759,40 +1588,38 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-		if route.Enabled {
-			if err := validateEnabledDesignerRoute("model_routes.image_generation.designer."+key, route); err != nil {
-				errs = append(errs, err.Error())
-			}
+	imageGeneration := c.ModelRoutes.ImageGeneration
+	if strings.TrimSpace(imageGeneration.DefaultCapability) != "" || len(imageGeneration.Capabilities) > 0 {
+		if strings.TrimSpace(imageGeneration.DefaultCapability) == "" {
+			errs = append(errs, "model_routes.image_generation.default_capability is required")
+		} else if route, ok := imageGeneration.Capabilities[imageGeneration.DefaultCapability]; !ok {
+			errs = append(errs, "model_routes.image_generation.default_capability must exist in capabilities")
+		} else if !route.Enabled {
+			errs = append(errs, "model_routes.image_generation.default_capability must be enabled")
+		} else if route.MinTier != "free" {
+			errs = append(errs, "model_routes.image_generation.default_capability must require free tier")
+		}
+	}
+	for key, route := range imageGeneration.Capabilities {
+		if err := validateEnabledImageCapability("model_routes.image_generation.capabilities."+key, key, route); err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
 
-	imageRoutes := []struct {
-		name  string
-		route ImageGenerationRouteConfig
-	}{
-		{name: "model_routes.image_generation.cover", route: c.ModelRoutes.ImageGeneration.Cover},
-		{name: "model_routes.image_generation.content", route: c.ModelRoutes.ImageGeneration.Content},
-	}
-	for key, route := range c.ModelRoutes.ImageGeneration.Designer {
-		imageRoutes = append(imageRoutes, struct {
-			name  string
-			route ImageGenerationRouteConfig
-		}{name: "model_routes.image_generation.designer." + key, route: route})
-	}
-	for _, candidate := range imageRoutes {
-		if strings.TrimSpace(candidate.route.Provider) == "" && strings.TrimSpace(candidate.route.Model) == "" {
+	for key, route := range imageGeneration.Capabilities {
+		if !route.Enabled {
 			continue
 		}
-		if candidate.route.Timeout <= 0 {
-			errs = append(errs, candidate.name+".timeout must be positive")
+		name := "model_routes.image_generation.capabilities." + key
+		if route.Timeout <= 0 {
+			errs = append(errs, name+".timeout must be positive")
 			continue
 		}
-		minimumOperationTimeout := candidate.route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
+		minimumOperationTimeout := route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
 		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
 			errs = append(errs, fmt.Sprintf(
 				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
-				c.MCP.ToolTimeouts.GenerateImage, candidate.name, candidate.route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
+				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
 		}
 	}
 

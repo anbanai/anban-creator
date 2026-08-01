@@ -7,7 +7,7 @@ func TestFindSKUByExecutionProfile(t *testing.T) {
 		{ID: "task.seednote.cost.v1", Operation: "task.seednote", ExecutionProfile: "effective"},
 		{ID: "task.seednote.balance.v1", Operation: "task.seednote", ExecutionProfile: "balanced"},
 		{ID: "task.seednote.quality.v1", Operation: "task.seednote", ExecutionProfile: "quality"},
-		{ID: "image.seedream.designer.v1", Operation: "designer.generate_image", Route: "image_generation.designer.seedream"},
+		{ID: "image.standard", Operation: "image.generate", Route: "image_generation.capabilities.standard"},
 	}}
 
 	for _, want := range []string{"effective", "balanced", "quality"} {
@@ -16,7 +16,7 @@ func TestFindSKUByExecutionProfile(t *testing.T) {
 			t.Fatalf("profile %q resolved to %#v, ok=%v", want, sku, ok)
 		}
 	}
-	if _, ok := catalog.FindSKUByExecutionProfile("designer.generate_image", "balanced"); ok {
+	if _, ok := catalog.FindSKUByExecutionProfile("image.generate", "balanced"); ok {
 		t.Fatal("Designer must not resolve Agent execution profiles")
 	}
 }

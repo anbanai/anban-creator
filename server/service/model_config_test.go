@@ -5,28 +5,20 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
-func TestPresetToImageAPIConfigUsesPresetTimeout(t *testing.T) {
-	base := &srvconfig.Config{ImageAPI: srvconfig.ImageAPIConfig{
-		Cover:   &appconfig.ImageAPI{TimeoutSec: 30},
-		Content: &appconfig.ImageAPI{TimeoutSec: 45},
-	}}
-	preset := &srvconfig.ImageModelPreset{
-		Provider: "volcengine", Model: "seedream", Timeout: 2 * time.Minute,
-	}
-
-	got := presetToImageAPIConfig(preset, base)
-	if got == nil || got.Cover.TimeoutSec != 120 || got.Content.TimeoutSec != 120 {
-		t.Fatalf("preset runtime timeouts = %#v/%#v, want 120/120", got.Cover, got.Content)
+func TestImageCapabilityRuntimeUsesConfiguredTimeout(t *testing.T) {
+	route := srvconfig.ImageGenerationRouteConfig{Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Timeout: 120000000000, Enabled: true}
+	base := &srvconfig.Config{ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{"standard": route}}}}
+	got, ok := base.ImageAPIForCapability("standard")
+	if !ok || got.Cover.TimeoutSec != 120 || got.Content.TimeoutSec != 120 {
+		t.Fatalf("capability runtime timeouts = %#v, want 120/120", got)
 	}
 }
 
@@ -45,20 +37,9 @@ func setupTestModelConfigService(t *testing.T) (*ModelConfigService, repository.
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 	cfg := &srvconfig.Config{
-		ImageAPI: srvconfig.ImageAPIConfig{
-			Cover: &appconfig.ImageAPI{
-				Provider: "gemini",
-				Key:      "system-key",
-				BaseURL:  "https://system.example",
-				Model:    "system-image-model",
-			},
-			Content: &appconfig.ImageAPI{
-				Provider: "gemini",
-				Key:      "system-key",
-				BaseURL:  "https://system.example",
-				Model:    "system-image-model",
-			},
-		},
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+			"standard": {Provider: "gemini", Model: "system-image-model", BaseURL: "https://system.example", APIKey: "system-key", Enabled: true, MinTier: "free", BillingSKU: "image.standard"},
+		}}},
 	}
 	return NewModelConfigService(repo, cfg, &logger), repo
 }

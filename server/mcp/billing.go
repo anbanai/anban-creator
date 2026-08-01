@@ -76,8 +76,8 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 			return cfg.Cover.Provider, cfg.Cover.Model, "user_custom"
 		}
 	}
-	if billSvc.config.ImageAPI.Cover != nil {
-		return billSvc.config.ImageAPI.Cover.Provider, billSvc.config.ImageAPI.Cover.Model, "system_default"
+	if cfg, ok := billSvc.config.ImageAPIForCapability(""); ok && cfg.Cover != nil {
+		return cfg.Cover.Provider, cfg.Cover.Model, "system_default"
 	}
 	return "", "", ""
 }

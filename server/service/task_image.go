@@ -117,12 +117,12 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 			pricing, err = s.catalog.ResolvePriceBySKUID(ctx, task.BillingCatalogID, resolved.BillingSKU, tier)
 		}
 	} else if task.BillingPricingTier != "" {
-		pricing, err = s.catalog.ResolvePriceForTier(ctx, task.BillingCatalogID, "mcp.generate_image", "image_generation."+req.ImageType, model.Tier(task.BillingPricingTier))
+		pricing, err = s.catalog.ResolvePriceForTier(ctx, task.BillingCatalogID, "image.generate", "image_generation.capabilities."+resolved.Key, model.Tier(task.BillingPricingTier))
 	} else {
 		// Tasks admitted before tier pricing did not persist a pricing tier. Their
 		// immutable flat catalog remains authoritative; the user tier only labels
 		// the frozen-price evidence for the operation.
-		pricing, err = s.catalog.ResolvePrice(ctx, req.UserID, task.BillingCatalogID, "mcp.generate_image", "image_generation."+req.ImageType)
+		pricing, err = s.catalog.ResolvePrice(ctx, req.UserID, task.BillingCatalogID, "image.generate", "image_generation.capabilities."+resolved.Key)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve fixed image SKU: %w", err)

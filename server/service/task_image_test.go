@@ -121,9 +121,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		CatalogID: "retail-task-image-v1", Currency: "credits",
 		TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 		SKUs: []serverbilling.SKUConfig{
-			{ID: "image.cover", Operation: "mcp.generate_image", Route: "image_generation.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
-			{ID: "image.content", Operation: "mcp.generate_image", Route: "image_generation.content", ChargePolicy: "accepted_task_operation", PriceCredits: 500, Delivery: "persisted_image"},
-			{ID: "image.seedream.designer", Operation: "designer.generate_image", Route: "image_generation.designer.seedream", ChargePolicy: "image_operation", PriceCredits: 500, Delivery: "persisted_image"},
+			{ID: "image.standard", Operation: "image.generate", Route: "image_generation.capabilities.standard", ChargePolicy: "image_operation", PriceCredits: 500, Delivery: "persisted_image"},
 		},
 	}, Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000}, Policy: serverbilling.PolicySnapshot{AcceptedTask: serverbilling.AcceptedTaskPolicy{
 		ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true,
@@ -147,7 +145,8 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	}
 	resolver := &taskImageResolverFake{resolved: &ResolvedImageModel{
 		Provider: "openai", Model: "gpt-image-2", SelectionReason: "preferred",
-		BillingSKU:        "image.seedream.designer",
+		BillingSKU:        "image.standard",
+		Key:               "standard",
 		SupportsReference: true, MaxReferenceImages: 16,
 	}}
 	generator := &taskImageGeneratorFake{result: &ImageResult{
@@ -203,7 +202,7 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 func TestGenerateTaskImageWrongPolicyFailsSettlementWithoutCharge(t *testing.T) {
 	f := newTaskImageFixture(t)
 	if err := f.db.Model(&model.BillingSKU{}).
-		Where("catalog_id = ? AND sk_uid = ?", "retail-task-image-v1", "image.seedream.designer").
+		Where("catalog_id = ? AND sk_uid = ?", "retail-task-image-v1", "image.standard").
 		Update("policy", "standalone_operation").Error; err != nil {
 		t.Fatal(err)
 	}

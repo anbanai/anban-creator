@@ -88,28 +88,22 @@ model_routes:
     max_recommended_resolution: "1920x1080"
 
   image_generation:
-    cover:
-      provider: "volcengine_ark"
-      model: "doubao-seedream-5-0-pro-260628"
-      timeout: 5m
-    content:
-      provider: "volcengine_ark"
-      model: "doubao-seedream-5-0-pro-260628"
-      timeout: 5m
-    designer:
-      seedream:
-        selection_key: "standard_image"
+    default_capability: "standard"
+    capabilities:
+      standard:
         min_tier: "free"
         alias: "标准图像"
         description: "适合日常内容配图和常规视觉创作"
-        billing_sku: "image.seedream.designer"
+        billing_sku: "image.standard"
         sort_order: 10
-        provider: "volcengine_ark"
+        provider: "volcengine"
         model: "doubao-seedream-5-0-pro-260628"
+        base_url: "https://ark.cn-beijing.volces.com/api/v3"
+        api_key: "${VOLCENGINE_ARK_API_KEY}"
         timeout: 5m
         enabled: true
         quality_rank: 100
-        capabilities:
+        features:
           size_presets: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"]
           default_size: "1:1"
           max_batch: 1
@@ -120,20 +114,21 @@ model_routes:
           has_background: false
           has_compression: false
           watermark: true
-      gpt_image_2:
-        selection_key: "professional_enhance"
+      professional:
         min_tier: "enterprise"
         alias: "专业增强"
         description: "更适合复杂构图、细节表现和高要求视觉任务"
-        billing_sku: "image.gpt-image-2.designer"
+        billing_sku: "image.professional"
         sort_order: 20
-        provider: "wangcai_openai"
+        provider: "openai"
         model: "gpt-image-2"
+        base_url: "http://18.141.196.64:18888/v1"
+        api_key: "${WANGCAI_OPENAI_API_KEY}"
         timeout: 5m
         enabled: true
         quality_rank: 200
         response_format: "url"
-        capabilities:
+        features:
           quality_levels: ["auto", "low", "medium", "high"]
           size_presets: ["auto", "1024x1024", "1536x1024", "1024x1536"]
           default_size: "auto"

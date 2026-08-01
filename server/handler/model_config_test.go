@@ -11,7 +11,6 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -53,10 +52,10 @@ func setupModelConfigHandlerTest(t *testing.T) *fiber.App {
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 	cfg := &srvconfig.Config{
-		ImageAPI: srvconfig.ImageAPIConfig{
-			Cover:   &appconfig.ImageAPI{},
-			Content: &appconfig.ImageAPI{},
-		},
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities:      map[string]srvconfig.ImageGenerationRouteConfig{"standard": {Provider: "openai", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Enabled: true}},
+		}},
 	}
 	svc := service.NewModelConfigService(repo, cfg, &logger)
 	h := NewModelConfigHandler(svc, &logger)

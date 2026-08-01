@@ -791,15 +791,15 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	presets := []config.ImageModelPreset{
-		{Key: "volcengine-standard", Provider: "volcengine", Model: "doubao-seedream", MinTier: "free"},
-		{Key: "gemini-pro", Provider: "gemini", Model: "gemini-3-pro", MinTier: "pro"},
+	capabilities := map[string]config.ImageGenerationRouteConfig{
+		"volcengine-standard": {Provider: "volcengine", Model: "image-v1", MinTier: "free", Enabled: true},
+		"gemini-pro":          {Provider: "internal", Model: "image-v2", MinTier: "pro", Enabled: true},
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
-	h.SetImagePresets(presets)
+	h.SetImageCapabilities(capabilities)
 	h.SetRepository(repo)
 
 	app := fiber.New()
@@ -1170,7 +1170,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
-	h.SetImagePresets([]config.ImageModelPreset{{Key: "free-image", Provider: "test", Model: "image-v1", MinTier: "free"}})
+	h.SetImageCapabilities(map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true}})
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
@@ -2189,7 +2189,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			h.SetRepository(repo)
 			h.SetStore(store)
 			h.SetReferenceAssetService(referenceSvc)
-			h.SetImagePresets([]config.ImageModelPreset{{Key: "free-image", Provider: "test", Model: "image-v1", MinTier: "free"}})
+			h.SetImageCapabilities(map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true}})
 			app := fiber.New()
 			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 

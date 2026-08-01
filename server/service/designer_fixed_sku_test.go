@@ -56,8 +56,8 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 			TaskFailureReversal: serverbilling.TaskFailureReversalPolicy{Enabled: true, Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"}},
 		},
 		Products: serverbilling.ProductCatalog{CatalogID: "retail-designer-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, SKUs: []serverbilling.SKUConfig{{
-			ID: "image.seedream.designer", Operation: "designer.generate_image", ChargePolicy: "image_operation",
-			PriceCredits: 500, Route: "image_generation.designer.seedream", Delivery: "persisted_image",
+			ID: "image.standard", Operation: "image.generate", ChargePolicy: "image_operation",
+			PriceCredits: 500, Route: "image_generation.capabilities.standard", Delivery: "persisted_image",
 		}}},
 	}
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
@@ -76,14 +76,10 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 		})
 	}
 	wallet := NewBillingWalletService(repo, &bundle, BillingWalletOptions{Now: func() time.Time { return now }})
-	enabled := true
 	cfg := &srvconfig.Config{
-		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{Designer: map[string]srvconfig.ImageGenerationRouteConfig{
-			"seedream": {Enabled: true, Provider: "volcengine_ark", Model: "doubao-seedream-5-0-pro-260628", Capabilities: DesignerProviderCapabilities{MaxBatch: 1}},
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+			"standard": {Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Alias: "Standard", MinTier: "free", BillingSKU: "image.standard", Features: DesignerProviderCapabilities{MaxBatch: 1, DefaultSize: "1:1", SizePresets: []string{"1:1"}}},
 		}}},
-		ImageAPI: srvconfig.ImageAPIConfig{Designer: map[string]*appconfig.ImageAPI{
-			"seedream": {Enable: &enabled, Provider: "volcengine", Model: "doubao-seedream-5-0-pro-260628"},
-		}},
 	}
 	logger := zerolog.New(io.Discard)
 	service := NewDesignerService(db, cfg, nil, &logger)
@@ -96,11 +92,11 @@ func (f *designerFixedSKUFixture) request(t *testing.T) DesignerGenerateRequest 
 	t.Helper()
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "product poster",
-		ProviderID: "seedream", Size: "1:1", N: 1,
+		CapabilityKey: "standard", Size: "1:1", N: 1,
 	}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-		UserID: f.userID, Operation: "designer.generate_image", Route: "image_generation.designer.seedream",
+		UserID: f.userID, Operation: "image.generate", Route: "image_generation.capabilities.standard",
 		RequestFingerprint: req.RequestFingerprint, IdempotencyScope: "designer-quote", IdempotencyKey: req.OperationID,
 	})
 	if err != nil {
@@ -167,12 +163,12 @@ func TestDesignerCreateGenerationRejectsBatchWithoutCountSKU(t *testing.T) {
 
 func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 1000)
-	f.service.fullCfg.ModelRoutes.ImageGeneration.Designer["seedream"] = srvconfig.ImageGenerationRouteConfig{
-		Enabled: true, Provider: "volcengine_ark", Model: "doubao-seedream-5-0-pro-260628",
-		MinTier: "enterprise", BillingSKU: "image.seedream.designer",
-		Capabilities: DesignerProviderCapabilities{MaxBatch: 1},
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = srvconfig.ImageGenerationRouteConfig{
+		Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret",
+		MinTier: "enterprise", BillingSKU: "image.standard",
+		Features: DesignerProviderCapabilities{MaxBatch: 1},
 	}
-	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "restricted", ProviderID: "seedream", N: 1}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "restricted", CapabilityKey: "standard", N: 1}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
 		t.Fatalf("free quote error = %v, want access denied", err)

@@ -294,13 +294,14 @@ func main() {
 	}
 	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes)
 	activeDeadline := reconcilerConfig.ActiveDeadline
+	defaultImageAPI, _ := cfg.ImageAPIForCapability("")
 	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
 		MaxTurns:                cfg.Claude.MaxTurns,
 		TokenTTL:                activeDeadline,
 		ActiveDeadline:          activeDeadline,
 		SignedURLTTL:            cfg.Storage.DirectUploadExpiresSeconds,
 		Store:                   store,
-		ImageAPIConfig:          &cfg.ImageAPI,
+		ImageAPIConfig:          defaultImageAPI,
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
@@ -468,7 +469,7 @@ func main() {
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var modelConfigHandler *handler.ModelConfigHandler
-	var imageModelHandler *handler.ImageModelHandler
+	var imageCapabilityHandler *handler.ImageCapabilityHandler
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
@@ -559,16 +560,16 @@ func main() {
 	if fixedBilling != nil {
 		imageCatalog = fixedBilling.Catalog
 	}
-	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, imageCatalog, log)
+	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
 	// Wire image presets + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
-		taskHandler.SetImagePresets(cfg.ImagePresets)
+		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration.Capabilities)
 		if repo != nil {
 			taskHandler.SetRepository(repo)
 		}
 	}
 	if planHandler != nil {
-		planHandler.SetImagePresets(cfg.ImagePresets)
+		planHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration.Capabilities)
 		if repo != nil {
 			planHandler.SetRepository(repo)
 		}
@@ -583,7 +584,7 @@ func main() {
 		var liveSliceSvc *service.LiveSliceService
 
 		if store != nil {
-			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, log)
+			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
 			if modelConfigSvc != nil {
 				imageSvc.SetModelConfigService(modelConfigSvc)
 			}
@@ -755,7 +756,7 @@ func main() {
 		AIEntryHandler:           aiEntryHandler,
 		FeedbackHandler:          feedbackHandler,
 		ModelConfigHandler:       modelConfigHandler,
-		ImageModelHandler:        imageModelHandler,
+		ImageCapabilityHandler:   imageCapabilityHandler,
 		TemplateHandler:          templateHandler,
 		ViralAnalysisHandler:     viralAnalysisHandler,
 		PosterHandler:            posterHandler,

@@ -22,7 +22,7 @@ import (
 type PlanHandler struct {
 	service                 *service.PlanService
 	logger                  *zerolog.Logger
-	imagePresets            []config.ImageModelPreset
+	imageCapabilities       map[string]config.ImageGenerationRouteConfig
 	repo                    repository.Repository
 	store                   storage.Provider
 	referenceAssets         *service.ReferenceAssetService
@@ -93,10 +93,10 @@ func (h *PlanHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-// SetImagePresets wires the system-managed image model presets for tier-gated
+// SetImageCapabilities wires the system-managed image capabilities for tier-gated
 // validation of createPlanRequest/updatePlanRequest.ImageModelKey.
-func (h *PlanHandler) SetImagePresets(presets []config.ImageModelPreset) {
-	h.imagePresets = presets
+func (h *PlanHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
+	h.imageCapabilities = capabilities
 }
 
 // SetRepository wires the user repository so the handler can resolve the caller's
@@ -560,10 +560,10 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 }
 
 // validateImageModelKeyForUser delegates to the package-level helper, binding
-// this handler's repository and image presets. See validateImageModelKeyForUser
-// in image_model.go for the fail-closed tier-resolution rules.
+// this handler's repository and image capabilities. See
+// validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
 func (h *PlanHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
-	return validateImageModelKeyForUser(c.Context(), h.repo, userID, key, h.imagePresets)
+	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
 }
 
 // Resume handles POST /api/v1/plans/:id/resume.

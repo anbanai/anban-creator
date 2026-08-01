@@ -35,14 +35,14 @@ const (
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
-	service         *service.TaskService
-	logger          *zerolog.Logger
-	dataDir         string // local storage data directory (for ServeLocalFile)
-	taskLogDir      string // task log directory (for GetLog)
-	imagePresets    []config.ImageModelPreset
-	repo            repository.Repository
-	store           storage.Provider
-	referenceAssets *service.ReferenceAssetService
+	service           *service.TaskService
+	logger            *zerolog.Logger
+	dataDir           string // local storage data directory (for ServeLocalFile)
+	taskLogDir        string // task log directory (for GetLog)
+	imageCapabilities map[string]config.ImageGenerationRouteConfig
+	repo              repository.Repository
+	store             storage.Provider
+	referenceAssets   *service.ReferenceAssetService
 }
 
 func (h *TaskHandler) SetReferenceAssetService(referenceAssets *service.ReferenceAssetService) {
@@ -53,7 +53,7 @@ func (h *TaskHandler) SetReferenceAssetService(referenceAssets *service.Referenc
 //
 // Optional variadic options:
 //   - first string arg: local data directory (for ServeLocalFile).
-//   - WithImagePresets / WithRepository: configure tier-gated image model validation.
+//   - SetImageCapabilities / SetRepository: configure tier-gated image capability validation.
 func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...string) *TaskHandler {
 	h := &TaskHandler{service: svc, logger: logger}
 	if svc != nil {
@@ -65,10 +65,10 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 	return h
 }
 
-// SetImagePresets wires the system-managed image model presets for tier-gated
+// SetImageCapabilities wires the system-managed image capabilities for tier-gated
 // validation of createTaskRequest.ImageModelKey.
-func (h *TaskHandler) SetImagePresets(presets []config.ImageModelPreset) {
-	h.imagePresets = presets
+func (h *TaskHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
+	h.imageCapabilities = capabilities
 }
 
 // SetRepository wires the user repository so the handler can resolve the caller's
@@ -1997,10 +1997,10 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 }
 
 // validateImageModelKeyForUser delegates to the package-level helper, binding
-// this handler's repository and image presets. See validateImageModelKeyForUser
-// in image_model.go for the fail-closed tier-resolution rules.
+// this handler's repository and image capabilities. See
+// validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
 func (h *TaskHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
-	return validateImageModelKeyForUser(c.Context(), h.repo, userID, key, h.imagePresets)
+	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
 }
 
 // validateUUIDParam extracts and validates that a path parameter is a valid UUID.

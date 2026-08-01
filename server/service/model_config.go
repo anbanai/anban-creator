@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -174,10 +173,12 @@ func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID
 		return nil
 	}
 
-	// Start from server config as base so fields like TimeoutSec, Size,
-	// Volcengine, MaxSizeMB etc. are preserved when user only overrides provider/key/model.
-	cover := *s.cfg.ImageAPI.Cover
-	content := *s.cfg.ImageAPI.Content
+	base, ok := s.cfg.ImageAPIForCapability("")
+	if !ok || base.Cover == nil || base.Content == nil {
+		return nil
+	}
+	cover := *base.Cover
+	content := *base.Content
 	if uc.Provider != "" {
 		cover.Provider = uc.Provider
 		content.Provider = uc.Provider
@@ -197,7 +198,7 @@ func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID
 	cfg := &config.ImageAPIConfig{
 		Cover:   &cover,
 		Content: &content,
-		Sizes:   s.cfg.ImageAPI.Sizes,
+		Sizes:   base.Sizes,
 	}
 
 	return cfg
@@ -223,15 +224,15 @@ func (s *ModelConfigService) GetImageProxy(ctx context.Context, userID string) s
 //     (system default) with a warning. Caller is responsible for enforcing that
 //     the user's tier is Enterprise at request time; we re-check tier here as a
 //     defense-in-depth (Enterprise downgrade scenario).
-//   - any other key: look up in cfg.ImagePresets, re-check tier at runtime
+//   - any other key: look up in the configured capability catalog and re-check tier at runtime
 //     (handles tier downgrade after task creation), fall back if missing.
 //
 // Returns nil cfg with source "system_default" when no override/preset applies
-// — callers must then use their own server default (s.imageCfg).
+// — callers must then use their own server default.
 func (s *ModelConfigService) ResolveImageConfigForKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string) {
-	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
+	imageModelKey = strings.TrimSpace(imageModelKey)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if s.userTierIsEnterprise(ctx, userID) {
 			if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
@@ -260,32 +261,12 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 		return cfg, "user_custom"
 	}
 
-	// Look up preset by key.
-	for i := range s.cfg.ImagePresets {
-		p := &s.cfg.ImagePresets[i]
-		if p.Key != imageModelKey {
-			continue
-		}
-		// Re-check tier at execution time (handles downgrade).
-		userTier := s.lookupUserTier(ctx, userID)
-		requiredTier := model.NormalizeTier(p.MinTier)
-		if !model.TierSatisfies(userTier, requiredTier) {
-			s.logger.Warn().
-				Str("user_id", userID).
-				Str("preset_key", p.Key).
-				Str("user_tier", string(userTier)).
-				Str("required_tier", string(requiredTier)).
-				Msg("user tier no longer satisfies preset, fallback to system default")
-			return nil, "system_default"
-		}
-		return presetToImageAPIConfig(p, s.cfg), "preset:" + p.Key
+	route, ok := s.cfg.ImageCapability(imageModelKey)
+	if !ok || !route.Enabled || !model.TierSatisfies(s.lookupUserTier(ctx, userID), model.NormalizeTier(route.MinTier)) {
+		return nil, "system_default"
 	}
-
-	s.logger.Warn().
-		Str("user_id", userID).
-		Str("image_model_key", imageModelKey).
-		Msg("image preset not found, fallback to system default")
-	return nil, "system_default"
+	runtime, _ := s.cfg.ImageAPIForCapability(imageModelKey)
+	return runtime, "capability:" + imageModelKey
 }
 
 // ResolveImageConfigForTaskKey resolves a persisted task/plan image model key.
@@ -295,12 +276,16 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 func (s *ModelConfigService) ResolveImageConfigForTaskKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string, error) {
-	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
+	imageModelKey = strings.TrimSpace(imageModelKey)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
 			return cfg, "user_custom", nil
 		}
-		return nil, "system_default", nil
+		cfg, ok := s.cfg.ImageAPIForCapability("")
+		if !ok {
+			return nil, "", fmt.Errorf("default image capability is unavailable")
+		}
+		return cfg, "capability:" + s.cfg.ModelRoutes.ImageGeneration.DefaultCapability, nil
 	}
 
 	if imageModelKey == model.ImageModelKeyCustom {
@@ -314,20 +299,17 @@ func (s *ModelConfigService) ResolveImageConfigForTaskKey(
 		return cfg, "user_custom", nil
 	}
 
-	for i := range s.cfg.ImagePresets {
-		p := &s.cfg.ImagePresets[i]
-		if p.Key != imageModelKey {
-			continue
-		}
-		userTier := s.lookupUserTier(ctx, userID)
-		requiredTier := model.NormalizeTier(p.MinTier)
-		if !model.TierSatisfies(userTier, requiredTier) {
-			return nil, "", fmt.Errorf("image model %q is not allowed for user tier %s; requires %s", imageModelKey, userTier, requiredTier)
-		}
-		return presetToImageAPIConfig(p, s.cfg), "preset:" + p.Key, nil
+	route, ok := s.cfg.ImageCapability(imageModelKey)
+	if !ok || !route.Enabled {
+		return nil, "", fmt.Errorf("unknown image model key %q", imageModelKey)
 	}
-
-	return nil, "", fmt.Errorf("unknown image model key %q", imageModelKey)
+	userTier := s.lookupUserTier(ctx, userID)
+	requiredTier := model.NormalizeTier(route.MinTier)
+	if !model.TierSatisfies(userTier, requiredTier) {
+		return nil, "", fmt.Errorf("image model %q is not allowed for user tier %s; requires %s", imageModelKey, userTier, requiredTier)
+	}
+	runtime, _ := s.cfg.ImageAPIForCapability(imageModelKey)
+	return runtime, "capability:" + imageModelKey, nil
 }
 
 // ImageReferenceLimitError reports that reference-capable image models are
@@ -398,55 +380,13 @@ func (s *ModelConfigService) ResolveImageModelForGeneration(
 	if err != nil {
 		return nil, err
 	}
-	if referenceCount == 0 || (preferred.supportsReference && referenceCount <= preferred.maxReferenceImages) {
-		return resolvedImageModelFromCandidate(preferred, "preferred"), nil
+	if referenceCount > 0 && !preferred.supportsReference {
+		return nil, fmt.Errorf("selected image capability does not support reference images")
 	}
-
-	userTier := s.lookupUserTier(ctx, userID)
-	maxAccessible := 0
-	if preferred.supportsReference && preferred.maxReferenceImages > maxAccessible {
-		maxAccessible = preferred.maxReferenceImages
+	if referenceCount > preferred.maxReferenceImages {
+		return nil, &ImageReferenceLimitError{Requested: referenceCount, MaxReferenceImages: preferred.maxReferenceImages}
 	}
-
-	candidates := make([]imageModelCandidate, 0, len(s.cfg.ImagePresets))
-	for i := range s.cfg.ImagePresets {
-		preset := &s.cfg.ImagePresets[i]
-		if !model.TierSatisfies(userTier, model.NormalizeTier(preset.MinTier)) {
-			continue
-		}
-		if preset.Capabilities.SupportsReference && preset.Capabilities.MaxReferenceImages > maxAccessible {
-			maxAccessible = preset.Capabilities.MaxReferenceImages
-		}
-		if !preset.Capabilities.SupportsReference || preset.Capabilities.MaxReferenceImages < referenceCount {
-			continue
-		}
-		candidate, candidateErr := imageModelCandidateFromPreset(preset, s.cfg, imageType)
-		if candidateErr != nil {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-
-	if len(candidates) == 0 {
-		if maxAccessible > 0 {
-			return nil, &ImageReferenceLimitError{
-				Requested:          referenceCount,
-				MaxReferenceImages: maxAccessible,
-			}
-		}
-		return nil, fmt.Errorf(
-			"no accessible image model supports reference images for image type %q",
-			imageType,
-		)
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].qualityRank != candidates[j].qualityRank {
-			return candidates[i].qualityRank > candidates[j].qualityRank
-		}
-		return candidates[i].key < candidates[j].key
-	})
-	return resolvedImageModelFromCandidate(candidates[0], "reference_compatible_fallback"), nil
+	return resolvedImageModelFromCandidate(preferred, "preferred"), nil
 }
 
 func (s *ModelConfigService) resolvePreferredImageCandidate(
@@ -463,7 +403,7 @@ func (s *ModelConfigService) resolvePreferredImageCandidate(
 		if s.cfg == nil {
 			return imageModelCandidate{}, fmt.Errorf("system image model is not configured")
 		}
-		resolvedConfig = &s.cfg.ImageAPI
+		resolvedConfig, _ = s.cfg.ImageAPIForCapability("")
 	}
 
 	apiCfg := imageAPIForType(resolvedConfig, imageType)
@@ -478,47 +418,27 @@ func (s *ModelConfigService) resolvePreferredImageCandidate(
 		model:    strings.TrimSpace(apiCfg.Model),
 		source:   source,
 	}
-	if strings.HasPrefix(source, "preset:") {
-		presetKey := strings.TrimPrefix(source, "preset:")
-		for i := range s.cfg.ImagePresets {
-			preset := &s.cfg.ImagePresets[i]
-			if preset.Key != presetKey {
-				continue
-			}
-			candidate.key = preset.Key
-			candidate.billingSKU = strings.TrimSpace(preset.BillingSKU)
-			candidate.qualityRank = preset.QualityRank
-			candidate.supportsReference = preset.Capabilities.SupportsReference
-			candidate.maxReferenceImages = preset.Capabilities.MaxReferenceImages
-			break
+	capabilityKey := strings.TrimPrefix(source, "capability:")
+	if capabilityKey == source || capabilityKey == "" {
+		capabilityKey = strings.TrimSpace(imageModelKey)
+		if capabilityKey == "" || capabilityKey == model.ImageModelKeySystemDefault || capabilityKey == model.ImageModelKeyCustom {
+			capabilityKey = s.cfg.ModelRoutes.ImageGeneration.DefaultCapability
+		}
+	}
+	if route, ok := s.cfg.ImageCapability(capabilityKey); ok {
+		candidate.key = capabilityKey
+		candidate.billingSKU = strings.TrimSpace(route.BillingSKU)
+		candidate.qualityRank = route.QualityRank
+		if !(strings.TrimSpace(imageModelKey) == model.ImageModelKeyCustom && source == "user_custom") {
+			candidate.supportsReference = route.Features.SupportsReference
+			candidate.maxReferenceImages = route.Features.MaxReferenceImages
+		} else {
+			candidate.key = model.ImageModelKeyCustom
 		}
 	} else {
 		candidate.supportsReference, candidate.maxReferenceImages = s.capabilitiesForImageConfig(resolvedConfig, imageType)
 	}
 	return candidate, nil
-}
-
-func imageModelCandidateFromPreset(
-	preset *config.ImageModelPreset,
-	base *config.Config,
-	imageType string,
-) (imageModelCandidate, error) {
-	resolvedConfig := presetToImageAPIConfig(preset, base)
-	apiCfg := imageAPIForType(resolvedConfig, imageType)
-	if apiCfg == nil || strings.TrimSpace(apiCfg.Provider) == "" || strings.TrimSpace(apiCfg.Model) == "" {
-		return imageModelCandidate{}, fmt.Errorf("image preset %q has no %s configuration", preset.Key, imageType)
-	}
-	return imageModelCandidate{
-		config:             resolvedConfig,
-		key:                preset.Key,
-		billingSKU:         strings.TrimSpace(preset.BillingSKU),
-		provider:           imageProviderKind(apiCfg.Provider),
-		model:              strings.TrimSpace(apiCfg.Model),
-		source:             "preset:" + preset.Key,
-		qualityRank:        preset.QualityRank,
-		supportsReference:  preset.Capabilities.SupportsReference,
-		maxReferenceImages: preset.Capabilities.MaxReferenceImages,
-	}, nil
 }
 
 func resolvedImageModelFromCandidate(candidate imageModelCandidate, reason string) *ResolvedImageModel {
@@ -563,15 +483,15 @@ func (s *ModelConfigService) capabilitiesForImageConfig(cfg *config.ImageAPIConf
 	}
 	provider := imageProviderKind(apiCfg.Provider)
 	modelID := strings.TrimSpace(apiCfg.Model)
-	routeKeys := make([]string, 0, len(s.cfg.ModelRoutes.ImageGeneration.Designer))
-	for key := range s.cfg.ModelRoutes.ImageGeneration.Designer {
+	routeKeys := make([]string, 0, len(s.cfg.ModelRoutes.ImageGeneration.Capabilities))
+	for key := range s.cfg.ModelRoutes.ImageGeneration.Capabilities {
 		routeKeys = append(routeKeys, key)
 	}
 	sort.Strings(routeKeys)
 	for _, key := range routeKeys {
-		route := s.cfg.ModelRoutes.ImageGeneration.Designer[key]
+		route := s.cfg.ModelRoutes.ImageGeneration.Capabilities[key]
 		if imageProviderKind(route.Provider) == provider && strings.TrimSpace(route.Model) == modelID {
-			return route.Capabilities.SupportsReference, route.Capabilities.MaxReferenceImages
+			return route.Features.SupportsReference, route.Features.MaxReferenceImages
 		}
 	}
 	return false, 0
@@ -607,43 +527,6 @@ func (s *ModelConfigService) lookupUserTier(ctx context.Context, userID string) 
 		return model.TierFree
 	}
 	return model.ResolveTier(user.Tier)
-}
-
-// presetToImageAPIConfig converts a single ImageModelPreset into a fully-formed
-// ImageAPIConfig where both Cover and Content use the same provider/model/key.
-// Other fields (Size, Volcengine tuning, MaxWidth, MaxSizeMB, etc.) are inherited
-// from the server's base ImageAPI config so callers don't lose those defaults.
-func presetToImageAPIConfig(p *config.ImageModelPreset, base *config.Config) *config.ImageAPIConfig {
-	if p == nil || base == nil {
-		return nil
-	}
-
-	// Start from base cover/content as templates to preserve Size/Volcengine/etc.
-	var cover, content appconfig.ImageAPI
-	if base.ImageAPI.Cover != nil {
-		cover = *base.ImageAPI.Cover
-	}
-	if base.ImageAPI.Content != nil {
-		content = *base.ImageAPI.Content
-	}
-
-	// Override provider/model/endpoint/key with preset values.
-	for _, dst := range []*appconfig.ImageAPI{&cover, &content} {
-		dst.Provider = p.Provider
-		dst.Model = p.Model
-		dst.BaseURL = p.Endpoint
-		dst.Key = p.APIKey
-		if p.Timeout > 0 {
-			dst.TimeoutSec = int(p.Timeout / time.Second)
-		}
-	}
-
-	return &config.ImageAPIConfig{
-		Cover:    &cover,
-		Content:  &content,
-		Designer: base.ImageAPI.Designer,
-		Sizes:    base.ImageAPI.Sizes,
-	}
 }
 
 // ---------------------------------------------------------------------------
