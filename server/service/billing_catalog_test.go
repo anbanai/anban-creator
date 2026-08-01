@@ -391,7 +391,8 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)
 	bundle := testBillingBundle()
-	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{})
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
 	registry, err := NewAgentProfileRegistry(testAgentProfiles())
 	if err != nil {
 		t.Fatal(err)
@@ -540,7 +541,8 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 	ctx := context.Background()
 	repo := newBillingServiceRepository(t)
 	bundle := tieredTestBillingBundle()
-	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{})
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	svc := NewBillingCatalogService(repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return now }})
 	if _, err := svc.Publish(ctx); err != nil {
 		t.Fatal(err)
 	}
