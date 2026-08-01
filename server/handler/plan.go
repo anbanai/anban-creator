@@ -143,6 +143,7 @@ type createPlanRequest struct {
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
 	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
 	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
+	AgentInput               map[string]any          `json:"agent_input,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -163,6 +164,7 @@ type updatePlanRequest struct {
 	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
+	AgentInput               *map[string]any                  `json:"agent_input,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -264,6 +266,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
+		AgentInput:               req.AgentInput,
 	})
 	if err != nil {
 		if handled, response := respondAgentProfileError(c, err); handled {
@@ -278,6 +281,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if errors.Is(err, service.ErrInvalidAgentInput) {
+			return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
@@ -477,6 +483,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		MontageInput:             req.MontageInput,
 		InputAttachments:         req.InputAttachments,
+		AgentInput:               req.AgentInput,
 	}
 	var plan *model.Plan
 	if req.ReferenceImageSet {
@@ -506,6 +513,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidAgentInput) {
+			return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
+		}
 		if handled, response := respondAgentProfileError(c, err); handled {
 			return response
 		}

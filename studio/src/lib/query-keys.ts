@@ -1,4 +1,7 @@
 export const queryKeys = {
+  agentPacks: {
+    all: ['agent-packs'] as const,
+  },
   auth: {
     me: ['auth', 'me'] as const,
   },

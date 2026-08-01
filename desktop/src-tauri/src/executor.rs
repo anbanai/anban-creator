@@ -24,6 +24,11 @@ const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 pub struct LocalExecutionConfig {
     pub task_id: String,
     pub task_type: String,
+    pub agent_pack_id: String,
+    pub agent_pack_version: String,
+    pub agent_pack_digest: String,
+    pub runtime_profile: String,
+    pub runtime_adapter: String,
     pub topic: String,
     pub agent_flag: String,
     pub max_turns: i64,
@@ -65,6 +70,7 @@ struct ExecutorInfo<'a> {
 
 #[derive(Serialize)]
 struct ClaimBody<'a> {
+    agent_pack_contract_version: u8,
     executor_info: ExecutorInfo<'a>,
 }
 
@@ -114,6 +120,7 @@ async fn claim_once(
         .post(&url)
         .bearer_auth(api_key)
         .json(&ClaimBody {
+            agent_pack_contract_version: 1,
             executor_info: ExecutorInfo {
                 hostname: "desktop",
                 version: "0.1",

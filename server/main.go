@@ -462,6 +462,7 @@ func main() {
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
+	agentPackHandler := handler.NewAgentPackHandler()
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
 	var apiKeyHandler *handler.APIKeyHandler
@@ -742,6 +743,7 @@ func main() {
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		AgentProfileHandler:      agentProfileHandler,
+		AgentPackHandler:         agentPackHandler,
 		BillingHandler:           fixedBilling.Handler,
 		BillingAdminHandler:      fixedBilling.AdminHandler,
 		TimelineHandler:          timelineHandler,

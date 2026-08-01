@@ -82,6 +82,10 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	if err != nil {
 		return nil, fmt.Errorf("resolve image capability: %w", err)
 	}
+	agentConfig := project.AgentConfig.Data()
+	if agentConfig == nil {
+		agentConfig = map[string]any{}
+	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
 		"instructions": project.Instructions, "keywords": project.Keywords,
@@ -89,6 +93,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"writer": style.Writer, "author": style.Author, "theme": style.Theme,
 		"visual_style_source": style.VisualStyleSource, "writer_source": style.WriterSource,
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
+		"agent_config": agentConfig,
 	}
 	resolvedProfile := map[string]any{
 		"id": project.ID, "name": project.Name, "platform": project.Platform,
@@ -99,6 +104,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
 		"image_capability_key": imageCapability.Key,
 		"supported_sizes":      append([]string(nil), imageCapability.SupportedSizes...),
+		"agent_config":         agentConfig,
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
 			"instructions": agentProfileSource(usesProjectSnapshot),

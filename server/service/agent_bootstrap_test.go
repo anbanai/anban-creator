@@ -384,6 +384,9 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	profiledExecution.ID, profiledExecution.TaskID, profiledExecution.Attempt = executionID, taskID, 1
 	profiledExecution.ResumeSessionID, profiledExecution.Target, profiledExecution.Status = resumeSessionID, "docker", model.TaskExecutionStarting
 	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "docker", "exec-1"
+	if err := applyAgentPackIdentity(&profiledExecution, task.Type); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.TaskExecutions().Create(ctx, &profiledExecution); err != nil {
 		t.Fatal(err)
 	}
@@ -398,6 +401,9 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
+	}
+	if first.AgentPackID != "seednote" || first.AgentPackVersion != "1.0.0" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
+		t.Fatalf("response Agent Pack identity = %#v", first)
 	}
 	if first.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.Envs["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.Envs["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.Envs) != 7 {
 		t.Fatalf("runtime environment = %#v, want only allowlisted Claude values", first.ExecutionProfile.Envs)

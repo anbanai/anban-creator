@@ -290,6 +290,19 @@ func TestAgentExecutionProfileRoute(t *testing.T) {
 	t.Fatal("GET /api/v1/agent/execution-profiles is not registered")
 }
 
+func TestAgentPackCatalogRoute(t *testing.T) {
+	app := NewRouter(&Services{
+		Config:           &config.Config{},
+		AgentPackHandler: handler.NewAgentPackHandler(),
+	})
+	for _, route := range app.GetRoutes() {
+		if route.Method == http.MethodGet && route.Path == "/api/v1/agent-packs" {
+			return
+		}
+	}
+	t.Fatal("GET /api/v1/agent-packs is not registered")
+}
+
 func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

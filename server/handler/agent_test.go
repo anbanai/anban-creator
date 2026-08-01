@@ -882,6 +882,26 @@ func TestAgentClaim_RejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestAgentClaim_RequiresCurrentAgentPackContract(t *testing.T) {
+	app, _, rawKey, _, _ := setupAgentClaimApp(t)
+	for _, body := range []string{
+		`{"executor_info":{"hostname":"legacy"}}`,
+		`{"agent_pack_contract_version":2,"executor_info":{"hostname":"future"}}`,
+	} {
+		req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+rawKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("claim failed: %v", err)
+		}
+		if resp.StatusCode != fiber.StatusUpgradeRequired {
+			responseBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 426; body=%s", resp.StatusCode, responseBody)
+		}
+	}
+}
+
 // TestAgentClaim_ReturnsConfigThenNoContent confirms a valid claim returns the
 // full task config, and a follow-up claim returns 204 (nothing left).
 func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
@@ -889,7 +909,7 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	taskID := seedClaimableLocalTask(t, repo, userID, projectID)
 
 	// First claim: should return 200 + config carrying the task id.
-	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"executor_info":{"hostname":"mbp"}}`))
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1,"executor_info":{"hostname":"mbp"}}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -909,8 +929,9 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	}
 
 	// Second claim: nothing claimable → 204 No Content.
-	req2 := httptest.NewRequest("POST", "/agent/claim", nil)
+	req2 := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
 	req2.Header.Set("Authorization", "Bearer "+rawKey)
+	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := app.Test(req2)
 	if err != nil {
 		t.Fatalf("second claim failed: %v", err)
@@ -925,8 +946,9 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 func TestAgentClaim_NoContentWhenEmpty(t *testing.T) {
 	app, _, rawKey, _, _ := setupAgentClaimApp(t)
 	// No task seeded.
-	req := httptest.NewRequest("POST", "/agent/claim", nil)
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("claim failed: %v", err)

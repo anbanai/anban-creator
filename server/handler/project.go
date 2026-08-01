@@ -148,6 +148,9 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectMontageDefaults) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if errors.Is(err, service.ErrInvalidAgentConfig) {
+		return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
+	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 	return Error(c, fiber.StatusInternalServerError, "failed to update project")
 }
@@ -194,6 +197,8 @@ type projectRequest struct {
 	InstructionsSet       bool                             `json:"-"`
 	EcommerceDefaults     *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults       *model.MontageDefaults           `json:"montage_defaults,omitempty"`
+	AgentConfig           map[string]any                   `json:"agent_config,omitempty"`
+	AgentConfigSet        bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
 	WechatAppID            string `json:"wechat_app_id"`
 	WechatSecret           string `json:"wechat_secret"`
@@ -249,6 +254,9 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.MontageDefaults != nil {
 		p.SetMontageDefaults(*req.MontageDefaults)
 		p.MontageDefaultsSet = true
+	}
+	if req.AgentConfigSet {
+		p.SetAgentConfig(req.AgentConfig)
 	}
 	return p
 }
@@ -345,6 +353,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
 	if req.Platform == "" {
 		return Error(c, fiber.StatusBadRequest, "platform is required")
@@ -404,6 +413,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err != nil {
 		if errors.Is(err, service.ErrProjectMontageDefaults) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if errors.Is(err, service.ErrInvalidAgentConfig) {
+			return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
@@ -491,6 +503,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)

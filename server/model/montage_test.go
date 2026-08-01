@@ -35,3 +35,24 @@ func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 		t.Fatalf("DeliveryTargets = %#v", got.DeliveryTargets)
 	}
 }
+
+func TestAgentConfigSurvivesProjectSnapshotRoundTripWithoutAliasing(t *testing.T) {
+	project := &Project{Name: "Research", Platform: PlatformArticle}
+	project.SetAgentConfig(map[string]any{
+		"audience": "developers",
+		"filters":  map[string]any{"language": "zh-CN"},
+	})
+
+	snapshot := SnapshotProject(project)
+	project.AgentConfig.Data()["audience"] = "founders"
+	project.AgentConfig.Data()["filters"].(map[string]any)["language"] = "en-US"
+	restored := ProjectFromSnapshot(project, snapshot)
+
+	if got := restored.AgentConfig.Data()["audience"]; got != "developers" {
+		t.Fatalf("audience = %v, want frozen developers", got)
+	}
+	filters := restored.AgentConfig.Data()["filters"].(map[string]any)
+	if got := filters["language"]; got != "zh-CN" {
+		t.Fatalf("filters.language = %v, want frozen zh-CN", got)
+	}
+}

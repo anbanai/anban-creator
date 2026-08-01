@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
 var testPNG = []byte("\x89PNG\r\n\x1a\nartifact-image")
@@ -32,7 +34,7 @@ func TestToolBaseNameHandlesPluginMCPNames(t *testing.T) {
 
 func TestDownloaderResolvesRelativePathsFromTaskRuntimeCwd(t *testing.T) {
 	workspace := t.TempDir()
-	montage := NewDownloader(&Config{Workspace: workspace, TaskType: "montage"})
+	montage := NewDownloader(&Config{Workspace: workspace, TaskType: "montage", RuntimeAdapter: agentpack.AdapterOpenMontage})
 	got, err := montage.resolveWorkspacePath("output/final.mp4")
 	if err != nil {
 		t.Fatal(err)

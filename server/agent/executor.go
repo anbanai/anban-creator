@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 
@@ -250,11 +251,16 @@ func loadAgentDefinition(pluginDir, agentName string) (*claudecode.AgentDefiniti
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
-	if taskType == model.TaskTypeViralAnalysis {
-		taskType = model.PlatformSeednote
-	}
 	if v, ok := maxTurns[taskType]; ok && v > 0 {
 		return v
+	}
+	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
+		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
+			return v
+		}
+		if pack.Runtime.MaxTurns > 0 {
+			return pack.Runtime.MaxTurns
+		}
 	}
 	return 40
 }

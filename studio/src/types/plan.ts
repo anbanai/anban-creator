@@ -23,6 +23,7 @@ export interface Plan {
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
   input_attachments?: InputAttachment[]
+  agent_input?: Record<string, unknown>
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
@@ -48,6 +49,7 @@ export interface CreatePlanRequest {
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
+  agent_input?: Record<string, unknown>
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
@@ -70,6 +72,7 @@ export interface UpdatePlanRequest {
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
   input_attachments?: InputAttachment[]
+  agent_input?: Record<string, unknown>
   watermark?: boolean
   goal?: string
   goal_mode?: boolean

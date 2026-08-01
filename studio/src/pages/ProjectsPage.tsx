@@ -38,9 +38,11 @@ import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/la
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
+import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
+import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 
-const platformOptions = [
+const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'moments', label: '朋友圈' },
@@ -56,6 +58,7 @@ const statusTabs: { label: string; value: string }[] = [
 
 const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   platform: 'article',
+  agent_config: {},
   name: '',
   profile_url: '',
   avatar_url: '',
@@ -107,6 +110,7 @@ function projectPlatformFromIntent(type?: string): ProjectPlatform {
 function projectToForm(ch: Project): ProjectFormValues {
   return {
     platform: ch.platform,
+    agent_config: ch.agent_config ?? {},
     name: ch.name || '',
     profile_url: ch.profile_url || '',
     avatar_url: ch.avatar_url || '',
@@ -140,6 +144,7 @@ function projectToForm(ch: Project): ProjectFormValues {
 }
 
 export default function ProjectsPage() {
+  const agentPacksQuery = useAgentPacks()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -169,6 +174,11 @@ export default function ProjectsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
+  const watchedAgentConfig = useWatch({ control: form.control, name: 'agent_config' }) ?? {}
+  const selectedAgentPack = useMemo(
+    () => agentPacksQuery.data?.packs.find((pack) => pack.bindings.project_platforms?.includes(selectedPlatform)),
+    [agentPacksQuery.data, selectedPlatform],
+  )
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
@@ -528,6 +538,7 @@ export default function ProjectsPage() {
     }
     const payload: CreateProjectRequest = {
       platform: values.platform,
+      agent_config: values.agent_config,
       name: values.name?.trim() || undefined,
       profile_url: values.profile_url?.trim() || undefined,
       avatar_url: values.avatar_url?.trim() || undefined,
@@ -700,6 +711,7 @@ export default function ProjectsPage() {
                       value={field.value}
                       onValueChange={(v) => {
                         field.onChange(v)
+                        form.setValue('agent_config', {}, { shouldDirty: true })
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
                         form.setValue('enable_publishing', false)
@@ -731,6 +743,13 @@ export default function ProjectsPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              <AgentPackSchemaFields
+                pack={selectedAgentPack}
+                surface="project"
+                value={watchedAgentConfig}
+                onChange={(value) => form.setValue('agent_config', value, { shouldDirty: true, shouldValidate: true })}
+              />
 
               {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>

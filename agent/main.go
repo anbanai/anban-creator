@@ -80,7 +80,7 @@ func newRunCommand(run runAgentFunc) *cli.Command {
 }
 
 func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error {
-	if err := prepareRuntimeWorkspace(cfg.Workspace, cfg.TaskType); err != nil {
+	if err := prepareRuntimeWorkspace(cfg.Workspace, cfg.TaskType, cfg.RuntimeAdapter); err != nil {
 		return fmt.Errorf("prepare runtime workspace: %w", err)
 	}
 	reporter := NewReporter(cfg)

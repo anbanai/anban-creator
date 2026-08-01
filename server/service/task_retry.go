@@ -19,6 +19,7 @@ type CloneTaskParams struct {
 	ExecutionProfile string
 	Prompt           *string
 	InputAttachments *[]model.EntryAttachment
+	AgentInput       *map[string]any
 	Overrides        *CloneTaskOverrides
 }
 
@@ -31,6 +32,7 @@ type CloneTaskOverrides struct {
 	SkipRefImage             *bool
 	ReferenceImageAssetID    string
 	InputAttachments         []model.EntryAttachment
+	AgentInput               map[string]any
 	Watermark                *bool
 	Goal                     string
 	GoalMode                 bool
@@ -87,6 +89,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			InputSourceTaskID:        inputSourceTaskID,
 			InputSourceProjectID:     inputSourceProjectID,
 			InputAttachments:         attachments,
+			AgentInput:               override.AgentInput,
 			Watermark:                override.Watermark,
 			Goal:                     override.Goal,
 			GoalMode:                 override.GoalMode,
@@ -155,6 +158,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ArticleWithCover:         articleCover,
 		ArticleWithContentImages: articleContent,
 		ExecutionTarget:          executionTarget,
+		AgentInput:               src.AgentInput.Data(),
+	}
+	if cloneParams.AgentInput != nil {
+		params.AgentInput = *cloneParams.AgentInput
 	}
 	// Preserve the e-commerce package config (module selection, product photos,
 	// selling points) so the clone bills the same package and reuses the inputs.

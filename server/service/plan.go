@@ -75,6 +75,7 @@ type CreatePlanParams struct {
 	ArticleWithContentImages *bool
 	MontageInput             *model.MontageInput
 	InputAttachments         []model.EntryAttachment
+	AgentInput               map[string]any
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -139,6 +140,10 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
 	}
+	agentInput, err := validateAndCloneAgentInput(project.Platform, p.AgentInput)
+	if err != nil {
+		return nil, err
+	}
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
 	if err != nil {
@@ -190,6 +195,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithContentImages: &articleContent,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
+	if agentInput != nil {
+		plan.SetAgentInput(agentInput)
+	}
 	if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
 		plan.SetMontageInput(*p.MontageInput)
 	}
@@ -267,6 +275,7 @@ type UpdatePlanParams struct {
 	ArticleWithContentImages *bool
 	MontageInput             *model.MontageInput
 	InputAttachments         *[]model.EntryAttachment
+	AgentInput               *map[string]any
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -366,6 +375,13 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	}
 	if p.InputAttachments != nil {
 		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))
+	}
+	if p.AgentInput != nil {
+		agentInput, err := validateAndCloneAgentInput(plan.Type, *p.AgentInput)
+		if err != nil {
+			return nil, err
+		}
+		plan.SetAgentInput(agentInput)
 	}
 	if p.MontageInput != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

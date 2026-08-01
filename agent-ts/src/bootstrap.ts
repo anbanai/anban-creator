@@ -15,9 +15,11 @@ const MAX_EXECUTION_TOKEN_BYTES = 16 << 10;
 const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
+const AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "task_id", "task_type", "project_id", "prompt",
+  "agent_pack_id", "agent_pack_version", "agent_pack_digest", "runtime_profile", "runtime_adapter",
   "execution_profile", "max_turns", "agent_flag", "auto_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
 ];
@@ -27,16 +29,6 @@ const EXECUTION_PROFILE_KEYS = [
 ];
 
 const EXECUTION_PROFILE_IDS = new Set(["effective", "balanced", "quality"]);
-const TASK_TYPE_AGENTS: Record<string, string> = {
-  article: "article",
-  seednote: "seednote",
-  moments: "moments",
-  ecommerce: "ecommerce",
-  montage: "montage",
-  "live-slicer": "live-slicer",
-  viral_analysis: "seednote",
-};
-
 export const CLAUDE_PROFILE_ENV_KEYS = new Set([
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
@@ -95,6 +87,11 @@ export interface BootstrapResponse {
   execution_token: string;
   task_id: string;
   task_type: string;
+  agent_pack_id: string;
+  agent_pack_version: string;
+  agent_pack_digest: string;
+  runtime_profile: string;
+  runtime_adapter: "standard" | "openmontage";
   project_id: string;
   prompt: string;
   execution_profile: ExecutionProfile;
@@ -106,6 +103,17 @@ export interface BootstrapResponse {
   env?: Record<string, string>;
   files?: BootstrapFile[];
   artifact_transport: { mode: "direct" | "stream" };
+}
+
+export interface AgentPackCatalog {
+  packs: Array<{
+    id: string;
+    version: string;
+    digest: string;
+    agent: { name: string };
+    bindings: { task_types?: string[] };
+    runtime: { profile?: string; adapter?: string };
+  }>;
 }
 
 export async function readWorkloadToken(path: string): Promise<string> {
@@ -137,7 +145,21 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
     throw new Error("bootstrap response is not valid JSON");
   }
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
-  return validateBootstrapResponse(config.executionID, envelope.data);
+  const data = validateBootstrapResponse(config.executionID, envelope.data);
+  validateAgentPackCatalog(data, await readAgentPackCatalog());
+  return data;
+}
+
+async function readAgentPackCatalog(): Promise<AgentPackCatalog> {
+  const info = await lstat(AGENT_PACK_CATALOG_PATH);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_BOOTSTRAP_RESPONSE_BYTES) {
+    throw new Error("Agent Pack Catalog is invalid");
+  }
+  try {
+    return JSON.parse(await readFile(AGENT_PACK_CATALOG_PATH, "utf8")) as AgentPackCatalog;
+  } catch {
+    throw new Error("Agent Pack Catalog is not valid JSON");
+  }
 }
 
 export function validateBootstrapResponse(executionID: string, input: unknown): BootstrapResponse {
@@ -152,12 +174,13 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     throw new Error("bootstrap response identity is incomplete");
   }
   validateExecutionToken(executionID, data);
-  const expectedAgent = TASK_TYPE_AGENTS[data.task_type];
-  if (!expectedAgent) throw new Error("bootstrap task type is invalid");
+  if (!cleanString(data.task_type) || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(data.task_type)) throw new Error("bootstrap task type is invalid");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_pack_id) || !/^\d+\.\d+\.\d+$/.test(data.agent_pack_version) || !/^[0-9a-f]{64}$/.test(data.agent_pack_digest)) throw new Error("bootstrap Agent Pack identity is invalid");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.runtime_profile) || (data.runtime_adapter !== "standard" && data.runtime_adapter !== "openmontage")) throw new Error("bootstrap runtime identity is invalid");
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
   if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
-  if (data.agent_flag !== `anban:${expectedAgent}`) throw new Error("bootstrap agent flag is invalid");
+  if (!/^anban:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_flag)) throw new Error("bootstrap agent flag is invalid");
   if (data.auto_memory_directory !== ".claude/memory") throw new Error("bootstrap auto memory directory is invalid");
   validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");
@@ -166,6 +189,17 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, "Montage");
   preflightBootstrapFiles(data.files ?? []);
   return data;
+}
+
+export function validateAgentPackCatalog(data: BootstrapResponse, catalog: AgentPackCatalog): AgentPackCatalog["packs"][number] {
+  if (!isRecord(catalog) || !Array.isArray(catalog.packs)) throw new Error("Agent Pack Catalog is invalid");
+  const matches = catalog.packs.filter((pack) => Array.isArray(pack.bindings?.task_types) && pack.bindings.task_types.includes(data.task_type));
+  if (matches.length !== 1) throw new Error("bootstrap task type does not resolve to exactly one Agent Pack");
+  const pack = matches[0]!;
+  if (pack.id !== data.agent_pack_id || pack.version !== data.agent_pack_version || pack.digest !== data.agent_pack_digest || pack.runtime?.profile !== data.runtime_profile || pack.runtime?.adapter !== data.runtime_adapter || data.agent_flag !== `anban:${pack.agent?.name}`) {
+    throw new Error("bootstrap Agent Pack identity does not match runtime Catalog");
+  }
+  return pack;
 }
 
 function validateExecutionProfile(input: unknown): asserts input is ExecutionProfile {

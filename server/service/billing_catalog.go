@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -592,14 +593,7 @@ func canonicalTaskQuoteRequest(req TaskQuoteRequest) (TaskQuoteRequest, string, 
 }
 
 func agentTaskOperation(taskType string) (string, bool) {
-	switch taskType {
-	case "article", "seednote", "moments", "ecommerce", "montage":
-		return "task." + taskType, true
-	case model.TaskTypeViralAnalysis:
-		return "task.viral_analysis", true
-	default:
-		return "", false
-	}
+	return agentpack.Default().BillingOperation(taskType)
 }
 
 func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {

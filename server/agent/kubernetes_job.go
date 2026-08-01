@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -93,7 +94,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						Image:           runtimeImage,
 						ImagePullPolicy: corev1.PullAlways,
 						Command:         []string{"/bin/sh", "-c"},
-						Args:            []string{kubernetesWorkspaceInitScript(taskType(task))},
+						Args:            []string{kubernetesWorkspaceInitScript(execution.RuntimeAdapter)},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsNonRoot:             &runAsRoot,
 							RunAsUser:                &rootUser,
@@ -181,7 +182,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	return job
 }
 
-func kubernetesWorkspaceInitScript(taskType string) string {
+func kubernetesWorkspaceInitScript(runtimeAdapter string) string {
 	lines := []string{
 		"set -eu",
 		"chown 1000:1000 /workspace",
@@ -192,7 +193,7 @@ func kubernetesWorkspaceInitScript(taskType string) string {
 		"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath,
 		"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
 	}
-	if strings.TrimSpace(taskType) != model.PlatformMontage {
+	if strings.TrimSpace(runtimeAdapter) != agentpack.AdapterOpenMontage {
 		return strings.Join(lines, "\n")
 	}
 	return strings.Join(append(lines, kubernetesMontageInitScript(

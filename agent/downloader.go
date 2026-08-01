@@ -162,7 +162,7 @@ func (d *Downloader) materializeGeneratedImage(ctx context.Context, call tracked
 	} else if same {
 		return nil
 	}
-	if err := ensureArtifactParent(runtimeCwd(d.cfg.Workspace, d.cfg.TaskType), targetPath); err != nil {
+	if err := ensureArtifactParent(runtimeCwd(d.cfg.Workspace, d.cfg.RuntimeAdapter), targetPath); err != nil {
 		return artifactMaterializationError(payload.FilePath, err)
 	}
 	if err := d.downloadVerifiedArtifact(ctx, payload, targetPath); err != nil {
@@ -352,7 +352,7 @@ func (d *Downloader) resolveWorkspacePath(target string) (string, error) {
 	if target == "" {
 		return "", errors.New("target path is empty")
 	}
-	workspace := filepath.Clean(runtimeCwd(d.cfg.Workspace, d.cfg.TaskType))
+	workspace := filepath.Clean(runtimeCwd(d.cfg.Workspace, d.cfg.RuntimeAdapter))
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(workspace, target)
 	}

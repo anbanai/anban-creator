@@ -391,6 +391,7 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"type":          task.Type,
 		"status":        task.Status,
 		"prompt":        task.Prompt,
+		"agent_input":   task.AgentInput.Data(),
 		"progress_log":  task.ProgressLog,
 		"result":        result,
 		"error_message": task.ErrorMessage,

@@ -20,6 +20,10 @@ type TaskExecution struct {
 	Attempt           int    `gorm:"uniqueIndex:idx_task_attempt,priority:2;not null" json:"attempt"`
 	ParentExecutionID string `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
 	ResumeSessionID   string `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
+	AgentPackID       string `gorm:"type:varchar(80);index" json:"agent_pack_id,omitempty"`
+	AgentPackVersion  string `gorm:"type:varchar(32)" json:"agent_pack_version,omitempty"`
+	AgentPackDigest   string `gorm:"type:char(64);index" json:"agent_pack_digest,omitempty"`
+	RuntimeAdapter    string `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
 	RuntimeProfile    string `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
 	RuntimeImage      string `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
 

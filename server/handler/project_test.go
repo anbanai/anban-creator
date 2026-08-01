@@ -56,6 +56,46 @@ func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	}
 }
 
+func TestProjectRequestMapsAgentConfig(t *testing.T) {
+	req := projectRequest{Platform: "article", Name: "Article", AgentConfig: map[string]any{}, AgentConfigSet: true}
+	project := req.toProject()
+	if !project.AgentConfigSet || project.AgentConfig.Data() == nil {
+		t.Fatalf("AgentConfig = %#v set=%v", project.AgentConfig.Data(), project.AgentConfigSet)
+	}
+}
+
+func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+		"platform": model.PlatformArticle,
+		"name":     "Article",
+		"agent_config": map[string]any{
+			"unexpected": true,
+		},
+	})
+	body := decodeBody(t, resp)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid_agent_config") {
+		t.Fatalf("create status/body = %d/%#v, want 400 invalid_agent_config", resp.StatusCode, body)
+	}
+
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle,
+		Name: "Article", Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{
+		"agent_config": map[string]any{"unexpected": true},
+	})
+	body = decodeBody(t, resp)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid_agent_config") {
+		t.Fatalf("update status/body = %d/%#v, want 400 invalid_agent_config", resp.StatusCode, body)
+	}
+}
+
 func TestProjectRequestMapsMontageDefaults(t *testing.T) {
 	req := projectRequest{
 		Platform: model.PlatformMontage,

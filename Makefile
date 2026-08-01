@@ -19,6 +19,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test git-sync-setup agent-reach-update humanizer-update \
+        agent-pack-new agent-pack-generate agent-pack-check \
         agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -76,8 +77,20 @@ agent-reach-update:
 humanizer-update:
 	@scripts/update-humanizer.sh
 
+# Scaffold, generate, and verify the canonical Agent Pack catalog. Pass
+# scaffold flags through ARGS, for example:
+#   make agent-pack-new ARGS="-id my-agent -kind managed -task-type my-agent -runtime-profile article"
+agent-pack-new:
+	@go run ./server/cmd/agent-pack new $(ARGS)
+
+agent-pack-generate:
+	@go run ./server/cmd/agent-pack generate
+
+agent-pack-check:
+	@go run ./server/cmd/agent-pack check
+
 # Run all CI checks (format, vet, test, lint)
-ci: fmt vet test lint
+ci: agent-pack-check fmt vet test lint
 
 # Run tests with coverage report
 coverage:
@@ -252,6 +265,9 @@ help:
 	@echo "  make deps          - Download and tidy dependencies"
 	@echo "  make agent-reach-update - Pull Agent-Reach main and update its gitlink"
 	@echo "  make humanizer-update - Pull upstream Humanizer and sync all plugin copies"
+	@echo "  make agent-pack-new ARGS=... - Scaffold a canonical Agent Pack"
+	@echo "  make agent-pack-generate - Generate native Agents and Server Catalog"
+	@echo "  make agent-pack-check - Fail when generated Agent Pack assets drift"
 	@echo "  make clean         - Remove build artifacts"
 	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""

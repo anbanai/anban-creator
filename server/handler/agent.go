@@ -369,11 +369,15 @@ type agentCompleteRequest struct {
 	Result *serveragent.ExecutionResult `json:"result"`
 }
 
-// agentClaimRequest is the optional body for POST /api/v1/agent/claim.
+const agentPackContractVersion = 1
+
+// agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for
-// diagnostics. The body may be empty.
+// diagnostics. The contract version prevents older executors from claiming a
+// task whose Agent Pack fields and runner arguments they cannot consume.
 type agentClaimRequest struct {
-	ExecutorInfo json.RawMessage `json:"executor_info"`
+	AgentPackContractVersion int             `json:"agent_pack_contract_version"`
+	ExecutorInfo             json.RawMessage `json:"executor_info"`
 }
 
 // Claim handles POST /api/v1/agent/claim.
@@ -395,9 +399,13 @@ func (h *AgentHandler) Claim(c fiber.Ctx) error {
 	userID := h.authenticatedUserID(c)
 
 	var req agentClaimRequest
-	// Body is optional; ignore bind errors (empty body is the common case).
 	if len(c.Body()) > 0 {
-		_ = c.Bind().Body(&req)
+		if err := c.Bind().Body(&req); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid request body")
+		}
+	}
+	if req.AgentPackContractVersion != agentPackContractVersion {
+		return Error(c, fiber.StatusUpgradeRequired, "desktop Agent Pack contract upgrade required")
 	}
 
 	cfg, err := h.taskSvc.ClaimLocalTask(c.Context(), userID, string(req.ExecutorInfo))

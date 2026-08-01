@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -18,6 +19,7 @@ var (
 	ErrProjectDeleteConflict  = errors.New("project delete conflict")
 	ErrProjectUpdateConflict  = errors.New("project update conflict")
 	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
+	ErrInvalidAgentConfig     = errors.New("invalid agent config")
 )
 
 type projectDeleteConflictError struct {
@@ -32,13 +34,22 @@ func (e projectDeleteConflictError) Is(target error) bool {
 	return target == ErrProjectDeleteConflict
 }
 
-// validPlatforms defines the allowed platform values.
-var validPlatforms = map[string]bool{
-	model.PlatformArticle:   true,
-	model.PlatformSeednote:  true,
-	model.PlatformMoments:   true,
-	model.PlatformEcommerce: true,
-	model.PlatformMontage:   true,
+func validProjectPlatform(platform string) bool {
+	return model.IsProjectPlatform(platform)
+}
+
+func validateProjectAgentConfig(project *model.Project) error {
+	if project == nil || !project.AgentConfigSet {
+		return nil
+	}
+	pack, ok := agentpack.Default().ForProjectPlatform(project.Platform)
+	if !ok {
+		return fmt.Errorf("%w: no Agent Pack is bound to project platform %q", ErrInvalidAgentConfig, project.Platform)
+	}
+	if err := agentpack.ValidateProjectConfig(pack, project.AgentConfig.Data()); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidAgentConfig, err)
+	}
+	return nil
 }
 
 func validateProjectMontageDefaults(project *model.Project) error {
@@ -89,10 +100,13 @@ func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle
 // is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
 // on the single source of truth. The project stores only what the user set.
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
-	if !validPlatforms[ch.Platform] {
+	if !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
 	if err := validateProjectMontageDefaults(ch); err != nil {
+		return nil, err
+	}
+	if err := validateProjectAgentConfig(ch); err != nil {
 		return nil, err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
@@ -202,13 +216,24 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 			return nil, err
 		}
 	}
+	if ch.AgentConfigSet || (ch.Platform != "" && ch.Platform != existing.Platform) {
+		candidate := *existing
+		candidate.Platform = effectivePlatform
+		candidate.AgentConfigSet = true
+		if ch.AgentConfigSet {
+			candidate.AgentConfig = ch.AgentConfig
+		}
+		if err := validateProjectAgentConfig(&candidate); err != nil {
+			return nil, err
+		}
+	}
 
 	// Apply updatable fields from ch to existing (only non-empty values).
 	if ch.Name != "" {
 		existing.Name = ch.Name
 	}
 	if ch.Platform != "" {
-		if !validPlatforms[ch.Platform] {
+		if !validProjectPlatform(ch.Platform) {
 			return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 		}
 		existing.Platform = ch.Platform
@@ -256,6 +281,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	}
 	if ch.MontageDefaultsSet {
 		existing.MontageDefaults = ch.MontageDefaults
+	}
+	if ch.AgentConfigSet {
+		existing.AgentConfig = ch.AgentConfig
 	}
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.

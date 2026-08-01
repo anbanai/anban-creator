@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
@@ -39,8 +40,8 @@ func newRunnerStreamState() *runnerStreamState {
 	}
 }
 
-func runtimeCwd(workspace, taskType string) string {
-	if model.IsMontagePlatform(strings.TrimSpace(taskType)) {
+func runtimeCwd(workspace, runtimeAdapter string) string {
+	if strings.TrimSpace(runtimeAdapter) == agentpack.AdapterOpenMontage {
 		return montageRuntimePath(workspace)
 	}
 	return workspace
@@ -59,7 +60,7 @@ func NewRunner(cfg *Config, reporter *Reporter, downloader *Downloader) *Runner 
 }
 
 func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) {
-	workDir := runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)
+	workDir := runtimeCwd(r.cfg.Workspace, r.cfg.RuntimeAdapter)
 	result := &serveragent.ExecutionResult{
 		Success:    false,
 		WorkDir:    workDir,
@@ -238,7 +239,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	extraArgs := map[string]*string{"agent": &r.cfg.AgentFlag}
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
-		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.TaskType)),
+		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.RuntimeAdapter)),
 		claudecode.WithUnsetEnv(serveragent.ClaudeEnvironmentKeysToUnset()...),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
@@ -251,7 +252,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),
 	}
-	if r.cfg.TaskType == "montage" && len(r.cfg.Env) > 0 {
+	if r.cfg.RuntimeAdapter == agentpack.AdapterOpenMontage && len(r.cfg.Env) > 0 {
 		sdkOpts = append(sdkOpts, claudecode.WithEnv(withoutClaudeRuntimeEnv(r.cfg.Env)))
 	}
 	sdkOpts = append(sdkOpts,
@@ -281,7 +282,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar(key, value))
 		}
 	}
-	if model.IsMontagePlatform(strings.TrimSpace(r.cfg.TaskType)) {
+	if r.cfg.RuntimeAdapter == agentpack.AdapterOpenMontage {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(serveragent.MontageSubmoduleEnvName, montageRuntimePath(r.cfg.Workspace)))
 	}
 	if r.cfg.AutoMemoryDirectory != "" {

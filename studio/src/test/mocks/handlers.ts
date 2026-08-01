@@ -11,6 +11,7 @@ import type {
   ProjectDetail,
   PlatformConfig,
   APIKey,
+  AgentPackCatalog,
 } from '@/types'
 
 // --- Mock Data ---
@@ -185,9 +186,39 @@ export const mockApiKeys: APIKey[] = [
   },
 ]
 
+const managedPack = (id: string, displayName: string, options: {
+  projectPlatforms?: string[]
+  taskTypes: string[]
+  surfaces?: Array<'plugin' | 'project' | 'task' | 'plan'>
+}): AgentPackCatalog['packs'][number] => ({
+  id,
+  version: '1.0.0',
+  kind: 'managed',
+  display_name: displayName,
+  description: `${displayName} workflow`,
+  agent: { name: id, max_turns: 20 },
+  bindings: { project_platforms: options.projectPlatforms, task_types: options.taskTypes },
+  runtime: { profile: id === 'montage' ? 'montage' : 'article', adapter: id === 'montage' ? 'openmontage' : 'standard' },
+  surfaces: options.surfaces ?? ['plugin', 'project', 'task'],
+  ui: { renderer: `custom:${id}` },
+  digest: 'a'.repeat(64),
+})
+
+export const mockAgentPackCatalog: AgentPackCatalog = {
+  packs: [
+    managedPack('article', '微信公众号文章', { projectPlatforms: ['article'], taskTypes: ['article'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
+    managedPack('live-slicer', '直播切片', { taskTypes: ['live-slicer'], surfaces: ['plugin'] }),
+    managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),
+    managedPack('montage', 'Montage 视频', { projectPlatforms: ['montage'], taskTypes: ['montage'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+  ],
+}
+
 // --- Handlers ---
 
 export const handlers = [
+  http.get('/api/v1/agent-packs', async () => HttpResponse.json({ code: 0, msg: 'ok', data: mockAgentPackCatalog })),
   // Auth
   http.post('/api/v1/auth/login', async () => {
     return HttpResponse.json({

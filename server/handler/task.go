@@ -149,6 +149,7 @@ type createTaskRequest struct {
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
+	AgentInput         map[string]any                   `json:"agent_input,omitempty"`
 	Watermark          *bool                            `json:"watermark"`
 	Goal               string                           `json:"goal"`
 	GoalMode           bool                             `json:"goal_mode"`
@@ -191,6 +192,7 @@ type cloneTaskRequest struct {
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
+	AgentInput               *map[string]any                  `json:"agent_input"`
 	Watermark                *bool                            `json:"watermark"`
 	Goal                     string                           `json:"goal"`
 	GoalMode                 bool                             `json:"goal_mode"`
@@ -625,6 +627,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			ReferenceImageAssetID:    referenceAssetID,
 			ProjectSnapshot:          &projectSnapshot,
 			InputAttachments:         req.InputAttachments,
+			AgentInput:               req.AgentInput,
 			Watermark:                req.Watermark,
 			Goal:                     req.Goal,
 			GoalMode:                 req.GoalMode,
@@ -651,6 +654,9 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	}
 	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, service.ErrInvalidAgentInput) {
+		return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
 	}
 	if isReferenceAssetError(err) {
 		return respondReferenceAssetError(c, h.logger, err)
@@ -981,6 +987,11 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			MontageInput:             req.MontageInput,
 			ExecutionTarget:          req.ExecutionTarget,
 		}
+		if req.AgentInput != nil {
+			creationReq.AgentInput = *req.AgentInput
+		} else {
+			creationReq.AgentInput = task.AgentInput.Data()
+		}
 		prepared, err := h.prepareTaskCreation(c, userID, &creationReq, true, task)
 		if err != nil || prepared == nil {
 			return err
@@ -994,6 +1005,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			SkipRefImage:             prepared.params.SkipRefImage,
 			ReferenceImageAssetID:    prepared.params.ReferenceImageAssetID,
 			InputAttachments:         prepared.params.InputAttachments,
+			AgentInput:               prepared.params.AgentInput,
 			Watermark:                prepared.params.Watermark,
 			Goal:                     prepared.params.Goal,
 			GoalMode:                 prepared.params.GoalMode,
@@ -1043,6 +1055,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		}
 		params.InputAttachments = &attachments
 	}
+	params.AgentInput = req.AgentInput
 	referenceView, err := h.presentCloneTaskReference(c.Context(), userID, task)
 	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)

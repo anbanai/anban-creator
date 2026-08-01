@@ -362,7 +362,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			return err
 		}
 		var runtime srvconfig.RuntimeImageSelection
-		if parent != nil && !refreshRuntime {
+		if parent != nil && !refreshRuntime && hasCompleteAgentPackIdentity(parent) {
 			runtime = srvconfig.RuntimeImageSelection{
 				Profile: strings.TrimSpace(parent.RuntimeProfile),
 				Image:   strings.TrimSpace(parent.RuntimeImage),
@@ -384,12 +384,19 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		}
 		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 		execution = &profiledExecution
+		if parent == nil || refreshRuntime || !inheritAgentPackIdentity(execution, parent) {
+			if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+				return err
+			}
+		}
+		if execution.RuntimeProfile != runtime.Profile {
+			return fmt.Errorf("resolved runtime profile %q does not match frozen Agent Pack profile %q", runtime.Profile, execution.RuntimeProfile)
+		}
 		execution.ID = uuid.NewString()
 		execution.TaskID = task.ID
 		execution.Attempt = attempt
 		execution.ParentExecutionID = parentExecutionID
 		execution.ResumeSessionID = resumeSessionID
-		execution.RuntimeProfile = runtime.Profile
 		execution.RuntimeImage = runtime.Image
 		execution.Target = target
 		execution.Status = model.TaskExecutionCreated

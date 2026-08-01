@@ -279,6 +279,29 @@ func TestTaskGetHandlerRejectsForeignTask(t *testing.T) {
 	}
 }
 
+func TestTaskGetHandlerExposesAgentInput(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	userID := uuid.NewString()
+	project := createAccountInfoProject(t, repo, userID, "")
+	task := createAccountInfoTask(t, repo, userID, project.ID, "")
+	task.SetAgentInput(map[string]any{"format": "brief"})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := taskGetHandler(withMCPUserID(context.Background(), userID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatalf("taskGetHandler: %v", err)
+	}
+	response := decodeMCPMap(t, result)
+	input, ok := response["agent_input"].(map[string]any)
+	if !ok || input["format"] != "brief" {
+		t.Fatalf("agent_input = %#v, want task extension payload", response["agent_input"])
+	}
+}
+
 func TestTaskCancelHandlerRejectsForeignTaskWithoutStatusChange(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()

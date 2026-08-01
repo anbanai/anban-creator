@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
-	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
@@ -124,13 +124,13 @@ func TestRunnerReconcilesOnlyTransportedExactModelAliases(t *testing.T) {
 
 func TestRuntimeCwd(t *testing.T) {
 	workspace := "/workspace"
-	if got := runtimeCwd(workspace, "montage"); got != "/workspace/openmontage" {
+	if got := runtimeCwd(workspace, agentpack.AdapterOpenMontage); got != "/workspace/openmontage" {
 		t.Fatalf("Montage cwd = %q", got)
 	}
-	if got := runtimeCwd(workspace, "seednote"); got != workspace {
+	if got := runtimeCwd(workspace, agentpack.AdapterStandard); got != workspace {
 		t.Fatalf("Seednote cwd = %q, want %q", got, workspace)
 	}
-	if got := runtimeCwd(workspace, model.TaskTypeLiveSlicer); got != workspace {
+	if got := runtimeCwd(workspace, ""); got != workspace {
 		t.Fatalf("Live Slicer cwd = %q, want %q", got, workspace)
 	}
 	if got := montageRuntimePath(workspace); got != "/workspace/openmontage" {
@@ -142,7 +142,7 @@ func TestRunnerOptionsUseWritableMontageRoot(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_ROOT", "/anbanai")
 	workspace := t.TempDir()
 	runner := NewRunner(&Config{
-		Workspace: workspace, AgentFlag: "anban:montage", TaskType: "montage", MaxTurns: 10,
+		Workspace: workspace, AgentFlag: "anban:montage", TaskType: "montage", RuntimeAdapter: agentpack.AdapterOpenMontage, MaxTurns: 10,
 		Env: map[string]string{serveragent.MontageSubmoduleEnvName: "/provider/override"},
 	}, nil, nil)
 	opts, err := runner.buildSDKOptions(context.Background())
@@ -158,7 +158,7 @@ func TestRunnerOptionsUseWritableMontageRoot(t *testing.T) {
 		t.Fatalf("Montage runtime env = %#v, want platform-owned %q", got.ExtraEnv, wantRoot)
 	}
 
-	content := NewRunner(&Config{Workspace: workspace, AgentFlag: "anban:seednote", TaskType: "seednote", MaxTurns: 10}, nil, nil)
+	content := NewRunner(&Config{Workspace: workspace, AgentFlag: "anban:seednote", TaskType: "seednote", RuntimeAdapter: agentpack.AdapterStandard, MaxTurns: 10}, nil, nil)
 	contentOpts, err := content.buildSDKOptions(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestRunnerOptionsApplyFrozenClaudeControlsFromRuntimeEnvironment(t *testing
 
 func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
 	runner := NewRunner(&Config{
-		Workspace: t.TempDir(), AgentFlag: "anban:montage", TaskType: "montage", MaxTurns: 10,
+		Workspace: t.TempDir(), AgentFlag: "anban:montage", TaskType: "montage", RuntimeAdapter: agentpack.AdapterOpenMontage, MaxTurns: 10,
 		ServerURL: "https://server.example.com", APIKey: "execution-jwt", ProjectID: "project-1",
 		RuntimeEnv: map[string]string{"ANTHROPIC_AUTH_TOKEN": "runtime-token"},
 		Env: map[string]string{

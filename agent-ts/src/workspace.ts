@@ -5,11 +5,11 @@ import { cleanBootstrapPath, preflightBootstrapFiles, readBoundedText, workspace
 
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
 
-export async function prepareWorkspace(workspace: string, taskType: string): Promise<void> {
+export async function prepareWorkspace(workspace: string, taskType: string, runtimeAdapter: BootstrapResponse["runtime_adapter"]): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
   await ensureRealDirectory(join(workspace, "output"), "output", true);
   if (taskType === "live-slicer") await ensureRealDirectory(join(workspace, "output", "exports", ".parts"), "live-slicer parts", true);
-  if (taskType === "montage") await prepareMontageWorkspace(workspace);
+  if (runtimeAdapter === "openmontage") await prepareMontageWorkspace(workspace);
 }
 
 async function prepareMontageWorkspace(workspace: string): Promise<void> {

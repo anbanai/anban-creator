@@ -122,6 +122,20 @@ func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateManualRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
+		ExecutionProfile: "effective", AgentInput: map[string]any{"tone": "concise"},
+	})
+	if !errors.Is(err, ErrInvalidAgentInput) {
+		t.Fatalf("CreateManual error = %v, want ErrInvalidAgentInput", err)
+	}
+}
+
 func TestTaskServiceCreateManualViralAnalysisRequiresSeednoteProject(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -220,6 +234,7 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic", ImageRatio: "21:9",
 	}
+	plan.SetAgentInput(map[string]any{})
 
 	task, err := svc.CreateFromPlan(ctx, plan)
 	if err != nil {
@@ -230,6 +245,9 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	}
 	if task.ImageRatio != "21:9" {
 		t.Fatalf("plan task image ratio = %q, want 21:9", task.ImageRatio)
+	}
+	if task.AgentInput.Data() == nil {
+		t.Fatal("plan agent_input was not copied to the task")
 	}
 }
 
@@ -1076,6 +1094,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue old workspace", FileName: "latest.md"},
 		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/feedback.pdf", FileName: "feedback.pdf"},
 	})
+	src.SetAgentInput(map[string]any{})
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatalf("create source task: %v", err)
 	}
@@ -1105,6 +1124,9 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if clone.InputSourceProjectID != src.ProjectID {
 		t.Fatalf("clone input source project = %q, want %q", clone.InputSourceProjectID, src.ProjectID)
+	}
+	if clone.AgentInput.Data() == nil {
+		t.Fatal("clone did not preserve source agent_input")
 	}
 	cloneAttachments := clone.InputAttachments.Data()
 	if len(cloneAttachments) != 1 || cloneAttachments[0].Role != "brief" || cloneAttachments[0].Text != "original input" {
@@ -2635,7 +2657,7 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 func TestTaskService_CreateManual(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2681,7 +2703,7 @@ func TestTaskService_CreateManual_NoProject(t *testing.T) {
 func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    "wrong-user",
@@ -2696,7 +2718,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 func TestTaskService_GetByID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2725,7 +2747,7 @@ func TestTaskService_GetByID_NotFound(t *testing.T) {
 func TestTaskService_Cancel(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2748,7 +2770,7 @@ func TestTaskService_Cancel(t *testing.T) {
 func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	if err := repo.IlinkBindings().Create(context.Background(), &model.IlinkBinding{
 		ID:                uuid.NewString(),
 		UserID:            userID,
@@ -2787,7 +2809,7 @@ func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 func TestTaskService_List(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2815,7 +2837,7 @@ func TestTaskService_List(t *testing.T) {
 func TestTaskService_List_ByStatus(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
