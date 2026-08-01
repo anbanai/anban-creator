@@ -140,8 +140,8 @@ export default function DesignerPage() {
   })
 
   const providerList: DesignerProvider[] = providers ?? []
-  const activeProvider = providerList.find((provider) => provider.id === selectedProviderId && provider.enabled)
-  const effectiveProvider = activeProvider ?? providerList.find((provider) => provider.enabled)
+  const activeProvider = providerList.find((provider) => provider.id === selectedProviderId && provider.enabled && provider.priceAvailable !== false)
+  const effectiveProvider = activeProvider ?? providerList.find((provider) => provider.enabled && provider.priceAvailable !== false)
   const hasInsufficientCredits = Boolean(
     !walletError && wallet && effectiveProvider && wallet.balance < effectiveProvider.credits,
   )
@@ -390,7 +390,6 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider: effectiveProvider.provider,
           provider_id: effectiveProvider.id,
           quality: settings.quality !== 'auto' ? settings.quality : undefined,
           size: buildDesignerRequestSize(settings.size, settings.resolution),
@@ -456,7 +455,6 @@ export default function DesignerPage() {
         designerApi.generate({
           project_id: projectID,
           prompt: value.prompt.trim(),
-          provider: effectiveProvider.provider,
           provider_id: effectiveProvider.id,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
@@ -565,7 +563,7 @@ export default function DesignerPage() {
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}
                 submitting={isGenerating}
-                submitDisabled={!promptValue.prompt.trim() || !effectiveProvider || hasInsufficientCredits}
+                submitDisabled={!promptValue.prompt.trim() || !effectiveProvider || effectiveProvider.priceAvailable === false || hasInsufficientCredits}
                 ariaLabel="Designer prompt"
                 acceptedTypesLabel="图片"
                 onAttachmentRejected={handleAttachmentRejected}
@@ -614,8 +612,7 @@ export default function DesignerPage() {
           images={currentImages}
           initialIndex={Math.max(0, currentImages.findIndex((image) => image.url === previewImage))}
           metadata={{
-            provider: currentGeneration.provider,
-            model: currentGeneration.model,
+            capabilityName: currentGeneration.capability_name ?? effectiveProvider?.name,
             prompt: currentGeneration.prompt,
             revisedPrompt: currentGeneration.revised_prompt,
             quality: currentGeneration.quality,

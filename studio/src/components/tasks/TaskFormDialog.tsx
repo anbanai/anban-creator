@@ -12,7 +12,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { Button } from '@/components/common/button'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -24,7 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
-import { useImageModels } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -41,6 +41,7 @@ import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, 
 import type { CreateTaskRequest, Project, Task, TaskType } from '@/types'
 import { ImageAspectRatioField } from './ImageAspectRatioField'
 import { ExecutionProfileSelector } from './ExecutionProfileSelector'
+import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
   allowedTypes: ['image'],
@@ -102,13 +103,15 @@ export function TaskFormDialog({
     queryKey: queryKeys.billing.wallet,
     queryFn: () => api.billing.wallet(),
   })
-  const { data: billingCatalog } = useQuery({
+  const { data: billingCatalog, refetch: refetchBillingCatalog } = useQuery({
     queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
+    enabled: open,
+    staleTime: 0,
   })
   const executionProfilesQuery = useAgentExecutionProfiles()
   const agentPacksQuery = useAgentPacks()
-  const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading, isError: imageModelsError } = useImageCapabilities()
 
   const form = useForm<TaskFormDefaults>({
     resolver: zodResolver(createTaskSchema) as Resolver<TaskFormDefaults>,
@@ -136,6 +139,18 @@ export function TaskFormDialog({
   const watchedPrompt = useWatch({ control: form.control, name: 'prompt' }) ?? ''
   const watchedImageModelKey = useWatch({ control: form.control, name: 'image_model_key' }) ?? ''
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
+
+  useEffect(() => {
+    const transition = billingCatalog?.task_time_pricing?.next_transition_at
+    if (!open || !transition) return
+    const delay = new Date(transition).getTime() - Date.now() + 250
+    if (delay <= 0) {
+      void refetchBillingCatalog()
+      return
+    }
+    const timer = window.setTimeout(() => { void refetchBillingCatalog() }, delay)
+    return () => window.clearTimeout(timer)
+  }, [billingCatalog?.task_time_pricing?.next_transition_at, open, refetchBillingCatalog])
   const watermark = useWatch({ control: form.control, name: 'watermark' }) ?? false
   const goalMode = useWatch({ control: form.control, name: 'goal_mode' }) ?? false
   const goal = useWatch({ control: form.control, name: 'goal' }) ?? ''
@@ -168,8 +183,7 @@ export function TaskFormDialog({
       ...imageModelOptions,
       {
         key: watchedImageModelKey,
-        display_name: `${watchedImageModelKey}（当前任务配置）`,
-        provider: '',
+        display_name: '已停用图像能力（当前任务配置）',
         is_custom: true,
       },
     ]
@@ -339,7 +353,7 @@ export function TaskFormDialog({
           : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageModelUnavailable
-                ? { message: '当前图像模型不可用，请重新选择。', href: '' }
+                ? { message: '当前图像能力不可用，请重新选择。', href: '' }
                 : watchedType !== 'ecommerce' && goalMode && !goal.trim()
                   ? { message: '强目标模式需要填写目标条件。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
@@ -443,6 +457,12 @@ export function TaskFormDialog({
                 </FormItem>
               )} />
 
+              <TaskTimePricingNotice
+                catalog={billingCatalog}
+                taskType={watchedType}
+                executionProfile={watchedExecutionProfile || undefined}
+              />
+
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
                 {!isMontageTask ? promptComposer : null}
@@ -492,12 +512,12 @@ export function TaskFormDialog({
                     ) : <div />}
                     <FormField control={form.control} name="image_model_key" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>图像模型</FormLabel>
+                        <FormLabel>图像能力</FormLabel>
                         <FormControl>
                           {imageModelsLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
                           ) : (
-                            <ImageModelSelector options={imageModelOptionsForValue} value={field.value || ''} onChange={field.onChange} />
+                            <ImageCapabilitySelector options={imageModelOptionsForValue} value={field.value || ''} onChange={field.onChange} />
                           )}
                         </FormControl>
                         <FormMessage />

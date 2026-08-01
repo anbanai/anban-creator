@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
@@ -24,7 +25,7 @@ func applyAgentPackIdentity(execution *model.TaskExecution, taskType string) err
 }
 
 func inheritAgentPackIdentity(target, source *model.TaskExecution) bool {
-	if target == nil || source == nil || source.AgentPackID == "" || source.AgentPackVersion == "" || source.AgentPackDigest == "" || source.RuntimeAdapter == "" || source.RuntimeProfile == "" {
+	if target == nil || !hasCompleteAgentPackIdentity(source) {
 		return false
 	}
 	target.AgentPackID = source.AgentPackID
@@ -33,4 +34,13 @@ func inheritAgentPackIdentity(target, source *model.TaskExecution) bool {
 	target.RuntimeAdapter = source.RuntimeAdapter
 	target.RuntimeProfile = source.RuntimeProfile
 	return true
+}
+
+func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
+	return execution != nil &&
+		strings.TrimSpace(execution.AgentPackID) != "" &&
+		strings.TrimSpace(execution.AgentPackVersion) != "" &&
+		strings.TrimSpace(execution.AgentPackDigest) != "" &&
+		strings.TrimSpace(execution.RuntimeAdapter) != "" &&
+		strings.TrimSpace(execution.RuntimeProfile) != ""
 }

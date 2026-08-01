@@ -2,12 +2,35 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+func TestImageModelOptionPublicContractOmitsInternalProviderFields(t *testing.T) {
+	payload, err := json.Marshal(ImageModelOption{
+		Key: "professional_enhance", DisplayName: "专业增强", Description: "复杂构图与细节表现",
+		MinTier: "enterprise", PriceCredits: 900,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(payload)
+	for _, forbidden := range []string{"provider", "provider_key", "route", "model", "openai", "gpt", "gemini", "claude", "seedream", "doubao"} {
+		if strings.Contains(strings.ToLower(text), forbidden) {
+			t.Fatalf("public image capability payload contains %q: %s", forbidden, text)
+		}
+	}
+	for _, required := range []string{"professional_enhance", "专业增强", "price_credits"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("public image capability payload missing %q: %s", required, text)
+		}
+	}
+}
 
 func TestValidateImageModelKey(t *testing.T) {
 	presets := []config.ImageModelPreset{

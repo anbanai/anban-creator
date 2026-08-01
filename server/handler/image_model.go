@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -10,6 +11,7 @@ import (
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // ImageModelHandler exposes the list of image models the current user can select
@@ -17,38 +19,40 @@ import (
 type ImageModelHandler struct {
 	presets []config.ImageModelPreset
 	repo    repository.Repository
+	catalog *service.BillingCatalogService
 	logger  *zerolog.Logger
 }
 
 // NewImageModelHandler creates a new ImageModelHandler.
-// repo may be nil in degraded mode; in that case List returns only the system-default option.
-func NewImageModelHandler(presets []config.ImageModelPreset, repo repository.Repository, logger *zerolog.Logger) *ImageModelHandler {
-	return &ImageModelHandler{presets: presets, repo: repo, logger: logger}
+// repo may be nil in degraded mode; in that case List fails closed to Free-tier
+// capabilities and does not manufacture a platform-default option.
+func NewImageModelHandler(presets []config.ImageModelPreset, repo repository.Repository, catalog *service.BillingCatalogService, logger *zerolog.Logger) *ImageModelHandler {
+	return &ImageModelHandler{presets: presets, repo: repo, catalog: catalog, logger: logger}
 }
 
 // ImageModelOption is a selectable image model entry returned to the frontend.
 type ImageModelOption struct {
-	// Key is the value stored on Task/Plan.ImageModelKey. "" = system default,
-	// "custom" = user override, any other = preset key.
+	// Key is the value stored on Task/Plan.ImageModelKey. Empty and "system_default"
+	// remain server-side fallback values; public entries use configurable
+	// capability keys. "custom" is the enterprise-only user override.
 	Key string `json:"key"`
 	// DisplayName is the user-facing label.
 	DisplayName string `json:"display_name"`
-	// Provider is the underlying image provider (volcengine/gemini/openai).
-	Provider string `json:"provider,omitempty"`
-	// Model is the concrete model id, included so the frontend can show a hint.
-	Model string `json:"model,omitempty"`
+	Description string `json:"description,omitempty"`
 	// MinTier is the minimum tier required to use this option (preset entries only).
-	MinTier string `json:"min_tier,omitempty"`
+	MinTier      string `json:"min_tier,omitempty"`
+	SortOrder    int    `json:"sort_order,omitempty"`
+	PriceCredits int64  `json:"price_credits,omitempty"`
+	PriceAvailable bool `json:"price_available"`
 	// IsCustom marks the user-override ("custom") entry.
 	IsCustom bool `json:"is_custom,omitempty"`
 }
 
 // List handles GET /api/v1/image-models.
 //
-// Returns the list of image models the current user is allowed to select, in display order:
-//  1. Always: the "system default" entry (Key = "").
-//  2. Each preset whose MinTier the user satisfies, in the order declared in config.
-//  3. For Enterprise users only: a "custom" entry that uses the user's per-account model-config.
+// Returns the list of neutral image capabilities the current user is allowed
+// to select, in configured display order. The server-side empty-key fallback
+// is intentionally not exposed as a selectable public entry.
 func (h *ImageModelHandler) List(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
@@ -62,39 +66,50 @@ func (h *ImageModelHandler) List(c fiber.Ctx) error {
 		}
 	}
 
-	options := make([]ImageModelOption, 0, len(h.presets)+2)
+	options := make([]ImageModelOption, 0, len(h.presets)+1)
 
-	// 1. System default is always available.
-	options = append(options, ImageModelOption{
-		Key:         model.ImageModelKeySystemDefault,
-		DisplayName: "系统默认",
+	// Presets the user's tier satisfies. SortOrder is the public catalog order;
+	// stable key order is the deterministic fallback for legacy entries.
+	presets := append([]config.ImageModelPreset(nil), h.presets...)
+	sort.SliceStable(presets, func(i, j int) bool {
+		if presets[i].SortOrder != presets[j].SortOrder {
+			if presets[i].SortOrder == 0 {
+				return false
+			}
+			if presets[j].SortOrder == 0 {
+				return true
+			}
+			return presets[i].SortOrder < presets[j].SortOrder
+		}
+		return presets[i].Key < presets[j].Key
 	})
-
-	// 2. Presets the user's tier satisfies, in declared order.
 	for i := range h.presets {
-		p := &h.presets[i]
+		p := &presets[i]
 		required := model.NormalizeTier(p.MinTier)
 		if !model.TierSatisfies(userTier, required) {
 			continue
 		}
-		display := p.DisplayName
-		if display == "" {
-			display = fmt.Sprintf("%s / %s", p.Provider, p.Model)
-		}
-		options = append(options, ImageModelOption{
+		option := ImageModelOption{
 			Key:         p.Key,
-			DisplayName: display,
-			Provider:    p.Provider,
-			Model:       p.Model,
+			DisplayName: p.DisplayName,
+			Description: p.Description,
 			MinTier:     string(required),
-		})
+			SortOrder:   p.SortOrder,
+		}
+		if h.catalog != nil && p.BillingSKU != "" {
+			if price, err := h.catalog.ResolvePriceBySKUID(c.Context(), "", p.BillingSKU, userTier); err == nil && price != nil {
+				option.PriceCredits = price.PriceCredits
+				option.PriceAvailable = true
+			}
+		}
+		options = append(options, option)
 	}
 
-	// 3. Enterprise users can opt into per-account custom config.
+	// Enterprise users can opt into per-account custom config.
 	if userTier == model.TierEnterprise {
 		options = append(options, ImageModelOption{
 			Key:         model.ImageModelKeyCustom,
-			DisplayName: "自定义 (使用账号配置)",
+			DisplayName: "自定义图像能力",
 			IsCustom:    true,
 		})
 	}
@@ -113,6 +128,7 @@ func (h *ImageModelHandler) List(c fiber.Ctx) error {
 //   - "custom" → valid only for Enterprise tier.
 //   - any other value → valid only if it matches a preset key whose MinTier the user satisfies.
 func ValidateImageModelKey(key string, userTier model.Tier, presets []config.ImageModelPreset) error {
+	key = config.NormalizeImageModelKeyForPresets(key, presets)
 	if key == "" || key == model.ImageModelKeySystemDefault {
 		return nil
 	}

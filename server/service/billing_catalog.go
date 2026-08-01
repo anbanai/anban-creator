@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,20 +55,37 @@ func (s *BillingCatalogService) SetAgentProfileRegistry(registry *AgentProfileRe
 }
 
 type ResolvedSKUPrice struct {
-	SKU              *model.BillingSKU
-	PricingTier      model.Tier
-	ListPriceCredits int64
-	PriceCredits     int64
-	DiscountCredits  int64
-	PricingRuleID    string
-	PricingSnapshot  datatypes.JSON
+	SKU                 *model.BillingSKU
+	PricingTier         model.Tier
+	ListPriceCredits    int64
+	PriceCredits        int64
+	DiscountCredits     int64
+	PricingRuleID       string
+	PricingSnapshot     datatypes.JSON
+	PeakPriceCredits    int64
+	OffPeakPriceCredits int64
+	TaskTimePriced      bool
+}
+
+type TaskTimePricingStatus struct {
+	Timezone           string               `json:"timezone"`
+	PeakWindows        []billing.TimeWindow `json:"peak_windows"`
+	OffPeakWindows     []billing.TimeWindow `json:"off_peak_windows"`
+	OffPeakRatePercent int64                `json:"off_peak_rate_percent"`
+	CurrentPeriod      string               `json:"current_period"`
+	ServerTime         time.Time            `json:"server_time"`
+	NextTransitionAt   time.Time            `json:"next_transition_at"`
 }
 
 type QuoteRequest struct {
-	UserID               string
-	CatalogID            string
-	Operation            string
-	Route                string
+	UserID    string
+	CatalogID string
+	Operation string
+	Route     string
+	// SKUID is an internal server-selected SKU override. Public callers must
+	// never populate it; it is used when a configurable capability owns a SKU
+	// that is intentionally independent from its semantic route.
+	SKUID                string
 	ExecutionProfile     string
 	AgentProfileSnapshot *model.AgentProfileSnapshot
 	RequestFingerprint   string
@@ -105,6 +124,8 @@ func NewBillingCatalogService(repo repository.Repository, bundle *billing.Bundle
 		}
 		snapshot.Products.SKUs = make([]billing.SKUConfig, len(bundle.Products.SKUs))
 		copy(snapshot.Products.SKUs, bundle.Products.SKUs)
+		snapshot.Products.TaskTimePricing.PeakWindows = append([]billing.TimeWindow(nil), bundle.Products.TaskTimePricing.PeakWindows...)
+		snapshot.Products.TaskTimePricing.OffPeakWindows = append([]billing.TimeWindow(nil), bundle.Products.TaskTimePricing.OffPeakWindows...)
 	}
 	return &BillingCatalogService{repo: repo, bundle: snapshot, now: now, quoteTTL: ttl}
 }
@@ -235,6 +256,10 @@ func (s *BillingCatalogService) ResolveSKUForExecutionProfile(ctx context.Contex
 }
 
 func (s *BillingCatalogService) ResolvePriceForExecutionProfile(ctx context.Context, userID, catalogID, operation, executionProfile string) (*ResolvedSKUPrice, error) {
+	return s.ResolvePriceForExecutionProfileAt(ctx, userID, catalogID, operation, executionProfile, s.now())
+}
+
+func (s *BillingCatalogService) ResolvePriceForExecutionProfileAt(ctx context.Context, userID, catalogID, operation, executionProfile string, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
 	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
 	if err != nil {
 		return nil, err
@@ -244,7 +269,7 @@ func (s *BillingCatalogService) ResolvePriceForExecutionProfile(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	return s.resolvePriceForSKU(ctx, sku, tier)
+	return s.resolvePriceForSKU(ctx, sku, tier, evaluatedAt)
 }
 
 func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, operation, route string) (*model.BillingSKU, error) {
@@ -275,16 +300,52 @@ func (s *BillingCatalogService) ResolveSKU(ctx context.Context, catalogID, opera
 	return sku, err
 }
 
+// ResolveSKUByID resolves a configured retail SKU identity. SKU IDs are
+// internal billing identities and must never be accepted from a public client
+// as a provider/model selector.
+func (s *BillingCatalogService) ResolveSKUByID(ctx context.Context, catalogID, skuID string) (*model.BillingSKU, error) {
+	var ok bool
+	if catalogID, ok = canonicalBillingText(catalogID, 128, false); !ok {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if skuID, ok = canonicalBillingText(skuID, 128, false); !ok || skuID == "" {
+		return nil, fmt.Errorf("%w: invalid SKU identity", ErrBillingInvalid)
+	}
+	if catalogID == "" {
+		catalog, err := s.repo.Billing().FindLatestPublishedCatalog(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBillingSKUNotFound
+			}
+			return nil, err
+		}
+		catalogID = catalog.CatalogID
+	}
+	sku, err := s.repo.Billing().FindSKU(ctx, catalogID, skuID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrBillingSKUNotFound
+	}
+	return sku, err
+}
+
 func (s *BillingCatalogService) ResolvePrice(ctx context.Context, userID, catalogID, operation, route string) (*ResolvedSKUPrice, error) {
+	return s.ResolvePriceAt(ctx, userID, catalogID, operation, route, s.now())
+}
+
+func (s *BillingCatalogService) ResolvePriceAt(ctx context.Context, userID, catalogID, operation, route string, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
 	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
 	if err != nil {
 		return nil, err
 	}
 	tier := model.ResolveTier(user.Tier)
-	return s.ResolvePriceForTier(ctx, catalogID, operation, route, tier)
+	return s.resolvePriceForTierAt(ctx, catalogID, operation, route, tier, evaluatedAt)
 }
 
 func (s *BillingCatalogService) ResolvePriceForTier(ctx context.Context, catalogID, operation, route string, tier model.Tier) (*ResolvedSKUPrice, error) {
+	return s.resolvePriceForTierAt(ctx, catalogID, operation, route, tier, s.now())
+}
+
+func (s *BillingCatalogService) resolvePriceForTierAt(ctx context.Context, catalogID, operation, route string, tier model.Tier, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
 	if !model.ValidTiers[tier] {
 		return nil, fmt.Errorf("%w: invalid pricing tier", ErrBillingInvalid)
 	}
@@ -292,10 +353,41 @@ func (s *BillingCatalogService) ResolvePriceForTier(ctx context.Context, catalog
 	if err != nil {
 		return nil, err
 	}
-	return s.resolvePriceForSKU(ctx, sku, tier)
+	return s.resolvePriceForSKU(ctx, sku, tier, evaluatedAt)
 }
 
-func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *model.BillingSKU, tier model.Tier) (*ResolvedSKUPrice, error) {
+// ResolvePriceBySKUID resolves the current tier price for a configured SKU.
+func (s *BillingCatalogService) ResolvePriceBySKUID(ctx context.Context, catalogID, skuID string, tier model.Tier) (*ResolvedSKUPrice, error) {
+	return s.resolvePriceBySKUIDAt(ctx, catalogID, skuID, tier, s.now())
+}
+
+func (s *BillingCatalogService) resolvePriceBySKUIDAt(ctx context.Context, catalogID, skuID string, tier model.Tier, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
+	if !model.ValidTiers[tier] {
+		return nil, fmt.Errorf("%w: invalid pricing tier", ErrBillingInvalid)
+	}
+	sku, err := s.ResolveSKUByID(ctx, catalogID, skuID)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolvePriceForSKU(ctx, sku, tier, evaluatedAt)
+}
+
+// ResolvePriceBySKUIDForUser resolves a configured SKU using the user's
+// current tier. The SKU remains server-owned; callers never receive it from
+// public client input.
+func (s *BillingCatalogService) ResolvePriceBySKUIDForUser(ctx context.Context, userID, catalogID, skuID string) (*ResolvedSKUPrice, error) {
+	return s.resolvePriceBySKUIDForUserAt(ctx, userID, catalogID, skuID, s.now())
+}
+
+func (s *BillingCatalogService) resolvePriceBySKUIDForUserAt(ctx context.Context, userID, catalogID, skuID string, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
+	user, err := s.repo.Users().FindByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	return s.resolvePriceBySKUIDAt(ctx, catalogID, skuID, model.ResolveTier(user.Tier), evaluatedAt)
+}
+
+func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *model.BillingSKU, tier model.Tier, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
 	if sku == nil || !model.ValidTiers[tier] {
 		return nil, fmt.Errorf("%w: invalid pricing identity", ErrBillingInvalid)
 	}
@@ -309,10 +401,29 @@ func (s *BillingCatalogService) resolvePriceForSKU(ctx context.Context, sku *mod
 	if price.PriceCredits > sku.PriceCredits {
 		return nil, fmt.Errorf("%w: tier price exceeds list price", ErrBillingInvalid)
 	}
-	return tierResolvedSKUPrice(sku, price)
+	resolved, err := tierResolvedSKUPrice(sku, price)
+	if err != nil || sku.Policy != "task_admission" {
+		return resolved, err
+	}
+	catalog, err := s.repo.Billing().FindCatalogVersion(ctx, sku.CatalogID)
+	if err != nil {
+		return nil, err
+	}
+	rule, configured, err := taskTimePricingFromCatalogSnapshot(catalog.Snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if !configured {
+		return resolved, nil
+	}
+	return applyTaskTimePricing(resolved, rule, evaluatedAt)
 }
 
 func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteRequest) (*model.BillingQuote, error) {
+	return s.createQuoteAt(ctx, req, s.now().UTC())
+}
+
+func (s *BillingCatalogService) createQuoteAt(ctx context.Context, req QuoteRequest, evaluatedAt time.Time) (*model.BillingQuote, error) {
 	var err error
 	req, err = canonicalQuoteRequest(req)
 	if err != nil {
@@ -330,16 +441,18 @@ func (s *BillingCatalogService) CreateQuote(ctx context.Context, req QuoteReques
 		return nil, err
 	}
 	var resolved *ResolvedSKUPrice
-	if req.ExecutionProfile != "" {
-		resolved, err = s.ResolvePriceForExecutionProfile(ctx, req.UserID, req.CatalogID, req.Operation, req.ExecutionProfile)
+	now := evaluatedAt.UTC()
+	if req.SKUID != "" {
+		resolved, err = s.resolvePriceBySKUIDForUserAt(ctx, req.UserID, req.CatalogID, req.SKUID, now)
+	} else if req.ExecutionProfile != "" {
+		resolved, err = s.ResolvePriceForExecutionProfileAt(ctx, req.UserID, req.CatalogID, req.Operation, req.ExecutionProfile, now)
 	} else {
-		resolved, err = s.ResolvePrice(ctx, req.UserID, req.CatalogID, req.Operation, req.Route)
+		resolved, err = s.ResolvePriceAt(ctx, req.UserID, req.CatalogID, req.Operation, req.Route, now)
 	}
 	if err != nil {
 		return nil, err
 	}
 	sku := resolved.SKU
-	now := s.now().UTC()
 	var profileSnapshot datatypes.JSON
 	if req.AgentProfileSnapshot != nil {
 		if req.AgentProfileSnapshot.ProfileID != req.ExecutionProfile {
@@ -419,7 +532,8 @@ func (s *BillingCatalogService) CreateTaskQuote(ctx context.Context, req TaskQuo
 		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
 	}
 	quoteRequest.AgentProfileSnapshot = &profileSnapshot
-	resolved, err := s.ResolvePriceForExecutionProfile(ctx, canonical.UserID, "", operation, canonical.ExecutionProfile)
+	now := s.now().UTC()
+	resolved, err := s.ResolvePriceForExecutionProfileAt(ctx, canonical.UserID, "", operation, canonical.ExecutionProfile, now)
 	if err != nil {
 		if errors.Is(err, ErrBillingSKUNotFound) {
 			return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingProfileSKUNotFound)
@@ -443,7 +557,7 @@ func (s *BillingCatalogService) CreateTaskQuote(ctx context.Context, req TaskQuo
 	if balance < resolved.PriceCredits {
 		return nil, ErrBillingInsufficientForTask
 	}
-	quote, err := s.CreateQuote(ctx, quoteRequest)
+	quote, err := s.createQuoteAt(ctx, quoteRequest, now)
 	if errors.Is(err, ErrBillingSKUNotFound) {
 		return nil, fmt.Errorf("%w: unavailable task execution profile", ErrBillingProfileSKUNotFound)
 	}
@@ -502,6 +616,9 @@ func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 	if req.ExecutionProfile != "" && req.Route != "" {
 		return QuoteRequest{}, fmt.Errorf("%w: route and execution_profile are mutually exclusive", ErrBillingInvalid)
 	}
+	if req.SKUID, ok = canonicalBillingText(req.SKUID, 128, false); !ok {
+		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
+	}
 	req.RequestFingerprint = strings.TrimSpace(req.RequestFingerprint)
 	if !validBillingFingerprint(req.RequestFingerprint) {
 		return QuoteRequest{}, fmt.Errorf("%w: invalid quote", ErrBillingInvalid)
@@ -517,16 +634,17 @@ func canonicalQuoteRequest(req QuoteRequest) (QuoteRequest, error) {
 
 func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
 	type productsSnapshot struct {
-		Currency         string              `json:"currency"`
-		TierRatesPercent map[string]int64    `json:"tier_rates_percent"`
-		SKUs             []billing.SKUConfig `json:"skus"`
+		Currency         string                  `json:"currency"`
+		TierRatesPercent map[string]int64        `json:"tier_rates_percent"`
+		TaskTimePricing  billing.TaskTimePricing `json:"task_time_pricing"`
+		SKUs             []billing.SKUConfig     `json:"skus"`
 	}
 	snapshot := struct {
 		Products  productsSnapshot        `json:"products"`
 		Economics billing.EconomicsConfig `json:"economics"`
 		Policy    billing.PolicySnapshot  `json:"policy"`
 	}{
-		Products:  productsSnapshot{Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs},
+		Products:  productsSnapshot{Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, TaskTimePricing: bundle.Products.TaskTimePricing, SKUs: bundle.Products.SKUs},
 		Economics: bundle.Economics,
 		Policy:    bundle.Policy,
 	}
@@ -535,6 +653,160 @@ func retailCatalogSnapshot(bundle billing.Bundle) (datatypes.JSON, error) {
 		return nil, fmt.Errorf("marshal retail billing catalog: %w", err)
 	}
 	return encoded, nil
+}
+
+func taskTimePricingFromCatalogSnapshot(snapshot []byte) (billing.TaskTimePricing, bool, error) {
+	var value struct {
+		Products struct {
+			TaskTimePricing billing.TaskTimePricing `json:"task_time_pricing"`
+		} `json:"products"`
+	}
+	if err := json.Unmarshal(snapshot, &value); err != nil {
+		return billing.TaskTimePricing{}, false, fmt.Errorf("%w: catalog task time pricing is invalid", ErrBillingInvalid)
+	}
+	if strings.TrimSpace(value.Products.TaskTimePricing.Timezone) == "" {
+		return billing.TaskTimePricing{}, false, nil
+	}
+	return value.Products.TaskTimePricing, true, nil
+}
+
+func applyTaskTimePricing(resolved *ResolvedSKUPrice, rule billing.TaskTimePricing, evaluatedAt time.Time) (*ResolvedSKUPrice, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("%w: missing resolved task price", ErrBillingInvalid)
+	}
+	location, err := time.LoadLocation(rule.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("%w: catalog task time pricing timezone is invalid", ErrBillingInvalid)
+	}
+	local := evaluatedAt.In(location)
+	period, _, err := evaluateTaskTimePeriod(rule, local)
+	if err != nil {
+		return nil, err
+	}
+	peakPrice := resolved.PriceCredits
+	offPeakPrice := percentageFloor(peakPrice, rule.OffPeakRatePercent)
+	finalPrice := peakPrice
+	timePercent := int64(100)
+	if period == "off_peak" {
+		finalPrice = offPeakPrice
+		timePercent = rule.OffPeakRatePercent
+	}
+	var tierSnapshot struct {
+		RatePercent int64 `json:"rate_percent"`
+	}
+	if err := json.Unmarshal(resolved.PricingSnapshot, &tierSnapshot); err != nil {
+		return nil, fmt.Errorf("%w: catalog tier pricing snapshot is invalid", ErrBillingInvalid)
+	}
+	ruleID := resolved.SKU.CatalogID + ":" + string(resolved.PricingTier) + ":" + period
+	pricingSnapshot, err := json.Marshal(struct {
+		CatalogID         string               `json:"catalog_id"`
+		SKUID             string               `json:"sku_id"`
+		Tier              string               `json:"tier"`
+		ListPriceCredits  int64                `json:"list_price_credits"`
+		Timezone          string               `json:"timezone"`
+		PeakWindows       []billing.TimeWindow `json:"peak_windows"`
+		OffPeakWindows    []billing.TimeWindow `json:"off_peak_windows"`
+		MembershipPercent int64                `json:"membership_percent"`
+		TimePercent       int64                `json:"time_percent"`
+		EvaluatedAt       time.Time            `json:"evaluated_at"`
+		Period            string               `json:"period"`
+		Rounding          string               `json:"rounding"`
+		FinalPriceCredits int64                `json:"final_price_credits"`
+		PricingRuleID     string               `json:"pricing_rule_id"`
+	}{resolved.SKU.CatalogID, resolved.SKU.SKUID, string(resolved.PricingTier), resolved.ListPriceCredits, rule.Timezone,
+		rule.PeakWindows, rule.OffPeakWindows, tierSnapshot.RatePercent, timePercent, local, period, "floor", finalPrice, ruleID})
+	if err != nil {
+		return nil, err
+	}
+	resolved.PeakPriceCredits = peakPrice
+	resolved.OffPeakPriceCredits = offPeakPrice
+	resolved.TaskTimePriced = true
+	resolved.PriceCredits = finalPrice
+	resolved.DiscountCredits = resolved.ListPriceCredits - finalPrice
+	resolved.PricingRuleID = ruleID
+	resolved.PricingSnapshot = pricingSnapshot
+	return resolved, nil
+}
+
+func percentageFloor(value, percent int64) int64 {
+	return value/100*percent + value%100*percent/100
+}
+
+func evaluateTaskTimePeriod(rule billing.TaskTimePricing, local time.Time) (string, time.Time, error) {
+	minute := local.Hour()*60 + local.Minute()
+	period := "off_peak"
+	boundaries := make([]int, 0, len(rule.PeakWindows)*2)
+	for _, window := range rule.PeakWindows {
+		start, ok := serviceClockMinute(window.Start)
+		if !ok {
+			return "", time.Time{}, fmt.Errorf("%w: catalog peak window is invalid", ErrBillingInvalid)
+		}
+		end, ok := serviceClockMinute(window.End)
+		if !ok {
+			return "", time.Time{}, fmt.Errorf("%w: catalog peak window is invalid", ErrBillingInvalid)
+		}
+		if minute >= start && minute < end {
+			period = "peak"
+		}
+		boundaries = append(boundaries, start, end)
+	}
+	sort.Ints(boundaries)
+	nextMinute := -1
+	for _, boundary := range boundaries {
+		if boundary > minute {
+			nextMinute = boundary
+			break
+		}
+	}
+	nextDay := nextMinute < 0
+	if nextDay {
+		for _, boundary := range boundaries {
+			if boundary < 24*60 {
+				nextMinute = boundary
+				break
+			}
+		}
+	}
+	if nextMinute < 0 {
+		return "", time.Time{}, fmt.Errorf("%w: catalog peak windows have no transition", ErrBillingInvalid)
+	}
+	if nextMinute == 24*60 {
+		nextMinute = 0
+		nextDay = true
+	}
+	next := time.Date(local.Year(), local.Month(), local.Day(), nextMinute/60, nextMinute%60, 0, 0, local.Location())
+	if nextDay {
+		next = next.AddDate(0, 0, 1)
+	}
+	return period, next, nil
+}
+
+func serviceClockMinute(value string) (int, bool) {
+	if len(value) != 5 || value[2] != ':' {
+		return 0, false
+	}
+	hour, hourErr := strconv.Atoi(value[:2])
+	minute, minuteErr := strconv.Atoi(value[3:])
+	if hourErr != nil || minuteErr != nil || hour < 0 || hour > 24 || minute < 0 || minute > 59 || (hour == 24 && minute != 0) {
+		return 0, false
+	}
+	return hour*60 + minute, true
+}
+
+func (s *BillingCatalogService) CurrentTaskTimePricing() (TaskTimePricingStatus, error) {
+	rule := s.bundle.Products.TaskTimePricing
+	location, err := time.LoadLocation(rule.Timezone)
+	if err != nil {
+		return TaskTimePricingStatus{}, fmt.Errorf("%w: task time pricing timezone is invalid", ErrBillingInvalid)
+	}
+	local := s.now().In(location)
+	period, next, err := evaluateTaskTimePeriod(rule, local)
+	if err != nil {
+		return TaskTimePricingStatus{}, err
+	}
+	return TaskTimePricingStatus{Timezone: rule.Timezone, PeakWindows: append([]billing.TimeWindow(nil), rule.PeakWindows...),
+		OffPeakWindows: append([]billing.TimeWindow(nil), rule.OffPeakWindows...), OffPeakRatePercent: rule.OffPeakRatePercent,
+		CurrentPeriod: period, ServerTime: local, NextTransitionAt: next}, nil
 }
 
 func sameCatalog(left, right *model.BillingCatalogVersion) bool {
@@ -617,7 +889,7 @@ func quoteMatchesRequest(existing *model.BillingQuote, req QuoteRequest) bool {
 	if err := json.Unmarshal(existing.SKUSnapshot, &pinned); err != nil {
 		return false
 	}
-	if pinned.ID != existing.SKUID || pinned.Operation != strings.TrimSpace(req.Operation) || pinned.Route != strings.TrimSpace(req.Route) || pinned.ExecutionProfile != strings.TrimSpace(req.ExecutionProfile) {
+	if pinned.ID != existing.SKUID || (req.SKUID != "" && pinned.ID != req.SKUID) || (req.SKUID == "" && (pinned.Operation != strings.TrimSpace(req.Operation) || pinned.Route != strings.TrimSpace(req.Route) || pinned.ExecutionProfile != strings.TrimSpace(req.ExecutionProfile))) {
 		return false
 	}
 	if req.AgentProfileSnapshot == nil {

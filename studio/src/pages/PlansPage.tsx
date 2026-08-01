@@ -12,7 +12,7 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import type { AgentExecutionProfileID, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
@@ -34,7 +34,7 @@ import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { useImageModels } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
@@ -50,6 +50,7 @@ import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
+import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -80,6 +81,21 @@ function planToFormValues(plan: Plan): PlanFormValues {
   }
 }
 
+function cronTime(cron: string) {
+  const [minute, hour] = cron.trim().split(/\s+/)
+  if (hour === undefined || minute === undefined) return undefined
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+}
+
+function cronWithTime(cron: string, value: string) {
+  const parts = cron.trim().split(/\s+/)
+  const [hour, minute] = value.split(':')
+  if (parts.length !== 5 || hour === undefined || minute === undefined) return cron
+  parts[0] = String(Number(minute))
+  parts[1] = String(Number(hour))
+  return parts.join(' ')
+}
+
 export default function PlansPage() {
   const agentPacksQuery = useAgentPacks()
   const queryClient = useQueryClient()
@@ -95,12 +111,15 @@ export default function PlansPage() {
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const [montageUploading, setMontageUploading] = useState(false)
+  const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const { submit } = useSubmitLock()
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageCapabilities()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
   const attachmentHydratingRef = useRef(false)
+  const recommendationRequestRef = useRef(0)
+  const scheduleManuallyChangedRef = useRef(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -215,11 +234,23 @@ export default function PlansPage() {
   )
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
-  const { data: billingCatalog } = useQuery({
+  const { data: billingCatalog, refetch: refetchBillingCatalog } = useQuery({
     queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
     staleTime: 60_000,
   })
+
+  useEffect(() => {
+    const transition = billingCatalog?.task_time_pricing?.next_transition_at
+    if (!modalOpen || !transition) return
+    const delay = new Date(transition).getTime() - Date.now() + 250
+    if (delay <= 0) {
+      void refetchBillingCatalog()
+      return
+    }
+    const timer = window.setTimeout(() => { void refetchBillingCatalog() }, delay)
+    return () => window.clearTimeout(timer)
+  }, [billingCatalog?.task_time_pricing?.next_transition_at, modalOpen, refetchBillingCatalog])
   const { data: billingWallet } = useQuery({
     queryKey: queryKeys.billing.wallet,
     queryFn: () => api.billing.wallet(),
@@ -304,6 +335,8 @@ export default function PlansPage() {
       : 'seednote'
     const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
     setEditingPlan(null)
+    scheduleManuallyChangedRef.current = false
+    setRecommendationUnavailable(false)
     setMontageUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
@@ -329,7 +362,20 @@ export default function PlansPage() {
         : undefined,
     })
     setModalOpen(true)
-  }, [createIntent.projectId, createIntent.type, form, projectMap])
+    const requestID = ++recommendationRequestRef.current
+    void refetchBillingCatalog()
+    void api.plans.scheduleRecommendation().then((recommendation) => {
+      if (requestID !== recommendationRequestRef.current || scheduleManuallyChangedRef.current) return
+      form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), recommendation.time), { shouldValidate: true })
+      setRecommendationUnavailable(!recommendation.load_balanced)
+    }).catch(async () => {
+      if (requestID !== recommendationRequestRef.current || scheduleManuallyChangedRef.current) return
+      const fallbackCatalog = billingCatalog ?? await queryClient.fetchQuery({ queryKey: queryKeys.billing.catalog, queryFn: () => api.billing.catalog() }).catch(() => undefined)
+      const fallback = fallbackCatalog?.task_time_pricing?.off_peak_windows[0]?.start
+      if (fallback) form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), fallback), { shouldValidate: true })
+      setRecommendationUnavailable(true)
+    })
+  }, [billingCatalog, createIntent.projectId, createIntent.type, form, projectMap, queryClient, refetchBillingCatalog])
 
   useEffect(() => {
     if (!createIntent.shouldCreate) return
@@ -339,7 +385,9 @@ export default function PlansPage() {
   }, [allProjects, createIntent.projectId, createIntent.shouldCreate, openCreate, setSearchParams])
 
   function openEdit(plan: Plan) {
+    recommendationRequestRef.current++
     setEditingPlan(plan)
+    setRecommendationUnavailable(false)
     setAttachmentSubmitError('')
     setMontageUploading(false)
     form.reset(planToFormValues(plan))
@@ -694,8 +742,15 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>排期设置</FormLabel>
                   <FormControl>
-                    <SchedulePicker value={field.value} onChange={field.onChange} />
+                    <SchedulePicker value={field.value} onChange={field.onChange} onInteraction={() => { scheduleManuallyChangedRef.current = true }} />
                   </FormControl>
+                  <TaskTimePricingNotice
+                    catalog={billingCatalog}
+                    taskType={watchedType}
+                    executionProfile={(watchedExecutionProfile || undefined) as AgentExecutionProfileID | undefined}
+                    selectedTime={cronTime(field.value)}
+                    recommendationUnavailable={!editingPlan && recommendationUnavailable}
+                  />
                   <FormMessage />
                 </FormItem>
               )} />
@@ -704,12 +759,12 @@ export default function PlansPage() {
 
               {!isMontagePlan && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>图像模型</FormLabel>
+                  <FormLabel>图像能力</FormLabel>
                   <FormControl>
                     {imageModelsLoading ? (
                       <Skeleton className="h-10 w-full rounded-xl" />
                     ) : (
-                      <ImageModelSelector
+                      <ImageCapabilitySelector
                         options={imageModelOptions}
                         value={field.value || ''}
                         onChange={field.onChange}

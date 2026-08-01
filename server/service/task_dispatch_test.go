@@ -1009,8 +1009,9 @@ func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t
 }
 
 func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t *testing.T) {
-	svc, repo, _, _, task := setupDispatchTest(t)
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	ctx := context.Background()
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
 	task.Status = model.TaskStatusRunning
 	profile := testAgentProfiles()[1]
 	snapshot, fingerprint, err := profile.Freeze()
@@ -1040,6 +1041,9 @@ func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t
 	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	if replacement.Provider != task.AgentProfileSnapshot.Provider || !reflect.DeepEqual(replacement.ProfileEnvs, profiled.ProfileEnvs) || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
 		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
+	}
+	if replacement.RuntimeImage != "registry/content@sha256:current" || replacement.AgentPackID != "article" {
+		t.Fatalf("replacement runtime = %#v, want current image and frozen Agent Pack identity", replacement)
 	}
 }
 
@@ -1150,9 +1154,13 @@ func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	}
 }
 
-func TestResumeExecutionMissingParentRuntimeIdentityFinalizesPendingTask(t *testing.T) {
-	svc, repo, _, _, task := setupDispatchTest(t)
-	parent := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed}
+func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
+		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:legacy",
+	}
 	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
 		t.Fatal(err)
 	}
@@ -1164,12 +1172,9 @@ func TestResumeExecutionMissingParentRuntimeIdentityFinalizesPendingTask(t *test
 	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
 	}
-	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if found.Status != model.TaskStatusFailed || found.CompletedAt == nil || !strings.Contains(found.ErrorMessage, "resume parent execution runtime identity is missing") {
-		t.Fatalf("task = %#v, want terminal missing runtime identity failure", found)
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != "article" || current.ParentExecutionID != parent.ID {
+		t.Fatalf("resumed execution = %#v, want current image with preserved lineage", current)
 	}
 }
 

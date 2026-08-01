@@ -98,9 +98,12 @@ model_routes:
       timeout: 5m
     designer:
       seedream:
-        selection_key: "volcengine-standard"
+        selection_key: "standard_image"
         min_tier: "free"
-        alias: "豆包 Seedream"
+        alias: "标准图像"
+        description: "适合日常内容配图和常规视觉创作"
+        billing_sku: "image.seedream.designer"
+        sort_order: 10
         provider: "volcengine_ark"
         model: "doubao-seedream-5-0-pro-260628"
         timeout: 5m
@@ -118,9 +121,12 @@ model_routes:
           has_compression: false
           watermark: true
       gpt_image_2:
-        selection_key: "openai-standard"
-        min_tier: "pro"
-        alias: "GPT Image 2"
+        selection_key: "professional_enhance"
+        min_tier: "enterprise"
+        alias: "专业增强"
+        description: "更适合复杂构图、细节表现和高要求视觉任务"
+        billing_sku: "image.gpt-image-2.designer"
+        sort_order: 20
         provider: "wangcai_openai"
         model: "gpt-image-2"
         timeout: 5m
@@ -231,20 +237,6 @@ billing_runtime:
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
 
 claude:
-  execution_profile_env_defaults:
-    CLAUDE_CODE_EFFORT_LEVEL: "high"
-    CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
-    CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
-    MAX_THINKING_TOKENS: "0"
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
-    CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
-    CLAUDE_CODE_DISABLE_THINKING: "false"
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
-    CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
-    CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
-    ENABLE_TOOL_SEARCH: "true"
   execution_profiles:
     effective:
       description: "适合日常创作和批量任务，成本最低"
@@ -258,7 +250,18 @@ claude:
         ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
         CLAUDE_CODE_EFFORT_LEVEL: "medium"
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
         CLAUDE_CODE_MAX_OUTPUT_TOKENS: "393216"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        ENABLE_TOOL_SEARCH: "true"
         CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
@@ -271,6 +274,19 @@ claude:
         ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-5.2"
         ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.2"
+        CLAUDE_CODE_EFFORT_LEVEL: "high"
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        ENABLE_TOOL_SEARCH: "true"
         CLAUDE_CODE_SUBAGENT_MODEL: "glm-5.2"
     quality:
       description: "旗舰模型与超长上下文，适合高难度任务"
@@ -283,7 +299,19 @@ claude:
         ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
         ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
+        CLAUDE_CODE_EFFORT_LEVEL: "high"
         CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "true"
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072"
+        MAX_THINKING_TOKENS: "0"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "false"
+        CLAUDE_CODE_DISABLE_THINKING: "false"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
+        ENABLE_TOOL_SEARCH: "true"
         CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3[1m]"
       model_usage_aliases:
         "kimi-k3[1m]": "kimi-k3"

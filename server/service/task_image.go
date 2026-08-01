@@ -106,7 +106,17 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		return nil, errors.New("image model unavailable: resolver returned no descriptor")
 	}
 	var pricing *ResolvedSKUPrice
-	if task.BillingPricingTier != "" {
+	// Preset selections carry their internal billing SKU through the resolver.
+	// Resolve by that immutable identity so adding or renaming public capability
+	// labels cannot silently charge the default image route.
+	if resolved.BillingSKU != "" {
+		tier := model.Tier(task.BillingPricingTier)
+		if task.BillingPricingTier == "" {
+			pricing, err = s.catalog.ResolvePriceBySKUIDForUser(ctx, req.UserID, task.BillingCatalogID, resolved.BillingSKU)
+		} else {
+			pricing, err = s.catalog.ResolvePriceBySKUID(ctx, task.BillingCatalogID, resolved.BillingSKU, tier)
+		}
+	} else if task.BillingPricingTier != "" {
 		pricing, err = s.catalog.ResolvePriceForTier(ctx, task.BillingCatalogID, "mcp.generate_image", "image_generation."+req.ImageType, model.Tier(task.BillingPricingTier))
 	} else {
 		// Tasks admitted before tier pricing did not persist a pricing tier. Their

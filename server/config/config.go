@@ -81,6 +81,9 @@ func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceC
 type ImageModelPreset struct {
 	Key           string                       `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
 	DisplayName   string                       `yaml:"display_name"`   // user-facing label
+	Description   string                       `yaml:"description"`    // neutral user-facing capability description
+	SortOrder     int                          `yaml:"sort_order"`     // stable public catalog order
+	BillingSKU    string                       `yaml:"billing_sku"`    // retail billing catalog identity
 	ProviderRoute string                       `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
 	Provider      string                       `yaml:"provider"`       // derived provider kind or legacy direct provider
 	Model         string                       `yaml:"model"`          // concrete model id
@@ -95,11 +98,40 @@ type ImageModelPreset struct {
 // maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
 const maxImageModelKeyLen = 50
 
+// NormalizeImageModelKey keeps already-persisted tasks and plans executable
+// after public capability keys are renamed. These aliases are server-side only
+// and are never returned by the public catalog.
+func NormalizeImageModelKey(key string) string {
+	switch strings.TrimSpace(key) {
+	case "volcengine-standard":
+		return "standard_image"
+	case "openai-standard", "gpt-image-2":
+		return "professional_enhance"
+	default:
+		return strings.TrimSpace(key)
+	}
+}
+
+func NormalizeImageModelKeyForPresets(key string, presets []ImageModelPreset) string {
+	original := strings.TrimSpace(key)
+	normalized := NormalizeImageModelKey(original)
+	if normalized == original {
+		return original
+	}
+	for _, preset := range presets {
+		if preset.Key == normalized {
+			return normalized
+		}
+	}
+	return original
+}
+
 // ValidateImagePresets checks that preset keys fit the Task/Plan ImageModelKey
 // column (varchar(50)) and are globally unique. Returns the first error found.
 // Call this at startup so a malformed config fails fast instead of surfacing
 // as a 500 on first task create.
 func ValidateImagePresets(presets []ImageModelPreset) error {
+	const blockedPublicBrandHint = "openai, chatgpt, gpt, gemini, claude, seedream, doubao"
 	seen := make(map[string]bool, len(presets))
 	for i, p := range presets {
 		if p.Key == "" {
@@ -116,6 +148,15 @@ func ValidateImagePresets(presets []ImageModelPreset) error {
 		}
 		if seen[p.Key] {
 			return fmt.Errorf("image_presets[%d]: duplicate key %q", i, p.Key)
+		}
+		if strings.TrimSpace(p.BillingSKU) == "" {
+			return fmt.Errorf("image_presets[%d]: billing_sku is required", i)
+		}
+		publicText := strings.ToLower(p.Key + "\n" + p.DisplayName + "\n" + p.Description)
+		for _, term := range []string{"openai", "chatgpt", "gpt", "gemini", "claude", "seedream", "doubao"} {
+			if strings.Contains(publicText, term) {
+				return fmt.Errorf("image_presets[%d]: public display text contains blocked brand %q (allowed terms: %s)", i, term, blockedPublicBrandHint)
+			}
 		}
 		seen[p.Key] = true
 	}
@@ -376,6 +417,9 @@ type ImageGenerationRouteConfig struct {
 	SelectionKey   string                       `yaml:"selection_key" json:"selection_key"`
 	MinTier        string                       `yaml:"min_tier" json:"min_tier"`
 	Alias          string                       `yaml:"alias"`
+	Description    string                       `yaml:"description"`
+	SortOrder      int                          `yaml:"sort_order" json:"sort_order"`
+	BillingSKU     string                       `yaml:"billing_sku" json:"billing_sku"`
 	Enabled        bool                         `yaml:"enabled"`
 	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
 	ResponseFormat string                       `yaml:"response_format"`
@@ -386,6 +430,7 @@ func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := validateYAMLMappingFields(value, "image generation route", map[string]bool{
 		"provider": true, "model": true, "timeout": true,
 		"selection_key": true, "min_tier": true, "alias": true,
+		"description": true, "sort_order": true, "billing_sku": true,
 		"enabled": true, "quality_rank": true, "response_format": true,
 		"capabilities": true,
 	}); err != nil {
@@ -594,18 +639,17 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	ExecutionProfileEnvDefaults map[string]string                       `yaml:"execution_profile_env_defaults" json:"-"`
-	ExecutionProfiles           map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
-	Executor                    string                                  `yaml:"executor"` // "docker" or "kubernetes"
-	RuntimeImages               RuntimeImages                           `yaml:"runtime_images"`
-	ExecutionTokenSecret        string                                  `yaml:"execution_token_secret" json:"-"`
-	PluginDir                   string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox                     bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker                      DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes                  KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns                    map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir                  string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL              string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
+	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
+	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes           KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns             map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir           string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 type ClaudeExecutionProfileConfig struct {
@@ -617,7 +661,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profile_env_defaults": true, "execution_profiles": true, "executor": true, "runtime_images": true,
+		"execution_profiles": true, "executor": true, "runtime_images": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -638,30 +682,10 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode((*plain)(c)); err != nil {
 		return err
 	}
-	if err := validateClaudeExecutionProfileEnvDefaults(c.ExecutionProfileEnvDefaults); err != nil {
-		return fmt.Errorf("claude.execution_profile_env_defaults: %w", err)
-	}
-	c.ExecutionProfileEnvDefaults = model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
-	for name, profile := range c.ExecutionProfiles {
-		merged := model.CloneClaudeProfileEnvs(c.ExecutionProfileEnvDefaults)
-		if merged == nil {
-			merged = make(map[string]string, len(profile.Envs))
-		}
-		for key, value := range profile.Envs {
-			merged[key] = value
-		}
-		profile.Envs = merged
-		c.ExecutionProfiles[name] = profile
-	}
 	return nil
 }
 
 func validateClaudeNestedFields(value *yaml.Node) error {
-	if defaults := yamlMappingValue(value, "execution_profile_env_defaults"); defaults != nil {
-		if err := validateClaudeEnvFields(defaults, "claude.execution_profile_env_defaults"); err != nil {
-			return err
-		}
-	}
 	profiles := yamlMappingValue(value, "execution_profiles")
 	if profiles == nil {
 		return nil
@@ -684,40 +708,6 @@ func validateClaudeNestedFields(value *yaml.Node) error {
 		}
 	}
 	return nil
-}
-
-func validateClaudeExecutionProfileEnvDefaults(defaults map[string]string) error {
-	if defaults == nil {
-		return nil
-	}
-	profileOwned := map[string]struct{}{
-		model.ClaudeEnvBaseURL:           {},
-		model.ClaudeEnvAuthToken:         {},
-		model.ClaudeEnvModel:             {},
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   {},
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  {},
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": {},
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  {},
-		"CLAUDE_CODE_SUBAGENT_MODEL":     {},
-	}
-	for key := range defaults {
-		if _, owned := profileOwned[key]; owned {
-			return fmt.Errorf("claude profile env %s must be configured per profile", key)
-		}
-	}
-	validationEnv := map[string]string{
-		model.ClaudeEnvBaseURL:           "https://defaults-validation.invalid/anthropic",
-		model.ClaudeEnvAuthToken:         "defaults-validation-token",
-		model.ClaudeEnvModel:             "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "defaults-validation-model",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "defaults-validation-model",
-	}
-	for key, value := range defaults {
-		validationEnv[key] = value
-	}
-	return model.ValidateClaudeProfileEnvs(validationEnv, true)
 }
 
 func validateClaudeEnvFields(node *yaml.Node, path string) error {
@@ -1403,6 +1393,17 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		sort.Slice(routeKeys, func(i, j int) bool {
 			left := c.ModelRoutes.ImageGeneration.Designer[routeKeys[i]]
 			right := c.ModelRoutes.ImageGeneration.Designer[routeKeys[j]]
+			if left.SortOrder > 0 || right.SortOrder > 0 {
+				if left.SortOrder == 0 {
+					return false
+				}
+				if right.SortOrder == 0 {
+					return true
+				}
+				if left.SortOrder != right.SortOrder {
+					return left.SortOrder < right.SortOrder
+				}
+			}
 			if left.QualityRank != right.QualityRank {
 				return left.QualityRank > right.QualityRank
 			}
@@ -1426,6 +1427,7 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			providerConfig := c.ModelProviders[route.Provider]
 			c.ImagePresets = append(c.ImagePresets, ImageModelPreset{
 				Key: route.SelectionKey, DisplayName: route.Alias,
+				Description: route.Description, SortOrder: route.SortOrder, BillingSKU: route.BillingSKU,
 				ProviderRoute: "image_generation.designer." + key,
 				Provider:      providerKind(route.Provider), Model: route.Model,
 				Endpoint: providerConfig.BaseURL, APIKey: providerConfig.APIKey,
@@ -1435,10 +1437,22 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		}
 	}
 	sort.Slice(c.ImagePresets, func(i, j int) bool {
-		if c.ImagePresets[i].QualityRank != c.ImagePresets[j].QualityRank {
-			return c.ImagePresets[i].QualityRank > c.ImagePresets[j].QualityRank
+		left, right := c.ImagePresets[i], c.ImagePresets[j]
+		if left.SortOrder > 0 || right.SortOrder > 0 {
+			if left.SortOrder == 0 {
+				return false
+			}
+			if right.SortOrder == 0 {
+				return true
+			}
+			if left.SortOrder != right.SortOrder {
+				return left.SortOrder < right.SortOrder
+			}
 		}
-		return c.ImagePresets[i].Key < c.ImagePresets[j].Key
+		if left.QualityRank != right.QualityRank {
+			return left.QualityRank > right.QualityRank
+		}
+		return left.Key < right.Key
 	})
 	if err := ValidateImagePresets(c.ImagePresets); err != nil {
 		return err

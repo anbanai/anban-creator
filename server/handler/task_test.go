@@ -82,7 +82,11 @@ func newHandlerPlanService(t *testing.T, repo repository.Repository, logger *zer
 func (availableRuntimeDispatcher) Scope() string { return "docker" }
 
 func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
-	return config.RuntimeImageSelection{Profile: taskType, Image: "creator-agent-" + taskType + ":test"}
+	return config.RuntimeImages{
+		model.PlatformArticle:  "creator-agent-article:test",
+		model.PlatformSeednote: "creator-agent-seednote:test",
+		model.PlatformMontage:  "creator-agent-montage:test",
+	}.ForTask(taskType)
 }
 
 func (availableRuntimeDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {

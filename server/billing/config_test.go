@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,12 @@ func TestLoadBundleNormalizesBlankTaskAdmissionRoute(t *testing.T) {
 func TestLoadBundleCanonicalizesSKUFields(t *testing.T) {
 	products := `currency: " credits "
 tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
+task_time_pricing:
+  timezone: Asia/Shanghai
+  peak_windows:
+    - { start: "09:00", end: "12:00" }
+    - { start: "14:00", end: "18:00" }
+  off_peak_rate_percent: 80
 skus:
   - id: " image.standard "
     operation: " mcp.generate_image "
@@ -204,6 +211,15 @@ func TestLoadBundleDerivesContentAddressedRetailCatalogID(t *testing.T) {
 		t.Fatal("price change did not change content-addressed catalog ID")
 	}
 
+	changedTimeRate := strings.Replace(validProductsYAML, "off_peak_rate_percent: 80", "off_peak_rate_percent: 79", 1)
+	timeBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": changedTimeRate}))
+	if err != nil {
+		t.Fatalf("LoadBundle(changed time rate): %v", err)
+	}
+	if timeBundle.Products.CatalogID == first.Products.CatalogID {
+		t.Fatal("task time pricing change did not change content-addressed catalog ID")
+	}
+
 	changedCreditsPerCNY := strings.Replace(validEconomicsYAML, "credits_per_cny: 1000", "credits_per_cny: 2000", 1)
 	creditsBundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"economics.yaml": changedCreditsPerCNY}))
 	if err != nil {
@@ -211,6 +227,107 @@ func TestLoadBundleDerivesContentAddressedRetailCatalogID(t *testing.T) {
 	}
 	if creditsBundle.Products.CatalogID == first.Products.CatalogID {
 		t.Fatal("credits_per_cny change did not change content-addressed catalog ID")
+	}
+}
+
+func TestLoadBundleNormalizesTaskTimePricing(t *testing.T) {
+	bundle, err := LoadBundle(writeBundleFixture(t, nil))
+	if err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	rule := bundle.Products.TaskTimePricing
+	if rule.Timezone != "Asia/Shanghai" || rule.OffPeakRatePercent != 80 {
+		t.Fatalf("task time pricing = %#v", rule)
+	}
+	wantPeak := []TimeWindow{{Start: "09:00", End: "12:00"}, {Start: "14:00", End: "18:00"}}
+	wantOffPeak := []TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "14:00"}, {Start: "18:00", End: "24:00"}}
+	if !reflect.DeepEqual(rule.PeakWindows, wantPeak) || !reflect.DeepEqual(rule.OffPeakWindows, wantOffPeak) {
+		t.Fatalf("normalized windows peak=%#v off_peak=%#v", rule.PeakWindows, rule.OffPeakWindows)
+	}
+}
+
+func TestLoadBundleMergesAdjacentPeakWindows(t *testing.T) {
+	products := strings.Replace(validProductsYAML, `peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "14:00", end: "18:00" }`, `peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "12:00", end: "18:00" }`, 1)
+	bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TimeWindow{{Start: "09:00", End: "18:00"}}
+	if !reflect.DeepEqual(bundle.Products.TaskTimePricing.PeakWindows, want) {
+		t.Fatalf("peak windows = %#v, want %#v", bundle.Products.TaskTimePricing.PeakWindows, want)
+	}
+}
+
+func TestLoadBundleRejectsInvalidTaskTimePricing(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new  string
+		want string
+	}{
+		{name: "timezone missing", old: "Asia/Shanghai", new: "Mars/Olympus", want: "timezone"},
+		{name: "timezone local is not IANA", old: "Asia/Shanghai", new: "Local", want: "timezone"},
+		{name: "time must be exact", old: `start: "09:00"`, new: `start: "9:00"`, want: "HH:mm"},
+		{name: "start cannot be day end", old: `start: "09:00"`, new: `start: "24:00"`, want: "valid HH:mm"},
+		{name: "start before end", old: `start: "09:00", end: "12:00"`, new: `start: "12:00", end: "12:00"`, want: "start must be before end"},
+		{name: "overlap", old: `start: "14:00", end: "18:00"`, new: `start: "11:00", end: "18:00"`, want: "must not overlap"},
+		{name: "unordered", old: `peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "14:00", end: "18:00" }`, new: `peak_windows:
+  - { start: "14:00", end: "18:00" }
+  - { start: "09:00", end: "12:00" }`, want: "ordered"},
+		{name: "rate zero", old: "off_peak_rate_percent: 80", new: "off_peak_rate_percent: 0", want: "between 1 and 100"},
+		{name: "rate over 100", old: "off_peak_rate_percent: 80", new: "off_peak_rate_percent: 101", want: "between 1 and 100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			products := strings.Replace(validProductsYAML, tt.old, tt.new, 1)
+			_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+			if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadBundle error = %v, want ErrInvalidConfig containing %q", err, tt.want)
+			}
+		})
+	}
+
+	t.Run("requires full fifteen minute off peak slot", func(t *testing.T) {
+		products := strings.Replace(validProductsYAML, `peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "14:00", end: "18:00" }`, `peak_windows:
+  - { start: "00:00", end: "12:00" }
+  - { start: "12:14", end: "24:00" }`, 1)
+		_, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "15-minute off-peak slot") {
+			t.Fatalf("LoadBundle error = %v", err)
+		}
+	})
+
+	t.Run("accepts fifteen minute off peak slot spanning midnight", func(t *testing.T) {
+		products := strings.Replace(validProductsYAML, `peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "14:00", end: "18:00" }`, `peak_windows:
+  - { start: "00:10", end: "23:55" }`, 1)
+		if _, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products})); err != nil {
+			t.Fatalf("LoadBundle: %v", err)
+		}
+	})
+}
+
+func TestLoadBundleAcceptsTaskTimeRateBoundaries(t *testing.T) {
+	for _, rate := range []string{"1", "100"} {
+		t.Run(rate, func(t *testing.T) {
+			products := strings.Replace(validProductsYAML, "off_peak_rate_percent: 80", "off_peak_rate_percent: "+rate, 1)
+			bundle, err := LoadBundle(writeBundleFixture(t, map[string]string{"products.yaml": products}))
+			if err != nil {
+				t.Fatalf("LoadBundle: %v", err)
+			}
+			if got := strconv.FormatInt(bundle.Products.TaskTimePricing.OffPeakRatePercent, 10); got != rate {
+				t.Fatalf("off peak rate = %s, want %s", got, rate)
+			}
+		})
 	}
 }
 
@@ -534,6 +651,12 @@ const validEconomicsYAML = `credits_per_cny: 1000
 
 const validProductsYAML = `currency: credits
 tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
+task_time_pricing:
+  timezone: Asia/Shanghai
+  peak_windows:
+  - { start: "09:00", end: "12:00" }
+  - { start: "14:00", end: "18:00" }
+  off_peak_rate_percent: 80
 skus:
   - id: task.seednote.balanced
     operation: task.seednote

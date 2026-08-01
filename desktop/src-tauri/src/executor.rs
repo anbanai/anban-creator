@@ -70,6 +70,7 @@ struct ExecutorInfo<'a> {
 
 #[derive(Serialize)]
 struct ClaimBody<'a> {
+    agent_pack_contract_version: u8,
     executor_info: ExecutorInfo<'a>,
 }
 
@@ -119,6 +120,7 @@ async fn claim_once(
         .post(&url)
         .bearer_auth(api_key)
         .json(&ClaimBody {
+            agent_pack_contract_version: 1,
             executor_info: ExecutorInfo {
                 hostname: "desktop",
                 version: "0.1",

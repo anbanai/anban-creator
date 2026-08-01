@@ -483,6 +483,7 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		planHandler.SetScheduleRecommendationService(service.NewScheduleRecommendationService(repo, billingBundle.Products.CatalogID, billingBundle.Products.TaskTimePricing, log))
 		planHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			planHandler.SetStore(store)
@@ -555,7 +556,11 @@ func main() {
 	}
 	// Image model options handler (tier-gated listing). Always available so the
 	// frontend can render the create-task/plan dropdown even without presets.
-	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, log)
+	var imageCatalog *service.BillingCatalogService
+	if fixedBilling != nil {
+		imageCatalog = fixedBilling.Catalog
+	}
+	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, imageCatalog, log)
 	// Wire image presets + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
 		taskHandler.SetImagePresets(cfg.ImagePresets)
@@ -589,6 +594,9 @@ func main() {
 			designerSvc.SetProviderCostService(fixedBilling.Cost)
 			designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
 			designerSvc.SetBillingWalletService(fixedBilling.Wallet)
+			if projectHandler != nil {
+				projectHandler.SetDesignerService(designerSvc)
+			}
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 			designerHandler.SetDirectUploadDependencies(repo, store)
 		}

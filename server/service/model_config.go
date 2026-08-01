@@ -162,6 +162,10 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 	return uc.HasCompleteConfig()
 }
 
+func (s *ModelConfigService) IsEnterpriseUser(ctx context.Context, userID string) bool {
+	return s.userTierIsEnterprise(ctx, userID)
+}
+
 // GetEffectiveImageConfig returns the resolved image config as an ImageAPIConfig.
 // Returns nil if no user override exists (use server default).
 func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID string) *config.ImageAPIConfig {
@@ -227,9 +231,12 @@ func (s *ModelConfigService) GetImageProxy(ctx context.Context, userID string) s
 func (s *ModelConfigService) ResolveImageConfigForKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string) {
+	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
-		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
-			return cfg, "user_custom"
+		if s.userTierIsEnterprise(ctx, userID) {
+			if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
+				return cfg, "user_custom"
+			}
 		}
 		return nil, "system_default"
 	}
@@ -288,6 +295,7 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 func (s *ModelConfigService) ResolveImageConfigForTaskKey(
 	ctx context.Context, userID, imageModelKey string,
 ) (*config.ImageAPIConfig, string, error) {
+	imageModelKey = config.NormalizeImageModelKeyForPresets(imageModelKey, s.cfg.ImagePresets)
 	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
 		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
 			return cfg, "user_custom", nil
@@ -346,6 +354,7 @@ func (e *ImageReferenceLimitError) Error() string {
 type ResolvedImageModel struct {
 	Config             *config.ImageAPIConfig `json:"-"`
 	Key                string                 `json:"key,omitempty"`
+	BillingSKU         string                 `json:"-"`
 	Provider           string                 `json:"provider"`
 	Model              string                 `json:"model"`
 	Source             string                 `json:"source,omitempty"`
@@ -357,6 +366,7 @@ type ResolvedImageModel struct {
 type imageModelCandidate struct {
 	config             *config.ImageAPIConfig
 	key                string
+	billingSKU         string
 	provider           string
 	model              string
 	source             string
@@ -476,6 +486,7 @@ func (s *ModelConfigService) resolvePreferredImageCandidate(
 				continue
 			}
 			candidate.key = preset.Key
+			candidate.billingSKU = strings.TrimSpace(preset.BillingSKU)
 			candidate.qualityRank = preset.QualityRank
 			candidate.supportsReference = preset.Capabilities.SupportsReference
 			candidate.maxReferenceImages = preset.Capabilities.MaxReferenceImages
@@ -500,6 +511,7 @@ func imageModelCandidateFromPreset(
 	return imageModelCandidate{
 		config:             resolvedConfig,
 		key:                preset.Key,
+		billingSKU:         strings.TrimSpace(preset.BillingSKU),
 		provider:           imageProviderKind(apiCfg.Provider),
 		model:              strings.TrimSpace(apiCfg.Model),
 		source:             "preset:" + preset.Key,
@@ -513,6 +525,7 @@ func resolvedImageModelFromCandidate(candidate imageModelCandidate, reason strin
 	return &ResolvedImageModel{
 		Config:             candidate.config,
 		Key:                candidate.key,
+		BillingSKU:         candidate.billingSKU,
 		Provider:           candidate.provider,
 		Model:              candidate.model,
 		Source:             candidate.source,

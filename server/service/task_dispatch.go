@@ -362,7 +362,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			return err
 		}
 		var runtime srvconfig.RuntimeImageSelection
-		if parent != nil && !refreshRuntime {
+		if parent != nil && !refreshRuntime && hasCompleteAgentPackIdentity(parent) {
 			runtime = srvconfig.RuntimeImageSelection{
 				Profile: strings.TrimSpace(parent.RuntimeProfile),
 				Image:   strings.TrimSpace(parent.RuntimeImage),

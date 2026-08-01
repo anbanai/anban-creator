@@ -1,5 +1,11 @@
 currency: "credits"
 tier_rates_percent: { free: 100, pro: 90, enterprise: 80 }
+task_time_pricing:
+  timezone: "Asia/Shanghai"
+  peak_windows:
+    - { start: "09:00", end: "12:00" }
+    - { start: "14:00", end: "18:00" }
+  off_peak_rate_percent: 80
 skus:
   - id: "task.article.effective"
     operation: "task.article"
@@ -130,14 +136,14 @@ skus:
 
   - id: "image.seedream.designer"
     operation: "designer.generate_image"
-    charge_policy: "standalone_operation"
+    charge_policy: "image_operation"
     price_credits: 500
     route: "image_generation.designer.seedream"
     delivery: "persisted_image"
 
   - id: "image.gpt-image-2.designer"
     operation: "designer.generate_image"
-    charge_policy: "standalone_operation"
+    charge_policy: "image_operation"
     price_credits: 500
     route: "image_generation.designer.gpt_image_2"
     delivery: "persisted_image"

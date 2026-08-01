@@ -235,8 +235,8 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.imageModels.list).mockResolvedValue({
       tier: 'pro',
       items: [
-        { key: '', display_name: '系统默认', provider: '', min_tier: 'free', is_custom: false },
-        { key: 'source-model', display_name: '源模型', provider: 'gemini', min_tier: 'pro', is_custom: false },
+      { key: 'standard_image', display_name: '标准图像', min_tier: 'free', is_custom: false },
+      { key: 'source-model', display_name: '源图像', min_tier: 'pro', is_custom: false },
       ],
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
@@ -1169,7 +1169,7 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).getByText('数量')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '1' })).toBeInTheDocument()
     expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    expect(await within(dialog).findByText('源模型')).toBeInTheDocument()
+    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
@@ -1652,7 +1652,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('图片比例')).toBeInTheDocument()
-    expect(screen.getByText('图片模型')).toBeInTheDocument()
+    expect(screen.getByText('图像能力')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()

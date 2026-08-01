@@ -25,6 +25,8 @@ import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
+import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -211,6 +213,7 @@ export default function TaskDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
+  const { items: imageCapabilities } = useImageCapabilities(showProjectDialog)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [showCloneDialog, setShowCloneDialog] = useState(false)
   const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)
@@ -1121,7 +1124,7 @@ export default function TaskDetailPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">图片模型</p>
-                    <p className="mt-1 text-sm text-foreground">{projectDialogEcommerceDefaults.image_model_key || '—'}</p>
+                    <p className="mt-1 text-sm text-foreground"><ImageCapabilityDisplay option={imageCapabilities.find((option) => option.key === projectDialogEcommerceDefaults.image_model_key)} fallback={projectDialogEcommerceDefaults.image_model_key ? '已停用能力' : '标准图像'} /></p>
                   </div>
                   <div className="sm:col-span-3">
                     <p className="text-xs text-muted-foreground">品牌 brief</p>

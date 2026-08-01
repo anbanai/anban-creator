@@ -11,15 +11,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 const IMAGE_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI (GPT Image)' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'volcengine', label: 'Volcengine/Seedream' },
+  { value: 'openai', label: '兼容图像服务 A' },
+  { value: 'gemini', label: '兼容图像服务 B' },
+  { value: 'volcengine', label: '标准图像服务' },
 ]
 
 const imageProviderNotes: Record<string, string> = {
-  openai: 'OpenAI 仅支持 Images API 兼容接口，不是任意 OpenAI-compatible 聊天接口。',
-  gemini: 'Gemini 使用 Google 图片生成接口，请填写支持图片生成的模型。',
-  volcengine: 'Volcengine 使用火山方舟 Seedream 图片生成接口。',
+  openai: '请填写与该服务匹配的图像生成 Endpoint 和能力版本。',
+  gemini: '请填写与该服务匹配的图像生成 Endpoint 和能力版本。',
+  volcengine: '请填写与该服务匹配的图像生成 Endpoint 和能力版本。',
 }
 
 function ModelSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
@@ -184,11 +184,11 @@ export default function ModelConfigSection() {
           }
         >
           <p className="px-3 text-xs text-muted-foreground">
-            图片自定义配置需要完整填写服务商、Endpoint、API Key 和模型名称。OpenAI 选项只适用于 OpenAI Images API 兼容接口。
+            图片自定义配置需要完整填写服务类型、Endpoint、API Key 和能力版本，仅供企业版使用。
           </p>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <Label className="text-xs">图片服务商</Label>
+              <Label className="text-xs">图像服务类型</Label>
               {config?.image?.provider && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
             </div>
             <select
@@ -196,7 +196,7 @@ export default function ModelConfigSection() {
               onChange={(e) => setImageProvider(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
             >
-              <option value="">选择服务商</option>
+              <option value="">选择服务类型</option>
               {IMAGE_PROVIDERS.map((p) => (
                 <option key={p.value} value={p.value}>
                   {p.label}
@@ -223,13 +223,14 @@ export default function ModelConfigSection() {
           />
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <Label className="text-xs">模型名称</Label>
+              <Label className="text-xs">能力版本</Label>
               {config?.image?.model && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
             </div>
             <Input
+              type="password"
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value)}
-              placeholder="gpt-image-2"
+              placeholder="填写服务能力版本（已配置时已隐藏）"
               className="text-xs"
             />
           </div>

@@ -35,12 +35,10 @@ describe('Designer provider contract', () => {
     window.sessionStorage.clear()
     vi.mocked(designerApi.getProviders).mockResolvedValue([
       {
-        id: 'gpt_image_2',
-        name: 'GPT Image 2',
-        provider: 'openai',
-        providerKey: 'wangcai_openai',
-        route: 'image_generation.designer.gpt_image_2',
-        model: 'gpt-image-2',
+        id: 'professional_enhance',
+        name: '专业增强',
+        description: '适合复杂构图与高细节视觉任务',
+        minTier: 'enterprise',
         credits: 500,
         enabled: true,
         idx: 0,
@@ -72,7 +70,10 @@ describe('Designer provider contract', () => {
   })
 
   it('sends provider_id with designer generation requests', () => {
-    expect(read('src/types/designer.ts')).toContain('provider_id?: string')
+    const types = read('src/types/designer.ts')
+    expect(types).toContain('provider_id: string')
+    expect(types).not.toContain('provider?: string')
+    expect(types).not.toContain('model?: string')
 
     const page = read('src/pages/DesignerPage.tsx')
     expect(page).toContain('provider_id: effectiveProvider.id')
@@ -102,10 +103,10 @@ describe('Designer provider contract', () => {
     expect(apiClient).not.toContain('GPT_IMAGE_SIZE_PRESETS')
   })
 
-  it('uses the provider default size when generating with GPT Image', async () => {
+  it('uses the configured capability default size when generating', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('GPT Image 2')
+    await screen.findAllByText('专业增强')
     expect(await screen.findByRole('button', { name: /自动\s*智能选择/ })).toBeInTheDocument()
     const prompt = await screen.findByPlaceholderText('描述你想要生成的图片...')
     fireEvent.change(prompt, {
@@ -116,19 +117,17 @@ describe('Designer provider contract', () => {
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
     const request = vi.mocked(designerApi.generate).mock.calls[0][0] as GenerateRequest
-    expect(request.provider_id).toBe('gpt_image_2')
+    expect(request.provider_id).toBe('professional_enhance')
     expect(request.size).toBe('auto')
   })
 
   it('renders ratio presets from configured Seedream capabilities without custom pixel controls', async () => {
     vi.mocked(designerApi.getProviders).mockResolvedValueOnce([
       {
-        id: 'seedream',
-        name: '豆包 Seedream',
-        provider: 'volcengine',
-        providerKey: 'volcengine_ark',
-        route: 'image_generation.designer.seedream',
-        model: 'doubao-seedream-5-0-pro-260628',
+        id: 'standard_image',
+        name: '标准图像',
+        description: '适合日常内容配图和常规视觉创作',
+        minTier: 'free',
         credits: 50,
         enabled: true,
         idx: 0,
@@ -151,7 +150,7 @@ describe('Designer provider contract', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('豆包 Seedream')
+    await screen.findAllByText('标准图像')
     expect(screen.getAllByRole('button', { name: /21:9/ }).length).toBeGreaterThan(0)
     expect(screen.getByText('分辨率')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /自定义\s*W×H/ })).not.toBeInTheDocument()

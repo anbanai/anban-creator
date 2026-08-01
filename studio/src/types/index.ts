@@ -81,6 +81,9 @@ export type {
   BillingTransactions,
   BillingSKU,
   BillingCatalog,
+  BillingTimeWindow,
+  TaskTimePricing,
+  ScheduleRecommendation,
   BillingReferralProgram,
   BillingReferral,
 } from './billing'
@@ -109,7 +112,7 @@ export type {
 export type { ResourceEntry, ResourceListResponse } from './resource'
 
 // Image Model
-export type { ImageModelOption, ImageModelListResponse } from './imageModel'
+export type { ImageCapabilityOption, ImageModelOption, ImageModelListResponse } from './imageModel'
 
 export type {
   MontageAsset,

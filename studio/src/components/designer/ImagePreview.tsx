@@ -15,8 +15,7 @@ export interface PreviewImage {
 }
 
 export interface PreviewMetadata {
-  provider: string
-  model: string
+  capabilityName?: string
   prompt: string
   revisedPrompt?: string
   quality?: string
@@ -129,7 +128,7 @@ export default function ImagePreview({
       : metadata.size || undefined
 
   const params: Array<{ label: string; value: string }> = [
-    { label: '模型', value: `${metadata.provider} / ${metadata.model}` },
+    ...(metadata.capabilityName ? [{ label: '图像能力', value: metadata.capabilityName }] : []),
     ...(sizeValue ? [{ label: '尺寸', value: sizeValue }] : []),
     ...(metadata.quality ? [{ label: '质量', value: metadata.quality }] : []),
     ...(metadata.outputFormat
@@ -179,7 +178,7 @@ export default function ImagePreview({
             <div className="space-y-4 p-5">
               {/* Header */}
               <div className="space-y-1 pr-8">
-                <div className="text-sm font-semibold leading-tight">{metadata.model}</div>
+                <div className="text-sm font-semibold leading-tight">{metadata.capabilityName || '图像生成结果'}</div>
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Clock className="h-3 w-3" />
                   <span>{formatTime(metadata.createdAt)}</span>

@@ -86,7 +86,20 @@ type ProductCatalog struct {
 	CatalogID        string           `yaml:"-" json:"catalog_id"`
 	Currency         string           `yaml:"currency" json:"currency"`
 	TierRatesPercent map[string]int64 `yaml:"tier_rates_percent" json:"tier_rates_percent"`
+	TaskTimePricing  TaskTimePricing  `yaml:"task_time_pricing" json:"task_time_pricing"`
 	SKUs             []SKUConfig      `yaml:"skus" json:"skus"`
+}
+
+type TaskTimePricing struct {
+	Timezone           string       `yaml:"timezone" json:"timezone"`
+	PeakWindows        []TimeWindow `yaml:"peak_windows" json:"peak_windows"`
+	OffPeakWindows     []TimeWindow `yaml:"-" json:"off_peak_windows"`
+	OffPeakRatePercent int64        `yaml:"off_peak_rate_percent" json:"off_peak_rate_percent"`
+}
+
+type TimeWindow struct {
+	Start string `yaml:"start" json:"start"`
+	End   string `yaml:"end" json:"end"`
 }
 
 type SKUConfig struct {
@@ -366,7 +379,7 @@ func validateBundle(bundle *Bundle) error {
 			if sku.Route != "" {
 				return configError("products.yaml", field+".route", errors.New("must be empty for task_admission"))
 			}
-		case "accepted_task_operation", "standalone_operation":
+		case "accepted_task_operation", "standalone_operation", "image_operation":
 			if sku.ExecutionProfile != "" {
 				return configError("products.yaml", field+".execution_profile", errors.New("must be empty for operation SKUs"))
 			}
@@ -387,12 +400,126 @@ func validateBundle(bundle *Bundle) error {
 		}
 		seenBillableIdentities[identity] = sku.ID
 	}
+	if err := normalizeTaskTimePricing(&bundle.Products.TaskTimePricing); err != nil {
+		return err
+	}
 	catalogID, err := retailCatalogID(bundle)
 	if err != nil {
 		return configError("products.yaml", "", err)
 	}
 	bundle.Products.CatalogID = catalogID
 	return nil
+}
+
+func normalizeTaskTimePricing(rule *TaskTimePricing) error {
+	if rule == nil {
+		return configError("products.yaml", "task_time_pricing", errors.New("is required"))
+	}
+	rule.Timezone = strings.TrimSpace(rule.Timezone)
+	if rule.Timezone == "" {
+		return configError("products.yaml", "task_time_pricing.timezone", errors.New("is required"))
+	}
+	if rule.Timezone == "Local" {
+		return configError("products.yaml", "task_time_pricing.timezone", errors.New("must be a valid IANA timezone"))
+	}
+	if _, err := time.LoadLocation(rule.Timezone); err != nil {
+		return configError("products.yaml", "task_time_pricing.timezone", errors.New("must be a valid IANA timezone"))
+	}
+	if rule.OffPeakRatePercent < 1 || rule.OffPeakRatePercent > 100 {
+		return configError("products.yaml", "task_time_pricing.off_peak_rate_percent", errors.New("must be between 1 and 100"))
+	}
+	if len(rule.PeakWindows) == 0 {
+		return configError("products.yaml", "task_time_pricing.peak_windows", errors.New("must not be empty"))
+	}
+	type parsedWindow struct {
+		window TimeWindow
+		start  int
+		end    int
+	}
+	parsed := make([]parsedWindow, 0, len(rule.PeakWindows))
+	for index, window := range rule.PeakWindows {
+		start, err := parseClockMinute(window.Start, false)
+		if err != nil {
+			return configError("products.yaml", fmt.Sprintf("task_time_pricing.peak_windows[%d].start", index), err)
+		}
+		end, err := parseClockMinute(window.End, true)
+		if err != nil {
+			return configError("products.yaml", fmt.Sprintf("task_time_pricing.peak_windows[%d].end", index), err)
+		}
+		if start >= end {
+			return configError("products.yaml", fmt.Sprintf("task_time_pricing.peak_windows[%d]", index), errors.New("start must be before end"))
+		}
+		parsed = append(parsed, parsedWindow{window: TimeWindow{Start: clockMinuteString(start), End: clockMinuteString(end)}, start: start, end: end})
+	}
+	for index := 1; index < len(parsed); index++ {
+		if parsed[index].start < parsed[index-1].start {
+			return configError("products.yaml", "task_time_pricing.peak_windows", errors.New("must be ordered by start time"))
+		}
+		if parsed[index].start < parsed[index-1].end {
+			return configError("products.yaml", "task_time_pricing.peak_windows", errors.New("must not overlap"))
+		}
+	}
+	normalized := make([]parsedWindow, 0, len(parsed))
+	for _, window := range parsed {
+		if len(normalized) > 0 && window.start == normalized[len(normalized)-1].end {
+			normalized[len(normalized)-1].end = window.end
+			normalized[len(normalized)-1].window.End = window.window.End
+			continue
+		}
+		normalized = append(normalized, window)
+	}
+	rule.PeakWindows = make([]TimeWindow, 0, len(normalized))
+	rule.OffPeakWindows = nil
+	cursor := 0
+	for _, window := range normalized {
+		if cursor < window.start {
+			rule.OffPeakWindows = append(rule.OffPeakWindows, TimeWindow{Start: clockMinuteString(cursor), End: clockMinuteString(window.start)})
+		}
+		rule.PeakWindows = append(rule.PeakWindows, window.window)
+		cursor = window.end
+	}
+	if cursor < 24*60 {
+		rule.OffPeakWindows = append(rule.OffPeakWindows, TimeWindow{Start: clockMinuteString(cursor), End: "24:00"})
+	}
+	for _, window := range rule.OffPeakWindows {
+		start, _ := parseClockMinute(window.Start, false)
+		end, _ := parseClockMinute(window.End, true)
+		if end-start >= 15 {
+			return nil
+		}
+	}
+	if len(rule.OffPeakWindows) >= 2 {
+		firstStart, _ := parseClockMinute(rule.OffPeakWindows[0].Start, false)
+		firstEnd, _ := parseClockMinute(rule.OffPeakWindows[0].End, true)
+		lastStart, _ := parseClockMinute(rule.OffPeakWindows[len(rule.OffPeakWindows)-1].Start, false)
+		lastEnd, _ := parseClockMinute(rule.OffPeakWindows[len(rule.OffPeakWindows)-1].End, true)
+		if firstStart == 0 && lastEnd == 24*60 && firstEnd-firstStart+lastEnd-lastStart >= 15 {
+			return nil
+		}
+	}
+	return configError("products.yaml", "task_time_pricing.peak_windows", errors.New("must leave at least one full 15-minute off-peak slot"))
+}
+
+func parseClockMinute(value string, allowDayEnd bool) (int, error) {
+	if len(value) != 5 || value[2] != ':' || value[0] < '0' || value[0] > '9' || value[1] < '0' || value[1] > '9' || value[3] < '0' || value[3] > '9' || value[4] < '0' || value[4] > '9' {
+		return 0, errors.New("must use exact HH:mm format")
+	}
+	hour := int(value[0]-'0')*10 + int(value[1]-'0')
+	minute := int(value[3]-'0')*10 + int(value[4]-'0')
+	if allowDayEnd && hour == 24 && minute == 0 {
+		return 24 * 60, nil
+	}
+	if hour > 23 || minute > 59 {
+		return 0, errors.New("must be a valid HH:mm time")
+	}
+	return hour*60 + minute, nil
+}
+
+func clockMinuteString(minute int) string {
+	if minute == 24*60 {
+		return "24:00"
+	}
+	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
 }
 
 func validateEconomics(economics EconomicsConfig) error {
@@ -422,6 +549,7 @@ func retailCatalogID(bundle *Bundle) (string, error) {
 	type retailProductsSnapshot struct {
 		Currency         string           `json:"currency"`
 		TierRatesPercent map[string]int64 `json:"tier_rates_percent"`
+		TaskTimePricing  TaskTimePricing  `json:"task_time_pricing"`
 		SKUs             []SKUConfig      `json:"skus"`
 	}
 	snapshot := struct {
@@ -430,7 +558,7 @@ func retailCatalogID(bundle *Bundle) (string, error) {
 		Policy    PolicySnapshot         `json:"policy"`
 	}{
 		Products: retailProductsSnapshot{
-			Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, SKUs: bundle.Products.SKUs,
+			Currency: bundle.Products.Currency, TierRatesPercent: bundle.Products.TierRatesPercent, TaskTimePricing: bundle.Products.TaskTimePricing, SKUs: bundle.Products.SKUs,
 		},
 		Economics: bundle.Economics,
 		Policy:    bundle.Policy,

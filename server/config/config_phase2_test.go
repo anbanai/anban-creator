@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestDesignerRoutesDeriveSelectablePresetsInStableQualityOrder(t *testing.T) {
@@ -32,6 +30,9 @@ model_routes:
         selection_key: stable-b
         min_tier: free
         alias: Lower
+        description: Routine illustrations
+        sort_order: 10
+        billing_sku: image.seedream.designer
         provider: images
         model: lower
         enabled: true
@@ -46,6 +47,7 @@ model_routes:
         selection_key: stable-z
         min_tier: enterprise
         alias: Higher Z
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: higher-z
         enabled: true
@@ -55,6 +57,9 @@ model_routes:
         selection_key: stable-a
         min_tier: pro
         alias: Higher A
+        description: Detailed compositions
+        sort_order: 20
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: higher-a
         enabled: true
@@ -81,17 +86,17 @@ claude:
 	if len(cfg.ImagePresets) != 3 {
 		t.Fatalf("derived presets = %#v", cfg.ImagePresets)
 	}
-	for index, want := range []string{"stable-a", "stable-z", "stable-b"} {
+	for index, want := range []string{"stable-b", "stable-a", "stable-z"} {
 		if cfg.ImagePresets[index].Key != want {
 			t.Fatalf("preset order = %#v, want index %d = %q", cfg.ImagePresets, index, want)
 		}
 	}
-	wantDesignerOrder := []string{"higher_a", "higher_z", "lower"}
+	wantDesignerOrder := []string{"lower", "higher_a", "higher_z"}
 	gotDesignerOrder := cfg.ImageAPI.DesignerOrder()
 	if !slices.Equal(gotDesignerOrder, wantDesignerOrder) {
 		t.Fatalf("designer order = %#v, want %#v", gotDesignerOrder, wantDesignerOrder)
 	}
-	if got := cfg.ImagePresets[0]; got.DisplayName != "Higher A" || got.MinTier != "pro" || got.ProviderRoute != "image_generation.designer.higher_a" {
+	if got := cfg.ImagePresets[1]; got.DisplayName != "Higher A" || got.Description != "Detailed compositions" || got.SortOrder != 20 || got.BillingSKU != "image.gpt-image-2.designer" || got.MinTier != "pro" || got.ProviderRoute != "image_generation.designer.higher_a" {
 		t.Fatalf("derived preset = %#v", got)
 	}
 }
@@ -103,60 +108,16 @@ func TestConfigRejectsLegacyTopLevelImagePresets(t *testing.T) {
 	}
 }
 
-func TestClaudeExecutionProfileEnvDefaultsMergeBeforeProfileOverrides(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML,
+func TestClaudeConfigRejectsExecutionProfileEnvDefaults(t *testing.T) {
+	body := strings.Replace(
+		validClaudeConfigYAML,
 		"claude:\n",
-		"claude:\n  execution_profile_env_defaults:\n    CLAUDE_CODE_EFFORT_LEVEL: high\n    CLAUDE_CODE_MAX_OUTPUT_TOKENS: \"131072\"\n    ENABLE_TOOL_SEARCH: \"true\"\n",
+		"claude:\n  execution_profile_env_defaults:\n    ENABLE_TOOL_SEARCH: \"true\"\n",
 		1,
 	)
-	body = strings.Replace(body, "        ENABLE_TOOL_SEARCH: \"false\"\n", "        CLAUDE_CODE_EFFORT_LEVEL: medium\n", 1)
-	cfg, err := loadClaudeConfigYAML(t, body)
-	if err != nil {
-		t.Fatalf("NewConfig: %v", err)
-	}
-	profile := cfg.Claude.ExecutionProfiles["quality"]
-	if profile.Envs["CLAUDE_CODE_EFFORT_LEVEL"] != "medium" || profile.Envs["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] != "131072" || profile.Envs["ENABLE_TOOL_SEARCH"] != "true" {
-		t.Fatalf("resolved profile envs = %#v", profile.Envs)
-	}
-	if cfg.Claude.ExecutionProfileEnvDefaults["CLAUDE_CODE_EFFORT_LEVEL"] != "high" {
-		t.Fatalf("defaults mutated = %#v", cfg.Claude.ExecutionProfileEnvDefaults)
-	}
-}
-
-func TestClaudeExecutionProfileEnvDefaultsRejectUnknownEnv(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  execution_profile_env_defaults:\n    PATH: /tmp\n", 1)
 	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), "claude.execution_profile_env_defaults.PATH") {
-		t.Fatalf("NewConfig error = %v, want strict defaults env error", err)
-	}
-}
-
-func TestClaudeExecutionProfileEnvDefaultsRejectProviderAndModelFields(t *testing.T) {
-	for _, key := range []string{
-		model.ClaudeEnvBaseURL,
-		model.ClaudeEnvAuthToken,
-		model.ClaudeEnvModel,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL",
-		"ANTHROPIC_DEFAULT_FABLE_MODEL",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL",
-		"CLAUDE_CODE_SUBAGENT_MODEL",
-	} {
-		t.Run(key, func(t *testing.T) {
-			body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  execution_profile_env_defaults:\n    "+key+": shared-value\n", 1)
-			_, err := loadClaudeConfigYAML(t, body)
-			if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "must be configured per profile") {
-				t.Fatalf("NewConfig error = %v, want profile-owned field rejection", err)
-			}
-		})
-	}
-}
-
-func TestClaudeExecutionProfileEnvDefaultsValidateConfiguredValues(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  execution_profile_env_defaults:\n    CLAUDE_CODE_EFFORT_LEVEL: turbo\n", 1)
-	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), "claude.execution_profile_env_defaults") || !strings.Contains(err.Error(), "CLAUDE_CODE_EFFORT_LEVEL") {
-		t.Fatalf("NewConfig error = %v, want partial defaults validation error", err)
+	if err == nil || !strings.Contains(err.Error(), `unknown claude config field "execution_profile_env_defaults"`) {
+		t.Fatalf("NewConfig error = %v, want legacy execution_profile_env_defaults rejection", err)
 	}
 }
 
@@ -226,6 +187,7 @@ model_routes:
         selection_key: stable-image
         min_tier: pro
         alias: Stable Image
+        billing_sku: image.seedream.designer
         provider: images
         model: image-v1
         enabled: true
@@ -249,6 +211,7 @@ model_routes:
 		{name: "selection key reserved", old: "selection_key: stable-image", replace: "selection_key: custom", want: "reserved"},
 		{name: "tier exact", old: "min_tier: pro", replace: "min_tier: premium", want: "min_tier"},
 		{name: "alias required", old: "alias: Stable Image", replace: "alias: \"\"", want: "alias"},
+		{name: "billing SKU required", old: "        billing_sku: image.seedream.designer\n", replace: "", want: "billing_sku"},
 		{name: "quality rank positive", old: "quality_rank: 100", replace: "quality_rank: 0", want: "quality_rank"},
 		{name: "capabilities valid", old: "max_batch: 1", replace: "max_batch: 0", want: "capabilities"},
 	}
@@ -310,6 +273,7 @@ model_routes:
         selection_key: same-key
         min_tier: free
         alias: First
+        billing_sku: image.seedream.designer
         provider: images
         model: image-v1
         enabled: true
@@ -324,6 +288,7 @@ model_routes:
         selection_key: same-key
         min_tier: free
         alias: Second
+        billing_sku: image.gpt-image-2.designer
         provider: images
         model: image-v2
         enabled: true
@@ -345,6 +310,9 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	raw, err := os.ReadFile("../config.example.yaml")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\n  execution_profile_env_defaults:") {
+		t.Fatal("config.example.yaml contains removed claude.execution_profile_env_defaults")
 	}
 	for _, match := range regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`).FindAllStringSubmatch(string(raw), -1) {
 		t.Setenv(match[1], "")
@@ -390,9 +358,71 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if len(cfg.ImagePresets) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("derived catalog sizes: image_presets=%d execution_profiles=%d", len(cfg.ImagePresets), len(cfg.Claude.ExecutionProfiles))
 	}
+	expectedRuntimeControls := map[string]map[string]string{
+		"effective": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "medium",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "false",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "393216",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+		"balanced": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "high",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "false",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "131072",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+		"quality": {
+			"CLAUDE_CODE_EFFORT_LEVEL":                 "high",
+			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":         "true",
+			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":           "1048576",
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS":            "131072",
+			"MAX_THINKING_TOKENS":                      "0",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_DISABLE_AUTO_MEMORY":          "0",
+			"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING":    "false",
+			"CLAUDE_CODE_DISABLE_THINKING":             "false",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":          "262144",
+			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":          "80",
+			"CLAUDE_CODE_DISABLE_1M_CONTEXT":           "false",
+			"ENABLE_TOOL_SEARCH":                       "true",
+		},
+	}
+	for name, expected := range expectedRuntimeControls {
+		for key, want := range expected {
+			if got := cfg.Claude.ExecutionProfiles[name].Envs[key]; got != want {
+				t.Errorf("%s env %s = %q, want %q", name, key, got, want)
+			}
+		}
+	}
+	for _, name := range []string{"effective", "balanced"} {
+		if got := len(cfg.Claude.ExecutionProfiles[name].ModelUsageAliases); got != 0 {
+			t.Errorf("%s model_usage_aliases length = %d, want 0", name, got)
+		}
+	}
+	if got := cfg.Claude.ExecutionProfiles["quality"].ModelUsageAliases; len(got) != 1 || got["kimi-k3[1m]"] != "kimi-k3" {
+		t.Errorf("quality model_usage_aliases = %#v, want only kimi-k3[1m]: kimi-k3", got)
+	}
 	effective := cfg.Claude.ExecutionProfiles["effective"]
 	effective.Envs["ENABLE_TOOL_SEARCH"] = "mutated"
-	if cfg.Claude.ExecutionProfiles["balanced"].Envs["ENABLE_TOOL_SEARCH"] != "true" || cfg.Claude.ExecutionProfileEnvDefaults["ENABLE_TOOL_SEARCH"] != "true" {
-		t.Fatalf("execution profile env maps share storage: defaults=%#v balanced=%#v", cfg.Claude.ExecutionProfileEnvDefaults, cfg.Claude.ExecutionProfiles["balanced"].Envs)
+	if got := cfg.Claude.ExecutionProfiles["balanced"].Envs["ENABLE_TOOL_SEARCH"]; got != "true" {
+		t.Fatalf("execution profile env maps share storage: balanced ENABLE_TOOL_SEARCH = %q, want true", got)
 	}
 }

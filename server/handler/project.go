@@ -36,6 +36,7 @@ type ProjectHandler struct {
 	referenceAssets *service.ReferenceAssetService
 	seednoteClient  *seednote.Client
 	seednoteReady   service.Readiness
+	designerSvc     *service.DesignerService
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -64,6 +65,23 @@ func (h *ProjectHandler) SetUploadRepository(repo repository.Repository) {
 
 func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetService) {
 	h.referenceAssets = svc
+}
+
+// SetDesignerService wires the capability catalog used to validate new
+// project image defaults. Existing stored values remain readable, but new
+// writes must use a public, tier-authorized capability key.
+func (h *ProjectHandler) SetDesignerService(svc *service.DesignerService) {
+	h.designerSvc = svc
+}
+
+func (h *ProjectHandler) validateProjectImageCapability(ctx context.Context, userID string, req *projectRequest) error {
+	if req == nil || req.EcommerceDefaults == nil || strings.TrimSpace(req.EcommerceDefaults.ImageModelKey) == "" || h.designerSvc == nil {
+		return nil
+	}
+	if req.EcommerceDefaults.ImageModelKey == model.ImageModelKeyCustom {
+		return fmt.Errorf("custom image model is not a valid project capability")
+	}
+	return h.designerSvc.ValidateCapabilityForUser(ctx, userID, req.EcommerceDefaults.ImageModelKey)
 }
 
 // signProjectURLs resolves the stored avatar URL to
@@ -364,6 +382,12 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
+		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
+			return Forbidden(c, "image capability is not available for your tier")
+		}
+		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
+	}
 	ch := req.toProject()
 	referenceView, err := h.projectReferenceView(c.Context(), userID, ch.ReferenceImageAssetID)
 	if err != nil {
@@ -491,6 +515,12 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	targetReferenceAssetID := current.ReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
+		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
+			return Forbidden(c, "image capability is not available for your tier")
+		}
+		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
 	if req.ReferenceImageSet {
 		targetReferenceAssetID = req.ReferenceImageAssetID

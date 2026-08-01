@@ -56,7 +56,7 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 			TaskFailureReversal: serverbilling.TaskFailureReversalPolicy{Enabled: true, Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"}},
 		},
 		Products: serverbilling.ProductCatalog{CatalogID: "retail-designer-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80}, SKUs: []serverbilling.SKUConfig{{
-			ID: "image.seedream.designer", Operation: "designer.generate_image", ChargePolicy: "standalone_operation",
+			ID: "image.seedream.designer", Operation: "designer.generate_image", ChargePolicy: "image_operation",
 			PriceCredits: 500, Route: "image_generation.designer.seedream", Delivery: "persisted_image",
 		}}},
 	}
@@ -162,6 +162,38 @@ func TestDesignerCreateGenerationRejectsBatchWithoutCountSKU(t *testing.T) {
 	_, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
 	if err == nil || err.Error() != "n must equal 1; batch designer SKUs are not configured" {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 1000)
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Designer["seedream"] = srvconfig.ImageGenerationRouteConfig{
+		Enabled: true, Provider: "volcengine_ark", Model: "doubao-seedream-5-0-pro-260628",
+		MinTier: "enterprise", BillingSKU: "image.seedream.designer",
+		Capabilities: DesignerProviderCapabilities{MaxBatch: 1},
+	}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "restricted", ProviderID: "seedream", N: 1}
+	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
+	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
+		t.Fatalf("free quote error = %v, want access denied", err)
+	}
+	req.QuoteID = "not-a-real-quote"
+	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
+	if _, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
+		t.Fatalf("free generation error = %v, want access denied", err)
+	}
+	if err := f.db.Model(&model.User{}).Where("id = ?", f.userID).Update("tier", model.TierPro).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
+		t.Fatalf("pro quote error = %v, want access denied", err)
+	}
+	if err := f.db.Model(&model.User{}).Where("id = ?", f.userID).Update("tier", model.TierEnterprise).Error; err != nil {
+		t.Fatal(err)
+	}
+	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
+	if err != nil || quote == nil {
+		t.Fatalf("enterprise quote = %#v err=%v", quote, err)
 	}
 }
 

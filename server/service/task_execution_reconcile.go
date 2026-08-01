@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	config "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -222,18 +223,28 @@ func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.
 		}
 		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot, currentTask.AgentProfileFingerprint)
 		replacement = &profiledExecution
+		runtime := config.RuntimeImageSelection{
+			Profile: strings.TrimSpace(current.RuntimeProfile),
+			Image:   strings.TrimSpace(current.RuntimeImage),
+		}
 		if !inheritAgentPackIdentity(replacement, current) {
 			if err := applyAgentPackIdentity(replacement, currentTask.Type); err != nil {
 				return err
 			}
+			runtime = s.runtimeDispatcher.ResolveRuntime(currentTask.Type)
+			runtime.Profile = strings.TrimSpace(runtime.Profile)
+			runtime.Image = strings.TrimSpace(runtime.Image)
+		}
+		if runtime.Profile == "" || runtime.Image == "" {
+			return fmt.Errorf("resolve replacement runtime for task type %q returned incomplete identity", currentTask.Type)
 		}
 		replacement.ID = uuid.NewString()
 		replacement.TaskID = task.ID
 		replacement.Attempt = current.Attempt + 1
-		if replacement.RuntimeProfile != current.RuntimeProfile {
-			return fmt.Errorf("replacement runtime profile %q does not match frozen profile %q", replacement.RuntimeProfile, current.RuntimeProfile)
+		if replacement.RuntimeProfile != runtime.Profile {
+			return fmt.Errorf("replacement runtime profile %q does not match selected profile %q", replacement.RuntimeProfile, runtime.Profile)
 		}
-		replacement.RuntimeImage = current.RuntimeImage
+		replacement.RuntimeImage = runtime.Image
 		replacement.Target = target
 		replacement.Status = model.TaskExecutionCreated
 		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {

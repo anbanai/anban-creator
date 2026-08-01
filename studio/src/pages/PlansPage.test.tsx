@@ -47,6 +47,7 @@ vi.mock('@/lib/api', async () => {
       ...actual.api,
       plans: {
         ...actual.api.plans,
+        scheduleRecommendation: vi.fn().mockResolvedValue({ time: '12:07', timezone: 'Asia/Shanghai', granularity_minutes: 15, load_balanced: true }),
         list: vi.fn().mockResolvedValue(mockPlans),
         create: vi.fn(),
         update: vi.fn(),
@@ -63,11 +64,12 @@ vi.mock('@/lib/api', async () => {
         catalog: vi.fn().mockResolvedValue({
           catalog_id: 'retail-test-v1',
           currency: 'credits',
+          task_time_pricing: { timezone: 'Asia/Shanghai', peak_windows: [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], off_peak_windows: [{ start: '00:00', end: '09:00' }, { start: '12:00', end: '14:00' }, { start: '18:00', end: '24:00' }], off_peak_rate_percent: 80, current_period: 'peak', server_time: '2026-07-31T10:00:00+08:00', next_transition_at: '2026-07-31T12:00:00+08:00' },
           skus: [
-            { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+            { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
             { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
             { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, peak_price_credits: 4000, off_peak_price_credits: 3200, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.quality', operation: 'task.seednote', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
@@ -155,6 +157,33 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
       execution_profile: 'balanced',
     })))
+  })
+
+  it('applies the backend off-peak recommendation only to a new plan', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(createDialog).findByText(/12:07 自动执行/)).toBeInTheDocument()
+    expect(within(createDialog).getByText('当前选择为低峰时段 · 预计 3200 积分/次')).toBeInTheDocument()
+    expect(within(createDialog).getByText('高峰 4000 积分 · 低峰 3200 积分 · 低峰可节省 800 积分')).toBeInTheDocument()
+    expect(api.plans.scheduleRecommendation).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not request or overwrite a recommendation when editing', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const editDialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(within(editDialog).getByText(/09:00 自动执行/)).toBeInTheDocument()
+    expect(api.plans.scheduleRecommendation).not.toHaveBeenCalled()
+  })
+
+  it('uses a catalog-derived off-peak fallback when recommendation is unavailable', async () => {
+    vi.mocked(api.plans.scheduleRecommendation).mockRejectedValueOnce(new Error('unavailable'))
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByText(/00:00 自动执行/)).toBeInTheDocument()
+    expect(within(dialog).getByText('智能分布暂不可用，已使用当前配置中的低峰时间。')).toBeInTheDocument()
   })
 
   it('retains the stored execution profile when editing a plan', async () => {

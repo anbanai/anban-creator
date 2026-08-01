@@ -296,7 +296,9 @@ describe('TasksPage URL-driven recovery filters', () => {
   })
 
   it('blocks creation instead of treating an unavailable catalog price as zero', async () => {
-    vi.mocked(api.billing.catalog).mockRejectedValueOnce(new Error('catalog unavailable'))
+    vi.mocked(api.billing.catalog)
+      .mockRejectedValueOnce(new Error('catalog unavailable'))
+      .mockRejectedValueOnce(new Error('catalog unavailable'))
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 

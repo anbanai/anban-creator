@@ -17,8 +17,7 @@ vi.mock('@/lib/tauri', () => ({
 }))
 
 const metadata: PreviewMetadata = {
-  provider: 'openai',
-  model: 'gpt-image-1',
+  capabilityName: '专业增强',
   prompt: 'A precise line drawing',
   outputFormat: 'png',
   createdAt: '2026-07-16T00:00:00Z',
@@ -49,7 +48,7 @@ describe('ImagePreview', () => {
     expect(screen.getByRole('button', { name: '放大' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '放大' }))
     expect(screen.getByText('125%')).toBeInTheDocument()
-    expect(screen.getByText('openai / gpt-image-1')).toBeInTheDocument()
+    expect(screen.getAllByText('专业增强')).toHaveLength(2)
     expect(screen.getByText('1024×1024')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '下一项' }))

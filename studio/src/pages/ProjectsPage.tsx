@@ -24,7 +24,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
@@ -34,7 +34,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
-import { useImageModels } from '@/hooks/useImageModels'
+import { useImageCapabilities } from '@/hooks/useImageModels'
 import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
@@ -192,7 +192,7 @@ export default function ProjectsPage() {
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
   const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageCapabilities()
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -1030,12 +1030,12 @@ export default function ProjectsPage() {
                     )} />
                     <FormField control={form.control} name="ecommerce_image_model_key" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>默认图像模型</FormLabel>
+                        <FormLabel>默认图像能力</FormLabel>
                         <FormControl>
                           {imageModelsLoading ? (
                             <Skeleton className="h-10 w-full rounded-xl" />
                           ) : (
-                            <ImageModelSelector options={imageModelOptions} value={field.value || ''} onChange={field.onChange} />
+                            <ImageCapabilitySelector options={imageModelOptions} value={field.value || ''} onChange={field.onChange} />
                           )}
                         </FormControl>
                         <FormMessage />
