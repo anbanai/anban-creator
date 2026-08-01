@@ -20,7 +20,7 @@ type ImageModelResolver interface {
 	ResolveImageModelForGeneration(
 		ctx context.Context,
 		userID string,
-		imageModelKey string,
+		imageCapabilityKey string,
 		imageType string,
 		referenceCount int,
 	) (*service.ResolvedImageModel, error)

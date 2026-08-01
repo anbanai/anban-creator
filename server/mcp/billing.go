@@ -19,15 +19,15 @@ var billSvc *billingServices
 var mcpLog *zerolog.Logger
 
 type billingServices struct {
-	modelConfigSvc *service.ModelConfigService
-	config         *config.Config
+	capabilityResolver *service.ImageCapabilityResolver
+	config             *config.Config
 }
 
 // SetBillingServices initializes billing dependencies. Called from MCP setup.
-func SetBillingServices(modelConfigSvc *service.ModelConfigService, cfg *config.Config) {
+func SetBillingServices(capabilityResolver *service.ImageCapabilityResolver, cfg *config.Config) {
 	billSvc = &billingServices{
-		modelConfigSvc: modelConfigSvc,
-		config:         cfg,
+		capabilityResolver: capabilityResolver,
+		config:             cfg,
 	}
 }
 
@@ -63,21 +63,8 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 	if billSvc == nil || billSvc.config == nil {
 		return "", "", ""
 	}
-	if billSvc.modelConfigSvc != nil {
-		if cfg := billSvc.modelConfigSvc.GetEffectiveImageConfig(ctx, userID); cfg != nil {
-			if mcpLog != nil {
-				mcpLog.Info().
-					Str("user_id", userID).
-					Str("provider", cfg.Cover.Provider).
-					Str("model", cfg.Cover.Model).
-					Str("source", "user_override").
-					Msg("MCP tool using user custom image model")
-			}
-			return cfg.Cover.Provider, cfg.Cover.Model, "user_custom"
-		}
-	}
 	if cfg, ok := billSvc.config.ImageAPIForCapability(""); ok && cfg.Cover != nil {
-		return cfg.Cover.Provider, cfg.Cover.Model, "system_default"
+		return cfg.Cover.Provider, cfg.Cover.Model, "capability:" + billSvc.config.ModelRoutes.ImageGeneration.DefaultCapability
 	}
 	return "", "", ""
 }
@@ -91,13 +78,10 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 //     the configured provider limit, plus the product-bible text block. Avoid
 //     unrelated refs because Seedream's strong i2i can over-lock the scene.
 //
-// Resolution mirrors generate_image's generation path: Task.ImageModelKey (a
-// system image_preset or "custom", chosen by the user at task creation) wins,
-// else the user override, else the server image generation cover default. Returns
-// ("","") only when nothing is configured.
+// Resolution mirrors generate_image's frozen task capability.
 func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
-	if task != nil && task.ImageModelKey != "" && billSvc != nil && billSvc.modelConfigSvc != nil {
-		if cfg, _, err := billSvc.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, userID, task.ImageModelKey); err == nil && cfg != nil {
+	if task != nil && billSvc != nil && billSvc.capabilityResolver != nil {
+		if cfg, _, err := billSvc.capabilityResolver.ResolveImageConfigForTaskKey(ctx, userID, task.ImageCapabilityKey); err == nil && cfg != nil {
 			if cfg.Cover != nil && cfg.Cover.Provider != "" {
 				return cfg.Cover.Provider, cfg.Cover.Model
 			}

@@ -762,11 +762,11 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 }
 
-// TestCreateTask_ImageModelKeyTierForbidden verifies that the handler returns
+// TestCreateTask_ImageCapabilityKeyTierForbidden verifies that the handler returns
 // 403 when a Free-tier user tries to create a task with a Pro-tier image preset,
 // or with "custom" (Enterprise-only). Also covers the fail-closed path:
 // Free users CAN still create tasks with Free-tier or empty keys.
-func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
+func TestCreateTask_ImageCapabilityKeyTierForbidden(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -815,7 +815,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}{
 		{
 			name:       "free tier + free preset accepted",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_model_key":"volcengine-standard"}`,
+			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"volcengine-standard"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
@@ -825,17 +825,17 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 		},
 		{
 			name:       "free tier + pro preset rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_model_key":"gemini-pro"}`,
+			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"gemini-pro"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + custom rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_model_key":"custom"}`,
+			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"custom"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + unknown key rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_model_key":"made-up"}`,
+			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"made-up"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 	}
@@ -1179,7 +1179,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		"quantity":2,
 		"prompt":"edited full clone prompt",
 		"image_ratio":"1:1",
-		"image_model_key":"free-image",
+		"image_capability_key":"free-image",
 		"skip_reference_image":true,
 		"reference_image":{"asset_id":"`+referenceAsset.ID+`"},
 		"input_attachments":[{"type":"text","text":"validated attachment","file_name":"brief.txt"}],
@@ -1221,7 +1221,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
 		}
-		if task.ImageRatio != "1:1" || task.ImageModelKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
+		if task.ImageRatio != "1:1" || task.ImageCapabilityKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
 			t.Fatalf("shared overrides = %#v", task)
 		}
 		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
@@ -2135,7 +2135,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)
 			}
-			return `{"execution_profile":"effective","project_id":"` + destination.ID + `","quantity":1,"image_model_key":"unknown"}`
+			return `{"execution_profile":"effective","project_id":"` + destination.ID + `","quantity":1,"image_capability_key":"unknown"}`
 		}, wantStatus: fiber.StatusForbidden},
 		{name: "invalid goal", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {

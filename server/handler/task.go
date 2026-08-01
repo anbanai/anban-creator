@@ -66,7 +66,7 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 }
 
 // SetImageCapabilities wires the system-managed image capabilities for tier-gated
-// validation of createTaskRequest.ImageModelKey.
+// validation of createTaskRequest.ImageCapabilityKey.
 func (h *TaskHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
 	h.imageCapabilities = capabilities
 }
@@ -145,7 +145,7 @@ type createTaskRequest struct {
 	Prompt             string                           `json:"prompt"`
 	Quantity           int                              `json:"quantity"`
 	ImageRatio         string                           `json:"image_ratio"`
-	ImageModelKey      string                           `json:"image_model_key"`
+	ImageCapabilityKey string                           `json:"image_capability_key"`
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
@@ -187,7 +187,7 @@ type cloneTaskRequest struct {
 	Prompt                   *string                          `json:"prompt"`
 	Quantity                 int                              `json:"quantity"`
 	ImageRatio               string                           `json:"image_ratio"`
-	ImageModelKey            string                           `json:"image_model_key"`
+	ImageCapabilityKey       string                           `json:"image_capability_key"`
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
@@ -558,7 +558,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
+	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return nil, Error(c, fiber.StatusForbidden, err.Error())
 	}
 	if req.GoalMode {
@@ -614,7 +614,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			Prompt:                   prompt,
 			Quantity:                 quantity,
 			ImageRatio:               req.ImageRatio,
-			ImageModelKey:            req.ImageModelKey,
+			ImageCapabilityKey:       req.ImageCapabilityKey,
 			SkipRefImage:             req.SkipReferenceImage,
 			ReferenceImageAssetID:    referenceAssetID,
 			ProjectSnapshot:          &projectSnapshot,
@@ -955,7 +955,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Prompt:                   prompt,
 			Quantity:                 req.Quantity,
 			ImageRatio:               req.ImageRatio,
-			ImageModelKey:            req.ImageModelKey,
+			ImageCapabilityKey:       req.ImageCapabilityKey,
 			SkipReferenceImage:       req.SkipReferenceImage,
 			ReferenceImage:           req.ReferenceImage,
 			InputAttachments:         attachments,
@@ -984,7 +984,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Quantity:                 prepared.params.Quantity,
 			Prompt:                   prepared.params.Prompt,
 			ImageRatio:               prepared.params.ImageRatio,
-			ImageModelKey:            prepared.params.ImageModelKey,
+			ImageCapabilityKey:       prepared.params.ImageCapabilityKey,
 			SkipRefImage:             prepared.params.SkipRefImage,
 			ReferenceImageAssetID:    prepared.params.ReferenceImageAssetID,
 			InputAttachments:         prepared.params.InputAttachments,
@@ -1012,7 +1012,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 
 	// Exact clones continue to use the source's frozen configuration. Re-check
 	// its image-model entitlement because the user's tier may have changed.
-	if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
+	if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 	params := service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile}
@@ -1375,7 +1375,7 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			continue
 		}
 		// Re-validate the image model against the caller's current tier.
-		if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
+		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
 			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
 			continue
 		}
@@ -1996,10 +1996,10 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	return c.SendFile(absPath)
 }
 
-// validateImageModelKeyForUser delegates to the package-level helper, binding
+// validateImageCapabilityKeyForUser delegates to the package-level helper, binding
 // this handler's repository and image capabilities. See
 // validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
-func (h *TaskHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
+func (h *TaskHandler) validateImageCapabilityKeyForUser(c fiber.Ctx, userID, key string) error {
 	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
 }
 

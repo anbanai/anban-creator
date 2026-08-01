@@ -74,7 +74,7 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 	updates := map[string]interface{}{
 		"execution_profile":           plan.ExecutionProfile,
 		"topic_hint":                  plan.Prompt,
-		"image_model_key":             plan.ImageModelKey,
+		"image_capability_key":        plan.ImageCapabilityKey,
 		"reference_image_asset_id":    plan.ReferenceImageAssetID,
 		"skip_reference_image":        plan.SkipReferenceImage,
 		"watermark":                   plan.Watermark,

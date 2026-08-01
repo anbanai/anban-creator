@@ -156,16 +156,8 @@ func ResolveTier(tier Tier) Tier {
 	return tier
 }
 
-// Image model key constants stored on Task/Plan.ImageModelKey.
-//
-// ImageModelKeySystemDefault ("") means: use the server default image provider/model.
-// ImageModelKeyCustom ("custom") means: use the user's per-account model-config
-// override (only allowed for Enterprise tier).
-// Any other value must match an ImageModelPreset.Key configured on the server.
-const (
-	ImageModelKeySystemDefault = ""
-	ImageModelKeyCustom        = "custom"
-)
+// ImageCapabilityKeySystemDefault selects the configured default capability.
+const ImageCapabilityKeySystemDefault = ""
 
 // TierRank returns the ordinal rank of a tier for privilege comparison
 // (higher = more privileged). Unknown tiers map to free.

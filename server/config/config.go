@@ -1391,7 +1391,7 @@ func (c *Config) ImageCapability(key string) (ImageGenerationRouteConfig, bool) 
 		return ImageGenerationRouteConfig{}, false
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || key == model.ImageModelKeySystemDefault {
+	if key == "" || key == model.ImageCapabilityKeySystemDefault {
 		key = c.ModelRoutes.ImageGeneration.DefaultCapability
 	}
 	route, ok := c.ModelRoutes.ImageGeneration.Capabilities[key]

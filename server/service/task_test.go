@@ -1406,7 +1406,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		Quantity:                 2,
 		Prompt:                   "edited prompt",
 		ImageRatio:               "1:1",
-		ImageModelKey:            "gemini-pro",
+		ImageCapabilityKey:       "gemini-pro",
 		SkipRefImage:             &skipReference,
 		ReferenceImageAssetID:    referenceAsset.ID,
 		InputAttachments:         attachments,
@@ -1432,8 +1432,8 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if snapshot.ProjectName != destinationProject.Name || snapshot.Platform != destinationProject.Platform || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v", snapshot)
 		}
-		if task.Prompt != "edited prompt" || task.ImageRatio != "1:1" || task.ImageModelKey != "gemini-pro" {
-			t.Fatalf("editable fields = prompt %q ratio %q model %q", task.Prompt, task.ImageRatio, task.ImageModelKey)
+		if task.Prompt != "edited prompt" || task.ImageRatio != "1:1" || task.ImageCapabilityKey != "gemini-pro" {
+			t.Fatalf("editable fields = prompt %q ratio %q model %q", task.Prompt, task.ImageRatio, task.ImageCapabilityKey)
 		}
 		if !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || !task.Watermark {
 			t.Fatalf("reference/watermark fields = skip %v asset %q watermark %v", task.SkipReferenceImage, task.ReferenceImageAssetID, task.Watermark)

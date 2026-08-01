@@ -70,12 +70,12 @@ type DownloadImageResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
-	imageCfg        *srvconfig.ImageAPIConfig
-	storage         storage.Provider
-	repo            repository.Repository
-	modelConfigSvc  *ModelConfigService
-	logger          *zerolog.Logger
-	providerCostSvc *ProviderCostService
+	imageCfg           *srvconfig.ImageAPIConfig
+	storage            storage.Provider
+	repo               repository.Repository
+	capabilityResolver *ImageCapabilityResolver
+	logger             *zerolog.Logger
+	providerCostSvc    *ProviderCostService
 }
 
 // NewImageService creates a new ImageService.
@@ -93,9 +93,8 @@ func NewImageService(
 	}
 }
 
-// SetModelConfigService sets the model config service for per-user AI model overrides.
-func (s *ImageService) SetModelConfigService(svc *ModelConfigService) {
-	s.modelConfigSvc = svc
+func (s *ImageService) SetImageCapabilityResolver(resolver *ImageCapabilityResolver) {
+	s.capabilityResolver = resolver
 }
 
 func (s *ImageService) SetProviderCostService(svc *ProviderCostService) {
@@ -285,17 +284,11 @@ func resolveProjectImageAPI(
 }
 
 // buildProcessor creates a new image.Processor for the given project and image type.
-// imageModelKey (optional) routes through ResolveImageConfigForTaskKey so that per-task
-// model selection takes effect: empty = server default / user override;
-// "custom" = user override; preset key = system-managed preset.
-func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageModelKey string) (*image.Processor, error) {
-	// Resolve the effective image config: per-task key → user override → server default.
+// imageCapabilityKey routes through the server-owned capability catalog.
+func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageCapabilityKey string) (*image.Processor, error) {
 	effectiveCfg := s.imageCfg
-	if imageModelKey != "" && s.modelConfigSvc == nil {
-		return nil, fmt.Errorf("image model resolver is not available")
-	}
-	if s.modelConfigSvc != nil && imageModelKey != "" {
-		resolved, source, err := s.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, ch.UserID, imageModelKey)
+	if s.capabilityResolver != nil {
+		resolved, source, err := s.capabilityResolver.ResolveImageConfigForTaskKey(ctx, ch.UserID, imageCapabilityKey)
 		if err != nil {
 			return nil, err
 		}
@@ -303,19 +296,10 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 			s.logger.Info().
 				Str("user_id", ch.UserID).
 				Str("image_type", imageType).
-				Str("image_model_key", imageModelKey).
+				Str("image_capability_key", imageCapabilityKey).
 				Str("source", source).
 				Msg("using task-selected image config")
 			effectiveCfg = resolved
-		}
-	} else if s.modelConfigSvc != nil {
-		// No per-task key: walk user override → server default.
-		if userCfg := s.modelConfigSvc.GetEffectiveImageConfig(ctx, ch.UserID); userCfg != nil {
-			s.logger.Info().
-				Str("user_id", ch.UserID).
-				Str("image_type", imageType).
-				Msg("using user custom image config")
-			effectiveCfg = userCfg
 		}
 	}
 

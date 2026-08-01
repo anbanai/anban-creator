@@ -23,10 +23,10 @@ type Plan struct {
 	CronExpr         string `gorm:"type:varchar(100)" json:"cron_expr"`
 	Prompt           string `gorm:"column:topic_hint;type:text" json:"prompt"`
 	Status           string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
-	// ImageModelKey / ReferenceImageAssetID are per-plan image defaults copied to each
+	// ImageCapabilityKey / ReferenceImageAssetID are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
 	// "what to produce" params, not style/author/theme dimensions.
-	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
+	ImageCapabilityKey    string     `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
 	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
 	SkipReferenceImage    bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`

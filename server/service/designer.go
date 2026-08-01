@@ -230,6 +230,9 @@ func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID stri
 		RequestFingerprint: fingerprint, IdempotencyScope: "designer-quote", IdempotencyKey: req.OperationID,
 	}
 	if strings.TrimSpace(route.BillingSKU) != "" {
+		if _, err := s.resolveDesignerCapabilitySKU(ctx, route, quoteRequest.Route); err != nil {
+			return nil, err
+		}
 		quoteRequest.SKUID = strings.TrimSpace(route.BillingSKU)
 	}
 	quote, err := s.billingCatalog.CreateQuote(ctx, quoteRequest)
@@ -331,7 +334,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 	var sku *model.BillingSKU
 	if strings.TrimSpace(authorizedRoute.BillingSKU) != "" {
-		sku, err = s.billingCatalog.ResolveSKUByID(ctx, "", strings.TrimSpace(authorizedRoute.BillingSKU))
+		sku, err = s.resolveDesignerCapabilitySKU(ctx, authorizedRoute, routeName)
 	} else {
 		sku, err = s.billingCatalog.ResolveSKU(ctx, "", "image.generate", routeName)
 	}
@@ -406,6 +409,17 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 
 	return &DesignerGenerationCreated{GenerationID: genID, Status: model.ImageGenerationStatusGenerating, PriceCredits: int(chargedPrice)}, nil
+}
+
+func (s *DesignerService) resolveDesignerCapabilitySKU(ctx context.Context, route srvconfig.ImageGenerationRouteConfig, routeName string) (*model.BillingSKU, error) {
+	sku, err := s.billingCatalog.ResolveSKUByID(ctx, "", strings.TrimSpace(route.BillingSKU))
+	if err != nil {
+		return nil, fmt.Errorf("resolve image capability SKU: %w", err)
+	}
+	if sku.Operation != "image.generate" || sku.Route != routeName {
+		return nil, fmt.Errorf("image capability billing_sku %q resolves to %s/%s, want image.generate/%s", route.BillingSKU, sku.Operation, sku.Route, routeName)
+	}
+	return sku, nil
 }
 
 // authorizeDesignerCapability resolves the public selection key to the

@@ -52,7 +52,6 @@ type Services struct {
 	UploadHandler            *handler.UploadHandler
 	AIEntryHandler           *handler.AIEntryHandler
 	FeedbackHandler          *handler.FeedbackHandler
-	ModelConfigHandler       *handler.ModelConfigHandler
 	ImageCapabilityHandler   *handler.ImageCapabilityHandler
 	TemplateHandler          *handler.TemplateHandler
 	ViralAnalysisHandler     *handler.ViralAnalysisHandler
@@ -404,15 +403,6 @@ func NewRouter(svc *Services) *fiber.App {
 		ilink.Post("/bind-code", svc.IlinkHandler.CreateBindCode)
 		ilink.Post("/unbind", svc.IlinkHandler.Unbind)
 		ilink.Put("/default-project", svc.IlinkHandler.SetDefaultProject)
-	}
-
-	// Model config endpoints
-	// ---------------------------------------------------------------------------
-
-	if svc.ModelConfigHandler != nil {
-		apiV1.Get("/model-config", svc.ModelConfigHandler.Get)
-		apiV1.Put("/model-config", svc.ModelConfigHandler.Update)
-		apiV1.Delete("/model-config", svc.ModelConfigHandler.Delete)
 	}
 
 	if svc.ImageCapabilityHandler != nil {

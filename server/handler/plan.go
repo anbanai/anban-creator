@@ -94,7 +94,7 @@ func (h *PlanHandler) SetStore(s storage.Provider) {
 }
 
 // SetImageCapabilities wires the system-managed image capabilities for tier-gated
-// validation of createPlanRequest/updatePlanRequest.ImageModelKey.
+// validation of createPlanRequest/updatePlanRequest.ImageCapabilityKey.
 func (h *PlanHandler) SetImageCapabilities(capabilities map[string]config.ImageGenerationRouteConfig) {
 	h.imageCapabilities = capabilities
 }
@@ -126,7 +126,7 @@ type createPlanRequest struct {
 	ExecutionProfile   string                           `json:"execution_profile"`
 	CronExpr           string                           `json:"cron_expr"`
 	Prompt             string                           `json:"prompt"`
-	ImageModelKey      string                           `json:"image_model_key"`
+	ImageCapabilityKey string                           `json:"image_capability_key"`
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	Watermark          *bool                            `json:"watermark"`
@@ -148,7 +148,7 @@ type updatePlanRequest struct {
 	ExecutionProfile         string                           `json:"execution_profile"`
 	CronExpr                 string                           `json:"cron_expr"`
 	Prompt                   string                           `json:"prompt"`
-	ImageModelKey            *string                          `json:"image_model_key"`
+	ImageCapabilityKey       *string                          `json:"image_capability_key"`
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet        bool                             `json:"-"`
@@ -207,8 +207,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	// Validate image_model_key against the caller's tier.
-	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
+	// Validate image_capability_key against the caller's tier.
+	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
@@ -243,7 +243,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
-		ImageModelKey:            req.ImageModelKey,
+		ImageCapabilityKey:       req.ImageCapabilityKey,
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
@@ -401,10 +401,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 
-	// Validate image_model_key against the caller's tier.
-	// nil/unset ImageModelKey in the request body means "leave unchanged" — no validation needed.
-	if req.ImageModelKey != nil {
-		if err := h.validateImageModelKeyForUser(c, userID, *req.ImageModelKey); err != nil {
+	// Validate image_capability_key against the caller's tier.
+	// nil/unset ImageCapabilityKey in the request body means "leave unchanged" — no validation needed.
+	if req.ImageCapabilityKey != nil {
+		if err := h.validateImageCapabilityKeyForUser(c, userID, *req.ImageCapabilityKey); err != nil {
 			return Error(c, fiber.StatusForbidden, err.Error())
 		}
 	}
@@ -441,7 +441,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 		CronExpr:                 req.CronExpr,
 		Prompt:                   req.Prompt,
-		ImageModelKey:            req.ImageModelKey,
+		ImageCapabilityKey:       req.ImageCapabilityKey,
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
@@ -559,10 +559,10 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "plan paused"})
 }
 
-// validateImageModelKeyForUser delegates to the package-level helper, binding
+// validateImageCapabilityKeyForUser delegates to the package-level helper, binding
 // this handler's repository and image capabilities. See
 // validateImageCapabilityKeyForUser for the fail-closed tier-resolution rules.
-func (h *PlanHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
+func (h *PlanHandler) validateImageCapabilityKeyForUser(c fiber.Ctx, userID, key string) error {
 	return validateImageCapabilityKeyForUser(c.Context(), h.repo, userID, key, h.imageCapabilities)
 }
 

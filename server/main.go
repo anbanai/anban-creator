@@ -101,6 +101,9 @@ func main() {
 		if err := requireAgentExecutionProfileSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Agent execution profiles")
 		}
+		if _, err := service.MigrateImageCapabilities(context.Background(), mysqlDB, cfg.ModelRoutes.ImageGeneration.DefaultCapability, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate image capabilities")
+		}
 		if err := migrateModels(mysqlDB, model.AutoMigrate); err != nil {
 			log.Fatal().Err(err).Msg("failed to auto-migrate models")
 		} else {
@@ -379,12 +382,7 @@ func main() {
 
 	}
 
-	// 12.1 Create per-user model config service.
-	var modelConfigSvc *service.ModelConfigService
-	if repo != nil {
-		modelConfigSvc = service.NewModelConfigService(repo, cfg, log)
-		log.Info().Msg("model config service initialized")
-	}
+	imageCapabilityResolver := service.NewImageCapabilityResolver(repo, cfg)
 
 	var serverInternalLLMClient service.ResultLLMClient
 	if route := cfg.ServerInternal; route.BaseURL != "" && route.Key != "" && route.Model != "" {
@@ -468,7 +466,6 @@ func main() {
 	var uploadHandler *handler.UploadHandler
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
-	var modelConfigHandler *handler.ModelConfigHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
@@ -551,9 +548,6 @@ func main() {
 		agentFeedbackSvc = service.NewAgentFeedbackService(repo, log)
 	}
 	resourceHandler = handler.NewResourceHandler(log)
-	if modelConfigSvc != nil {
-		modelConfigHandler = handler.NewModelConfigHandler(modelConfigSvc, log)
-	}
 	// Image model options handler (tier-gated listing). Always available so the
 	// frontend can render the create-task/plan dropdown even without presets.
 	var imageCatalog *service.BillingCatalogService
@@ -585,9 +579,7 @@ func main() {
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
-			if modelConfigSvc != nil {
-				imageSvc.SetModelConfigService(modelConfigSvc)
-			}
+			imageSvc.SetImageCapabilityResolver(imageCapabilityResolver)
 		}
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
@@ -625,7 +617,7 @@ func main() {
 			TaskSvc:                taskSvc,
 			PlanSvc:                planSvc,
 			ImageSvc:               imageSvc,
-			ImageModelResolver:     modelConfigSvc,
+			ImageModelResolver:     imageCapabilityResolver,
 			ImageGenerator:         imageSvc,
 			ProviderCostSvc:        fixedBilling.Cost,
 			BillingCatalogSvc:      fixedBilling.Catalog,
@@ -643,7 +635,7 @@ func main() {
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
-			TaskImageSvc:           service.NewTaskImageService(taskSvc, modelConfigSvc, imageSvc, fixedBilling.Catalog, log),
+			TaskImageSvc:           service.NewTaskImageService(taskSvc, imageCapabilityResolver, imageSvc, fixedBilling.Catalog, log),
 			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
@@ -653,7 +645,7 @@ func main() {
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
 		})
-		mcp.SetBillingServices(modelConfigSvc, cfg)
+		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
 		log.Info().
@@ -755,7 +747,6 @@ func main() {
 		UploadHandler:            uploadHandler,
 		AIEntryHandler:           aiEntryHandler,
 		FeedbackHandler:          feedbackHandler,
-		ModelConfigHandler:       modelConfigHandler,
 		ImageCapabilityHandler:   imageCapabilityHandler,
 		TemplateHandler:          templateHandler,
 		ViralAnalysisHandler:     viralAnalysisHandler,

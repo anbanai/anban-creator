@@ -338,7 +338,7 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 		DefaultSelectedModules: map[string]int{"product_poster": 1},
 		TargetPlatform:         "tmall",
 		BrandBrief:             "品牌说明",
-		ImageModelKey:          "openai-gpt-image",
+		ImageCapabilityKey:     "openai-gpt-image",
 	})
 
 	created, err := svc.Create(ctx, tmpl, ownerID)
@@ -360,7 +360,7 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 	if created.Structure != nil || created.ExampleContent != nil {
 		t.Fatalf("Structure/ExampleContent = %v/%v, want nil visual-only fields", created.Structure, created.ExampleContent)
 	}
-	if ec := created.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
+	if ec := created.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageCapabilityKey != "" {
 		t.Fatalf("Ecommerce = %+v, want empty visual-only payload", ec)
 	}
 

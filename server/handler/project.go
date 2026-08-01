@@ -75,13 +75,10 @@ func (h *ProjectHandler) SetDesignerService(svc *service.DesignerService) {
 }
 
 func (h *ProjectHandler) validateProjectImageCapability(ctx context.Context, userID string, req *projectRequest) error {
-	if req == nil || req.EcommerceDefaults == nil || strings.TrimSpace(req.EcommerceDefaults.ImageModelKey) == "" || h.designerSvc == nil {
+	if req == nil || req.EcommerceDefaults == nil || strings.TrimSpace(req.EcommerceDefaults.ImageCapabilityKey) == "" || h.designerSvc == nil {
 		return nil
 	}
-	if req.EcommerceDefaults.ImageModelKey == model.ImageModelKeyCustom {
-		return fmt.Errorf("custom image model is not a valid project capability")
-	}
-	return h.designerSvc.ValidateCapabilityForUser(ctx, userID, req.EcommerceDefaults.ImageModelKey)
+	return h.designerSvc.ValidateCapabilityForUser(ctx, userID, req.EcommerceDefaults.ImageCapabilityKey)
 }
 
 // signProjectURLs resolves the stored avatar URL to

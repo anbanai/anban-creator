@@ -71,7 +71,7 @@ func (h *DesignerHandler) Quote(c fiber.Ctx) error {
 		}
 		var limitErr *service.DesignerReferenceLimitError
 		if errors.As(err, &limitErr) {
-			return Error(c, fiber.StatusBadRequest, "designer_reference_limit_exceeded")
+			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "designer_reference_limit_exceeded", Data: limitErr})
 		}
 		if errors.Is(err, service.ErrDesignerCapabilityUnavailable) {
 			return Error(c, fiber.StatusBadRequest, "designer_capability_unavailable")
@@ -107,7 +107,7 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		}
 		var limitErr *service.DesignerReferenceLimitError
 		if errors.As(err, &limitErr) {
-			return Error(c, fiber.StatusBadRequest, "designer_reference_limit_exceeded")
+			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "designer_reference_limit_exceeded", Data: limitErr})
 		}
 		if errors.Is(err, service.ErrDesignerCapabilityUnavailable) {
 			return Error(c, fiber.StatusBadRequest, "designer_capability_unavailable")

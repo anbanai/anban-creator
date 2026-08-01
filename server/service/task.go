@@ -358,7 +358,7 @@ type CreateManualParams struct {
 	Prompt                string
 	Quantity              int
 	ImageRatio            string
-	ImageModelKey         string
+	ImageCapabilityKey    string
 	SkipRefImage          *bool
 	ReferenceImageAssetID string
 	// allowProjectReferenceAsset is set only by Clone after it derives a trusted
@@ -480,7 +480,7 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
-// ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
+// ImageCapabilityKey optionally selects a per-task image model (validated upstream by the handler).
 //
 // Style/author/theme dimensions are snapshotted from the project at creation.
 // Editing the project later does not change existing pending/running tasks.
@@ -542,7 +542,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// with task-level explicit values winning. Product photos and selling points
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
-	effectiveImageModelKey := p.ImageModelKey
+	effectiveImageCapabilityKey := p.ImageCapabilityKey
 	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
@@ -557,8 +557,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.Ecommerce.BrandBrief == "" {
 			p.Ecommerce.BrandBrief = projEc.BrandBrief
 		}
-		if effectiveImageModelKey == "" {
-			effectiveImageModelKey = projEc.ImageModelKey
+		if effectiveImageCapabilityKey == "" {
+			effectiveImageCapabilityKey = projEc.ImageCapabilityKey
 		}
 	}
 	if model.IsMontagePlatform(taskType) {
@@ -645,7 +645,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Status:                   model.TaskStatusPending,
 			Prompt:                   taskPrompt,
 			ImageRatio:               p.ImageRatio,
-			ImageModelKey:            effectiveImageModelKey,
+			ImageCapabilityKey:       effectiveImageCapabilityKey,
 			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
 			InputSourceProjectID:     p.InputSourceProjectID,
@@ -897,7 +897,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Type:                     taskType,
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
-		ImageModelKey:            plan.ImageModelKey,
+		ImageCapabilityKey:       plan.ImageCapabilityKey,
 		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,

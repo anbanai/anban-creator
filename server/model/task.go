@@ -54,7 +54,7 @@ type EcommerceConfig struct {
 	BrandBrief string `json:"brand_brief,omitempty"`
 	Language   string `json:"language,omitempty"`
 	// ProviderStrategyOverride is deprecated/superseded: provider selection now
-	// flows through Task.ImageModelKey (user picks the image preset at task
+	// flows through Task.ImageCapabilityKey (user picks the image preset at task
 	// creation). Retained on the column for backward compatibility with existing
 	// rows; no longer surfaced to the agent (get_project_profile returns the
 	// resolved image_model instead).
@@ -99,7 +99,7 @@ type Task struct {
 	Prompt                string     `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                 string     `gorm:"type:varchar(200)" json:"title,omitempty"`
 	ImageRatio            string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
-	ImageModelKey         string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
+	ImageCapabilityKey    string     `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
 	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone

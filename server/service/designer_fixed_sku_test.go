@@ -129,6 +129,21 @@ func TestDesignerCreateGenerationChargesFixedStandaloneSKU(t *testing.T) {
 	}
 }
 
+func TestDesignerCapabilityRejectsBillingSKURouteMismatch(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	if err := f.db.Model(&model.BillingSKU{}).Where("sk_uid = ?", "image.standard").Update("route", "image_generation.capabilities.professional").Error; err != nil {
+		t.Fatal(err)
+	}
+	req := DesignerGenerateRequest{
+		OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "product poster",
+		CapabilityKey: "standard", Size: "1:1", N: 1,
+	}
+	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
+	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); err == nil || !strings.Contains(err.Error(), "want image.generate/image_generation.capabilities.standard") {
+		t.Fatalf("route mismatch error = %v", err)
+	}
+}
+
 func TestDesignerCreateGenerationRejectsInsufficientWalletBeforeProvider(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 499)
 	req := f.request(t)

@@ -98,7 +98,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		req.Watermark = &watermark
 	}
 
-	resolved, err := s.resolver.ResolveImageModelForGeneration(ctx, req.UserID, task.ImageModelKey, req.ImageType, len(req.ReferencePaths))
+	resolved, err := s.resolver.ResolveImageModelForGeneration(ctx, req.UserID, task.ImageCapabilityKey, req.ImageType, len(req.ReferencePaths))
 	if err != nil {
 		return nil, fmt.Errorf("image model unavailable: %w", err)
 	}

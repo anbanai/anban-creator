@@ -27,7 +27,7 @@ type CloneTaskOverrides struct {
 	Quantity                 int
 	Prompt                   string
 	ImageRatio               string
-	ImageModelKey            string
+	ImageCapabilityKey       string
 	SkipRefImage             *bool
 	ReferenceImageAssetID    string
 	InputAttachments         []model.EntryAttachment
@@ -82,7 +82,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			Prompt:                   override.Prompt,
 			Quantity:                 override.Quantity,
 			ImageRatio:               override.ImageRatio,
-			ImageModelKey:            override.ImageModelKey,
+			ImageCapabilityKey:       override.ImageCapabilityKey,
 			SkipRefImage:             override.SkipRefImage,
 			InputSourceTaskID:        inputSourceTaskID,
 			InputSourceProjectID:     inputSourceProjectID,
@@ -141,7 +141,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Prompt:                   prompt,
 		Quantity:                 1,
 		ImageRatio:               src.ImageRatio,
-		ImageModelKey:            src.ImageModelKey,
+		ImageCapabilityKey:       src.ImageCapabilityKey,
 		SkipRefImage:             &skipRef,
 		InputSourceTaskID:        inputSourceTaskID,
 		InputSourceProjectID:     inputSourceProjectID,

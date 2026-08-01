@@ -25,17 +25,17 @@ import (
 )
 
 type taskImageResolverFake struct {
-	resolved       *ResolvedImageModel
-	calls          int
-	userID         string
-	imageModelKey  string
-	imageType      string
-	referenceCount int
+	resolved           *ResolvedImageModel
+	calls              int
+	userID             string
+	imageCapabilityKey string
+	imageType          string
+	referenceCount     int
 }
 
-func (f *taskImageResolverFake) ResolveImageModelForGeneration(_ context.Context, userID, imageModelKey, imageType string, referenceCount int) (*ResolvedImageModel, error) {
+func (f *taskImageResolverFake) ResolveImageModelForGeneration(_ context.Context, userID, imageCapabilityKey, imageType string, referenceCount int) (*ResolvedImageModel, error) {
 	f.calls++
-	f.userID, f.imageModelKey, f.imageType, f.referenceCount = userID, imageModelKey, imageType, referenceCount
+	f.userID, f.imageCapabilityKey, f.imageType, f.referenceCount = userID, imageCapabilityKey, imageType, referenceCount
 	return f.resolved, nil
 }
 
@@ -97,7 +97,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
-		Status: model.TaskStatusRunning, ImageModelKey: "preferred-image",
+		Status: model.TaskStatusRunning, ImageCapabilityKey: "preferred-image",
 		BillingCatalogID: "retail-task-image-v1", BillingSKUID: "task.seednote.effective", BillingPricingTier: string(model.TierFree),
 	}); err != nil {
 		t.Fatal(err)

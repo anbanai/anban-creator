@@ -70,14 +70,14 @@ func (s *AIEntryService) SetReferenceAssetService(referenceAssets *ReferenceAsse
 }
 
 type aiEntryIntent struct {
-	Prompt          string         `json:"prompt"`
-	Notes           string         `json:"notes"`
-	SellingPoints   string         `json:"selling_points"`
-	SelectedModules map[string]int `json:"selected_modules"`
-	TargetPlatform  string         `json:"target_platform"`
-	Language        string         `json:"language"`
-	ImageRatio      string         `json:"image_ratio"`
-	ImageModelKey   string         `json:"image_model_key"`
+	Prompt             string         `json:"prompt"`
+	Notes              string         `json:"notes"`
+	SellingPoints      string         `json:"selling_points"`
+	SelectedModules    map[string]int `json:"selected_modules"`
+	TargetPlatform     string         `json:"target_platform"`
+	Language           string         `json:"language"`
+	ImageRatio         string         `json:"image_ratio"`
+	ImageCapabilityKey string         `json:"image_capability_key"`
 }
 
 var aiEntryEcommerceModuleMax = map[string]int{
@@ -350,7 +350,7 @@ func parseAIEntryIntentJSON(raw string) (aiEntryIntent, error) {
 	intent.TargetPlatform = strings.TrimSpace(intent.TargetPlatform)
 	intent.Language = strings.TrimSpace(intent.Language)
 	intent.ImageRatio = strings.TrimSpace(intent.ImageRatio)
-	intent.ImageModelKey = strings.TrimSpace(intent.ImageModelKey)
+	intent.ImageCapabilityKey = strings.TrimSpace(intent.ImageCapabilityKey)
 	return intent, nil
 }
 

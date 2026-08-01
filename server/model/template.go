@@ -55,7 +55,7 @@ type EcommerceTemplateDefaults struct {
 	DefaultSelectedModules map[string]int `json:"default_selected_modules,omitempty"`
 	TargetPlatform         string         `json:"target_platform,omitempty"`
 	BrandBrief             string         `json:"brand_brief,omitempty"`
-	ImageModelKey          string         `json:"image_model_key,omitempty"`
+	ImageCapabilityKey     string         `json:"image_capability_key,omitempty"`
 }
 
 // SetEcommerce stores legacy e-commerce template defaults into the JSON column.

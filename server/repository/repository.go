@@ -22,7 +22,6 @@ type Repository interface {
 	Projects() ProjectRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
-	ModelConfigs() ModelConfigRepository
 	SeednoteTrackings() SeednoteTrackingRepository
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	Templates() TemplateRepository
@@ -328,7 +327,6 @@ type repository struct {
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
-	modelConfigs            ModelConfigRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	templates               TemplateRepository
@@ -355,7 +353,6 @@ func New(db *gorm.DB) Repository {
 	projects := newProjectRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
-	modelConfigs := newModelConfigRepository(db)
 	seednoteTrackings := newSeednoteTrackingRepository(db)
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
@@ -381,7 +378,6 @@ func New(db *gorm.DB) Repository {
 		projects:                projects,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
-		modelConfigs:            modelConfigs,
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
 		templates:               templates,
@@ -407,7 +403,6 @@ func (r *repository) Assets() AssetRepository                       { return r.a
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
-func (r *repository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
 func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
@@ -464,7 +459,6 @@ type txRepository struct {
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
-	modelConfigs            ModelConfigRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	templates               TemplateRepository
@@ -492,7 +486,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		projects:                newProjectRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
-		modelConfigs:            newModelConfigRepository(tx),
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
@@ -518,7 +511,6 @@ func (r *txRepository) Assets() AssetRepository                       { return r
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
-func (r *txRepository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
 func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots

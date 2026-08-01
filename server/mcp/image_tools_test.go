@@ -75,7 +75,7 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	schema := generateImageInputSchema()
 	properties := schema["properties"].(map[string]any)
 	for _, removed := range []string{
-		"image_model_key", "operation_id", "verify_with_vision", "verification_prompt", "upload_to_cdn",
+		"image_capability_key", "operation_id", "verify_with_vision", "verification_prompt", "upload_to_cdn",
 	} {
 		if _, ok := properties[removed]; ok {
 			t.Fatalf("generate_image schema exposes %q", removed)

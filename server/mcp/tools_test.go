@@ -862,12 +862,12 @@ func TestAgentProjectProfileDoesNotExposeImageRouteMetadata(t *testing.T) {
 	userID := uuid.New().String()
 	project := createAccountInfoProject(t, repo, userID, "clean editorial collage")
 	task := &model.Task{
-		ID:            uuid.New().String(),
-		UserID:        userID,
-		ProjectID:     project.ID,
-		Type:          model.PlatformSeednote,
-		Status:        model.TaskStatusPending,
-		ImageModelKey: "preferred-key",
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          project.ID,
+		Type:               model.PlatformSeednote,
+		Status:             model.TaskStatusPending,
+		ImageCapabilityKey: "preferred-key",
 	}
 	task.SetProjectSnapshot(model.SnapshotProject(project))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -905,12 +905,12 @@ func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(
 		t.Fatalf("create project: %v", err)
 	}
 	task := &model.Task{
-		ID:            uuid.New().String(),
-		UserID:        userID,
-		ProjectID:     ch.ID,
-		Type:          model.PlatformEcommerce,
-		Status:        model.TaskStatusPending,
-		ImageModelKey: "openai-gpt-image",
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          ch.ID,
+		Type:               model.PlatformEcommerce,
+		Status:             model.TaskStatusPending,
+		ImageCapabilityKey: "openai-gpt-image",
 	}
 	task.SetEcommerce(model.EcommerceConfig{
 		SelectedModules: map[string]int{"main_images": 3},

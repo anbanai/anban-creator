@@ -43,7 +43,7 @@ func TestAgentProjectProfileUsesTaskSnapshotWithoutImageRouteMetadata(t *testing
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: project.ID,
 		Type: model.PlatformSeednote, Status: model.TaskStatusPending,
-		ImageModelKey: "server-owned-route",
+		ImageCapabilityKey: "server-owned-route",
 	}
 	task.SetProjectSnapshot(model.ProjectSnapshot{
 		ProjectName: "snapshot", Platform: model.PlatformSeednote,

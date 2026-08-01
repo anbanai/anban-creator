@@ -66,7 +66,7 @@ func TestProjectHandler_CreateEcommerceStoresProjectDefaults(t *testing.T) {
 			"default_selected_modules": map[string]any{"main": 6, "detail": 4},
 			"target_platform":          "wechat-store",
 			"brand_brief":              "高端护肤品牌",
-			"image_model_key":          "openai-gpt-image",
+			"image_capability_key":     "openai-gpt-image",
 		},
 	})
 	if resp.StatusCode != fiber.StatusOK {
@@ -84,8 +84,8 @@ func TestProjectHandler_CreateEcommerceStoresProjectDefaults(t *testing.T) {
 	if ec["brand_brief"] != "高端护肤品牌" {
 		t.Errorf("brand_brief = %v, want 高端护肤品牌", ec["brand_brief"])
 	}
-	if ec["image_model_key"] != "openai-gpt-image" {
-		t.Errorf("image_model_key = %v, want openai-gpt-image", ec["image_model_key"])
+	if ec["image_capability_key"] != "openai-gpt-image" {
+		t.Errorf("image_capability_key = %v, want openai-gpt-image", ec["image_capability_key"])
 	}
 	modules, ok := ec["default_selected_modules"].(map[string]any)
 	if !ok || modules["main"] == nil {

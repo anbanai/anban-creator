@@ -493,7 +493,7 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	llm := &fakeAIEntryLLM{responses: []string{
-		`{"prompt":"写一篇新品发布文章","image_ratio":"2:1","image_model_key":"custom"}`,
+		`{"prompt":"写一篇新品发布文章","image_ratio":"2:1","image_capability_key":"custom"}`,
 	}}
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
@@ -517,8 +517,8 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if found.ImageRatio != "" {
 		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped", found.ImageRatio)
 	}
-	if found.ImageModelKey != "" {
-		t.Fatalf("image_model_key = %q, want LLM model key ignored", found.ImageModelKey)
+	if found.ImageCapabilityKey != "" {
+		t.Fatalf("image_capability_key = %q, want LLM model key ignored", found.ImageCapabilityKey)
 	}
 }
 

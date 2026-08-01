@@ -56,7 +56,7 @@ type CreatePlanParams struct {
 	ExecutionProfile      string
 	CronExpr              string
 	Prompt                string
-	ImageModelKey         string
+	ImageCapabilityKey    string
 	SkipReferenceImage    *bool
 	ReferenceImageAssetID string
 	Watermark             *bool
@@ -78,7 +78,7 @@ type CreatePlanParams struct {
 
 // Create validates the cron expression, resolves the project, computes the next run
 // time, and persists the plan. The task type is derived from the project's platform.
-// ImageModelKey optionally selects a per-plan image model (validated upstream by the handler).
+// ImageCapabilityKey optionally selects a per-plan image model (validated upstream by the handler).
 //
 // Goal and GoalMode propagate to tasks spawned from this plan; when GoalMode is
 // true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
@@ -176,7 +176,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		Prompt:                   p.Prompt,
 		Status:                   model.PlanStatusActive,
 		NextRunAt:                nextRun,
-		ImageModelKey:            p.ImageModelKey,
+		ImageCapabilityKey:       p.ImageCapabilityKey,
 		ReferenceImageAssetID:    p.ReferenceImageAssetID,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
@@ -238,8 +238,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 
 // UpdatePlanParams holds the inputs for PlanService.Update. Pointer-typed fields
 // use leave-unchanged semantics:
-//   - ImageModelKey: nil = leave unchanged; &"" = clear to system default
-//     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
+//   - ImageCapabilityKey: nil = leave unchanged; &"" = clear to the configured default
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageAssetID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
@@ -253,7 +252,7 @@ type UpdatePlanParams struct {
 	ExecutionProfile         string
 	CronExpr                 string
 	Prompt                   string
-	ImageModelKey            *string
+	ImageCapabilityKey       *string
 	SkipReferenceImage       *bool
 	ReferenceImageAssetID    *string
 	Watermark                *bool
@@ -333,8 +332,8 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
 	plan.Goal = p.Goal
-	if p.ImageModelKey != nil {
-		plan.ImageModelKey = *p.ImageModelKey
+	if p.ImageCapabilityKey != nil {
+		plan.ImageCapabilityKey = *p.ImageCapabilityKey
 	}
 	if p.SkipReferenceImage != nil {
 		plan.SkipReferenceImage = *p.SkipReferenceImage

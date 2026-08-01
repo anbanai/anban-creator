@@ -82,13 +82,7 @@ func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
 
 func ValidateImageCapabilityKey(key string, userTier model.Tier, capabilities map[string]config.ImageGenerationRouteConfig) error {
 	key = strings.TrimSpace(key)
-	if key == "" || key == model.ImageModelKeySystemDefault {
-		return nil
-	}
-	if key == model.ImageModelKeyCustom {
-		if userTier != model.TierEnterprise {
-			return fmt.Errorf("custom image model requires enterprise tier")
-		}
+	if key == "" || key == model.ImageCapabilityKeySystemDefault {
 		return nil
 	}
 	route, ok := capabilities[key]
