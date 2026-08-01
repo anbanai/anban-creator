@@ -3,9 +3,41 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
+
+func generatingSkillContractPaths(t *testing.T, root string) []string {
+	t.Helper()
+	skillRoot := filepath.Join(root, "plugins", "skills")
+	var paths []string
+	err := filepath.WalkDir(skillRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || entry.Name() != "SKILL.md" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), "generate_image(") {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(paths)
+	return paths
+}
 
 func TestGeneratingAgentsUseEffectiveImageRatioAndCapabilitySizes(t *testing.T) {
 	root := articleContractRepoRoot(t)
@@ -37,13 +69,9 @@ func TestGeneratingAgentsUseEffectiveImageRatioAndCapabilitySizes(t *testing.T) 
 
 func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	paths := []string{
-		"plugins/skills/article/SKILL.md",
-		"plugins/skills/article-visual-design/SKILL.md",
-		"plugins/skills/article-visual-design/references/content.md",
-		"plugins/skills/article-cover-design/SKILL.md",
-		"plugins/skills/seednote-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-visual-design/SKILL.md",
+	paths := generatingSkillContractPaths(t, root)
+	if len(paths) != 8 {
+		t.Fatalf("generating Skill count = %d (%v), want 8", len(paths), paths)
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -91,11 +119,8 @@ func TestEveryDocumentedGenerateImageCallPassesSize(t *testing.T) {
 		"plugins/agents/seednote.toml",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/ecommerce.toml",
-		"plugins/skills/article-visual-design/SKILL.md",
-		"plugins/skills/article-cover-design/SKILL.md",
-		"plugins/skills/seednote-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-visual-design/SKILL.md",
 	}
+	paths = append(paths, generatingSkillContractPaths(t, root)...)
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
@@ -114,7 +139,37 @@ func TestEveryDocumentedGenerateImageCallPassesSize(t *testing.T) {
 				if !strings.Contains(invocation, "size") {
 					t.Fatalf("%s generate_image call %d does not pass size: %s", rel, call, invocation)
 				}
+				for _, stale := range []string{"size=\"9:16\"", "size = \"9:16\"", ":2K", ":4K"} {
+					if strings.Contains(invocation, stale) {
+						t.Fatalf("%s generate_image call %d contains fixed or mixed size %q: %s", rel, call, stale, invocation)
+					}
+				}
 				remaining = remaining[end+1:]
+			}
+		})
+	}
+}
+
+func TestImageSkillGuidanceDoesNotOverrideEffectiveRatioOrRestoreLegacyRoutes(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	tests := []struct {
+		path  string
+		stale []string
+	}{
+		{path: "plugins/skills/article-cover-design/SKILL.md", stale: []string{"宽银幕叙事构图", "A cinematic 2.35:1 wide banner", "the 2.35:1 hero"}},
+		{path: "plugins/skills/article-visual-design/references/cover.md", stale: []string{"硬编码 900×383 / 2.35:1", "image_size=full-bleed`, `2.35:1", "A 2.35:1 horizontal image"}},
+		{path: "plugins/skills/ecommerce-visual-design/SKILL.md", stale: []string{"1:1:2K", "3:4:2K", "16:9:2K", "默认 cover 用更高质量"}},
+		{path: "plugins/skills/line-art-coloring/SKILL.md", stale: []string{"size=\"[从原线稿推断的比例]\""}},
+		{path: "plugins/skills/portrait-pose-variants/SKILL.md", stale: []string{"size=\"9:16\""}},
+		{path: "plugins/skills/short-video-cover/SKILL.md", stale: []string{"size=\"9:16\"", "size` 参数固定传 `\"9:16\"`"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			body := readImageGenerationContractFile(t, filepath.Join(root, tt.path))
+			for _, stale := range tt.stale {
+				if strings.Contains(body, stale) {
+					t.Errorf("%s still contains stale image guidance %q", tt.path, stale)
+				}
 			}
 		})
 	}

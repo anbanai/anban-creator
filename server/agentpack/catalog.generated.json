@@ -84,7 +84,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "12b04fc2cb856e5c0de2bacb816a4e847b3772500a070231ac9058727a2d1ed7"
+      "digest": "6eda754dff344698b4f30bd2de893c984c14ce79efb5174930da2e95eb849fa2"
     },
     {
       "id": "designer",
@@ -139,7 +139,7 @@
         }
       ],
       "ui": {},
-      "digest": "a352731289be9b4908ced527813c9a6a71f810fe3ec5dcb433d387c470a6a381"
+      "digest": "fb2a30cf7f2ffdb6267ffdb5f124bf4d32a0ddd348bb55ae486c4df3eeaf9551"
     },
     {
       "id": "ecommerce",
@@ -220,7 +220,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "491a6079dd6c73ddef003dfc0057c5091a0907497c2df66734b62f53df1c942c"
+      "digest": "59f77a54c903b935089b472476f7130318c686dab0a771c2cba409c30f9afc61"
     },
     {
       "id": "live-slicer",

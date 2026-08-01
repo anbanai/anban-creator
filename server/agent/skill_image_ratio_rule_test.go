@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
+func TestAllSkillsDeclareEffectiveImageRatioRule(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, plugin := range []string{"plugins"} {
 		skillsRoot := filepath.Join(root, plugin, "skills")
@@ -27,7 +27,7 @@ func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
 					t.Fatalf("read %s: %v", path, err)
 				}
 				body := string(raw)
-				for _, want := range []string{
+				legacyRule := []string{
 					"图片比例固定规则",
 					"用户/任务明确指定的 `image_ratio`、`size` 或平台规格优先",
 					"项目/频道默认比例次之",
@@ -36,9 +36,23 @@ func TestAllSkillsDeclareImageRatioRule(t *testing.T) {
 					"比例只由用户、任务、项目或业务场景决定",
 					"微信文章封面/正文图默认 `16:9`",
 					"Seednote/XLS/移动信息流默认 `3:4`",
-				} {
+				}
+				effectiveRule := []string{
+					"图像参数合同",
+					"resolved_profile.image_ratio",
+					"resolved_profile.supported_sizes",
+					"用户明确比例",
+					"智能适配",
+					"显式传 `size`",
+					"image_capability_ratio_unsupported",
+				}
+				required := legacyRule
+				if strings.Contains(body, "generate_image(") {
+					required = effectiveRule
+				}
+				for _, want := range required {
 					if !strings.Contains(body, want) {
-						t.Fatalf("%s missing global image ratio rule term %q", path, want)
+						t.Fatalf("%s missing image ratio contract term %q", path, want)
 					}
 				}
 			})
