@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 interface TimePickerProps {
   value: string // HH:mm format
   onChange: (value: string) => void
+  id?: string
   className?: string
   disabled?: boolean
 }
@@ -22,7 +23,7 @@ function formatTime(hour: number, minute: number): string {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
-export default function TimePicker({ value, onChange, className, disabled }: TimePickerProps) {
+export default function TimePicker({ value, onChange, id, className, disabled }: TimePickerProps) {
   const [open, setOpen] = useState(false)
 
   const [hour, minute] = useMemo(() => {
@@ -46,6 +47,7 @@ export default function TimePicker({ value, onChange, className, disabled }: Tim
         disabled={disabled}
         render={
           <button
+            id={id}
             className={cn(
               'flex h-8 items-center gap-1.5 rounded-lg border border-input bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors outline-none hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50',
               className

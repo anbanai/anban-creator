@@ -38,4 +38,21 @@ describe('SchedulePicker', () => {
     expect(screen.getByText('每周一 09:00 自动执行')).toBeInTheDocument()
     expect(onChange).toHaveBeenCalledWith('0 9 * * 1')
   })
+
+  it.each(['0 9 * * 1-5', '0 9 * * 7', '75 99 * * *'])(
+    'normalizes unsupported cron %s to a safe daily schedule',
+    (cron) => {
+      const onChange = vi.fn()
+      render(<SchedulePicker value={cron} onChange={onChange} />)
+
+      expect(screen.getByText('每天 09:00 自动执行')).toBeInTheDocument()
+      expect(onChange).toHaveBeenCalledWith('0 9 * * *')
+    },
+  )
+
+  it('labels the time picker trigger with its purpose', () => {
+    render(<SchedulePicker value="0 9 * * *" onChange={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '执行时间' })).toHaveTextContent('09:00')
+  })
 })

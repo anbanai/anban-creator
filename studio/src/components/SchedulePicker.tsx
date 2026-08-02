@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import TimePicker from '@/components/TimePicker'
 
@@ -22,20 +22,46 @@ const WEEK_DAYS = [
   { value: 0, label: '周日', shortLabel: '日' },
 ]
 
-function parseCron(cron: string): { frequency: Frequency; days: number[]; hour: number; minute: number } {
+interface ParsedSchedule {
+  frequency: Frequency
+  days: number[]
+  hour: number
+  minute: number
+  supported: boolean
+}
+
+const SAFE_DAILY_SCHEDULE: ParsedSchedule = {
+  frequency: 'daily',
+  days: [],
+  hour: 9,
+  minute: 0,
+  supported: false,
+}
+
+function parseCron(cron: string): ParsedSchedule {
   const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return { frequency: 'daily', days: [], hour: 9, minute: 0 }
-  const [minuteText, hourText, , , weekday] = parts
-  const parsedHour = Number.parseInt(hourText, 10)
-  const parsedMinute = Number.parseInt(minuteText, 10)
-  const hour = Number.isNaN(parsedHour) ? 9 : parsedHour
-  const minute = Number.isNaN(parsedMinute) ? 0 : parsedMinute
-  if (weekday === '*') return { frequency: 'daily', days: [], hour, minute }
+  if (parts.length !== 5) return SAFE_DAILY_SCHEDULE
+  const [minuteText, hourText, dayOfMonth, month, weekday] = parts
+  if (
+    !/^\d{1,2}$/.test(minuteText)
+    || !/^\d{1,2}$/.test(hourText)
+    || dayOfMonth !== '*'
+    || month !== '*'
+  ) return SAFE_DAILY_SCHEDULE
+
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  if (hour > 23 || minute > 59) return SAFE_DAILY_SCHEDULE
+  if (weekday === '*') return { frequency: 'daily', days: [], hour, minute, supported: true }
+  if (!/^[0-6](?:,[0-6])*$/.test(weekday)) return SAFE_DAILY_SCHEDULE
+
+  const days = [...new Set(weekday.split(',').map(Number))]
   return {
     frequency: 'weekly',
-    days: weekday.split(',').map(Number).filter((day) => WEEK_DAYS.some(({ value }) => value === day)),
+    days,
     hour,
     minute,
+    supported: true,
   }
 }
 
@@ -57,6 +83,7 @@ export default function SchedulePicker({
   footer,
 }: SchedulePickerProps) {
   const parsed = parseCron(value)
+  const timePickerId = useId()
   const [frequency, setFrequency] = useState<Frequency>(parsed.frequency)
   const [days, setDays] = useState<number[]>(parsed.days)
   const [time, setTime] = useState(`${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`)
@@ -67,7 +94,8 @@ export default function SchedulePicker({
     setFrequency(next.frequency)
     setDays(next.days)
     setTime(`${String(next.hour).padStart(2, '0')}:${String(next.minute).padStart(2, '0')}`)
-  }, [value])
+    if (!next.supported) onChange('0 9 * * *')
+  }, [onChange, value])
 
   useEffect(() => {
     onValidityChange?.(valid)
@@ -146,8 +174,8 @@ export default function SchedulePicker({
         )}
 
         <div className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-foreground">执行时间</label>
-          <TimePicker value={time} onChange={handleTimeChange} />
+          <label htmlFor={timePickerId} className="text-sm font-medium text-foreground">执行时间</label>
+          <TimePicker id={timePickerId} value={time} onChange={handleTimeChange} />
         </div>
 
         {valid ? (
