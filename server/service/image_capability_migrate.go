@@ -67,7 +67,7 @@ func MigrateImageCapabilities(ctx context.Context, db *gorm.DB, defaultCapabilit
 		}
 		stats.UnknownValues += unknown
 	}
-	if err := migrateEmptyBusinessImageRatios(ctx, db); err != nil {
+	if err := migrateBusinessImageRatios(ctx, db); err != nil {
 		return stats, err
 	}
 
@@ -82,7 +82,7 @@ func MigrateImageCapabilities(ctx context.Context, db *gorm.DB, defaultCapabilit
 	return stats, nil
 }
 
-func migrateEmptyBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
+func migrateBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
 	projectRatios := make(map[string]string)
 	if db.Migrator().HasTable("projects") &&
 		db.Migrator().HasColumn("projects", "platform") &&
@@ -95,13 +95,10 @@ func migrateEmptyBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
 			return fmt.Errorf("read project image ratios: %w", err)
 		}
 		for _, project := range projects {
-			ratio := strings.TrimSpace(project.ImageRatio)
-			if ratio == "" {
-				ratio = model.DefaultImageRatio(project.Platform)
-				if ratio != "" {
-					if err := db.WithContext(ctx).Table("projects").Where("id = ?", project.ID).Update("image_ratio", ratio).Error; err != nil {
-						return fmt.Errorf("backfill project %s image ratio: %w", project.ID, err)
-					}
+			ratio := normalizePersistedBusinessImageRatio(project.Platform, project.ImageRatio)
+			if ratio != strings.TrimSpace(project.ImageRatio) {
+				if err := db.WithContext(ctx).Table("projects").Where("id = ?", project.ID).Update("image_ratio", ratio).Error; err != nil {
+					return fmt.Errorf("normalize project %s image ratio: %w", project.ID, err)
 				}
 			}
 			projectRatios[project.ID] = ratio
@@ -127,27 +124,37 @@ func migrateEmptyBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
 			return fmt.Errorf("read task image ratios: %w", err)
 		}
 		for _, task := range tasks {
-			if strings.TrimSpace(task.ImageRatio) != "" {
-				continue
-			}
-			var snapshot struct {
-				Platform   string `json:"platform"`
-				ImageRatio string `json:"image_ratio"`
-			}
+			var snapshot map[string]any
+			var snapshotValid bool
 			if task.ProjectSnapshot.Valid && strings.TrimSpace(task.ProjectSnapshot.String) != "" {
-				_ = json.Unmarshal([]byte(task.ProjectSnapshot.String), &snapshot)
-			}
-			ratio := strings.TrimSpace(snapshot.ImageRatio)
-			if ratio == "" {
-				platform := strings.TrimSpace(snapshot.Platform)
-				if platform == "" {
-					platform = task.Type
+				if err := json.Unmarshal([]byte(task.ProjectSnapshot.String), &snapshot); err == nil && snapshot != nil {
+					snapshotValid = true
 				}
-				ratio = model.DefaultImageRatio(platform)
 			}
-			if ratio != "" {
-				if err := db.WithContext(ctx).Table("tasks").Where("id = ?", task.ID).Update("image_ratio", ratio).Error; err != nil {
-					return fmt.Errorf("backfill task %s image ratio: %w", task.ID, err)
+			platform := strings.TrimSpace(stringMapValue(snapshot, "platform"))
+			if platform == "" {
+				platform = task.Type
+			}
+			ratio := strings.TrimSpace(task.ImageRatio)
+			if ratio == "" {
+				ratio = stringMapValue(snapshot, "image_ratio")
+			}
+			ratio = normalizePersistedBusinessImageRatio(platform, ratio)
+			updates := make(map[string]any)
+			if ratio != strings.TrimSpace(task.ImageRatio) {
+				updates["image_ratio"] = ratio
+			}
+			if snapshotValid && ratio != "" && stringMapValue(snapshot, "image_ratio") != ratio {
+				snapshot["image_ratio"] = ratio
+				encoded, err := json.Marshal(snapshot)
+				if err != nil {
+					return fmt.Errorf("encode task %s project snapshot: %w", task.ID, err)
+				}
+				updates["project_snapshot"] = encoded
+			}
+			if len(updates) > 0 {
+				if err := db.WithContext(ctx).Table("tasks").Where("id = ?", task.ID).Updates(updates).Error; err != nil {
+					return fmt.Errorf("normalize task %s image ratio: %w", task.ID, err)
 				}
 			}
 		}
@@ -168,21 +175,38 @@ func migrateEmptyBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
 			return fmt.Errorf("read plan image ratios: %w", err)
 		}
 		for _, plan := range plans {
-			if strings.TrimSpace(plan.ImageRatio) != "" {
-				continue
-			}
-			ratio := strings.TrimSpace(projectRatios[plan.ProjectID])
+			ratio := strings.TrimSpace(plan.ImageRatio)
 			if ratio == "" {
-				ratio = model.DefaultImageRatio(plan.Type)
+				ratio = projectRatios[plan.ProjectID]
 			}
-			if ratio != "" {
+			ratio = normalizePersistedBusinessImageRatio(plan.Type, ratio)
+			if ratio != strings.TrimSpace(plan.ImageRatio) {
 				if err := db.WithContext(ctx).Table("plans").Where("id = ?", plan.ID).Update("image_ratio", ratio).Error; err != nil {
-					return fmt.Errorf("backfill plan %s image ratio: %w", plan.ID, err)
+					return fmt.Errorf("normalize plan %s image ratio: %w", plan.ID, err)
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func normalizePersistedBusinessImageRatio(platform, ratio string) string {
+	ratio = strings.TrimSpace(ratio)
+	if len(model.SupportedImageRatios(platform)) == 0 {
+		return ratio
+	}
+	if ratio != "" && model.IsBusinessImageRatioAllowed(platform, ratio) {
+		return ratio
+	}
+	return model.DefaultImageRatio(platform)
+}
+
+func stringMapValue(value map[string]any, key string) string {
+	if value == nil {
+		return ""
+	}
+	text, _ := value[key].(string)
+	return strings.TrimSpace(text)
 }
 
 func migrateCapabilityColumn(ctx context.Context, db *gorm.DB, table, defaultCapability string) (int64, error) {

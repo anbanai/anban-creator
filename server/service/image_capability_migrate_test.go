@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -173,4 +174,66 @@ func TestMigrateImageCapabilitiesBackfillsEmptyBusinessRatios(t *testing.T) {
 		t.Fatalf("second migration: %v", err)
 	}
 	assertRatio("tasks", "snapshot-wins", "1:1")
+}
+
+func TestMigrateImageCapabilitiesNormalizesRetiredBusinessRatios(t *testing.T) {
+	db := newMigrateTestDB(t)
+	for _, statement := range []string{
+		`CREATE TABLE projects (id TEXT PRIMARY KEY, platform TEXT, image_ratio TEXT)`,
+		`CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT, type TEXT, image_ratio TEXT, project_snapshot JSON)`,
+		`CREATE TABLE plans (id TEXT PRIMARY KEY, project_id TEXT, type TEXT, image_ratio TEXT)`,
+		`INSERT INTO projects VALUES
+			('seed-retired', 'seednote', '2:3'),
+			('article-retired', 'article', '3:2'),
+			('article-valid', 'article', '4:3')`,
+		`INSERT INTO tasks VALUES
+			('snapshot-retired', 'seed-retired', 'seednote', '2:3', '{"platform":"seednote","image_ratio":"2:3","keep":"value"}'),
+			('type-retired', 'article-retired', 'article', '21:9', '{}'),
+			('valid-auto', 'article-valid', 'article', 'auto', '{"platform":"article","image_ratio":"auto"}')`,
+		`INSERT INTO plans VALUES
+			('seed-retired', 'seed-retired', 'seednote', '9:16'),
+			('article-retired', 'article-retired', 'article', '3:2'),
+			('valid', 'article-valid', 'article', '1:1')`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("exec %q: %v", statement, err)
+		}
+	}
+
+	if _, err := MigrateImageCapabilities(context.Background(), db, "standard", nil); err != nil {
+		t.Fatalf("MigrateImageCapabilities: %v", err)
+	}
+
+	assertRatio := func(table, id, want string) {
+		t.Helper()
+		var got string
+		if err := db.Table(table).Select("image_ratio").Where("id = ?", id).Scan(&got).Error; err != nil {
+			t.Fatalf("read %s/%s: %v", table, id, err)
+		}
+		if got != want {
+			t.Fatalf("%s/%s image_ratio = %q, want %q", table, id, got, want)
+		}
+	}
+
+	assertRatio("projects", "seed-retired", "3:4")
+	assertRatio("projects", "article-retired", "16:9")
+	assertRatio("projects", "article-valid", "4:3")
+	assertRatio("tasks", "snapshot-retired", "3:4")
+	assertRatio("tasks", "type-retired", "16:9")
+	assertRatio("tasks", "valid-auto", "auto")
+	assertRatio("plans", "seed-retired", "3:4")
+	assertRatio("plans", "article-retired", "16:9")
+	assertRatio("plans", "valid", "1:1")
+
+	var snapshot string
+	if err := db.Table("tasks").Select("project_snapshot").Where("id = ?", "snapshot-retired").Scan(&snapshot).Error; err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(snapshot), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["image_ratio"] != "3:4" || decoded["keep"] != "value" {
+		t.Fatalf("normalized task snapshot = %#v", decoded)
+	}
 }

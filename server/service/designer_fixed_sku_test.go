@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -340,5 +342,56 @@ func TestDesignerExecuteGenerationRejectsActualRatioBeforePersistenceAndReverses
 	account, err := f.repo.Billing().FindAccount(context.Background(), f.userID)
 	if err != nil || account.PaidCredits != 500 || account.DebtCredits != 0 {
 		t.Fatalf("account after reversal = %#v err=%v", account, err)
+	}
+}
+
+func TestDesignerExecuteGenerationDownloadsRemoteResultOnceForValidationAndPersistence(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := f.request(t)
+	created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imageBytes := taskImagePNG(4, 4)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests > 1 {
+			http.Error(w, "expired", http.StatusGone)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(imageBytes)
+	}))
+	defer server.Close()
+
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return &fakeImageProvider{result: &appimage.GenerateResult{
+			ProviderRequestID: "provider-single-download",
+			URL:               server.URL + "/generated.png",
+			Model:             "image-v1",
+			ResponseType:      "url",
+		}}, nil
+	}
+
+	f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+
+	if requests != 1 {
+		t.Fatalf("remote image requests = %d, want 1", requests)
+	}
+	var generation model.ImageGeneration
+	if err := f.db.First(&generation, "id = ?", created.GenerationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if generation.Status != model.ImageGenerationStatusCompleted {
+		t.Fatalf("generation status = %q, error = %q", generation.Status, generation.Error)
+	}
+	var result model.ImageGenerationResult
+	if err := f.db.First(&result, "generation_id = ?", created.GenerationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if result.ImagePath != server.URL+"/generated.png" || result.FileID == "" {
+		t.Fatalf("persisted result = %#v", result)
 	}
 }

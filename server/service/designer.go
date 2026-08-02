@@ -685,8 +685,15 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	if strings.TrimSpace(result.ProviderRequestID) == "" {
 		result.ProviderRequestID = "internal:designer:" + gen.ID
 	}
+	outputs, cleanupOutputs, materializeErr := materializeDesignerResultOutputs(ctx, result)
+	if materializeErr != nil {
+		s.recordDesignerProviderCost(ctx, &gen, result)
+		fail("platform_error", materializeErr.Error())
+		return
+	}
+	defer cleanupOutputs()
 	expectedRatio, _ := image.ParseSize(gen.Size)
-	outputWidth, outputHeight, dimensionErr := inspectDesignerResultDimensions(ctx, result, expectedRatio)
+	outputWidth, outputHeight, dimensionErr := inspectDesignerResultDimensions(outputs, expectedRatio)
 	result.OutputWidth, result.OutputHeight = outputWidth, outputHeight
 	s.recordDesignerProviderCost(ctx, &gen, result)
 	if dimensionErr != nil {
@@ -694,7 +701,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		return
 	}
 	var durableResults int
-	result.OutputWidth, result.OutputHeight, durableResults = s.processResults(ctx, gen.UserID, genID, result)
+	result.OutputWidth, result.OutputHeight, durableResults = s.processResults(ctx, gen.UserID, genID, outputs)
 	if durableResults == 0 {
 		fail("platform_error", "generated image could not be persisted")
 		return
@@ -708,37 +715,49 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	})
 }
 
-func inspectDesignerResultDimensions(ctx context.Context, result *image.GenerateResult, expectedRatio string) (int, int, error) {
+type designerGeneratedOutput struct {
+	sourceURL string
+	localPath string
+	index     int
+}
+
+func materializeDesignerResultOutputs(ctx context.Context, result *image.GenerateResult) ([]designerGeneratedOutput, func(), error) {
 	if result == nil {
-		return 0, 0, errors.New("generated image dimensions unavailable")
+		return nil, func() {}, errors.New("generated image dimensions unavailable")
 	}
-	type generatedOutput struct {
-		url   string
-		index int
-	}
-	outputs := make([]generatedOutput, 0, len(result.Images)+1)
+	outputs := make([]designerGeneratedOutput, 0, len(result.Images)+1)
 	for _, generated := range result.Images {
-		outputs = append(outputs, generatedOutput{url: generated.URL, index: generated.Index})
+		outputs = append(outputs, designerGeneratedOutput{sourceURL: generated.URL, index: generated.Index})
 	}
 	if len(outputs) == 0 && strings.TrimSpace(result.URL) != "" {
-		outputs = append(outputs, generatedOutput{url: result.URL})
+		outputs = append(outputs, designerGeneratedOutput{sourceURL: result.URL})
 	}
+	cleanup := func() {
+		for _, output := range outputs {
+			if strings.TrimSpace(output.localPath) != "" {
+				_ = os.Remove(output.localPath)
+			}
+		}
+	}
+	for index := range outputs {
+		outputs[index].localPath = outputs[index].sourceURL
+		if isLocalFilePath(outputs[index].sourceURL) {
+			continue
+		}
+		localPath, err := downloadToTempFile(ctx, outputs[index].sourceURL, outputs[index].index)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("generated image dimensions unavailable: %w", err)
+		}
+		outputs[index].localPath = localPath
+	}
+	return outputs, cleanup, nil
+}
+
+func inspectDesignerResultDimensions(outputs []designerGeneratedOutput, expectedRatio string) (int, int, error) {
 	var firstWidth, firstHeight int
 	for _, output := range outputs {
-		localPath := output.url
-		isTemp := false
-		if !isLocalFilePath(output.url) {
-			var err error
-			localPath, err = downloadToTempFile(ctx, output.url, output.index)
-			if err != nil {
-				return 0, 0, fmt.Errorf("generated image dimensions unavailable: %w", err)
-			}
-			isTemp = true
-		}
-		width, height, err := image.GetImageDimensions(localPath)
-		if isTemp {
-			_ = os.Remove(localPath)
-		}
+		width, height, err := image.GetImageDimensions(output.localPath)
 		if err != nil {
 			return 0, 0, fmt.Errorf("generated image dimensions unavailable: %w", err)
 		}
@@ -781,35 +800,23 @@ func (s *DesignerService) failGenerationWithReversal(ctx context.Context, gen *m
 	})
 }
 
-func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) (int, int, int) {
+func (s *DesignerService) processResults(ctx context.Context, userID, genID string, outputs []designerGeneratedOutput) (int, int, int) {
 	var outputWidth, outputHeight int
 	var durableResults int
-	collectURLs := func(rawURL string, idx int) {
-		// Resolve to a local file path — download remote URLs if needed.
-		localPath := rawURL
-		isTemp := false
-		if !isLocalFilePath(rawURL) {
-			tmpPath, err := downloadToTempFile(ctx, rawURL, idx)
-			if err != nil {
-				s.logger.Error().Err(err).Str("url", rawURL).Msg("failed to download remote image")
-				return
-			}
-			localPath = tmpPath
-			isTemp = true
-		}
+	for _, output := range outputs {
 		if outputWidth == 0 && outputHeight == 0 {
-			if width, height, err := image.GetImageDimensions(localPath); err == nil {
+			if width, height, err := image.GetImageDimensions(output.localPath); err == nil {
 				outputWidth, outputHeight = width, height
 			}
 		}
 
-		serveURL := rawURL // fallback if upload fails
+		serveURL := output.sourceURL
 		var storageKey string
 
 		if s.storage != nil {
-			uploadedURL, k, err := s.uploadGeneratedImage(ctx, userID, genID, localPath, idx)
+			uploadedURL, k, err := s.uploadGeneratedImage(ctx, userID, genID, output.localPath, output.index)
 			if err != nil {
-				s.logger.Error().Err(err).Str("path", localPath).Msg("failed to upload generated image to storage")
+				s.logger.Error().Err(err).Str("path", output.localPath).Msg("failed to upload generated image to storage")
 			} else {
 				storageKey = k
 				serveURL = uploadedURL
@@ -817,41 +824,20 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 		}
 
 		if storageKey == "" {
-			if isTemp {
-				_ = os.Remove(localPath)
-			}
-			return
+			continue
 		}
 		dbResult := model.ImageGenerationResult{
 			GenerationID: genID,
 			ImageURL:     serveURL,
-			ImagePath:    rawURL,
+			ImagePath:    output.sourceURL,
 			FileID:       storageKey,
-			Index:        idx,
+			Index:        output.index,
 		}
 		if err := s.db.Create(&dbResult).Error; err != nil {
-			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
+			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", output.index).Msg("failed to save generation result")
 		} else {
 			durableResults++
 		}
-
-		// Cleanup temp file after successful upload.
-		if isTemp {
-			_ = os.Remove(localPath)
-		} else if storageKey != "" {
-			_ = os.Remove(localPath)
-		}
-	}
-
-	if len(result.Images) > 0 {
-		for _, img := range result.Images {
-			collectURLs(img.URL, img.Index)
-		}
-		return outputWidth, outputHeight, durableResults
-	}
-
-	if result.URL != "" {
-		collectURLs(result.URL, 0)
 	}
 	return outputWidth, outputHeight, durableResults
 }
