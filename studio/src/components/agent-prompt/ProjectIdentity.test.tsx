@@ -28,15 +28,32 @@ describe('ProjectIdentity', () => {
   })
 
   it('uses the project initial and deterministic localized fallback without optional metadata', () => {
-    render(
+    const { rerender } = render(
       <ProjectIdentity
         project={{ id: 'seednote-1', name: '  Garden Notes  ', platform: 'seednote' }}
       />,
     )
 
     expect(screen.getByText('G')).toBeInTheDocument()
-    expect(screen.getByText('种草笔记项目')).toBeInTheDocument()
+    expect(
+      screen.getByText('种草笔记项目', { selector: '[data-slot="badge"]' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('种草笔记项目', {
+        selector: '[data-slot="project-identity-description"]',
+      }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
+
+    rerender(
+      <ProjectIdentity
+        project={{ id: 'seednote-1', name: '  Garden Notes  ', platform: 'seednote' }}
+        compact
+      />,
+    )
+    expect(
+      document.querySelector('[data-slot="project-identity-description"]'),
+    ).not.toBeInTheDocument()
   })
 
   it('shows the initial when the project avatar fails to load', () => {

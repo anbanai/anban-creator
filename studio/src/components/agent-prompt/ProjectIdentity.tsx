@@ -58,9 +58,12 @@ export function ProjectIdentity({
             <Badge variant="secondary">{platformLabel}项目</Badge>
           ) : null}
         </span>
-        {!compact && project.description ? (
-          <span className="min-w-0 truncate text-xs text-muted-foreground">
-            {project.description}
+        {!compact ? (
+          <span
+            data-slot="project-identity-description"
+            className="min-w-0 truncate text-xs text-muted-foreground"
+          >
+            {project.description || `${platformLabel}项目`}
           </span>
         ) : null}
       </span>
