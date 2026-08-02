@@ -55,9 +55,6 @@ func (s *ResourceCatalogService) Query(req ResourceCatalogRequest) (any, error) 
 		result["layout_category"], result["serves"] = entry.LayoutCategory, entry.Serves
 		result["when_to_use"], result["markdown_syntax"] = entry.WhenToUse, entry.MarkdownSyntax
 		result["body_format"], result["fields"], result["rows"] = entry.BodyFormat, entry.Fields, entry.Rows
-	case resources.CategoryImagePreset:
-		result["archetype"], result["aspect_ratios"] = entry.Archetype, entry.AspectRatios
-		result["default_ratio"] = entry.DefaultRatio
 	case resources.CategoryArticleTemplate:
 		result["article_type"], result["article_types"] = entry.TemplateArticleType, entry.TemplateArticleTypes
 		result["best_for"], result["rhythm"] = entry.TemplateBestFor, entry.TemplateRhythm

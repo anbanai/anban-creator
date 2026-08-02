@@ -22,17 +22,18 @@ const (
 
 // GenerateOptions 图片生成选项
 type GenerateOptions struct {
-	RefImagePath      string         // 本地参考图文件路径（单张，可选）
-	RefImagePaths     []string       // 多张参考图路径（组图模式，可选）
-	MaskPath          string         // inpainting mask 文件路径（PNG with alpha，可选）
-	Quality           string         // 图片质量: "low", "medium", "high", "auto"（可选）
-	OutputFormat      string         // 输出格式: "png", "jpeg", "webp"（可选）
-	OutputCompression int            // 压缩率 0-100（仅 JPEG/WebP，0 表示使用 API 默认值）
-	Background        string         // 背景: "auto", "opaque", "transparent"（可选）
-	N                 int            // 批量生成数量，1-10（默认 1）
-	Size              string         // 自定义尺寸或比例（覆盖默认尺寸）
-	Watermark         *bool          // 是否启用水印（仅 Volcengine 支持此选项）
-	StreamCB          StreamCallback // 流式回调（nil 表示不启用流式）
+	RefImagePath        string         // 本地参考图文件路径（单张，可选）
+	RefImagePaths       []string       // 多张参考图路径（组图模式，可选）
+	MaskPath            string         // inpainting mask 文件路径（PNG with alpha，可选）
+	Quality             string         // 图片质量: "low", "medium", "high", "auto"（可选）
+	OutputFormat        string         // 输出格式: "png", "jpeg", "webp"（可选）
+	OutputCompression   int            // 压缩率 0-100（仅 JPEG/WebP，0 表示使用 API 默认值）
+	Background          string         // 背景: "auto", "opaque", "transparent"（可选）
+	N                   int            // 批量生成数量，1-10（默认 1）
+	Size                string         // 自定义尺寸或比例（覆盖默认尺寸）
+	SemanticAspectRatio bool           // 任务语义比例模式：由 prompt 控制，Provider 使用自动/省略尺寸协议
+	Watermark           *bool          // 是否启用水印（仅 Volcengine 支持此选项）
+	StreamCB            StreamCallback // 流式回调（nil 表示不启用流式）
 }
 
 // StreamCallback 流式图片生成回调函数

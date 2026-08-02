@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createElement } from 'react'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DesignerPage from './DesignerPage'
@@ -43,11 +43,11 @@ describe('Designer provider contract', () => {
         priceAvailable: true,
         enabled: true,
         idx: 0,
-        features: {
+        designerFeatures: {
           qualityLevels: ['auto', 'low', 'medium', 'high'],
-          sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
-          defaultSize: 'auto',
-          maxBatch: 10,
+          sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K'],
+          defaultSize: '1:1:2K',
+          maxBatch: 1,
           maxReferenceImages: 16,
           supportsReference: true,
           supportsMask: true,
@@ -67,12 +67,21 @@ describe('Designer provider contract', () => {
 
   it('sends capability_key with designer generation requests', () => {
     const types = read('src/types/designer.ts')
-    expect(types).toContain('capability_key: string')
+    const requestType = types.match(/export interface GenerateRequest \{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(requestType).toContain('capability_key: string')
+    expect(requestType).toContain('quality: string')
+    expect(requestType).toContain('size: string')
+    expect(requestType).toContain('n: number')
+    expect(requestType).toContain('output_format: string')
+    expect(requestType).not.toMatch(/^\s*(?:quality|size|n|output_format)\?:/m)
     expect(types).not.toContain('provider?: string')
     expect(types).not.toContain('model?: string')
+    expect(types).not.toContain('resolution: string')
 
     const page = read('src/pages/DesignerPage.tsx')
     expect(page).toContain('capability_key: effectiveCapability.id')
+    expect(page).not.toContain('buildDesignerRequestSize')
+    expect(page).toContain('size: settings.size')
   })
 
   it('floats the prompt bar inside the designer canvas frame', () => {
@@ -102,8 +111,7 @@ describe('Designer provider contract', () => {
   it('uses the configured capability default size when generating', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('专业增强')
-    expect(await screen.findByRole('button', { name: /自动\s*智能选择/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })).toBeInTheDocument()
     const prompt = await screen.findByPlaceholderText('描述你想要生成的图片...')
     fireEvent.change(prompt, {
       target: { value: '给下周奶做一张竖版海报' },
@@ -114,7 +122,10 @@ describe('Designer provider contract', () => {
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledTimes(1))
     const request = vi.mocked(designerApi.generate).mock.calls[0][0] as GenerateRequest
     expect(request.capability_key).toBe('professional')
-    expect(request.size).toBe('auto')
+    expect(request.size).toBe('1:1:2K')
+    expect(request.quality).toBe('auto')
+    expect(request.output_format).toBe('png')
+    expect(request.n).toBe(1)
   })
 
   it('renders ratio presets from configured Seedream capabilities without custom pixel controls', async () => {
@@ -128,10 +139,10 @@ describe('Designer provider contract', () => {
         priceAvailable: true,
         enabled: true,
         idx: 0,
-        features: {
+        designerFeatures: {
           qualityLevels: [],
-          sizePresets: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'],
-          defaultSize: '1:1',
+          sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K', '16:9:2K'],
+          defaultSize: '1:1:2K',
           maxBatch: 1,
           maxReferenceImages: 10,
           supportsReference: true,
@@ -146,10 +157,10 @@ describe('Designer provider contract', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('标准图像')
-    expect(screen.getAllByRole('button', { name: /21:9/ }).length).toBeGreaterThan(0)
-    expect(screen.getByText('分辨率')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /自定义\s*W×H/ })).not.toBeInTheDocument()
+    const imageSettings = await screen.findByRole('button', { name: '图像设置：标准图像 · 1:1 · 2K · PNG · 1 张' })
+    fireEvent.click(imageSettings)
+    expect(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '16:9 · 2K' })).toBeInTheDocument()
+    expect(screen.queryByText('分辨率')).not.toBeInTheDocument()
   })
 
   it('uses the configured default capability instead of the first sorted option', async () => {
@@ -163,7 +174,7 @@ describe('Designer provider contract', () => {
     })
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('标准图像')
+    await screen.findByRole('button', { name: '图像设置：标准图像 · 1:1 · 2K · 自动 · PNG · 1 张' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), { target: { value: '生成海报' } })
     await waitFor(() => expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '生成' }))

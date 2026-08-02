@@ -16,8 +16,7 @@ type ImageCapabilityResolver struct {
 }
 
 type PublicImageCapability struct {
-	Key            string
-	SupportedSizes []string
+	Key string
 }
 
 func NewImageCapabilityResolver(repo repository.Repository, cfg *config.Config) *ImageCapabilityResolver {
@@ -25,14 +24,11 @@ func NewImageCapabilityResolver(repo repository.Repository, cfg *config.Config) 
 }
 
 func (s *ImageCapabilityResolver) ResolvePublicImageCapability(ctx context.Context, userID, capabilityKey string) (*PublicImageCapability, error) {
-	route, key, err := s.resolveRoute(ctx, userID, capabilityKey)
+	_, key, err := s.resolveRoute(ctx, userID, capabilityKey)
 	if err != nil {
 		return nil, err
 	}
-	return &PublicImageCapability{
-		Key:            key,
-		SupportedSizes: append([]string(nil), route.Features.SizePresets...),
-	}, nil
+	return &PublicImageCapability{Key: key}, nil
 }
 
 func (s *ImageCapabilityResolver) ResolveImageConfigForTaskKey(ctx context.Context, userID, capabilityKey string) (*config.ImageAPIConfig, string, error) {
@@ -72,7 +68,6 @@ type ResolvedImageModel struct {
 	Source             string                 `json:"-"`
 	SupportsReference  bool                   `json:"-"`
 	MaxReferenceImages int                    `json:"-"`
-	SupportedSizes     []string               `json:"-"`
 	SelectionReason    string                 `json:"-"`
 }
 
@@ -94,11 +89,11 @@ func (s *ImageCapabilityResolver) ResolveImageModelForGeneration(
 	if err != nil {
 		return nil, err
 	}
-	if referenceCount > 0 && !route.Features.SupportsReference {
+	if referenceCount > 0 && !route.DesignerFeatures.SupportsReference {
 		return nil, fmt.Errorf("selected image capability does not support reference images")
 	}
-	if referenceCount > route.Features.MaxReferenceImages {
-		return nil, &ImageReferenceLimitError{Requested: referenceCount, MaxReferenceImages: route.Features.MaxReferenceImages}
+	if referenceCount > route.DesignerFeatures.MaxReferenceImages {
+		return nil, &ImageReferenceLimitError{Requested: referenceCount, MaxReferenceImages: route.DesignerFeatures.MaxReferenceImages}
 	}
 	runtime, ok := s.cfg.ImageAPIForCapability(key)
 	if !ok || runtime == nil {
@@ -111,9 +106,8 @@ func (s *ImageCapabilityResolver) ResolveImageModelForGeneration(
 	return &ResolvedImageModel{
 		Config: runtime, Key: key, BillingSKU: strings.TrimSpace(route.BillingSKU),
 		Provider: strings.TrimSpace(api.Provider), Model: strings.TrimSpace(api.Model),
-		Source: "capability:" + key, SupportsReference: route.Features.SupportsReference,
-		MaxReferenceImages: route.Features.MaxReferenceImages,
-		SupportedSizes:     append([]string(nil), route.Features.SizePresets...), SelectionReason: "task_capability",
+		Source: "capability:" + key, SupportsReference: route.DesignerFeatures.SupportsReference,
+		MaxReferenceImages: route.DesignerFeatures.MaxReferenceImages, SelectionReason: "task_capability",
 	}, nil
 }
 

@@ -558,7 +558,7 @@ func main() {
 		imageCatalog = fixedBilling.Catalog
 	}
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
-	// Wire image presets + repo into task/plan handlers for tier-gated validation.
+	// Wire capability routing + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
 		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
 		if repo != nil {

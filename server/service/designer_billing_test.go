@@ -7,9 +7,9 @@ import (
 	appimage "github.com/anbanai/anban-creator/app/image"
 )
 
-func TestDesignerValidateProviderCapabilitiesAcceptsRatioWithResolutionTier(t *testing.T) {
-	caps := DesignerProviderCapabilities{SizePresets: []string{"1:1", "3:4", "4:3", "16:9"}, MaxBatch: 1}
-	if err := validateDesignerGenerateRequest(DesignerGenerateRequest{Prompt: "poster", Size: "3:4:4K", N: 1}, caps); err != nil {
+func TestDesignerValidateProviderCapabilitiesAcceptsExactFixedSizePreset(t *testing.T) {
+	caps := DesignerProviderCapabilities{SizePresets: []string{"1:1:2K", "3:4:4K", "4:3:2K", "16:9:2K"}, QualityLevels: []string{"auto"}, MaxBatch: 1}
+	if err := validateDesignerGenerateRequest(DesignerGenerateRequest{Prompt: "poster", Size: "3:4:4K", Quality: "auto", N: 1, OutputFormat: "png"}, caps); err != nil {
 		t.Fatalf("validateDesignerGenerateRequest() error = %v", err)
 	}
 }

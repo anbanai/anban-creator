@@ -45,7 +45,7 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: project.ID,
 		Type: model.PlatformSeednote, Status: model.TaskStatusPending,
-		ImageCapabilityKey: "server-owned-route", ImageRatio: "16:9",
+		ImageCapabilityKey: "server-owned-route", ImageRatio: "3:4",
 	}
 	task.SetProjectSnapshot(model.ProjectSnapshot{
 		ProjectName: "snapshot", Platform: model.PlatformSeednote,
@@ -82,15 +82,18 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	if got := resolved["reference_image_path"]; got != ".anban-creator/reference.png" {
 		t.Fatalf("reference_image_path = %v", got)
 	}
-	if got := resolved["image_ratio"]; got != "16:9" {
-		t.Fatalf("effective image_ratio = %v, want task value 16:9", got)
+	if got := resolved["image_ratio"]; got != "3:4" {
+		t.Fatalf("effective image_ratio = %v, want task value 3:4", got)
 	}
 	if got := resolved["image_capability_key"]; got != "server-owned-route" {
 		t.Fatalf("image_capability_key = %v, want task value server-owned-route", got)
 	}
-	wantSizes := []string{"1:1", "3:4", "16:9"}
-	if got := resolved["supported_sizes"]; !reflect.DeepEqual(got, wantSizes) {
-		t.Fatalf("supported_sizes = %#v, want %#v", got, wantSizes)
+	wantRatios := []string{"3:4", "1:1", "4:3"}
+	if got := resolved["allowed_image_ratios"]; !reflect.DeepEqual(got, wantRatios) {
+		t.Fatalf("allowed_image_ratios = %#v, want %#v", got, wantRatios)
+	}
+	if _, exists := resolved["supported_sizes"]; exists {
+		t.Fatal("resolved profile must not expose supported_sizes")
 	}
 	raw, err := json.Marshal(profile)
 	if err != nil {
@@ -142,8 +145,8 @@ func TestAgentProjectProfileUsesDefaultImageCapability(t *testing.T) {
 	if got := resolved["image_capability_key"]; got != "default-route" {
 		t.Fatalf("image_capability_key = %v, want configured default default-route", got)
 	}
-	if got, want := resolved["supported_sizes"], []string{"1:1", "4:3"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("supported_sizes = %#v, want %#v", got, want)
+	if got, want := resolved["allowed_image_ratios"], []string{"3:4", "1:1", "4:3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("allowed_image_ratios = %#v, want %#v", got, want)
 	}
 }
 
@@ -154,12 +157,12 @@ func agentProjectProfileImageCapabilityResolver() *ImageCapabilityResolver {
 			Capabilities: map[string]config.ImageGenerationRouteConfig{
 				"default-route": {
 					Enabled: true, MinTier: "free",
-					Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "4:3"}},
+					DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "4:3"}},
 				},
 				"server-owned-route": {
 					Provider: "private-provider", Model: "private-model", BaseURL: "https://internal-route.invalid/v1",
 					APIKey: "private-api-key", BillingSKU: "private-billing-sku", Enabled: true, MinTier: "free",
-					Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "3:4", "16:9"}},
+					DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "3:4", "16:9"}},
 				},
 			},
 		},

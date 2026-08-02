@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
 
+	appimage "github.com/anbanai/anban-creator/app/image"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -26,7 +28,7 @@ type GenerateTaskImageRequest struct {
 	Prompt         string
 	ImageType      string
 	OutputPath     string
-	Size           string
+	AspectRatio    string
 	ReferencePaths []string
 	Watermark      *bool
 }
@@ -45,7 +47,7 @@ type TaskImageModelResolver interface {
 }
 
 type TaskImageGenerator interface {
-	GenerateImage(context.Context, string, string, string, string, string, string, []string, string, string, *ResolvedImageModel, *bool) (*ImageResult, error)
+	GenerateImage(context.Context, string, string, string, string, string, string, []string, string, *ResolvedImageModel, *bool) (*ImageResult, error)
 }
 
 type TaskImageService struct {
@@ -56,9 +58,10 @@ type TaskImageService struct {
 	logger    *zerolog.Logger
 }
 
-type ImageCapabilitySizeError struct {
-	Requested      string   `json:"requested"`
-	SupportedSizes []string `json:"supported_sizes"`
+type ImageRatioNotAllowedError struct {
+	RequestedRatio     string   `json:"requested_ratio"`
+	AllowedImageRatios []string `json:"allowed_image_ratios"`
+	TaskImageRatio     string   `json:"task_image_ratio"`
 }
 
 type ImageCapabilityBillingSKUError struct {
@@ -73,8 +76,19 @@ func (e *ImageCapabilityBillingSKUError) Error() string {
 	return fmt.Sprintf("image capability billing_sku %q resolves to %s/%s, want %s/%s", e.BillingSKU, e.Operation, e.Route, e.ExpectedOperation, e.ExpectedRoute)
 }
 
-func (e *ImageCapabilitySizeError) Error() string {
-	return fmt.Sprintf("requested image size %q is not supported by the selected capability", e.Requested)
+func (e *ImageRatioNotAllowedError) Error() string {
+	return fmt.Sprintf("requested aspect_ratio %q is not allowed for this task", e.RequestedRatio)
+}
+
+type ImageRatioMismatchError struct {
+	RequestedRatio string `json:"requested_ratio"`
+	ActualWidth    int    `json:"actual_width"`
+	ActualHeight   int    `json:"actual_height"`
+	CapabilityKey  string `json:"capability_key"`
+}
+
+func (e *ImageRatioMismatchError) Error() string {
+	return fmt.Sprintf("image_ratio_mismatch: requested %s, got %dx%d", e.RequestedRatio, e.ActualWidth, e.ActualHeight)
 }
 
 func NewTaskImageService(tasks *TaskService, resolver TaskImageModelResolver, generator TaskImageGenerator, catalog *BillingCatalogService, logger *zerolog.Logger) *TaskImageService {
@@ -91,8 +105,9 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, errors.New("prompt is required")
 	}
-	if strings.TrimSpace(req.Size) == "" {
-		return nil, errors.New("size is required")
+	req.AspectRatio = strings.TrimSpace(req.AspectRatio)
+	if req.AspectRatio == "" || req.AspectRatio == model.ImageRatioAuto || strings.Contains(strings.ToLower(req.AspectRatio), "x") {
+		return nil, errors.New("aspect_ratio must be a concrete business ratio, not auto or a pixel size")
 	}
 	outputPath, err := CleanTaskFileRelativePath(req.OutputPath)
 	if err != nil {
@@ -111,6 +126,17 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if task.ProjectID != req.ProjectID {
 		return nil, errors.New("task does not belong to the requested project")
 	}
+	platform := task.Type
+	if snapshotPlatform := strings.TrimSpace(task.ProjectSnapshot.Data().Platform); snapshotPlatform != "" {
+		platform = snapshotPlatform
+	}
+	allowedRatios := model.SupportedImageRatios(platform)
+	if !model.IsBusinessImageRatioAllowed(platform, req.AspectRatio) ||
+		(strings.TrimSpace(task.ImageRatio) != "" && task.ImageRatio != model.ImageRatioAuto && task.ImageRatio != req.AspectRatio) {
+		return nil, &ImageRatioNotAllowedError{
+			RequestedRatio: req.AspectRatio, AllowedImageRatios: allowedRatios, TaskImageRatio: task.ImageRatio,
+		}
+	}
 	if req.ExecutionID == "" && task.CurrentExecutionID != nil {
 		req.ExecutionID = strings.TrimSpace(*task.CurrentExecutionID)
 	}
@@ -128,9 +154,6 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	if resolved == nil {
 		return nil, errors.New("image model unavailable: resolver returned no descriptor")
-	}
-	if req.Size != "" && !stringInSet(req.Size, resolved.SupportedSizes) {
-		return nil, &ImageCapabilitySizeError{Requested: req.Size, SupportedSizes: append([]string(nil), resolved.SupportedSizes...)}
 	}
 	var pricing *ResolvedSKUPrice
 	// Preset selections carry their internal billing SKU through the resolver.
@@ -186,7 +209,8 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		defer cleanupReferences()
 	}
 
-	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, req.Size, resolved, req.Watermark)
+	req.Prompt = appendStrictImageRatioRequirement(req.Prompt, req.AspectRatio)
+	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, resolved, req.Watermark)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -196,6 +220,17 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	defer result.CleanupLocalFile()
 	if result.FilePath == "" {
 		result.FilePath = req.OutputPath
+	}
+	actualWidth, actualHeight, err := appimage.GetImageDimensions(result.SavedFilePath())
+	if err != nil {
+		return nil, fmt.Errorf("read generated image dimensions: %w", err)
+	}
+	result.Width, result.Height = actualWidth, actualHeight
+	if !imageDimensionsMatchRatio(actualWidth, actualHeight, req.AspectRatio) {
+		discardGeneratedTaskImage(result)
+		return nil, &ImageRatioMismatchError{
+			RequestedRatio: req.AspectRatio, ActualWidth: actualWidth, ActualHeight: actualHeight, CapabilityKey: resolved.Key,
+		}
 	}
 
 	asset, err := s.persist(ctx, req, operationID, fingerprint, pricing, result)
@@ -215,6 +250,16 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	return asset, nil
 }
 
+func discardGeneratedTaskImage(result *ImageResult) {
+	if result == nil {
+		return
+	}
+	if path := strings.TrimSpace(result.SavedFilePath()); path != "" {
+		_ = os.Remove(path)
+	}
+	result.CleanupLocalFile()
+}
+
 func taskImageOperationIdentity(req GenerateTaskImageRequest) (string, string, error) {
 	canonical, err := json.Marshal(struct {
 		ExecutionID    string
@@ -223,12 +268,12 @@ func taskImageOperationIdentity(req GenerateTaskImageRequest) (string, string, e
 		Prompt         string
 		ImageType      string
 		OutputPath     string
-		Size           string
+		AspectRatio    string
 		ReferencePaths []string
 		Watermark      *bool
 	}{
 		ExecutionID: req.ExecutionID, TaskID: req.TaskID, ProjectID: req.ProjectID,
-		Prompt: req.Prompt, ImageType: req.ImageType, OutputPath: req.OutputPath, Size: req.Size,
+		Prompt: req.Prompt, ImageType: req.ImageType, OutputPath: req.OutputPath, AspectRatio: req.AspectRatio,
 		ReferencePaths: append([]string(nil), req.ReferencePaths...), Watermark: req.Watermark,
 	})
 	if err != nil {
@@ -237,6 +282,25 @@ func taskImageOperationIdentity(req GenerateTaskImageRequest) (string, string, e
 	sum := sha256.Sum256(canonical)
 	fingerprint := hex.EncodeToString(sum[:])
 	return "image:" + fingerprint[:32], fingerprint, nil
+}
+
+func appendStrictImageRatioRequirement(prompt, ratio string) string {
+	return strings.TrimSpace(prompt) + "\n\n" + fmt.Sprintf(`输出规格：最终图片画布宽高比必须严格为 %s。
+该比例是交付要求，不是构图建议。
+不得输出 2:3、9:16、近似比例、留白边框或内嵌画布。`, ratio)
+}
+
+func imageDimensionsMatchRatio(width, height int, ratio string) bool {
+	parts := strings.Split(ratio, ":")
+	if width <= 0 || height <= 0 || len(parts) != 2 {
+		return false
+	}
+	ratioWidth, errWidth := strconv.Atoi(parts[0])
+	ratioHeight, errHeight := strconv.Atoi(parts[1])
+	if errWidth != nil || errHeight != nil || ratioWidth <= 0 || ratioHeight <= 0 {
+		return false
+	}
+	return int64(width)*int64(ratioHeight) == int64(height)*int64(ratioWidth)
 }
 
 type taskImageOperationSnapshot struct {

@@ -91,7 +91,7 @@ func accountInfoImageCapabilityResolver() *service.ImageCapabilityResolver {
 	capability := func(sizes ...string) srvconfig.ImageGenerationRouteConfig {
 		return srvconfig.ImageGenerationRouteConfig{
 			Enabled: true, MinTier: "free",
-			Features: srvconfig.DesignerProviderCapabilities{SizePresets: sizes},
+			DesignerFeatures: srvconfig.DesignerProviderCapabilities{SizePresets: sizes},
 		}
 	}
 	preferred := capability("1:1", "16:9")
@@ -554,7 +554,7 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 		t.Fatalf("moments block missing or wrong type: %T", info["moments"])
 	}
 	artifacts, _ := moments["required_artifacts"].([]string)
-	if strings.Join(artifacts, ",") != "material-analysis.md,content.md,quality-review.md" {
+	if strings.Join(artifacts, ",") != "material-analysis.md,content.md,image-prompts.md,moments-image.png,quality-review.md" {
 		t.Fatalf("required artifacts = %#v", artifacts)
 	}
 	if _, ok := moments["image_skill"]; ok {
@@ -934,8 +934,8 @@ func TestAgentProjectProfileDoesNotExposeImageRouteMetadata(t *testing.T) {
 	if got := resolved["image_capability_key"]; got != "preferred-key" {
 		t.Fatalf("image_capability_key = %v, want preferred-key", got)
 	}
-	if got, want := resolved["supported_sizes"], []string{"1:1", "16:9"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("supported_sizes = %#v, want %#v", got, want)
+	if got, want := resolved["allowed_image_ratios"], []string{"3:4", "1:1", "4:3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("allowed_image_ratios = %#v, want %#v", got, want)
 	}
 	for _, forbidden := range []string{
 		"image_generation", "image_model", "provider", "selection_reason", "base_url", "api_key", "billing_sku",

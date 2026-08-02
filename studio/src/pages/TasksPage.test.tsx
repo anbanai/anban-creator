@@ -119,6 +119,7 @@ vi.mock('@/lib/api', async () => {
       projects: {
         ...actual.api.projects,
         list: vi.fn().mockResolvedValue([fixtures.project]),
+        platformConfigs: vi.fn().mockResolvedValue([]),
       },
       billing: {
         ...actual.api.billing,

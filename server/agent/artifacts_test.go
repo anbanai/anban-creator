@@ -63,6 +63,37 @@ func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestValidateMomentsArtifactsRequiresGeneratedImage(t *testing.T) {
+	required := []string{
+		"material-analysis.md",
+		"content.md",
+		"image-prompts.md",
+		"moments-image.png",
+		"quality-review.md",
+	}
+	for _, missing := range append([]string{""}, required...) {
+		name := "complete"
+		if missing != "" {
+			name = "missing " + missing
+		}
+		t.Run(name, func(t *testing.T) {
+			var files []*model.TaskFile
+			for _, artifact := range required {
+				if artifact != missing {
+					files = append(files, &model.TaskFile{FileName: artifact, FilePath: filepath.Join("output", artifact)})
+				}
+			}
+			got := ValidateTaskArtifactsFromTaskFiles(&model.Task{Type: model.PlatformMoments}, files)
+			if got.Valid != (missing == "") {
+				t.Fatalf("validation = %#v, missing=%q", got, missing)
+			}
+			if missing != "" && !containsArtifactName(got.Missing, missing) {
+				t.Fatalf("missing = %#v, want %q", got.Missing, missing)
+			}
+		})
+	}
+}
+
 func containsArtifactName(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

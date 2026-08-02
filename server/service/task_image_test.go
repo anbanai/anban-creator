@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -58,7 +57,7 @@ type failingTaskImageDeleteStorage struct {
 
 func (s *failingTaskImageDeleteStorage) Delete(context.Context, string) error { return s.err }
 
-func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, _ []string, _, _ string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
+func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, _ []string, _ string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
 	f.calls++
 	f.prompts = append(f.prompts, prompt)
 	copy := *f.result
@@ -101,7 +100,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
-		Status: model.TaskStatusRunning, ImageCapabilityKey: "preferred-image",
+		Status: model.TaskStatusRunning, ImageCapabilityKey: "preferred-image", ImageRatio: "3:4",
 		BillingCatalogID: "retail-task-image-v1", BillingSKUID: "task.seednote.effective", BillingPricingTier: string(model.TierFree),
 	}); err != nil {
 		t.Fatal(err)
@@ -152,7 +151,6 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		BillingSKU:        "image.standard",
 		Key:               "standard",
 		SupportsReference: true, MaxReferenceImages: 16,
-		SupportedSizes: []string{"1:1", "3:4"},
 	}}
 	generator := &taskImageGeneratorFake{result: &ImageResult{
 		LocalFilePath: generatedPath, OutputMIME: "image/png", Size: "3:4",
@@ -168,7 +166,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 func (f *taskImageFixture) request() GenerateTaskImageRequest {
 	return GenerateTaskImageRequest{
 		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.taskID, ProjectID: f.projectID,
-		Prompt: "draw a tea cover", ImageType: "cover", OutputPath: "output/cover.png", Size: "3:4",
+		Prompt: "draw a tea cover", ImageType: "cover", OutputPath: "output/cover.png", AspectRatio: "3:4",
 	}
 }
 
@@ -204,30 +202,74 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	}
 }
 
-func TestGenerateTaskImageRejectsUnsupportedExplicitSizeWithoutProviderCall(t *testing.T) {
+func TestGenerateTaskImageRejectsRatioOutsideBusinessContractWithoutProviderCall(t *testing.T) {
 	f := newTaskImageFixture(t)
 	req := f.request()
-	req.Size = "16:9"
+	req.AspectRatio = "2:3"
 	_, err := f.service.Generate(context.Background(), req)
-	var sizeErr *ImageCapabilitySizeError
-	if !errors.As(err, &sizeErr) || sizeErr.Requested != "16:9" || len(sizeErr.SupportedSizes) != 2 {
-		t.Fatalf("size error = %#v, %v", sizeErr, err)
+	var ratioErr *ImageRatioNotAllowedError
+	if !errors.As(err, &ratioErr) || ratioErr.RequestedRatio != "2:3" {
+		t.Fatalf("ratio error = %#v, %v", ratioErr, err)
 	}
 	if f.generator.calls != 0 {
 		t.Fatalf("provider calls = %d, want 0", f.generator.calls)
 	}
 }
 
-func TestGenerateTaskImageRejectsMissingSizeWithoutProviderCall(t *testing.T) {
-	f := newTaskImageFixture(t)
-	req := f.request()
-	req.Size = ""
-	_, err := f.service.Generate(context.Background(), req)
-	if err == nil || !strings.Contains(err.Error(), "size is required") {
-		t.Fatalf("Generate error = %v, want size is required", err)
+func TestGenerateTaskImageRejectsMissingOrAutoAspectRatioWithoutProviderCall(t *testing.T) {
+	for _, ratio := range []string{"", "auto", "1024x1536"} {
+		f := newTaskImageFixture(t)
+		req := f.request()
+		req.AspectRatio = ratio
+		_, err := f.service.Generate(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "aspect_ratio") {
+			t.Fatalf("Generate(%q) error = %v, want aspect_ratio validation", ratio, err)
+		}
+		if f.resolver.calls != 0 || f.generator.calls != 0 {
+			t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
+		}
 	}
-	if f.resolver.calls != 0 || f.generator.calls != 0 {
-		t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
+}
+
+func TestGenerateTaskImageInjectsStrictRatioRequirement(t *testing.T) {
+	f := newTaskImageFixture(t)
+	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.generator.prompts[0]
+	for _, required := range []string{
+		"draw a tea cover",
+		"最终图片画布宽高比必须严格为 3:4",
+		"该比例是交付要求，不是构图建议",
+		"不得输出 2:3、9:16、近似比例、留白边框或内嵌画布",
+	} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("prompt missing %q: %s", required, got)
+		}
+	}
+}
+
+func TestGenerateTaskImageRejectsExactRatioMismatchBeforePersistenceOrCharge(t *testing.T) {
+	f := newTaskImageFixture(t)
+	wrongPath := filepath.Join(t.TempDir(), "wrong.png")
+	if err := os.WriteFile(wrongPath, taskImagePNG(2, 3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.result.LocalFilePath = wrongPath
+	f.generator.result.Width, f.generator.result.Height = 2, 3
+	_, err := f.service.Generate(context.Background(), f.request())
+	var mismatch *ImageRatioMismatchError
+	if !errors.As(err, &mismatch) || mismatch.RequestedRatio != "3:4" || mismatch.ActualWidth != 2 || mismatch.ActualHeight != 3 || mismatch.CapabilityKey != "standard" {
+		t.Fatalf("mismatch = %#v, err=%v", mismatch, err)
+	}
+	var files, settlements int64
+	_ = f.db.Model(&model.TaskFile{}).Count(&files).Error
+	_ = f.db.Model(&model.BillingSettlementOutbox{}).Count(&settlements).Error
+	if files != 0 || settlements != 0 {
+		t.Fatalf("files=%d settlements=%d, want 0/0", files, settlements)
+	}
+	if _, statErr := os.Stat(wrongPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("mismatched output still exists: %v", statErr)
 	}
 }
 
@@ -363,7 +405,7 @@ func TestGenerateTaskImageChangedPromptCreatesNewOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(f.generator.result.LocalFilePath, []byte("second-image"), 0o644); err != nil {
+	if err := os.WriteFile(f.generator.result.LocalFilePath, taskImagePNG(6, 8), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	changed := f.request()
@@ -414,7 +456,7 @@ func TestTaskDeleteRemovesEveryImmutableImageOperationObject(t *testing.T) {
 	if _, err := f.service.Generate(ctx, f.request()); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(f.generator.result.LocalFilePath, []byte("second-image"), 0o644); err != nil {
+	if err := os.WriteFile(f.generator.result.LocalFilePath, taskImagePNG(6, 8), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	changed := f.request()
@@ -558,8 +600,13 @@ func TestTaskImageAssetDoesNotExposeProviderMetadata(t *testing.T) {
 }
 
 func taskImageTinyPNG() []byte {
-	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
-	return data
+	return taskImagePNG(3, 4)
+}
+
+func taskImagePNG(width, height int) []byte {
+	var encoded bytes.Buffer
+	_ = png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, width, height)))
+	return encoded.Bytes()
 }
 
 func hashTaskFileContent(data []byte) string {

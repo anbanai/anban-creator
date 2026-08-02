@@ -9,11 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { AgentExecutionProfileID, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import type { AgentExecutionProfileID, PlatformConfig, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
-import { ImageAspectRatioField } from '@/components/tasks/ImageAspectRatioField'
+import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
@@ -137,7 +136,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_capability_key: '',
-      image_ratio: '',
+      image_ratio: 'auto',
       reference_image: null,
       input_attachments: [],
       agent_input: {},
@@ -193,15 +192,6 @@ export default function PlansPage() {
 		() => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
-	const selectedImageCapability = useMemo(
-		() => imageCapabilityOptions.find((option) => option.key === (watchedImageCapabilityKey || defaultImageCapability)),
-		[defaultImageCapability, imageCapabilityOptions, watchedImageCapabilityKey],
-  )
-  const imageRatioUnsupported = Boolean(
-		watchedImageRatio
-		&& selectedImageCapability?.features?.size_presets
-		&& !selectedImageCapability.features.size_presets.includes(watchedImageRatio),
-	)
 
   const handleScheduleValidityChange = useCallback((valid: boolean) => {
     setScheduleValid(valid)
@@ -243,6 +233,14 @@ export default function PlansPage() {
     queryFn: () => api.projects.list(),
     staleTime: 60_000,
   })
+  const { data: platformConfigs = [] } = useQuery({
+    queryKey: ['platform-configs'],
+    queryFn: () => api.projects.platformConfigs(),
+    staleTime: Infinity,
+  })
+  const platformConfigMap = useMemo(() => new Map<string, PlatformConfig>(
+    platformConfigs.map((config) => [config.id, config]),
+  ), [platformConfigs])
 
   const projectMap = useMemo(() => {
     const map: Record<string, Project> = {}
@@ -258,6 +256,7 @@ export default function PlansPage() {
     [allProjects],
   )
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
+  const businessImageRatios = platformConfigMap.get(selectedProject?.platform ?? watchedType)?.supported_image_ratios ?? []
 
   const { data: billingCatalog, refetch: refetchBillingCatalog } = useQuery({
     queryKey: queryKeys.billing.catalog,
@@ -449,7 +448,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_capability_key: '',
-      image_ratio: '',
+		image_ratio: 'auto',
       reference_image: null,
       input_attachments: [],
       has_content_image: true,
@@ -474,14 +473,6 @@ export default function PlansPage() {
       || submittedImageCapability.price_available !== true
     ) {
       toast.error('该图像能力已停用，请重新选择')
-      return
-    }
-    if (
-      values.image_ratio
-      && submittedImageCapability?.features?.size_presets
-      && !submittedImageCapability.features.size_presets.includes(values.image_ratio)
-    ) {
-      toast.error('当前图像能力不支持所选比例，请重新选择比例或智能适配')
       return
     }
     // For edit (PUT), image_capability_key is a *string on the backend: nil = leave
@@ -558,6 +549,39 @@ export default function PlansPage() {
       submitting={isSubmitting}
       submitDisabled={!watchedProjectId}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
+      contextBar={editingPlan ? (
+        <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
+      ) : (
+        <ProjectContextControl
+          mode="select"
+          projects={planContextProjects}
+          value={watchedProjectId || null}
+          allowNoProject={false}
+          placeholder="选择项目"
+          onValueChange={(id, project) => {
+            setMontageUploading(false)
+            form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+            if (!id || !project?.platform) return
+            const nextType = project.platform as PlanType
+			const fullProject = projectMap[id]
+			form.setValue('type', nextType, { shouldDirty: true })
+			form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
+			form.setValue('agent_input', {}, { shouldDirty: true })
+			form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
+          }}
+        />
+      )}
+      leadingTools={!isMontagePlan ? (
+        <ImageGenerationToolbar
+          ratios={businessImageRatios}
+          ratio={watchedImageRatio || 'auto'}
+          onRatioChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true })}
+          capabilities={imageCapabilityOptions}
+          capabilityKey={watchedImageCapabilityKey || defaultImageCapability}
+          onCapabilityChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })}
+          loading={imageCapabilitiesLoading}
+        />
+      ) : undefined}
       />
       {attachmentSubmitError ? (
         <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
@@ -816,43 +840,6 @@ export default function PlansPage() {
               )} />
 
               {!isMontagePlan ? promptComposer : null}
-
-              {!isMontagePlan && <FormField control={form.control} name="image_capability_key" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>图像能力</FormLabel>
-                  <FormControl>
-                    {imageCapabilitiesLoading ? (
-                      <Skeleton className="h-10 w-full rounded-xl" />
-                    ) : (
-                      <ImageCapabilitySelector
-                        options={imageCapabilityOptions}
-                        value={field.value || defaultImageCapability}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />}
-
-              {!isMontagePlan && <FormField control={form.control} name="image_ratio" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>图像比例</FormLabel>
-                  <FormControl>
-                    <ImageAspectRatioField
-                      value={field.value || ''}
-                      defaultValue={selectedProject?.image_ratio || ''}
-                      supportedSizes={selectedImageCapability?.features?.size_presets}
-                      onChange={field.onChange}
-                    />
-                  </FormControl>
-                  <FormDescription>智能适配时，由创作流程为每张产物选择当前能力支持的比例。</FormDescription>
-                  {imageRatioUnsupported && (
-                    <p className="text-sm font-medium text-destructive">当前图像能力不支持所选比例，请重新选择比例或智能适配</p>
-                  )}
-                  <FormMessage />
-                </FormItem>
-              )} />}
 
               {isMontagePlan && (
                 <MontageCreationPanel

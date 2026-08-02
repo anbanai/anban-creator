@@ -158,7 +158,7 @@ const platformTabs = [
   { key: 'seednote', label: '种草笔记' },
   { key: 'article', label: '公众号' },
   { key: 'ecommerce', label: '电商出图' },
-  { key: 'xls', label: '小绿书' },
+  { key: 'moments', label: '朋友圈' },
 ]
 
 const activePlatform = ref('')
@@ -190,7 +190,7 @@ function platformColor(platform: string): string {
     seednote: '#FF2442',
     article: '#07C160',
     ecommerce: '#FF6900',
-    xls: '#07C160',
+    moments: '#22C55E',
   }
   return map[platform] || '#6B7280'
 }

@@ -187,7 +187,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]config.ImageGenerationRouteConfig{
-			"standard": {Enabled: true, MinTier: "free", Features: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
+			"standard": {Enabled: true, MinTier: "free", DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
 		},
 	})
 
@@ -197,7 +197,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","image_ratio":"21:9","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","image_ratio":"16:9","article_with_cover":false,"article_with_content_images":false}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -216,8 +216,8 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
 	got := plans[0]
-	if got.ImageRatio != "21:9" {
-		t.Fatalf("image_ratio = %q, want 21:9", got.ImageRatio)
+	if got.ImageRatio != "16:9" {
+		t.Fatalf("image_ratio = %q, want 16:9", got.ImageRatio)
 	}
 	for label, ptr := range map[string]*bool{
 		"ArticleWithCover":         got.ArticleWithCover,

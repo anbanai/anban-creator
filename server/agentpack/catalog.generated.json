@@ -84,7 +84,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "6eda754dff344698b4f30bd2de893c984c14ce79efb5174930da2e95eb849fa2"
+      "digest": "2521d9e90628c95b30629c256a3ad6657cd41b02771d5ef2c0bdc47864ad26da"
     },
     {
       "id": "designer",
@@ -139,7 +139,7 @@
         }
       ],
       "ui": {},
-      "digest": "fb2a30cf7f2ffdb6267ffdb5f124bf4d32a0ddd348bb55ae486c4df3eeaf9551"
+      "digest": "7d65b21055a4de12cdec97e3a6bc328b38949469e1226ff36b125378703f9e4a"
     },
     {
       "id": "ecommerce",
@@ -220,7 +220,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "59f77a54c903b935089b472476f7130318c686dab0a771c2cba409c30f9afc61"
+      "digest": "43659c44487560422b75a9ce26492e01d0f1d2aaa7aa53222c4b4efd01facff0"
     },
     {
       "id": "live-slicer",
@@ -288,7 +288,7 @@
         }
       ],
       "ui": {},
-      "digest": "53653446f738b69507e247e81b511810c83aedfe3f1a116995bfc16e1fec664b"
+      "digest": "3f18519f2793e144533d9b0545cc0a0d716fd0a8ca86e8cfb5544574f33de48d"
     },
     {
       "id": "moments",
@@ -356,6 +356,18 @@
           "required": true
         },
         {
+          "role": "image_prompt",
+          "path": "output/image-prompts.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "image",
+          "path": "output/moments-image.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
           "role": "review",
           "path": "output/quality-review.md",
           "mime_type": "text/markdown",
@@ -365,7 +377,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "5bc665916bc6509287aede41fb7c1c4558071674382e1e17a67d4db2608bfc33"
+      "digest": "11c2a12033051b06aed801df3ead364273c8b28e2302314e116649849ab9f870"
     },
     {
       "id": "montage",
@@ -443,7 +455,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "3a03125b3627e46536304f2ecb1b37e01b9983db0fd72e049239338a54d55417"
+      "digest": "5dc3790dbc43e2f5dc088d53c263c73f2035dbfab3767f53558d1ccd64851a62"
     },
     {
       "id": "seednote",
@@ -528,7 +540,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "a377973508ff56ea1b216133f0f4f9135ac8fd40de86400ae10718a17dd95824"
+      "digest": "de26ff292b5050f37a06416bc76636d82232315f8c1006db1e50652f8e245931"
     }
   ]
 }

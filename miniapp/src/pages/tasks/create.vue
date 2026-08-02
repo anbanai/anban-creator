@@ -45,21 +45,17 @@
         :maxlength="2000"
         :error="errors.prompt"
       />
+      <ImageGenerationToolbar
+        v-model:ratio="form.image_ratio"
+        v-model:capability-key="form.image_capability_key"
+        :ratios="allowedImageRatios"
+        :capabilities="imageCapabilities"
+        :loading="imageCapabilitiesLoading"
+      />
       <view class="inspiration-hint" @tap="applyInspiration">
         <text class="inspiration-hint__icon">灵</text>
         <text class="inspiration-hint__text">试试: {{ currentInspiration }}</text>
       </view>
-    </view>
-
-    <!-- Image capability -->
-    <view class="task-create__section">
-      <text class="field-label">图像能力</text>
-      <ImageCapabilitySelector
-        v-model="form.image_capability_key"
-        :options="imageCapabilities"
-        :loading="imageCapabilitiesLoading"
-      />
-      <text v-if="errors.image_capability_key" class="field-error">{{ errors.image_capability_key }}</text>
     </view>
 
     <view class="task-create__advanced-toggle" @tap="advancedOpen = !advancedOpen">
@@ -271,16 +267,6 @@
       </view>
     </view>
 
-    <!-- Image ratio selector -->
-    <view class="task-create__section" v-if="advancedOpen">
-      <text class="field-label">图片比例</text>
-      <ImageAspectRatioField
-        v-model="form.image_ratio"
-        :supported-sizes="selectedCapability?.features?.size_presets"
-      />
-      <text v-if="imageRatioUnsupported" class="field-error">当前图像能力不支持所选比例，请重新选择比例或智能适配</text>
-    </view>
-
     <!-- Image generation options -->
     <view class="task-create__section" v-if="advancedOpen">
       <view class="switch-row">
@@ -383,7 +369,7 @@
         :disabled="!canSubmit"
         @click="onSubmit"
       >
-        开始创作
+        {{ !isEcommerce && form.quantity > 1 ? `创建 ${form.quantity} 个任务` : '开始创作' }}
       </AbButton>
     </view>
   </view>
@@ -401,6 +387,7 @@ import type {
   ResourceEntry,
   ReferenceImageSelection,
   ImageCapabilityOption,
+  PlatformConfig,
 } from '@/types'
 import { agentProfilesApi } from '@/api/agent-profiles'
 import { tasksApi } from '@/api/tasks'
@@ -425,8 +412,7 @@ import AbInput from '@/components/common/AbInput.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
-import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
-import ImageAspectRatioField from '@/components/business/ImageAspectRatioField.vue'
+import ImageGenerationToolbar from '@/components/business/ImageGenerationToolbar.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import ExecutionProfileSelector from '@/components/business/ExecutionProfileSelector.vue'
 
@@ -462,13 +448,14 @@ const platformThemes = ref<ResourceEntry[]>([])
 const imageCapabilities = ref<ImageCapabilityOption[]>([])
 const imageCapabilitiesLoading = ref(false)
 const defaultImageCapability = ref('')
+const platformConfigs = ref<PlatformConfig[]>([])
 
 const form = reactive({
   project_id: '',
   execution_profile: '' as AgentExecutionProfileID | '',
   prompt: '',
   quantity: 1,
-  image_ratio: '',
+  image_ratio: 'auto',
   image_capability_key: '',
   visual_style: '',
   writer_key: '',
@@ -509,10 +496,7 @@ const imageCapabilityUnavailable = computed(() =>
     || selectedCapability.value.price_available !== true
   ),
 )
-const imageRatioUnsupported = computed(() => {
-  const supported = selectedCapability.value?.features?.size_presets
-  return !!form.image_ratio && !!supported && !supported.includes(form.image_ratio)
-})
+const allowedImageRatios = computed(() => platformConfigs.value.find((item) => item.id === platform.value)?.supported_image_ratios || [])
 const isArticle = computed(() => platform.value === 'article')
 const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
@@ -640,7 +624,6 @@ const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim() || !form.execution_profile) return false
   if (!selectedExecutionProfileAvailable.value) return false
   if (imageCapabilityUnavailable.value) return false
-  if (imageRatioUnsupported.value) return false
   if (billableGoalMode.value && !form.goal.trim()) return false
   if (!priceAvailable.value || debt.value > 0 || balance.value < creationCost.value) return false
   return !submitting.value && !referenceUploading.value
@@ -650,7 +633,7 @@ function onProjectChange(project: Project) {
   selectedProject.value = project
   form.project_id = project.id
 
-  form.image_ratio = project.image_ratio || ''
+  form.image_ratio = project.image_ratio || 'auto'
   form.image_capability_key = project.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
 
   delete errors.project
@@ -833,11 +816,6 @@ function validate(): boolean {
     uni.showToast({ title: errors.image_capability_key, icon: 'none' })
     return false
   }
-  if (imageRatioUnsupported.value) {
-    errors.image_ratio = '当前图像能力不支持所选比例，请重新选择比例或智能适配'
-    uni.showToast({ title: errors.image_ratio, icon: 'none' })
-    return false
-  }
   if (billableGoalMode.value && !form.goal.trim()) {
     errors.goal = '强目标模式需填写成功目标'
     return false
@@ -968,6 +946,14 @@ async function loadImageCapabilities() {
   }
 }
 
+async function loadPlatformConfigs() {
+  try {
+    platformConfigs.value = await projectsApi.platformConfigs()
+  } catch {
+    platformConfigs.value = []
+  }
+}
+
 function safeDecodeQuery(value: string): string {
   try {
     return decodeURIComponent(value)
@@ -1003,6 +989,7 @@ onMounted(() => {
   loadBalance()
   loadExecutionConfiguration()
   loadImageCapabilities()
+  loadPlatformConfigs()
 })
 </script>
 

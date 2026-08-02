@@ -247,6 +247,16 @@ type GenerateRawResult struct {
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
 // 不下载、不压缩、不写磁盘（本地临时文件会被读取并转为 data URL 后清理）。
 func (p *Processor) GenerateRaw(ctx context.Context, prompt string) (*GenerateRawResult, error) {
+	return p.generateRaw(ctx, prompt, false)
+}
+
+// GenerateRawSemantic uses the provider's semantic-aspect-ratio protocol.
+// The concrete ratio is already embedded in the immutable task prompt.
+func (p *Processor) GenerateRawSemantic(ctx context.Context, prompt string) (*GenerateRawResult, error) {
+	return p.generateRaw(ctx, prompt, true)
+}
+
+func (p *Processor) generateRaw(ctx context.Context, prompt string, semanticAspectRatio bool) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -254,7 +264,7 @@ func (p *Processor) GenerateRaw(ctx context.Context, prompt string) (*GenerateRa
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
 	}
 
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark, SemanticAspectRatio: semanticAspectRatio}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {

@@ -29,7 +29,7 @@ func TestImageCapabilityResolverIsStrictAndDoesNotAutoUpgradeReferences(t *testi
 			Provider: "volcengine", Model: "internal-image", BaseURL: "https://internal.invalid", APIKey: "secret",
 			Alias: "图像能力", Description: "图像能力说明", MinTier: tier, BillingSKU: sku,
 			Timeout: time.Minute, Enabled: true, QualityRank: 100,
-			Features: serverconfig.DesignerProviderCapabilities{
+			DesignerFeatures: serverconfig.DesignerProviderCapabilities{
 				DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"},
 				SupportsReference: supportsReference, MaxReferenceImages: maxReferences,
 			},
@@ -45,7 +45,7 @@ func TestImageCapabilityResolverIsStrictAndDoesNotAutoUpgradeReferences(t *testi
 	resolver := NewImageCapabilityResolver(repo, cfg)
 
 	standard, err := resolver.ResolveImageModelForGeneration(t.Context(), "free", "", "content", 0)
-	if err != nil || standard.Key != "standard" || standard.BillingSKU != "image.standard" || len(standard.SupportedSizes) != 1 || standard.SupportedSizes[0] != "1:1" {
+	if err != nil || standard.Key != "standard" || standard.BillingSKU != "image.standard" {
 		t.Fatalf("default resolution = %#v, %v", standard, err)
 	}
 	if _, err := resolver.ResolveImageModelForGeneration(t.Context(), "free", "professional", "content", 0); err == nil {

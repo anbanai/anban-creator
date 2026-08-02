@@ -198,14 +198,13 @@
             <text class="field-label">图片比例</text>
             <ImageAspectRatioField
               v-model="form.image_ratio"
-              :supported-sizes="selectedCapability?.features?.size_presets"
+              :ratios="selectedChannelConfig?.supported_image_ratios || []"
             />
-            <text v-if="imageRatioUnsupported" class="field-error">当前图像能力不支持所选比例，请重新选择比例或智能适配</text>
           </view>
         </view>
       </view>
 
-      <!-- Step 3: Publishing config (only for article/xls/ecommerce) -->
+      <!-- Step 3: Publishing config -->
       <view v-if="isNew ? currentStep === 2 : true">
         <template v-if="!isSeednote">
           <view v-if="isNew" class="project-detail__section-title">发布配置</view>
@@ -331,16 +330,6 @@
               :options="layoutOptions"
               :disabled="resourcesLoading"
               placeholder="选择版式布局"
-            />
-          </view>
-
-          <view v-if="isArticle" class="field-group">
-            <text class="field-label">图片预设</text>
-            <AbSelect
-              v-model="form.image_preset"
-              :options="imagePresetOptions"
-              :disabled="resourcesLoading"
-              placeholder="选择封面/配图预设"
             />
           </view>
 
@@ -534,6 +523,7 @@ import type {
   ReferenceImageSelection,
   ImageCapabilityOption,
   EcommerceProjectDefaults,
+  PlatformConfig,
 } from '@/types'
 import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
@@ -555,8 +545,8 @@ import TagInput from '@/components/business/TagInput.vue'
 const platformOptions = [
   { value: 'seednote', label: '种草笔记', description: '社交种草，图文笔记' },
   { value: 'article', label: '公众号', description: '长图文深度文章' },
+  { value: 'moments', label: '朋友圈', description: '私域内容，生活化表达' },
   { value: 'ecommerce', label: '电商出图', description: '商品主图/详情/封面' },
-  { value: 'xls', label: '小绿书', description: '图片帖，轻量分享' },
 ]
 
 const steps = ['选择平台', '基础信息', '发布配置', '高级设置']
@@ -591,9 +581,8 @@ const form = reactive({
   template_id: '',
   theme: '',
   layout: '',
-  image_preset: '',
   reference_image: null as ReferenceImageSelection | null,
-  image_ratio: '',
+  image_ratio: 'auto',
   image_capability_key: '',
   enable_publishing: false,
   wechat_app_id: '',
@@ -605,11 +594,11 @@ const imageCapabilities = ref<ImageCapabilityOption[]>([])
 const imageCapabilitiesLoading = ref(false)
 const defaultImageCapability = ref('')
 const existingEcommerceDefaults = ref<EcommerceProjectDefaults>({})
+const channelConfigs = ref<PlatformConfig[]>([])
 
 const keywordList = ref<string[]>([])
 const themes = ref<ResourceEntry[]>([])
 const layouts = ref<ResourceEntry[]>([])
-const imagePresets = ref<ResourceEntry[]>([])
 const resourcesLoading = ref(false)
 const platformTemplates = ref<Template[]>([])
 const topics = ref<TopicPool[]>([])
@@ -639,14 +628,10 @@ const imageCapabilityUnavailable = computed(() =>
     || selectedCapability.value.price_available !== true
   ),
 )
-const imageRatioUnsupported = computed(() => {
-  const supported = selectedCapability.value?.features?.size_presets
-  return !!form.image_ratio && !!supported && !supported.includes(form.image_ratio)
-})
+const selectedChannelConfig = computed(() => channelConfigs.value.find((item) => item.id === form.platform))
 
 const themeOptions = computed(() => resourceOptions(themes.value))
 const layoutOptions = computed(() => resourceOptions(layouts.value))
-const imagePresetOptions = computed(() => resourceOptions(imagePresets.value))
 const topicStatusOptions = [
   { value: 'unused', label: '未使用' },
   { value: 'used', label: '已使用' },
@@ -694,6 +679,7 @@ watch(keywordList, (val) => {
 
 watch(() => form.platform, (val) => {
   if (val === 'ecommerce' && !form.image_capability_key) form.image_capability_key = defaultImageCapability.value
+  if (isNew.value) form.image_ratio = selectedChannelConfig.value?.default_image_ratio || 'auto'
   void loadResources(val)
   void loadPlatformTemplates(val)
 })
@@ -718,19 +704,16 @@ async function loadResources(platform?: string) {
   if (!platform) {
     themes.value = []
     layouts.value = []
-    imagePresets.value = []
     return
   }
   resourcesLoading.value = true
   try {
-    const [themeRes, layoutRes, presetRes] = await Promise.all([
+    const [themeRes, layoutRes] = await Promise.all([
       resourcesApi.list('themes', platform).catch(() => ({ items: [] as ResourceEntry[] })),
       resourcesApi.list('layouts', platform).catch(() => ({ items: [] as ResourceEntry[] })),
-      resourcesApi.list('image_presets', platform).catch(() => ({ items: [] as ResourceEntry[] })),
     ])
     themes.value = themeRes.items || []
     layouts.value = layoutRes.items || []
-    imagePresets.value = presetRes.items || []
   } catch (err) {
     console.error('Failed to load resources:', err)
   } finally {
@@ -770,12 +753,11 @@ async function loadProject(id: string) {
     form.template_id = ch.template_id || ''
     form.theme = ch.theme || ''
     form.layout = ch.layout || ''
-    form.image_preset = ch.image_preset || ''
     form.reference_image = ch.reference_image?.asset_id
       ? { asset_id: ch.reference_image.asset_id }
       : null
     referencePreviewUrl.value = ch.reference_image?.download_url || ''
-    form.image_ratio = ch.image_ratio || ''
+    form.image_ratio = ch.image_ratio || selectedChannelConfig.value?.default_image_ratio || 'auto'
     form.image_capability_key = ch.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
     existingEcommerceDefaults.value = ch.ecommerce_defaults || {}
     form.enable_publishing = ch.config?.enable_publishing || false
@@ -1035,11 +1017,6 @@ function validate(): boolean {
     uni.showToast({ title: '该图像能力已停用，请重新选择', icon: 'none' })
     return false
   }
-  if (imageRatioUnsupported.value) {
-    errors.image_ratio = '当前图像能力不支持所选比例，请重新选择比例或智能适配'
-    uni.showToast({ title: errors.image_ratio, icon: 'none' })
-    return false
-  }
   if (form.enable_publishing && isArticle.value && !form.wechat_app_id?.trim()) {
     errors.wechat_app_id = '启用自动发布时，微信 AppID 为必填项'
     return false
@@ -1066,10 +1043,9 @@ function buildPayload(): CreateProjectRequest {
     template_id: form.template_id || undefined,
     theme: form.theme || undefined,
     layout: form.layout || undefined,
-    image_preset: form.image_preset || undefined,
     byline: form.byline || undefined,
     reference_image: form.reference_image,
-    image_ratio: form.image_ratio || undefined,
+    image_ratio: form.image_ratio,
     ecommerce_defaults: isEcommerce.value ? {
       ...existingEcommerceDefaults.value,
       image_capability_key: form.image_capability_key || undefined,
@@ -1207,6 +1183,7 @@ function onDelete() {
 
 onLoad((query) => {
   void loadImageCapabilities()
+  void loadPlatformConfigs()
   if (query?.return_to) {
     returnToUrl.value = safeDecodeQuery(String(query.return_to))
   }
@@ -1219,6 +1196,17 @@ onLoad((query) => {
     loadProject(query.id)
   }
 })
+
+async function loadPlatformConfigs() {
+  try {
+    channelConfigs.value = await projectsApi.platformConfigs()
+    if (isNew.value && form.platform) {
+      form.image_ratio = selectedChannelConfig.value?.default_image_ratio || 'auto'
+    }
+  } catch {
+    channelConfigs.value = []
+  }
+}
 
 async function loadImageCapabilities() {
   imageCapabilitiesLoading.value = true

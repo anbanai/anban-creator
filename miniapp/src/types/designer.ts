@@ -21,17 +21,25 @@ export interface DesignerCapability {
   priceAvailable?: boolean
   enabled: boolean
   idx: number
-  features: DesignerCapabilityFeatures
+  designerFeatures: DesignerCapabilityFeatures
+}
+
+export interface DesignerSettings {
+  size: string
+  n: number
+  quality: string
+  outputFormat: string
+  watermark: boolean
 }
 
 export interface GenerateRequest {
   project_id: string
   prompt: string
   capability_key: string
-  quality?: string
-  size?: string
-  n?: number
-  output_format?: string
+  quality: string
+  size: string
+  n: number
+  output_format: string
   output_compression?: number
   background?: string
   reference_file_ids?: string[]
@@ -62,6 +70,7 @@ export interface ImageGeneration {
   output_format?: string
   status: 'generating' | 'completed' | 'failed'
   error?: string
+  error_code?: 'image_ratio_mismatch'
   created_at: string
   updated_at: string
   results?: ImageGenerationResult[]

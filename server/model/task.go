@@ -31,7 +31,7 @@ type ModelTokenUsage struct {
 // EcommerceConfig carries the per-task inputs for an e-commerce image-generation
 // package (project platform = "ecommerce"): which deliverable modules the buyer
 // selected and in what quantity, the uploaded product photos, target platform,
-// selling points, language, and an optional provider-strategy override. Stored on
+// selling points, and language. Stored on
 // Task.Ecommerce as a typed JSON column (datatypes.JSONType) so the agent reads it
 // via get_project_profile(task_id, scope="ecommerce") and Studio renders it.
 //
@@ -53,12 +53,6 @@ type EcommerceConfig struct {
 	// SellingPoints stay separate.
 	BrandBrief string `json:"brand_brief,omitempty"`
 	Language   string `json:"language,omitempty"`
-	// ProviderStrategyOverride is deprecated/superseded: provider selection now
-	// flows through Task.ImageCapabilityKey (user picks the image preset at task
-	// creation). Retained on the column for backward compatibility with existing
-	// rows; no longer surfaced to the agent (get_project_profile returns the
-	// resolved image_model instead).
-	ProviderStrategyOverride string `json:"provider_strategy_override,omitempty"`
 }
 
 // StyleOverrides is legacy storage for old tasks created before project_snapshot.
@@ -132,7 +126,7 @@ type Task struct {
 	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
 	// Ecommerce carries the e-commerce package config for platform="ecommerce"
 	// tasks (selected deliverable modules, product photos, target platform, selling
-	// points, language, provider-strategy override). Zero value for non-ecommerce
+	// points, and language). Zero value for non-ecommerce
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
 	Ecommerce            datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments     datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`

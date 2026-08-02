@@ -144,6 +144,7 @@ export type {
 export type {
   DesignerCapabilityFeatures,
   DesignerCapability,
+  DesignerSettings,
   GenerateRequest,
   GenerateQuote,
   GenerateImage,

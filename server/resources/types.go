@@ -7,7 +7,6 @@ const (
 	CategoryTheme           Category = "themes"
 	CategoryWriter          Category = "writers"
 	CategoryLayout          Category = "layouts"
-	CategoryImagePreset     Category = "image_presets"
 	CategoryArticleTemplate Category = "article_templates"
 )
 
@@ -42,12 +41,6 @@ type ResourceEntry struct {
 	Fields         *FieldsSpec `json:"fields,omitempty"`
 	Rows           *RowsSpec   `json:"rows,omitempty"`
 
-	// Image preset fields
-	Kind         string   `json:"kind,omitempty"`
-	Archetype    string   `json:"archetype,omitempty"`
-	AspectRatios []string `json:"aspect_ratios,omitempty"`
-	DefaultRatio string   `json:"default_ratio,omitempty"`
-
 	// Article template fields
 	TemplateArticleType  string         `json:"template_article_type,omitempty"`
 	TemplateArticleTypes []string       `json:"template_article_types,omitempty"`
@@ -56,12 +49,10 @@ type ResourceEntry struct {
 	TemplateImageCount   map[string]int `json:"template_image_count,omitempty"`
 	TemplateModules      []string       `json:"template_modules,omitempty"`
 	CompositionGuidance  []string       `json:"composition_guidance,omitempty"`
-
-	Tags []string `json:"tags,omitempty"`
 }
 
 // ValidCategories is the list of all resource categories.
-var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, CategoryImagePreset, CategoryArticleTemplate}
+var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, CategoryArticleTemplate}
 
 // IsPlatformRelevant checks if a resource category is relevant for a given platform.
 func (c Category) IsPlatformRelevant(platform string) bool {
@@ -70,8 +61,6 @@ func (c Category) IsPlatformRelevant(platform string) bool {
 		return platform == "article"
 	case CategoryLayout:
 		return platform == "article"
-	case CategoryImagePreset:
-		return platform == "article" || platform == "seednote"
 	case CategoryArticleTemplate:
 		return platform == "article"
 	}

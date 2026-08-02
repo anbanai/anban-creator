@@ -16,13 +16,13 @@ const props = defineProps<{
 const labelMap: Record<string, string> = {
   seednote: '种',
   article: '公',
-  xls: '绿',
+  moments: '圈',
 }
 
 const colorMap: Record<string, string> = {
   seednote: '#FF2442',
   article: '#07C160',
-  xls: '#07C160',
+  moments: '#22C55E',
 }
 
 const label = computed(() => labelMap[props.platform] || props.platform.charAt(0))

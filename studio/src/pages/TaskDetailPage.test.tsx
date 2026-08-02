@@ -102,6 +102,7 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.projects,
         get: vi.fn().mockResolvedValue(mockProjectDetail),
         list: vi.fn(),
+        platformConfigs: vi.fn().mockResolvedValue([]),
       },
       billing: {
         ...actual.api.billing,
@@ -239,7 +240,7 @@ describe('TaskDetailPage', () => {
       {
         key: 'standard', display_name: '标准图像', min_tier: 'free', enabled: true,
         price_available: true, price_credits: 500,
-        features: {
+        designer_features: {
           quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
           max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
           output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
@@ -248,7 +249,7 @@ describe('TaskDetailPage', () => {
       {
         key: 'source-capability', display_name: '源图像', min_tier: 'pro', enabled: true,
         price_available: true, price_credits: 500,
-        features: {
+        designer_features: {
           quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
           max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
           output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
@@ -1188,8 +1189,7 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始任务要求')
     expect(within(dialog).getByText('数量')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '1' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('radio', { name: '16:9 widescreen default' })).toBeChecked()
-    expect(await within(dialog).findByText('源图像')).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: '图像设置：16:9 · 源图像' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))

@@ -122,6 +122,35 @@ func TestProjectDeleteRemovesDeterministicMemoryPVC(t *testing.T) {
 	}
 }
 
+func TestProjectUpdatePlatformWithoutRatioUsesNewPlatformDefault(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	svc := NewProjectService(repo, &logger)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID: userID, Email: userID + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12],
+	}); err != nil {
+		t.Fatal(err)
+	}
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Name: "article", Platform: model.PlatformArticle,
+		ImageRatio: "16:9", Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.Update(ctx, userID, project.ID, &model.Project{Platform: model.PlatformSeednote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ImageRatio != "3:4" {
+		t.Fatalf("image ratio = %q, want new platform default 3:4", updated.ImageRatio)
+	}
+}
+
 func TestProjectDeleteMemoryFailurePreservesProjectForRetry(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)

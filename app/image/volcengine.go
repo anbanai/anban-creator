@@ -133,11 +133,12 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 		Msg("volcengine: generating image")
 
 	respFmt := model.GenerateImagesResponseFormatURL
+	requestSize := volcengineRequestSize(p.sizePixel, opts != nil && opts.SemanticAspectRatio)
 	req := model.GenerateImagesRequest{
 		Watermark:      &wm,
 		Model:          p.model,
 		Prompt:         prompt,
-		Size:           new(p.sizePixel),
+		Size:           requestSize,
 		ResponseFormat: &respFmt,
 	}
 
@@ -196,6 +197,13 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 		ResponseType:    "url",
 		ResponsePreview: *resp.Data[0].Url,
 	}, nil
+}
+
+func volcengineRequestSize(defaultSize string, semanticAspectRatio bool) *string {
+	if semanticAspectRatio {
+		return nil
+	}
+	return new(defaultSize)
 }
 
 func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (any, error) {

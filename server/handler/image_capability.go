@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,24 +26,15 @@ func NewImageCapabilityHandler(routes config.ImageGenerationRoutesConfig, repo r
 }
 
 type ImageCapabilityOption struct {
-	Key            string                              `json:"key"`
-	DisplayName    string                              `json:"display_name"`
-	Description    string                              `json:"description"`
-	MinTier        string                              `json:"min_tier"`
-	PriceCredits   int64                               `json:"price_credits"`
-	PriceAvailable bool                                `json:"price_available"`
-	Enabled        bool                                `json:"enabled"`
-	SortOrder      int                                 `json:"sort_order"`
-	Features       config.DesignerProviderCapabilities `json:"features"`
-}
-
-type ImageCapabilityRatioError struct {
-	CapabilityKey string `json:"capability_key"`
-	ImageRatio    string `json:"image_ratio"`
-}
-
-func (e *ImageCapabilityRatioError) Error() string {
-	return fmt.Sprintf("image capability %q does not support image_ratio %q", e.CapabilityKey, e.ImageRatio)
+	Key              string                              `json:"key"`
+	DisplayName      string                              `json:"display_name"`
+	Description      string                              `json:"description"`
+	MinTier          string                              `json:"min_tier"`
+	PriceCredits     int64                               `json:"price_credits"`
+	PriceAvailable   bool                                `json:"price_available"`
+	Enabled          bool                                `json:"enabled"`
+	SortOrder        int                                 `json:"sort_order"`
+	DesignerFeatures config.DesignerProviderCapabilities `json:"designer_features"`
 }
 
 func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
@@ -76,9 +66,9 @@ func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
 		if !route.Enabled || !model.TierSatisfies(userTier, requiredTier) {
 			continue
 		}
-		features := route.Features
+		features := route.DesignerFeatures
 		features.MaxBatch = 1
-		item := ImageCapabilityOption{Key: key, DisplayName: route.Alias, Description: route.Description, MinTier: string(requiredTier), Enabled: route.Enabled, SortOrder: route.SortOrder, Features: features}
+		item := ImageCapabilityOption{Key: key, DisplayName: route.Alias, Description: route.Description, MinTier: string(requiredTier), Enabled: route.Enabled, SortOrder: route.SortOrder, DesignerFeatures: features}
 		if h.catalog != nil && strings.TrimSpace(route.BillingSKU) != "" {
 			if price, err := h.catalog.ResolvePriceBySKUID(c.Context(), "", route.BillingSKU, userTier); err == nil && price != nil {
 				item.PriceCredits = price.PriceCredits
@@ -104,39 +94,6 @@ func ValidateImageCapabilityKey(key string, userTier model.Tier, capabilities ma
 		return fmt.Errorf("image capability %q requires %s tier", key, required)
 	}
 	return nil
-}
-
-func ValidateImageRatioForCapability(key, ratio string, routes config.ImageGenerationRoutesConfig) error {
-	ratio = strings.TrimSpace(ratio)
-	if ratio == "" {
-		return nil
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		key = strings.TrimSpace(routes.DefaultCapability)
-	}
-	route, ok := routes.Capabilities[key]
-	if !ok || !route.Enabled {
-		return fmt.Errorf("unknown image capability key %q", key)
-	}
-	for _, supported := range route.Features.SizePresets {
-		if strings.EqualFold(strings.TrimSpace(supported), ratio) {
-			return nil
-		}
-	}
-	return &ImageCapabilityRatioError{CapabilityKey: key, ImageRatio: ratio}
-}
-
-func respondImageCapabilityRatioError(c fiber.Ctx, err error) error {
-	var ratioErr *ImageCapabilityRatioError
-	if errors.As(err, &ratioErr) {
-		return c.Status(fiber.StatusBadRequest).JSON(Response{
-			Code: fiber.StatusBadRequest * 100,
-			Msg:  "image_capability_ratio_unsupported",
-			Data: ratioErr,
-		})
-	}
-	return Error(c, fiber.StatusBadRequest, err.Error())
 }
 
 func validateImageCapabilityKeyForUser(ctx context.Context, repo repository.Repository, userID, key string, capabilities map[string]config.ImageGenerationRouteConfig) error {

@@ -33,7 +33,7 @@ func (h *ResourceHandler) List(c fiber.Ctx) error {
 	platform := c.Query("platform")
 
 	if !isValidCategory(category) {
-		return Error(c, fiber.StatusBadRequest, "invalid category, must be one of: themes, writers, layouts, image_presets")
+		return Error(c, fiber.StatusBadRequest, "invalid category, must be one of: themes, writers, layouts, article_templates")
 	}
 
 	items := resources.Manager().ListByPlatform(resources.Category(category), platform)
@@ -50,7 +50,7 @@ func (h *ResourceHandler) Get(c fiber.Ctx) error {
 	name := c.Params("name")
 
 	if !isValidCategory(category) {
-		return Error(c, fiber.StatusBadRequest, "invalid category, must be one of: themes, writers, layouts, image_presets")
+		return Error(c, fiber.StatusBadRequest, "invalid category, must be one of: themes, writers, layouts, article_templates")
 	}
 
 	entry := resources.Manager().Get(resources.Category(category), name)

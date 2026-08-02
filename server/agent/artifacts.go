@@ -94,7 +94,7 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 	}
 	if task != nil && task.Type == model.PlatformMoments {
 		var missing []string
-		for _, name := range []string{"material-analysis.md", "content.md", "quality-review.md"} {
+		for _, name := range []string{"material-analysis.md", "content.md", "image-prompts.md", "moments-image.png", "quality-review.md"} {
 			if !files[name] {
 				missing = append(missing, name)
 			}

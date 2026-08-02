@@ -117,24 +117,48 @@ func IsMontagePlatform(platform string) bool {
 	return platform == PlatformMontage
 }
 
-// ValidImageRatios is the set of allowed image aspect ratios.
+const ImageRatioAuto = "auto"
+
+// ValidImageRatios is the union of business image ratios, including explicit auto selection.
 var ValidImageRatios = map[string]bool{
-	"3:4":  true,
-	"1:1":  true,
-	"4:3":  true,
-	"16:9": true,
-	"3:2":  true,
-	"2:3":  true,
-	"9:16": true,
-	"21:9": true,
+	ImageRatioAuto: true,
+	"3:4":          true,
+	"1:1":          true,
+	"4:3":          true,
+	"16:9":         true,
 }
 
-const ValidImageRatioHint = "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9, 3:2, 2:3, 9:16, 21:9"
+const ValidImageRatioHint = "image_ratio must be auto or one of the platform supported_image_ratios"
+
+// IsBusinessImageRatioAllowed validates a persisted task/project ratio against its business platform.
+func IsBusinessImageRatioAllowed(platform, ratio string) bool {
+	if ratio == ImageRatioAuto {
+		return true
+	}
+	cfg := GetPlatformConfig(platform)
+	if cfg == nil {
+		return false
+	}
+	for _, allowed := range cfg.SupportedImageRatios {
+		if ratio == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func SupportedImageRatios(platform string) []string {
+	cfg := GetPlatformConfig(platform)
+	if cfg == nil {
+		return nil
+	}
+	return append([]string(nil), cfg.SupportedImageRatios...)
+}
 
 // DefaultImageRatio returns the default image ratio for a platform.
 func DefaultImageRatio(platform string) string {
-	if platform == PlatformArticle {
-		return "16:9"
+	if cfg := GetPlatformConfig(platform); cfg != nil && cfg.DefaultImageRatio != "" {
+		return cfg.DefaultImageRatio
 	}
 	return "3:4"
 }

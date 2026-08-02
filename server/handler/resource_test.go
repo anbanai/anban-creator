@@ -61,3 +61,9 @@ func TestPreviewTheme_UnknownThemeReturns404(t *testing.T) {
 		t.Errorf("status = %d, want 404 for unknown theme", resp.StatusCode)
 	}
 }
+
+func TestImagePresetsAreNotAPublicResourceCategory(t *testing.T) {
+	if isValidCategory("image_presets") {
+		t.Fatal("image_presets must not remain a public resource category")
+	}
+}

@@ -202,11 +202,9 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 		Bool("streaming", opts.StreamCB != nil && isGPTImageModel(p.model)).
 		Msg("openai: generating image")
 
-	// Determine effective size
-	size := p.size
-	if opts.Size != "" {
-		size = mapToImageSize(opts.Size, p.model)
-	}
+	// Task semantic mode always delegates sizing to the Provider protocol. The
+	// strict concrete ratio remains in the prompt and is verified after download.
+	size := openAIRequestSize(p.size, opts.Size, p.model, opts.SemanticAspectRatio)
 
 	hasRefImages := opts.RefImagePath != "" || len(opts.RefImagePaths) > 0
 	hasMask := opts.MaskPath != ""
@@ -249,6 +247,16 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 		Msg("openai: image generation completed")
 
 	return result, nil
+}
+
+func openAIRequestSize(defaultSize, overrideSize, model string, semanticAspectRatio bool) string {
+	if semanticAspectRatio {
+		return "auto"
+	}
+	if overrideSize != "" {
+		return mapToImageSize(overrideSize, model)
+	}
+	return defaultSize
 }
 
 // Capabilities returns OpenAI provider capabilities

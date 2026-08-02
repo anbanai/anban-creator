@@ -21,7 +21,7 @@ export interface ImageCapabilityOption {
   price_credits?: number
   price_available?: boolean
   enabled?: boolean
-  features?: ImageCapabilityFeatures
+  designer_features?: ImageCapabilityFeatures
 }
 
 export interface ImageCapabilityListResponse {

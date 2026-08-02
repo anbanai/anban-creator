@@ -70,14 +70,14 @@ export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
   ecommerce: '电商出图',
-  xls: '小绿书',
+  moments: '朋友圈',
 }
 
 export const contentTypes = {
   seednote: { label: '种草笔记', platform: '种草笔记' },
   article: { label: '公众号', platform: '公众号' },
   ecommerce: { label: '电商出图', platform: '电商出图' },
-  xls: { label: '小绿书', platform: '小绿书' },
+  moments: { label: '朋友圈', platform: '朋友圈' },
 } as const
 
 export const contentTypeLabel = Object.fromEntries(
@@ -88,7 +88,7 @@ export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
   ecommerce: '1:1',
-  xls: '3:4',
+  moments: '3:4',
 }
 
 export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({

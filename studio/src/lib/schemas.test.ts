@@ -212,7 +212,7 @@ describe('createTaskSchema', () => {
       prompt: '测试',
     })
     expect(result.quantity).toBe(1)
-    expect(result.image_ratio).toBe('')
+    expect(result.image_ratio).toBe('auto')
   })
 
   it('defaults task input attachments to an empty snapshot', () => {
@@ -382,9 +382,10 @@ describe('createTaskSchema', () => {
 
 describe('normalizeImageRatio', () => {
   it('keeps supported ratios and maps unknown stored values to smart mode', () => {
-    expect(normalizeImageRatio('21:9')).toBe('21:9')
-    expect(normalizeImageRatio('900x383')).toBe('')
-    expect(normalizeImageRatio(undefined)).toBe('')
+    expect(normalizeImageRatio('3:4')).toBe('3:4')
+    expect(normalizeImageRatio('21:9')).toBe('auto')
+    expect(normalizeImageRatio('900x383')).toBe('auto')
+    expect(normalizeImageRatio(undefined)).toBe('auto')
   })
 })
 

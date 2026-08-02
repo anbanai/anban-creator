@@ -13,26 +13,28 @@ type PlatformFieldConfig struct {
 
 // PlatformConfig describes a platform's form and behavior configuration.
 type PlatformConfig struct {
-	ID                 string                `json:"id"`
-	Label              string                `json:"label"`
-	BadgeVariant       string                `json:"badge_variant"`
-	SupportsPublishing bool                  `json:"supports_publishing"`
-	SupportsAutoFetch  bool                  `json:"supports_auto_fetch"`
-	ProfileURLPattern  string                `json:"profile_url_pattern"`
-	DefaultImageRatio  string                `json:"default_image_ratio"`
-	Fields             []PlatformFieldConfig `json:"fields"`
+	ID                   string                `json:"id"`
+	Label                string                `json:"label"`
+	BadgeVariant         string                `json:"badge_variant"`
+	SupportsPublishing   bool                  `json:"supports_publishing"`
+	SupportsAutoFetch    bool                  `json:"supports_auto_fetch"`
+	ProfileURLPattern    string                `json:"profile_url_pattern"`
+	DefaultImageRatio    string                `json:"default_image_ratio"`
+	SupportedImageRatios []string              `json:"supported_image_ratios"`
+	Fields               []PlatformFieldConfig `json:"fields"`
 }
 
 // PlatformConfigs defines all supported platforms and their form configurations.
 var PlatformConfigs = map[string]*PlatformConfig{
 	PlatformArticle: {
-		ID:                 PlatformArticle,
-		Label:              "公众号",
-		BadgeVariant:       "success",
-		SupportsPublishing: true,
-		SupportsAutoFetch:  false,
-		ProfileURLPattern:  `^https?://mp\.weixin\.qq\.com`,
-		DefaultImageRatio:  "16:9",
+		ID:                   PlatformArticle,
+		Label:                "公众号",
+		BadgeVariant:         "success",
+		SupportsPublishing:   true,
+		SupportsAutoFetch:    false,
+		ProfileURLPattern:    `^https?://mp\.weixin\.qq\.com`,
+		DefaultImageRatio:    "16:9",
+		SupportedImageRatios: []string{"16:9", "4:3", "1:1"},
 		Fields: []PlatformFieldConfig{
 			{Key: "name", Label: "项目名称", Placeholder: "例如 我的科技博客", Required: true, Type: "text", Group: "basic"},
 			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取或手动填写", Type: "url", Group: "basic", AutoFetched: true},
@@ -48,13 +50,14 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		},
 	},
 	PlatformSeednote: {
-		ID:                 PlatformSeednote,
-		Label:              "种草笔记",
-		BadgeVariant:       "danger",
-		SupportsPublishing: false,
-		SupportsAutoFetch:  true,
-		ProfileURLPattern:  `^https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/`,
-		DefaultImageRatio:  "3:4",
+		ID:                   PlatformSeednote,
+		Label:                "种草笔记",
+		BadgeVariant:         "danger",
+		SupportsPublishing:   false,
+		SupportsAutoFetch:    true,
+		ProfileURLPattern:    `^https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/`,
+		DefaultImageRatio:    "3:4",
+		SupportedImageRatios: []string{"3:4", "1:1", "4:3"},
 		Fields: []PlatformFieldConfig{
 			{Key: "profile_url", Label: "种草笔记主页", Placeholder: "粘贴种草笔记主页链接或分享文本...", Type: "textarea", Group: "basic"},
 			{Key: "name", Label: "项目名称", Placeholder: "自动获取", Type: "text", Group: "basic", AutoFetched: true},
@@ -68,12 +71,13 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		},
 	},
 	PlatformMoments: {
-		ID:                 PlatformMoments,
-		Label:              "朋友圈",
-		BadgeVariant:       "secondary",
-		SupportsPublishing: false,
-		SupportsAutoFetch:  false,
-		DefaultImageRatio:  "3:4",
+		ID:                   PlatformMoments,
+		Label:                "朋友圈",
+		BadgeVariant:         "secondary",
+		SupportsPublishing:   false,
+		SupportsAutoFetch:    false,
+		DefaultImageRatio:    "3:4",
+		SupportedImageRatios: []string{"3:4", "1:1"},
 		Fields: []PlatformFieldConfig{
 			{Key: "name", Label: "项目名称", Placeholder: "例如 私域朋友圈", Required: true, Type: "text", Group: "basic"},
 			{Key: "avatar_url", Label: "头像", Placeholder: "手动填写或上传", Type: "url", Group: "basic"},
@@ -82,6 +86,21 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 真实手机随拍、自然光、生活化构图", Type: "textarea", Group: "advanced"},
 			{Key: "author", Label: "人设称呼", Placeholder: "例如 主理人、顾问昵称", Type: "text", Group: "advanced"},
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（朋友圈默认）", Type: "select", Group: "advanced"},
+		},
+	},
+	PlatformEcommerce: {
+		ID:                   PlatformEcommerce,
+		Label:                "电商",
+		BadgeVariant:         "warning",
+		SupportsPublishing:   false,
+		SupportsAutoFetch:    false,
+		DefaultImageRatio:    "1:1",
+		SupportedImageRatios: []string{"1:1", "3:4", "4:3", "16:9"},
+		Fields: []PlatformFieldConfig{
+			{Key: "name", Label: "项目名称", Placeholder: "例如 春季新品视觉", Required: true, Type: "text", Group: "basic"},
+			{Key: "instructions", Label: "项目定位", Placeholder: "例如 品牌调性、目标人群和商品视觉要求", Type: "textarea", Group: "basic"},
+			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 棚拍质感、自然光、干净背景", Type: "textarea", Group: "advanced"},
+			{Key: "image_ratio", Label: "图片比例", Placeholder: "1:1（电商默认）", Type: "select", Group: "advanced"},
 		},
 	},
 }

@@ -130,7 +130,7 @@ func TestLineArtColoringSkillDocumentsRuntimeLimits(t *testing.T) {
 		"output/color-bible.md",
 		"output/colored_00.png",
 		"output/consistency-report.md",
-		"size` 是宽高比提示",
+		"aspect_ratio` 是宽高比提示",
 		"智能适配时才从",
 		"与原始线稿最接近",
 		"Prompt 控制在 500 词以内",

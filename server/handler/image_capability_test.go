@@ -17,7 +17,7 @@ func handlerCapability(alias, tier, sku string, order int) config.ImageGeneratio
 		Alias: alias, Description: alias + " description", MinTier: tier, BillingSKU: sku,
 		Provider: "internal-provider", Model: "internal-model", BaseURL: "https://secret.example.com", APIKey: "secret",
 		Enabled: true, SortOrder: order, QualityRank: order,
-		Features: config.DesignerProviderCapabilities{DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"}},
+		DesignerFeatures: config.DesignerProviderCapabilities{DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"}},
 	}
 }
 
@@ -25,7 +25,7 @@ func TestImageCapabilityOptionPublicContractOmitsInternalRouteFields(t *testing.
 	payload, err := json.Marshal(ImageCapabilityOption{
 		Key: "professional", DisplayName: "Professional", Description: "Detailed images", MinTier: "pro",
 		PriceCredits: 500, PriceAvailable: true, Enabled: true, SortOrder: 20,
-		Features: config.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 4},
+		DesignerFeatures: config.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 4},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestImageCapabilitiesListFiltersByTierAndReturnsDefault(t *testing.T) {
 		"professional": handlerCapability("Professional", "pro", "image.professional", 20),
 	}}
 	standard := routes.Capabilities["standard"]
-	standard.Features.MaxBatch = 10
+	standard.DesignerFeatures.MaxBatch = 10
 	routes.Capabilities["standard"] = standard
 	h := NewImageCapabilityHandler(routes, repo, nil, nil)
 	app := fiber.New()
@@ -77,8 +77,8 @@ func TestImageCapabilitiesListFiltersByTierAndReturnsDefault(t *testing.T) {
 	if len(envelope.Data.Items) != 1 || envelope.Data.Items[0].Key != "standard" {
 		t.Fatalf("free catalog items = %#v", envelope.Data.Items)
 	}
-	if envelope.Data.Items[0].Features.MaxBatch != 1 {
-		t.Fatalf("public max_batch = %d, want 1", envelope.Data.Items[0].Features.MaxBatch)
+	if envelope.Data.Items[0].DesignerFeatures.MaxBatch != 1 {
+		t.Fatalf("public max_batch = %d, want 1", envelope.Data.Items[0].DesignerFeatures.MaxBatch)
 	}
 }
 
@@ -102,37 +102,6 @@ func TestValidateImageCapabilityKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateImageCapabilityKey(tt.key, tt.tier, routes)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateImageRatioForCapability(t *testing.T) {
-	standard := handlerCapability("Standard", "free", "image.standard", 10)
-	standard.Features.SizePresets = []string{"1:1", "4:3"}
-	professional := handlerCapability("Professional", "enterprise", "image.professional", 20)
-	professional.Features.SizePresets = []string{"1:1", "21:9"}
-	routes := config.ImageGenerationRoutesConfig{
-		DefaultCapability: "standard",
-		Capabilities: map[string]config.ImageGenerationRouteConfig{
-			"standard": standard, "professional": professional,
-		},
-	}
-
-	for _, tt := range []struct {
-		name, key, ratio string
-		wantErr          bool
-	}{
-		{name: "smart mode", key: "standard", ratio: ""},
-		{name: "explicit supported", key: "standard", ratio: "4:3"},
-		{name: "default capability supported", ratio: "1:1"},
-		{name: "explicit unsupported", key: "standard", ratio: "21:9", wantErr: true},
-		{name: "professional supported", key: "professional", ratio: "21:9"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateImageRatioForCapability(tt.key, tt.ratio, routes)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}

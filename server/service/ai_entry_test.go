@@ -514,8 +514,8 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.ImageRatio != "" {
-		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped", found.ImageRatio)
+	if found.ImageRatio != model.DefaultImageRatio(model.PlatformArticle) {
+		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped and platform default frozen", found.ImageRatio)
 	}
 	if found.ImageCapabilityKey != "" {
 		t.Fatalf("image_capability_key = %q, want LLM model key ignored", found.ImageCapabilityKey)

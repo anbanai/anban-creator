@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { normalizeCapability } from './designer'
+import { designerApi, normalizeCapability } from './designer'
 import { http } from '@/lib/http-client'
 
 describe('designer API normalization', () => {
@@ -37,11 +37,11 @@ describe('designer API normalization', () => {
       price_available: true,
       enabled: true,
       sort_order: 2,
-      features: {
+      designer_features: {
         quality_levels: ['auto', 'low', 'medium', 'high'],
-        size_presets: ['1024x1024', '1536x1024', '1024x1536'],
-        default_size: '1024x1024',
-        max_batch: 10,
+        size_presets: ['1:1:2K', '3:4:2K', '4:3:2K'],
+        default_size: '1:1:2K',
+        max_batch: 1,
         max_reference_images: 16,
         supports_reference: true,
         supports_mask: true,
@@ -52,16 +52,17 @@ describe('designer API normalization', () => {
       },
     })
 
-    expect(capability.features.defaultSize).toBe('1024x1024')
-    expect(capability.features.sizePresets).toEqual([
-      '1024x1024',
-      '1536x1024',
-      '1024x1536',
+    expect(capability.designerFeatures.defaultSize).toBe('1:1:2K')
+    expect(capability.designerFeatures.sizePresets).toEqual([
+      '1:1:2K',
+      '3:4:2K',
+      '4:3:2K',
     ])
     expect(capability).not.toHaveProperty('provider')
     expect(capability).not.toHaveProperty('providerKey')
     expect(capability).not.toHaveProperty('route')
     expect(capability).not.toHaveProperty('model')
+    expect(capability).not.toHaveProperty('features')
   })
 
   it('registers an immutable direct upload identity without multipart data', async () => {
@@ -96,7 +97,10 @@ describe('designer API normalization', () => {
     const controller = new AbortController()
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', capability_key: 'professional' }, controller.signal)
+    await designerApi.generate({
+      project_id: 'default', prompt: 'test', capability_key: 'professional',
+      size: '1:1:2K', quality: 'auto', output_format: 'png', n: 1,
+    }, controller.signal)
     await designerApi.registerReference({ upload_id: 'upload-1', key: 'uploads/finalized/reference.png' }, controller.signal)
     await designerApi.uploadReferenceFromUrl('https://example.com/source.png', controller.signal)
     await designerApi.getGeneration('generation-1', controller.signal)
@@ -126,11 +130,37 @@ describe('designer API normalization', () => {
       })
     const { designerApi } = await import('./designer')
 
-    await designerApi.generate({ project_id: 'default', prompt: 'test', capability_key: 'professional' })
+    await designerApi.generate({
+      project_id: 'default', prompt: 'test', capability_key: 'professional',
+      size: '1:1:2K', quality: 'auto', output_format: 'png', n: 1,
+    })
 
     const quoteRequest = post.mock.calls[0]?.[1]
     const generateRequest = post.mock.calls[1]?.[1]
     expect(quoteRequest).not.toHaveProperty('execution_profile')
     expect(generateRequest).not.toHaveProperty('execution_profile')
+  })
+
+  it('preserves the bounded Designer batch size in quote and generation requests', async () => {
+    const post = vi.spyOn(http, 'post')
+      .mockResolvedValueOnce({
+        data: { code: 0, msg: 'success', data: { quote_id: 'quote-1', request_fingerprint: 'fingerprint-1' } },
+      })
+      .mockResolvedValueOnce({
+        data: { code: 0, msg: 'success', data: { generation_id: 'generation-1', status: 'generating', price_credits: 1500 } },
+      })
+
+    await designerApi.generate({
+      project_id: 'default',
+      prompt: '生成三张海报',
+      capability_key: 'professional',
+      size: '1:1:2K',
+      quality: 'high',
+      output_format: 'webp',
+      n: 3,
+    })
+
+    expect(post.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ n: 3 }))
+    expect(post.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ n: 3 }))
   })
 })

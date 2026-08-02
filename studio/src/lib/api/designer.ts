@@ -3,7 +3,7 @@ import type { ImageCapabilityListResponse, ImageCapabilityOption } from '@/types
 import type { DesignerCapability, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration } from '@/types/designer'
 
 export function normalizeCapability(raw: ImageCapabilityOption): DesignerCapability {
-  const features = raw.features ?? {
+  const designerFeatures = raw.designer_features ?? {
     quality_levels: [], size_presets: [], default_size: 'auto', max_batch: 1,
     max_reference_images: 0, supports_reference: false, supports_mask: false,
     output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
@@ -17,18 +17,18 @@ export function normalizeCapability(raw: ImageCapabilityOption): DesignerCapabil
     priceAvailable: raw.price_available,
     enabled: raw.enabled !== false,
     idx: raw.sort_order ?? 0,
-    features: {
-      qualityLevels: features.quality_levels ?? [],
-      sizePresets: features.size_presets ?? [],
-      defaultSize: features.default_size ?? 'auto',
-      maxBatch: features.max_batch ?? 1,
-      maxReferenceImages: features.max_reference_images ?? 0,
-      supportsReference: features.supports_reference ?? false,
-      supportsMask: features.supports_mask ?? false,
-      outputFormats: features.output_formats ?? ['png'],
-      hasBackground: features.has_background ?? false,
-      hasCompression: features.has_compression ?? false,
-      watermark: features.watermark ?? false,
+    designerFeatures: {
+      qualityLevels: designerFeatures.quality_levels ?? [],
+      sizePresets: designerFeatures.size_presets ?? [],
+      defaultSize: designerFeatures.default_size ?? 'auto',
+      maxBatch: designerFeatures.max_batch ?? 1,
+      maxReferenceImages: designerFeatures.max_reference_images ?? 0,
+      supportsReference: designerFeatures.supports_reference ?? false,
+      supportsMask: designerFeatures.supports_mask ?? false,
+      outputFormats: designerFeatures.output_formats ?? ['png'],
+      hasBackground: designerFeatures.has_background ?? false,
+      hasCompression: designerFeatures.has_compression ?? false,
+      watermark: designerFeatures.watermark ?? false,
     },
   }
 }
@@ -42,7 +42,7 @@ export const designerApi = {
 
   generate: async (req: GenerateRequest, signal?: AbortSignal) => {
     const operation_id = crypto.randomUUID()
-    const quotedRequest = { ...req, n: 1, operation_id }
+    const quotedRequest = { ...req, operation_id }
     const quote = await unwrap<GenerateQuote>(
       signal ? http.post('/designer/quote', quotedRequest, { signal }) : http.post('/designer/quote', quotedRequest),
     )

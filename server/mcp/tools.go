@@ -35,7 +35,7 @@ type ImageGenerator interface {
 		ctx context.Context,
 		userID, projectID, prompt, imageType, outputPath, refPath string,
 		refPaths []string,
-		taskID, size string,
+		taskID string,
 		resolved *service.ResolvedImageModel,
 		watermark *bool,
 	) (*service.ImageResult, error)

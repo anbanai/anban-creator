@@ -84,7 +84,7 @@ func (h *ProjectHandler) validateProjectImageCapability(ctx context.Context, use
 			return err
 		}
 	}
-	return h.designerSvc.ValidateCapabilitySizeForUser(ctx, userID, key, req.ImageRatio)
+	return nil
 }
 
 // signProjectURLs resolves the stored avatar URL to
@@ -389,9 +389,6 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
 			return Forbidden(c, "image capability is not available for your tier")
 		}
-		if errors.Is(err, service.ErrDesignerCapabilitySizeUnsupported) {
-			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "image_capability_ratio_unsupported", Data: fiber.Map{"capability_key": req.EcommerceDefaults.ImageCapabilityKey, "image_ratio": req.ImageRatio}})
-		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
 	ch := req.toProject()
@@ -525,9 +522,6 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
 		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
 			return Forbidden(c, "image capability is not available for your tier")
-		}
-		if errors.Is(err, service.ErrDesignerCapabilitySizeUnsupported) {
-			return c.Status(fiber.StatusBadRequest).JSON(Response{Code: fiber.StatusBadRequest * 100, Msg: "image_capability_ratio_unsupported", Data: fiber.Map{"capability_key": req.EcommerceDefaults.ImageCapabilityKey, "image_ratio": req.ImageRatio}})
 		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}

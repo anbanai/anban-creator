@@ -9,6 +9,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import DesignerToolbar, { type DesignerSettingsPatch } from '@/components/designer/DesignerToolbar'
+import { DesignerGenerationToolbar } from '@/components/designer/DesignerGenerationToolbar'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import InlineMaskEditor from '@/components/designer/InlineMaskEditor'
 import HistoryDrawer from '@/components/designer/HistoryDrawer'
@@ -18,7 +19,6 @@ import { api } from '@/lib/api'
 import { designerApi } from '@/lib/api/designer'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { getApiErrorCode, getApiErrorMessage, sanitizeUserFacingErrorMessage } from '@/lib/http-client'
-import { buildDesignerRequestSize } from '@/lib/designer-size'
 import { clearActiveGeneration, loadActiveGeneration, saveActiveGeneration } from '@/lib/designer-session'
 import {
   AttachmentRejectionReason,
@@ -31,8 +31,7 @@ import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEdi
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
-  size: 'auto',
-  resolution: '2K',
+  size: '',
   n: 1,
   outputFormat: 'png',
   compression: 100,
@@ -47,9 +46,9 @@ const MAX_POLLS = 180
 const MAX_CONSECUTIVE_ERRORS = 5
 
 function maxReferenceImagesForCapability(capability?: DesignerCapability): number {
-  const capabilities = capability?.features
-  return capabilities?.supportsReference
-    ? Math.max(0, capabilities.maxReferenceImages)
+  const designerFeatures = capability?.designerFeatures
+  return designerFeatures?.supportsReference
+    ? Math.max(0, designerFeatures.maxReferenceImages)
     : 0
 }
 
@@ -146,7 +145,7 @@ export default function DesignerPage() {
   const hasInsufficientCredits = Boolean(
     !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits,
   )
-  const effectiveCaps = effectiveCapability?.features
+  const effectiveDesignerFeatures = effectiveCapability?.designerFeatures
   const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
   const projectID = selectedProjectId ?? 'default'
@@ -170,12 +169,13 @@ export default function DesignerPage() {
   }, [])
 
   const resetSettingsForCapability = useCallback((capability?: DesignerCapability) => {
-    const capabilities = capability?.features
+    const designerFeatures = capability?.designerFeatures
     setSettings({
       ...DEFAULT_SETTINGS,
-      size: capabilities?.defaultSize || DEFAULT_SETTINGS.size,
-      quality: capabilities?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
-      n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, capabilities?.maxBatch ?? 1)),
+      size: designerFeatures?.defaultSize || DEFAULT_SETTINGS.size,
+      quality: designerFeatures?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
+      outputFormat: designerFeatures?.outputFormats?.[0] ?? DEFAULT_SETTINGS.outputFormat,
+      n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, designerFeatures?.maxBatch ?? 1)),
     })
   }, [])
 
@@ -392,12 +392,12 @@ export default function DesignerPage() {
           project_id: projectID,
           prompt: value.prompt.trim(),
           capability_key: effectiveCapability.id,
-          quality: settings.quality !== 'auto' ? settings.quality : undefined,
-          size: buildDesignerRequestSize(settings.size, settings.resolution),
-          n: settings.n > 1 ? settings.n : undefined,
-          output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
-          output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
-          background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
+          quality: settings.quality,
+          size: settings.size,
+          n: settings.n,
+          output_format: settings.outputFormat,
+          output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
+          background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
           reference_file_ids: referenceFileIDs.length > 0 ? referenceFileIDs : undefined,
           watermark: settings.watermark || undefined,
         }, attempt.signal),
@@ -411,7 +411,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveCaps, effectiveCapability, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveDesignerFeatures, effectiveCapability, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveCapability || !editingImage) return
@@ -457,8 +457,15 @@ export default function DesignerPage() {
           project_id: projectID,
           prompt: value.prompt.trim(),
           capability_key: effectiveCapability.id,
+          quality: settings.quality,
+          size: settings.size,
+          n: settings.n,
+          output_format: settings.outputFormat,
+          output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
+          background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
+          watermark: settings.watermark || undefined,
         }, attempt.signal),
         attempt.signal,
       )
@@ -470,7 +477,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, isGenerationAttemptActive, projectID, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, effectiveDesignerFeatures, isGenerationAttemptActive, projectID, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
     generationAttemptRef.current += 1
@@ -523,10 +530,7 @@ export default function DesignerPage() {
       className="relative -mx-4 -my-6 flex h-[calc(100dvh-2.5rem)] flex-col overflow-hidden bg-background md:-mx-8 md:-my-8 md:h-dvh md:flex-row"
     >
       <DesignerToolbar
-        imageCapabilities={capabilityList}
-        selectedCapabilityKey={effectiveCapability?.id ?? ''}
-        onCapabilityChange={handleCapabilityChange}
-        capabilities={effectiveCaps}
+        designerFeatures={effectiveDesignerFeatures}
         settings={settings}
         onSettingsChange={updateSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
@@ -545,7 +549,7 @@ export default function DesignerPage() {
               <DesignerCanvas
                 images={currentImages}
                 isGenerating={isGenerating}
-                canInpaint={effectiveCaps?.supportsMask ?? false}
+                canInpaint={effectiveDesignerFeatures?.supportsMask ?? false}
                 onImageClick={(image) => setPreviewImage(image.url)}
                 onEdit={setEditingImage}
               />
@@ -560,6 +564,18 @@ export default function DesignerPage() {
                 attachmentController={attachmentController}
                 attachmentPolicy={attachmentPolicy}
                 contextBar={contextBar}
+                leadingTools={!editingImage ? (
+                  effectiveCapability ? (
+                    <DesignerGenerationToolbar
+                      capabilities={capabilityList}
+                      capabilityKey={effectiveCapability.id}
+                      settings={settings}
+                      onCapabilityChange={handleCapabilityChange}
+                      onSettingsChange={updateSettings}
+                      disabled={isGenerating}
+                    />
+                  ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
+                ) : undefined}
                 placeholder={editingImage ? '描述你想修改的区域...' : '描述你想要生成的图片...'}
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}
@@ -624,7 +640,7 @@ export default function DesignerPage() {
             billingStatus: currentGeneration.billing_status,
             createdAt: currentGeneration.created_at,
           }}
-          canInpaint={effectiveCaps?.supportsMask ?? false}
+          canInpaint={effectiveDesignerFeatures?.supportsMask ?? false}
           onEdit={(image) => {
             setPreviewImage(null)
             setEditingImage(image)

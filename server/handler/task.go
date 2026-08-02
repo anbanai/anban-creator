@@ -169,13 +169,12 @@ type createTaskRequest struct {
 	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are server-owned storage URLs materialized into the agent
 	// workspace by the executor.
-	ProductPhotos            []string            `json:"product_photos,omitempty"`
-	SelectedModules          map[string]int      `json:"selected_modules,omitempty"`
-	TargetPlatform           string              `json:"target_platform,omitempty"`
-	SellingPoints            string              `json:"selling_points,omitempty"`
-	Language                 string              `json:"language,omitempty"`
-	ProviderStrategyOverride string              `json:"provider_strategy_override,omitempty"`
-	MontageInput             *model.MontageInput `json:"montage_input,omitempty"`
+	ProductPhotos   []string            `json:"product_photos,omitempty"`
+	SelectedModules map[string]int      `json:"selected_modules,omitempty"`
+	TargetPlatform  string              `json:"target_platform,omitempty"`
+	SellingPoints   string              `json:"selling_points,omitempty"`
+	Language        string              `json:"language,omitempty"`
+	MontageInput    *model.MontageInput `json:"montage_input,omitempty"`
 	// ExecutionTarget, when "local", routes non-Montage tasks to the caller's
 	// desktop local executor. Montage ignores this user input and resolves cloud
 	// vs local from server policy and runtime capability.
@@ -205,7 +204,6 @@ type cloneTaskRequest struct {
 	TargetPlatform           string                           `json:"target_platform,omitempty"`
 	SellingPoints            string                           `json:"selling_points,omitempty"`
 	Language                 string                           `json:"language,omitempty"`
-	ProviderStrategyOverride string                           `json:"provider_strategy_override,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
 	ExecutionTarget          string                           `json:"execution_target,omitempty"`
 }
@@ -549,7 +547,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if quantity > 5 {
 		return nil, Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
 	}
-	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
+	if req.ImageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, req.ImageRatio) {
 		return nil, Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 	for _, u := range req.ProductPhotos {
@@ -565,9 +563,6 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	}
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return nil, Error(c, fiber.StatusForbidden, err.Error())
-	}
-	if err := ValidateImageRatioForCapability(req.ImageCapabilityKey, req.ImageRatio, h.imageCapabilityRoutes); err != nil {
-		return nil, respondImageCapabilityRatioError(c, err)
 	}
 	if req.GoalMode {
 		goalText := strings.TrimSpace(req.Goal)
@@ -601,14 +596,13 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	}
 
 	var ecommerceCfg *model.EcommerceConfig
-	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" || req.Language != "" || req.ProviderStrategyOverride != "" {
+	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" || req.Language != "" {
 		ecommerceCfg = &model.EcommerceConfig{
-			ProductPhotos:            req.ProductPhotos,
-			SelectedModules:          req.SelectedModules,
-			TargetPlatform:           req.TargetPlatform,
-			SellingPoints:            req.SellingPoints,
-			Language:                 req.Language,
-			ProviderStrategyOverride: req.ProviderStrategyOverride,
+			ProductPhotos:   req.ProductPhotos,
+			SelectedModules: req.SelectedModules,
+			TargetPlatform:  req.TargetPlatform,
+			SellingPoints:   req.SellingPoints,
+			Language:        req.Language,
 		}
 	}
 	return &preparedTaskCreation{
@@ -983,7 +977,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			TargetPlatform:           req.TargetPlatform,
 			SellingPoints:            req.SellingPoints,
 			Language:                 req.Language,
-			ProviderStrategyOverride: req.ProviderStrategyOverride,
 			MontageInput:             req.MontageInput,
 			ExecutionTarget:          req.ExecutionTarget,
 		}

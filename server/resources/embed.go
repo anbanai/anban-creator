@@ -11,8 +11,5 @@ var WritersFS embed.FS
 //go:embed layouts/*.yaml
 var LayoutsFS embed.FS
 
-//go:embed image_presets/*.yaml
-var ImagePresetsFS embed.FS
-
 //go:embed article_templates/*.yaml
 var ArticleTemplatesFS embed.FS

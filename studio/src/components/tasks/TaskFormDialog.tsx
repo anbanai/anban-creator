@@ -12,7 +12,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { Button } from '@/components/common/button'
-import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
+import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
@@ -38,8 +37,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
-import type { CreateTaskRequest, Project, Task, TaskType } from '@/types'
-import { ImageAspectRatioField } from './ImageAspectRatioField'
+import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
 import { ExecutionProfileSelector } from './ExecutionProfileSelector'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
@@ -112,6 +110,14 @@ export function TaskFormDialog({
 	const executionProfilesQuery = useAgentExecutionProfiles()
 	const agentPacksQuery = useAgentPacks()
 	const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities()
+	const { data: platformConfigs = [] } = useQuery({
+		queryKey: ['platform-configs'],
+		queryFn: () => api.projects.platformConfigs(),
+		staleTime: Infinity,
+	})
+	const platformConfigMap = useMemo(() => new Map<string, PlatformConfig>(
+		platformConfigs.map((config) => [config.id, config]),
+	), [platformConfigs])
 
   const form = useForm<TaskFormDefaults>({
     resolver: zodResolver(createTaskSchema) as Resolver<TaskFormDefaults>,
@@ -186,11 +192,6 @@ export function TaskFormDialog({
         key: watchedImageCapabilityKey,
         display_name: '已停用图像能力（当前任务配置）',
         enabled: false,
-        features: {
-          quality_levels: [], size_presets: [], default_size: '', max_batch: 1,
-          max_reference_images: 0, supports_reference: false, supports_mask: false,
-          output_formats: [], has_background: false, has_compression: false, watermark: false,
-        },
       },
     ]
   }, [imageCapabilityOptions, watchedImageCapabilityKey])
@@ -204,19 +205,7 @@ export function TaskFormDialog({
       || selectedImageCapability.enabled !== true
       || selectedImageCapability.price_available !== true
     )
-  const imageRatioUnsupported = Boolean(
-    watchedImageRatio
-    && selectedImageCapability?.features?.size_presets
-    && !selectedImageCapability.features.size_presets.includes(watchedImageRatio)
-  )
-
-  useEffect(() => {
-    if (imageRatioUnsupported) {
-      form.setError('image_ratio', { type: 'validate', message: '当前图像能力不支持此比例' })
-      return
-    }
-    form.clearErrors('image_ratio')
-  }, [form, imageRatioUnsupported])
+  const businessImageRatios = platformConfigMap.get(selectedProject?.platform ?? watchedType)?.supported_image_ratios ?? []
   useFormDirtyCheck(form, open)
 
   useEffect(() => {
@@ -379,9 +368,7 @@ export function TaskFormDialog({
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-                : imageRatioUnsupported
-                  ? { message: '当前图像能力不支持所选比例，请重新选择比例或智能适配。', href: '' }
-                : watchedType !== 'ecommerce' && goalMode && !goal.trim()
+              : watchedType !== 'ecommerce' && goalMode && !goal.trim()
                   ? { message: '强目标模式需要填写目标条件。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
                     ? { message: '电商出图需要先上传产品图。', href: '' }
@@ -432,6 +419,17 @@ export function TaskFormDialog({
       submitting={isSubmitting}
       submitDisabled={Boolean(creationBlocker)}
       contextBar={projectContextBar}
+      leadingTools={!isMontageTask ? (
+        <ImageGenerationToolbar
+          ratios={businessImageRatios}
+          ratio={watchedImageRatio || 'auto'}
+          onRatioChange={(value) => setFormValue('image_ratio', value)}
+          capabilities={imageCapabilityOptionsForValue}
+          capabilityKey={effectiveImageCapabilityKey}
+          onCapabilityChange={(value) => setFormValue('image_capability_key', value)}
+          loading={imageCapabilitiesLoading}
+        />
+      ) : undefined}
     />
   )
 
@@ -517,38 +515,6 @@ export function TaskFormDialog({
                         </Button>
                       ))}
                     </div>
-                  </div>
-                ) : null}
-
-                {!isMontageTask && !isViralAnalysisTask ? (
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-                    <FormField control={form.control} name="image_ratio" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>图像比例</FormLabel>
-                          <FormControl>
-                            <ImageAspectRatioField
-                              value={field.value || ''}
-                              defaultValue={selectedProject?.image_ratio || ''}
-                              supportedSizes={selectedImageCapability?.features?.size_presets}
-                              onChange={field.onChange}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                    <FormField control={form.control} name="image_capability_key" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>图像能力</FormLabel>
-                        <FormControl>
-                          {imageCapabilitiesLoading ? (
-                            <Skeleton className="h-10 w-full rounded-xl" />
-                          ) : (
-                            <ImageCapabilitySelector options={imageCapabilityOptionsForValue} value={field.value || defaultCapability} onChange={field.onChange} />
-                          )}
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
                   </div>
                 ) : null}
 

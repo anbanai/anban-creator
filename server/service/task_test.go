@@ -232,7 +232,7 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	plan := &model.Plan{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic", ImageRatio: "21:9",
+		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic", ImageRatio: "4:3",
 	}
 	plan.SetAgentInput(map[string]any{})
 
@@ -243,8 +243,8 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	if task == nil || task.ExecutionProfile != "balanced" || task.AgentProfileSnapshot.ProfileID != "balanced" || task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "doubao-seed-evolving" || len(task.AgentProfileFingerprint) != 64 {
 		t.Fatalf("plan task profile = %#v", task)
 	}
-	if task.ImageRatio != "21:9" {
-		t.Fatalf("plan task image ratio = %q, want 21:9", task.ImageRatio)
+	if task.ImageRatio != "4:3" {
+		t.Fatalf("plan task image ratio = %q, want 4:3", task.ImageRatio)
 	}
 	if task.AgentInput.Data() == nil {
 		t.Fatal("plan agent_input was not copied to the task")
@@ -262,8 +262,8 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"standard":     {Enabled: true, MinTier: "free", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
 		},
 	}}}
 	setter, ok := any(svc).(interface {
@@ -288,7 +288,7 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	}
 }
 
-func TestTaskServiceCreateFromPlanRejectsRatioNoLongerSupported(t *testing.T) {
+func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfDesignerSpecs(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -299,21 +299,20 @@ func TestTaskServiceCreateFromPlanRejectsRatioNoLongerSupported(t *testing.T) {
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", Features: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"standard":     {Enabled: true, MinTier: "free", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
 		},
 	}}}
 	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
 	plan := &model.Plan{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		ExecutionProfile: "effective", Status: model.PlanStatusActive,
-		ImageCapabilityKey: "professional", ImageRatio: "21:9",
+		ImageCapabilityKey: "professional", ImageRatio: "16:9",
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
-	var sizeErr *ImageCapabilitySizeError
-	if !errors.As(err, &sizeErr) || task != nil || sizeErr.Requested != "21:9" {
-		t.Fatalf("CreateFromPlan = task %#v, err %#v; want unsupported ratio error", task, err)
+	if err != nil || task == nil || task.ImageRatio != "16:9" {
+		t.Fatalf("CreateFromPlan = task %#v, err %#v; want business ratio independent of Designer specs", task, err)
 	}
 }
 
@@ -759,7 +758,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		Keywords:              "旧关键词",
 		VisualStyle:           "旧视觉",
 		ReferenceImageAssetID: asset.ID,
-		ImageRatio:            "3:4",
+		ImageRatio:            "4:3",
 		Writer:                "dan-koe",
 		Theme:                 "autumn-warm",
 		Author:                "旧署名",
@@ -798,7 +797,10 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
 		t.Fatalf("snapshot = %+v, want original project values", snap)
 	}
-	if snap.ReferenceImageAssetID != asset.ID || snap.ImageRatio != "3:4" {
+	if found.ImageRatio != "4:3" {
+		t.Fatalf("task image ratio = %q, want inherited project ratio 4:3", found.ImageRatio)
+	}
+	if snap.ReferenceImageAssetID != asset.ID || snap.ImageRatio != "4:3" {
 		t.Fatalf("snapshot image fields = %q/%q", snap.ReferenceImageAssetID, snap.ImageRatio)
 	}
 }
@@ -1687,18 +1689,17 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 					ProjectID: projectID,
 					Quantity:  2,
 					Ecommerce: &model.EcommerceConfig{
-						SelectedModules:          map[string]int{"main_images": 2},
-						ProductPhotos:            []string{"https://example.com/product.png"},
-						TargetPlatform:           "amazon",
-						SellingPoints:            "durable",
-						Language:                 "en",
-						ProviderStrategyOverride: "balanced",
+						SelectedModules: map[string]int{"main_images": 2},
+						ProductPhotos:   []string{"https://example.com/product.png"},
+						TargetPlatform:  "amazon",
+						SellingPoints:   "durable",
+						Language:        "en",
 					},
 				}
 			},
 			assert: func(t *testing.T, task *model.Task) {
 				got := task.Ecommerce.Data()
-				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || got.ProviderStrategyOverride != "balanced" || len(got.ProductPhotos) != 1 {
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || len(got.ProductPhotos) != 1 {
 					t.Fatalf("ecommerce = %#v", got)
 				}
 			},

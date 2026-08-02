@@ -56,7 +56,7 @@ export function getProjectCreationDefaults(project?: Project | null): ProjectCre
   const type = (project?.platform || 'seednote') as TaskType
   return {
     type,
-    imageRatio: project?.image_ratio || '',
+    imageRatio: project?.image_ratio || 'auto',
     imageCapabilityKey: project?.ecommerce_defaults?.image_capability_key || '',
     selectedModules: project?.ecommerce_defaults?.default_selected_modules || {},
     targetPlatform: project?.ecommerce_defaults?.target_platform || '',

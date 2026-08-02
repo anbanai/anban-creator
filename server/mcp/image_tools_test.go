@@ -96,7 +96,7 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 		}
 	}
 	required := schema["required"].([]any)
-	for _, name := range []string{"project_id", "task_id", "prompt", "output_path", "size"} {
+	for _, name := range []string{"project_id", "task_id", "prompt", "output_path", "aspect_ratio"} {
 		if !containsAnyString(required, name) {
 			t.Fatalf("generate_image schema must require %s, got %#v", name, required)
 		}
@@ -130,19 +130,20 @@ func TestCategorizeImageGenFailureDetectsFilesystemErrors(t *testing.T) {
 	}
 }
 
-func TestClassifyImageToolFailurePreservesUnsupportedCapabilitySize(t *testing.T) {
-	err := &service.ImageCapabilitySizeError{
-		Requested:      "16:9",
-		SupportedSizes: []string{"1:1", "3:2", "2:3"},
+func TestClassifyImageToolFailurePreservesBusinessRatioDetails(t *testing.T) {
+	err := &service.ImageRatioNotAllowedError{
+		RequestedRatio:     "16:9",
+		AllowedImageRatios: []string{"3:4", "1:1", "4:3"},
+		TaskImageRatio:     "3:4",
 	}
 	failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
-	if failure.Code != "image_capability_size_unsupported" {
+	if failure.Code != "image_ratio_not_allowed" {
 		t.Fatalf("failure code = %q", failure.Code)
 	}
-	if failure.Requested != "16:9" || !slices.Equal(failure.SupportedSizes, []string{"1:1", "3:2", "2:3"}) {
-		t.Fatalf("failure size details = %#v", failure)
+	if failure.RequestedRatio != "16:9" || !slices.Equal(failure.AllowedImageRatios, []string{"3:4", "1:1", "4:3"}) || failure.TaskImageRatio != "3:4" {
+		t.Fatalf("failure ratio details = %#v", failure)
 	}
-	if !errors.As(err, new(*service.ImageCapabilitySizeError)) {
+	if !errors.As(err, new(*service.ImageRatioNotAllowedError)) {
 		t.Fatal("test error no longer exposes the typed capability failure")
 	}
 }

@@ -714,7 +714,7 @@ describe('task form mapping', () => {
       ...(values as unknown as Partial<TaskFormDefaults>),
       execution_profile: 'effective',
       quantity: 1,
-      image_ratio: '',
+      image_ratio: 'auto',
       image_capability_key: '',
       reference_image: null,
       skip_reference_image: false,
@@ -730,7 +730,7 @@ describe('task form mapping', () => {
       skip_reference_image: false,
       ...expected,
     })
-    expect(request.image_ratio).toBeUndefined()
+    expect(request.image_ratio).toBe('auto')
     expect(request.image_capability_key).toBeUndefined()
     expect(request.reference_image).toBeUndefined()
     for (const key of omitted) expect(request).not.toHaveProperty(key)

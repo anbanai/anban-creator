@@ -59,7 +59,7 @@ vi.mock('@/components/designer/InlineMaskEditor', async () => {
   }
 })
 
-function provider(overrides: Partial<DesignerCapability['features']> = {}): DesignerCapability {
+function provider(overrides: Partial<DesignerCapability['designerFeatures']> = {}): DesignerCapability {
   return {
     id: 'professional',
     name: '专业增强',
@@ -69,8 +69,8 @@ function provider(overrides: Partial<DesignerCapability['features']> = {}): Desi
     priceAvailable: true,
     enabled: true,
     idx: 0,
-    features: {
-      qualityLevels: ['auto'], sizePresets: ['auto'], defaultSize: 'auto', maxBatch: 1,
+    designerFeatures: {
+      qualityLevels: ['auto'], sizePresets: ['1:1:2K'], defaultSize: '1:1:2K', maxBatch: 1,
       maxReferenceImages: 3, supportsReference: true, supportsMask: true,
       outputFormats: ['png'], hasBackground: false, hasCompression: false, watermark: false,
       ...overrides,
@@ -108,7 +108,7 @@ function SubmitBeforeProviderReconciliation() {
     queryFn: () => designerApi.getCapabilities(),
   })
   useLayoutEffect(() => {
-    if (submitted.current || data?.items[0]?.features.maxReferenceImages !== 1) return
+    if (submitted.current || data?.items[0]?.designerFeatures.maxReferenceImages !== 1) return
     submitted.current = true
     screen.getByRole('button', { name: '生成' }).click()
   }, [data])

@@ -41,7 +41,7 @@ vi.mock('@/lib/api/uploads', async () => {
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  const { mockPlans, mockProjects } =
+  const { mockPlans, mockProjects, mockPlatformConfigs } =
     await vi.importActual<typeof import('@/test/mocks/handlers')>('@/test/mocks/handlers')
   return {
     ...actual,
@@ -60,6 +60,7 @@ vi.mock('@/lib/api', async () => {
       projects: {
         ...actual.api.projects,
         list: vi.fn().mockResolvedValue(mockProjects),
+        platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
       },
       billing: {
         ...actual.api.billing,
@@ -340,14 +341,17 @@ describe('PlansPage image capability contract', () => {
     expect(source).not.toContain('火山引擎')
   })
 
-  it('persists image ratio and constrains it with the effective capability', () => {
+  it('persists image ratio through the business platform contract', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
     expect(source).toContain('image_ratio: normalizeImageRatio(plan.image_ratio)')
     expect(source).toContain('image_ratio: values.image_ratio')
-    expect(source).toContain('supportedSizes={selectedImageCapability?.features?.size_presets}')
+    expect(source).toContain('supported_image_ratios')
+    expect(source).toContain('<ImageGenerationToolbar')
     expect(source).toContain('normalizeImageRatio(fullProject?.image_ratio)')
-    expect(source).toContain('imageRatioUnsupported')
-    expect(source).toContain('当前图像能力不支持所选比例，请重新选择比例或智能适配')
+    expect(source).not.toContain('designer_features')
+    expect(source).not.toContain('designerFeatures')
+    expect(source).not.toContain('sizePresets')
+    expect(source).not.toContain('imageRatioUnsupported')
   })
 })
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
@@ -66,6 +67,9 @@ func MigrateImageCapabilities(ctx context.Context, db *gorm.DB, defaultCapabilit
 		}
 		stats.UnknownValues += unknown
 	}
+	if err := migrateEmptyBusinessImageRatios(ctx, db); err != nil {
+		return stats, err
+	}
 
 	if db.Migrator().HasTable("user_model_configs") {
 		if err := db.Migrator().DropTable("user_model_configs"); err != nil {
@@ -76,6 +80,109 @@ func MigrateImageCapabilities(ctx context.Context, db *gorm.DB, defaultCapabilit
 		logger.Info().Int64("unknown_values", stats.UnknownValues).Msg("image capability database migration completed")
 	}
 	return stats, nil
+}
+
+func migrateEmptyBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
+	projectRatios := make(map[string]string)
+	if db.Migrator().HasTable("projects") &&
+		db.Migrator().HasColumn("projects", "platform") &&
+		db.Migrator().HasColumn("projects", "image_ratio") {
+		type projectRow struct {
+			ID, Platform, ImageRatio string
+		}
+		var projects []projectRow
+		if err := db.WithContext(ctx).Table("projects").Select("id, platform, image_ratio").Scan(&projects).Error; err != nil {
+			return fmt.Errorf("read project image ratios: %w", err)
+		}
+		for _, project := range projects {
+			ratio := strings.TrimSpace(project.ImageRatio)
+			if ratio == "" {
+				ratio = model.DefaultImageRatio(project.Platform)
+				if ratio != "" {
+					if err := db.WithContext(ctx).Table("projects").Where("id = ?", project.ID).Update("image_ratio", ratio).Error; err != nil {
+						return fmt.Errorf("backfill project %s image ratio: %w", project.ID, err)
+					}
+				}
+			}
+			projectRatios[project.ID] = ratio
+		}
+	}
+
+	if db.Migrator().HasTable("tasks") &&
+		db.Migrator().HasColumn("tasks", "type") &&
+		db.Migrator().HasColumn("tasks", "image_ratio") {
+		type taskRow struct {
+			ID, ProjectID, Type, ImageRatio string
+			ProjectSnapshot                 sql.NullString
+		}
+		selectColumns := "id, type, image_ratio"
+		if db.Migrator().HasColumn("tasks", "project_id") {
+			selectColumns += ", project_id"
+		}
+		if db.Migrator().HasColumn("tasks", "project_snapshot") {
+			selectColumns += ", project_snapshot"
+		}
+		var tasks []taskRow
+		if err := db.WithContext(ctx).Table("tasks").Select(selectColumns).Scan(&tasks).Error; err != nil {
+			return fmt.Errorf("read task image ratios: %w", err)
+		}
+		for _, task := range tasks {
+			if strings.TrimSpace(task.ImageRatio) != "" {
+				continue
+			}
+			var snapshot struct {
+				Platform   string `json:"platform"`
+				ImageRatio string `json:"image_ratio"`
+			}
+			if task.ProjectSnapshot.Valid && strings.TrimSpace(task.ProjectSnapshot.String) != "" {
+				_ = json.Unmarshal([]byte(task.ProjectSnapshot.String), &snapshot)
+			}
+			ratio := strings.TrimSpace(snapshot.ImageRatio)
+			if ratio == "" {
+				platform := strings.TrimSpace(snapshot.Platform)
+				if platform == "" {
+					platform = task.Type
+				}
+				ratio = model.DefaultImageRatio(platform)
+			}
+			if ratio != "" {
+				if err := db.WithContext(ctx).Table("tasks").Where("id = ?", task.ID).Update("image_ratio", ratio).Error; err != nil {
+					return fmt.Errorf("backfill task %s image ratio: %w", task.ID, err)
+				}
+			}
+		}
+	}
+
+	if db.Migrator().HasTable("plans") &&
+		db.Migrator().HasColumn("plans", "type") &&
+		db.Migrator().HasColumn("plans", "image_ratio") {
+		type planRow struct {
+			ID, ProjectID, Type, ImageRatio string
+		}
+		selectColumns := "id, type, image_ratio"
+		if db.Migrator().HasColumn("plans", "project_id") {
+			selectColumns += ", project_id"
+		}
+		var plans []planRow
+		if err := db.WithContext(ctx).Table("plans").Select(selectColumns).Scan(&plans).Error; err != nil {
+			return fmt.Errorf("read plan image ratios: %w", err)
+		}
+		for _, plan := range plans {
+			if strings.TrimSpace(plan.ImageRatio) != "" {
+				continue
+			}
+			ratio := strings.TrimSpace(projectRatios[plan.ProjectID])
+			if ratio == "" {
+				ratio = model.DefaultImageRatio(plan.Type)
+			}
+			if ratio != "" {
+				if err := db.WithContext(ctx).Table("plans").Where("id = ?", plan.ID).Update("image_ratio", ratio).Error; err != nil {
+					return fmt.Errorf("backfill plan %s image ratio: %w", plan.ID, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func migrateCapabilityColumn(ctx context.Context, db *gorm.DB, table, defaultCapability string) (int64, error) {
@@ -165,6 +272,11 @@ func migrateCapabilityJSONValue(value any, defaultCapability string) (bool, int6
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
+			if strings.EqualFold(key, "provider_strategy_override") {
+				delete(typed, key)
+				changed = true
+				continue
+			}
 			if key == "image_model_key" {
 				raw, _ := child.(string)
 				mapped, known := migrateLegacyCapabilityKey(raw, defaultCapability)

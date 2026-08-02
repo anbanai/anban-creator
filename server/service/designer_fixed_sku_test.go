@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
@@ -78,11 +80,15 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 	wallet := NewBillingWalletService(repo, &bundle, BillingWalletOptions{Now: func() time.Time { return now }})
 	cfg := &srvconfig.Config{
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-			"standard": {Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Alias: "Standard", MinTier: "free", BillingSKU: "image.standard", Features: DesignerProviderCapabilities{MaxBatch: 1, DefaultSize: "1:1", SizePresets: []string{"1:1"}}},
+			"standard": {Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Alias: "Standard", MinTier: "free", BillingSKU: "image.standard", DesignerFeatures: DesignerProviderCapabilities{MaxBatch: 1, DefaultSize: "1:1", SizePresets: []string{"1:1"}, QualityLevels: []string{"auto"}, OutputFormats: []string{"png"}}},
 		}}},
 	}
 	logger := zerolog.New(io.Discard)
-	service := NewDesignerService(db, cfg, nil, &logger)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesignerService(db, cfg, store, &logger)
 	service.SetBillingCatalogService(catalog)
 	service.SetBillingWalletService(wallet)
 	return &designerFixedSKUFixture{service: service, repo: repo, catalog: catalog, wallet: wallet, userID: userID, db: db}
@@ -92,7 +98,7 @@ func (f *designerFixedSKUFixture) request(t *testing.T) DesignerGenerateRequest 
 	t.Helper()
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "product poster",
-		CapabilityKey: "standard", Size: "1:1", N: 1,
+		CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png",
 	}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
@@ -129,6 +135,17 @@ func TestDesignerCreateGenerationChargesFixedStandaloneSKU(t *testing.T) {
 	}
 }
 
+func TestDesignerCreateGenerationQuoteRejectsMissingCount(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := DesignerGenerateRequest{
+		OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "product poster",
+		CapabilityKey: "standard", Size: "1:1", Quality: "auto", OutputFormat: "png",
+	}
+	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); err == nil || err.Error() != "n is required" {
+		t.Fatalf("error = %v, want n is required", err)
+	}
+}
+
 func TestDesignerCapabilityRejectsBillingSKURouteMismatch(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 500)
 	if err := f.db.Model(&model.BillingSKU{}).Where("sk_uid = ?", "image.standard").Update("route", "image_generation.capabilities.professional").Error; err != nil {
@@ -136,7 +153,7 @@ func TestDesignerCapabilityRejectsBillingSKURouteMismatch(t *testing.T) {
 	}
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "product poster",
-		CapabilityKey: "standard", Size: "1:1", N: 1,
+		CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png",
 	}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); err == nil || !strings.Contains(err.Error(), "want image.generate/image_generation.capabilities.standard") {
@@ -181,9 +198,9 @@ func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testi
 	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = srvconfig.ImageGenerationRouteConfig{
 		Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret",
 		MinTier: "enterprise", BillingSKU: "image.standard",
-		Features: DesignerProviderCapabilities{MaxBatch: 1},
+		DesignerFeatures: DesignerProviderCapabilities{MaxBatch: 1, QualityLevels: []string{"auto"}},
 	}
-	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "restricted", CapabilityKey: "standard", N: 1}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: uuid.NewString(), Prompt: "restricted", CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png"}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
 		t.Fatalf("free quote error = %v, want access denied", err)
@@ -205,20 +222,6 @@ func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testi
 	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
 	if err != nil || quote == nil {
 		t.Fatalf("enterprise quote = %#v err=%v", quote, err)
-	}
-}
-
-func TestDesignerValidateCapabilitySizeForUser(t *testing.T) {
-	f := newDesignerFixedSKUFixture(t, 1000)
-	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
-	route.Features.SizePresets = []string{"1:1", "4:3"}
-	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
-
-	if err := f.service.ValidateCapabilitySizeForUser(context.Background(), f.userID, "standard", "4:3"); err != nil {
-		t.Fatalf("supported size error = %v", err)
-	}
-	if err := f.service.ValidateCapabilitySizeForUser(context.Background(), f.userID, "standard", "21:9"); err == nil {
-		t.Fatal("unsupported size was accepted")
 	}
 }
 
@@ -294,5 +297,48 @@ func TestDesignerExecuteGenerationReversesFixedChargeOnProviderFailure(t *testin
 	var reversals int64
 	if err := f.db.Model(&model.BillingCharge{}).Where("charge_kind = ?", model.BillingChargeKindReversal).Count(&reversals).Error; err != nil || reversals != 1 {
 		t.Fatalf("reversal count = %d err=%v", reversals, err)
+	}
+}
+
+func TestDesignerExecuteGenerationRejectsActualRatioBeforePersistenceAndReversesCharge(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := f.request(t)
+	created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedPath := t.TempDir() + "/generated.png"
+	if err := os.WriteFile(generatedPath, taskImagePNG(4, 3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return &fakeImageProvider{result: &appimage.GenerateResult{
+			ProviderRequestID: "provider-ratio-mismatch",
+			URL:               generatedPath, Model: "image-v1", ResponseType: "file",
+		}}, nil
+	}
+
+	f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+
+	var generation model.ImageGeneration
+	if err := f.db.First(&generation, "id = ?", created.GenerationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if generation.Status != model.ImageGenerationStatusFailed || !strings.Contains(generation.Error, "image_ratio_mismatch") {
+		t.Fatalf("generation = %#v", generation)
+	}
+	if public := f.service.publicGeneration(&generation); public.ErrorCode != "image_ratio_mismatch" {
+		t.Fatalf("public error_code = %q, want image_ratio_mismatch", public.ErrorCode)
+	}
+	var results int64
+	if err := f.db.Model(&model.ImageGenerationResult{}).Where("generation_id = ?", created.GenerationID).Count(&results).Error; err != nil || results != 0 {
+		t.Fatalf("persisted results = %d, err=%v; want none", results, err)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(context.Background(), 10); err != nil || processed != 1 {
+		t.Fatalf("ProcessSettlementOutbox = %d, %v", processed, err)
+	}
+	account, err := f.repo.Billing().FindAccount(context.Background(), f.userID)
+	if err != nil || account.PaidCredits != 500 || account.DebtCredits != 0 {
+		t.Fatalf("account after reversal = %#v err=%v", account, err)
 	}
 }

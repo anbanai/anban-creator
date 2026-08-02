@@ -53,6 +53,16 @@ func TestParseVolcengineSize(t *testing.T) {
 	}
 }
 
+func TestVolcengineRequestSizeIsOmittedForSemanticTaskGeneration(t *testing.T) {
+	if got := volcengineRequestSize("1728x2304", true); got != nil {
+		t.Fatalf("semantic request size = %v, want nil", *got)
+	}
+	got := volcengineRequestSize("1728x2304", false)
+	if got == nil || *got != "1728x2304" {
+		t.Fatalf("Designer request size = %v, want fixed pixels", got)
+	}
+}
+
 func TestIsContentSafetyError(t *testing.T) {
 	tests := []struct {
 		name   string

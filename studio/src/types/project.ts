@@ -121,6 +121,7 @@ export interface PlatformConfig {
   supports_auto_fetch: boolean
   profile_url_pattern: string
   default_image_ratio: string
+  supported_image_ratios: string[]
   fields: PlatformFieldConfig[]
 }
 

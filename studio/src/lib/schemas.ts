@@ -20,12 +20,12 @@ const executionProfileSchema = z
   .or(z.literal(''))
   .refine((value): boolean => value !== '', '请选择执行配置')
 
-export const imageRatioSchema = z.enum(['', '3:4', '1:1', '4:3', '16:9', '3:2', '2:3', '9:16', '21:9'])
+export const imageRatioSchema = z.enum(['auto', '3:4', '1:1', '4:3', '16:9'])
 export type ImageRatio = z.infer<typeof imageRatioSchema>
 
 export function normalizeImageRatio(value: unknown): ImageRatio {
   const parsed = imageRatioSchema.safeParse(value)
-  return parsed.success ? parsed.data : ''
+  return parsed.success ? parsed.data : 'auto'
 }
 
 export const agentExecutionProfileCapabilitySchema = z.object({
@@ -126,7 +126,7 @@ export const createTaskSchema = z.object({
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
-  image_ratio: imageRatioSchema.default(''),
+  image_ratio: imageRatioSchema.default('auto'),
   image_capability_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
@@ -228,7 +228,7 @@ export const planSchema = z.object({
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_capability_key: z.string().max(50).optional(),
-  image_ratio: imageRatioSchema.default(''),
+  image_ratio: imageRatioSchema.default('auto'),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)

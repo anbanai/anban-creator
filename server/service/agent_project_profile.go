@@ -103,7 +103,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
 		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
 		"image_capability_key": imageCapability.Key,
-		"supported_sizes":      append([]string(nil), imageCapability.SupportedSizes...),
+		"allowed_image_ratios": model.SupportedImageRatios(project.Platform),
 		"agent_config":         agentConfig,
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
@@ -131,7 +131,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 		profile["image_config"] = imageConfig
 		profile["moments"] = map[string]any{
-			"required_artifacts": []string{"material-analysis.md", "content.md", "quality-review.md"},
+			"required_artifacts": []string{"material-analysis.md", "content.md", "image-prompts.md", "moments-image.png", "quality-review.md"},
 			"method":             []string{"六类素材：发售、人设、产品、案例、生活、认知", "四层提炼：观点层、框架层、风格层、人设层"},
 			"auto_publish":       false, "scheduled_plans": false,
 			"falsification_ban": "不伪造客户案例、成交数据、用户反馈",

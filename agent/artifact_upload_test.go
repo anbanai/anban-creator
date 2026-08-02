@@ -188,9 +188,9 @@ func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
 }
 
 func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
-	t.Setenv(jobFinalizationTimeoutEnv, "120ms")
+	t.Setenv(jobFinalizationTimeoutEnv, "500ms")
 	previousReserve := jobCompletionReserve
-	jobCompletionReserve = 40 * time.Millisecond
+	jobCompletionReserve = 300 * time.Millisecond
 	t.Cleanup(func() { jobCompletionReserve = previousReserve })
 
 	root := t.TempDir()

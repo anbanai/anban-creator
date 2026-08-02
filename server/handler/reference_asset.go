@@ -18,6 +18,8 @@ var (
 	errRemovedReferenceImageField   = fmt.Errorf("%w: %s is no longer supported; use reference_image", errReferenceAssetRequestInvalid, removedReferenceImageField)
 	removedImageModelField          = "image_model_key"
 	errRemovedImageModelField       = fmt.Errorf("%w: %s is no longer supported; use image_capability_key", errReferenceAssetRequestInvalid, removedImageModelField)
+	removedProviderStrategyField    = "provider_strategy_override"
+	errRemovedProviderStrategyField = fmt.Errorf("%w: %s is no longer supported; use image_capability_key", errReferenceAssetRequestInvalid, removedProviderStrategyField)
 )
 
 func rejectRemovedRequestFields(body []byte) error {
@@ -43,6 +45,9 @@ func rejectRemovedRequestFields(body []byte) error {
 	}
 	if containsJSONField(value, removedImageModelField) {
 		return errRemovedImageModelField
+	}
+	if containsJSONField(value, removedProviderStrategyField) {
+		return errRemovedProviderStrategyField
 	}
 	return nil
 }
@@ -74,6 +79,8 @@ func respondReferenceAssetError(c fiber.Ctx, logger *zerolog.Logger, err error) 
 		return Error(c, fiber.StatusBadRequest, errRemovedReferenceImageField.Error())
 	case errors.Is(err, errRemovedImageModelField):
 		return Error(c, fiber.StatusBadRequest, errRemovedImageModelField.Error())
+	case errors.Is(err, errRemovedProviderStrategyField):
+		return Error(c, fiber.StatusBadRequest, errRemovedProviderStrategyField.Error())
 	case errors.Is(err, errReferenceAssetRequestInvalid):
 		return Error(c, fiber.StatusBadRequest, errReferenceAssetRequestInvalid.Error())
 	case errors.Is(err, service.ErrReferenceImageSelectionInvalid):

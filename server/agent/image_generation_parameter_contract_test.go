@@ -39,13 +39,15 @@ func generatingSkillContractPaths(t *testing.T, root string) []string {
 	return paths
 }
 
-func TestGeneratingAgentsUseEffectiveImageRatioAndCapabilitySizes(t *testing.T) {
+func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		"plugins/agents/article.md",
 		"plugins/agents/article.toml",
 		"plugins/agents/seednote.md",
 		"plugins/agents/seednote.toml",
+		"plugins/agents/moments.md",
+		"plugins/agents/moments.toml",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/ecommerce.toml",
 	}
@@ -54,10 +56,10 @@ func TestGeneratingAgentsUseEffectiveImageRatioAndCapabilitySizes(t *testing.T) 
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
 			for _, want := range []string{
 				"resolved_profile.image_ratio",
-				"resolved_profile.supported_sizes",
+				"resolved_profile.allowed_image_ratios",
 				"用户明确比例",
 				"智能适配",
-				"显式传 `size`",
+				"显式传 `aspect_ratio`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing image parameter contract %q", rel, want)
@@ -70,18 +72,18 @@ func TestGeneratingAgentsUseEffectiveImageRatioAndCapabilitySizes(t *testing.T) 
 func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := generatingSkillContractPaths(t, root)
-	if len(paths) != 8 {
-		t.Fatalf("generating Skill count = %d (%v), want 8", len(paths), paths)
+	if len(paths) != 9 {
+		t.Fatalf("generating Skill count = %d (%v), want 9", len(paths), paths)
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
 			for _, want := range []string{
 				"resolved_profile.image_ratio",
-				"resolved_profile.supported_sizes",
+				"resolved_profile.allowed_image_ratios",
 				"用户明确比例",
 				"智能适配",
-				"显式传 `size`",
+				"显式传 `aspect_ratio`",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing image parameter contract %q", rel, want)
@@ -94,6 +96,9 @@ func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.
 				"不依赖项目级/任务级 image ratio",
 				"size=<按 slot 固定",
 				`size="4:3"`,
+				"resolved_profile.supported_sizes",
+				"image_capability_ratio_unsupported",
+				"$EFFECTIVE_IMAGE_SIZE",
 			} {
 				if strings.Contains(body, stale) {
 					t.Fatalf("%s still contains stale image parameter rule %q", rel, stale)
@@ -110,13 +115,15 @@ func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.
 	}
 }
 
-func TestEveryDocumentedGenerateImageCallPassesSize(t *testing.T) {
+func TestEveryDocumentedGenerateImageCallPassesAspectRatio(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		"plugins/agents/article.md",
 		"plugins/agents/article.toml",
 		"plugins/agents/seednote.md",
 		"plugins/agents/seednote.toml",
+		"plugins/agents/moments.md",
+		"plugins/agents/moments.toml",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/ecommerce.toml",
 	}
@@ -136,15 +143,57 @@ func TestEveryDocumentedGenerateImageCallPassesSize(t *testing.T) {
 					t.Fatalf("%s generate_image call %d is not closed", rel, call)
 				}
 				invocation := remaining[:end+1]
-				if !strings.Contains(invocation, "size") {
-					t.Fatalf("%s generate_image call %d does not pass size: %s", rel, call, invocation)
+				if !strings.Contains(invocation, "aspect_ratio") {
+					t.Fatalf("%s generate_image call %d does not pass aspect_ratio: %s", rel, call, invocation)
 				}
-				for _, stale := range []string{"size=\"9:16\"", "size = \"9:16\"", ":2K", ":4K"} {
+				for _, stale := range []string{"size=", "size =", "supported_sizes", "$EFFECTIVE_IMAGE_SIZE", ":2K", ":4K"} {
 					if strings.Contains(invocation, stale) {
 						t.Fatalf("%s generate_image call %d contains fixed or mixed size %q: %s", rel, call, stale, invocation)
 					}
 				}
 				remaining = remaining[end+1:]
+			}
+		})
+	}
+}
+
+func TestGeneratingSkillProseDoesNotDescribeTaskMCPSizeParameter(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, rel := range generatingSkillContractPaths(t, root) {
+		t.Run(rel, func(t *testing.T) {
+			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
+			for _, stale := range []string{
+				"MCP `size`",
+				"`size` 是宽高比",
+				"重选 `size`",
+			} {
+				if strings.Contains(body, stale) {
+					t.Fatalf("%s still describes task MCP parameter as size via %q", rel, stale)
+				}
+			}
+		})
+	}
+}
+
+func TestMomentsGeneratesSemanticRatioImageArtifacts(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, rel := range []string{
+		"plugins/agents/moments.md",
+		"plugins/agents/moments.toml",
+		"plugins/skills/moments/SKILL.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
+			for _, want := range []string{
+				"output/image-prompts.md",
+				"output/moments-image.png",
+				"image_capability_key",
+				"generate_image(",
+				"aspect_ratio=$EFFECTIVE_ASPECT_RATIO",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing Moments image workflow term %q", rel, want)
+				}
 			}
 		})
 	}

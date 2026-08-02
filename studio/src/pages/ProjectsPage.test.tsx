@@ -103,11 +103,13 @@ describe('ProjectsPage deletion feedback', () => {
     window.history.pushState({}, '', '/projects')
   })
 
-  it('constrains project ratios with the selected image capability features', () => {
+  it('constrains project ratios with the selected business platform', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'ProjectsPage.tsx'), 'utf8')
-    expect(source).toContain('supportedSizes={selectedImageCapability?.features?.size_presets}')
-    expect(source).toContain('imageRatioUnsupported')
-    expect(source).toContain('当前图像能力不支持所选比例，请重新选择比例或智能适配')
+    expect(source).toContain('ratios={currentPlatformConfig?.supported_image_ratios ?? []}')
+    expect(source).not.toContain('designer_features')
+    expect(source).not.toContain('designerFeatures')
+    expect(source).not.toContain('sizePresets')
+    expect(source).not.toContain('imageRatioUnsupported')
     expect(source).toContain('该图像能力已停用，请重新选择')
     expect(source).toContain('submittedImageCapability.price_available !== true')
     expect(source).toContain('submittedImageCapability.enabled !== true')

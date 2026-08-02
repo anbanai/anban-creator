@@ -12,16 +12,6 @@
     </view>
 
     <view class="section">
-      <text class="field-label">图像能力</text>
-      <ImageCapabilitySelector
-        :model-value="selectedCapabilityKey"
-        :options="imageCapabilityOptions"
-        :loading="capabilitiesLoading"
-        @update:model-value="selectCapability"
-      />
-    </view>
-
-    <view class="section">
       <text class="field-label">提示词</text>
       <AbTextarea
         v-model="prompt"
@@ -29,35 +19,13 @@
         :rows="5"
         :maxlength="1200"
       />
-    </view>
-
-    <view v-if="capabilityFeatures" class="section">
-      <view class="field-row">
-        <view class="field-row__item">
-          <text class="field-label">尺寸</text>
-          <AbSelect v-model="settings.size" :options="sizeOptions" />
-        </view>
-        <view class="field-row__item">
-          <text class="field-label">数量</text>
-          <AbSelect v-model="countValue" :options="countOptions" :disabled="capabilityFeatures.maxBatch <= 1" />
-        </view>
-      </view>
-
-      <view class="field-row">
-        <view class="field-row__item">
-          <text class="field-label">质量</text>
-          <AbSelect v-model="settings.quality" :options="qualityOptions" />
-        </view>
-        <view class="field-row__item">
-          <text class="field-label">格式</text>
-          <AbSelect v-model="settings.outputFormat" :options="formatOptions" />
-        </view>
-      </view>
-
-      <view v-if="capabilityFeatures.watermark" class="switch-row">
-        <text class="field-label">生成水印</text>
-        <AbSwitch v-model="settings.watermark" />
-      </view>
+      <DesignerGenerationToolbar
+        :capabilities="usableCapabilities"
+        :capability-key="selectedCapabilityKey"
+        :settings="settings"
+        @update:capability-key="selectCapability"
+        @update:settings="applySettings"
+      />
     </view>
 
     <view class="section">
@@ -82,6 +50,10 @@
       >
         选择参考图
       </AbButton>
+      <view v-if="capabilityFeatures?.watermark" class="switch-row">
+        <text class="field-label">生成水印</text>
+        <AbSwitch v-model="settings.watermark" />
+      </view>
     </view>
 
     <view v-if="generatedImages.length" class="section">
@@ -185,16 +157,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import type { DesignerCapability, GenerateImage, ImageCapabilityOption, ImageGeneration, ImageGenerationResult } from '@/types'
+import type { DesignerCapability, DesignerSettings, GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types'
 import { designerApi } from '@/api/designer'
 import { billingApi } from '@/api/billing'
 import { TOKEN_KEY } from '@/utils/constants'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbButton from '@/components/common/AbButton.vue'
-import AbSelect from '@/components/common/AbSelect.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
-import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
+import DesignerGenerationToolbar from '@/components/business/DesignerGenerationToolbar.vue'
 
 interface LocalReference {
   path: string
@@ -217,7 +188,7 @@ const editingImage = ref<GenerateImage | null>(null)
 const editPrompt = ref('')
 const maskFile = ref<LocalReference | null>(null)
 
-const settings = reactive({
+const settings = reactive<DesignerSettings>({
   size: 'auto',
   n: 1,
   quality: 'auto',
@@ -226,46 +197,9 @@ const settings = reactive({
 })
 
 const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))
-const imageCapabilityOptions = computed<ImageCapabilityOption[]>(() => usableCapabilities.value.map((capability) => ({
-  key: capability.id,
-  display_name: capability.name,
-  description: capability.description,
-  min_tier: capability.minTier,
-  sort_order: capability.idx,
-  price_credits: capability.credits,
-  price_available: capability.priceAvailable,
-  enabled: capability.enabled,
-})))
 const selectedCapability = computed(() => usableCapabilities.value.find((capability) => capability.id === selectedCapabilityKey.value))
-const capabilityFeatures = computed(() => selectedCapability.value?.features)
+const capabilityFeatures = computed(() => selectedCapability.value?.designerFeatures)
 const canInpaint = computed(() => capabilityFeatures.value?.supportsMask === true)
-
-const sizeOptions = computed(() => {
-  const presets = capabilityFeatures.value?.sizePresets?.length ? capabilityFeatures.value.sizePresets : ['auto']
-  return presets.map((value) => ({ value, label: value === 'auto' ? '自动' : value }))
-})
-
-const qualityOptions = computed(() => {
-  const levels = capabilityFeatures.value?.qualityLevels?.length ? capabilityFeatures.value.qualityLevels : ['auto']
-  return levels.map((value) => ({ value, label: value }))
-})
-
-const formatOptions = computed(() => {
-  const formats = capabilityFeatures.value?.outputFormats?.length ? capabilityFeatures.value.outputFormats : ['png']
-  return formats.map((value) => ({ value, label: value.toUpperCase() }))
-})
-
-const countOptions = computed(() => {
-  const max = capabilityFeatures.value?.maxBatch ?? 1
-  return Array.from({ length: Math.min(max, 4) }, (_, i) => String(i + 1)).map((value) => ({ value, label: value }))
-})
-
-const countValue = computed({
-  get: () => String(settings.n),
-  set: (value: string) => {
-    settings.n = Number(value) || 1
-  },
-})
 
 const canAddReference = computed(() => {
   const max = capabilityFeatures.value?.maxReferenceImages ?? 0
@@ -289,12 +223,16 @@ function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
 
 function selectCapability(id: string) {
   selectedCapabilityKey.value = id
-  const caps = capabilities.value.find((capability) => capability.id === id)?.features
-  settings.size = caps?.defaultSize || caps?.sizePresets?.[0] || 'auto'
-  settings.n = Math.min(settings.n, caps?.maxBatch ?? 1)
+  const caps = capabilities.value.find((capability) => capability.id === id)?.designerFeatures
+  settings.size = caps?.defaultSize || caps?.sizePresets?.[0] || ''
+  settings.n = Math.min(Math.max(settings.n, 1), caps?.maxBatch ?? 1)
   settings.quality = caps?.qualityLevels?.[0] || 'auto'
   settings.outputFormat = caps?.outputFormats?.[0] || 'png'
   settings.watermark = false
+}
+
+function applySettings(next: DesignerSettings) {
+  Object.assign(settings, next)
 }
 
 function chooseReference() {
@@ -445,8 +383,8 @@ async function generate() {
       prompt: prompt.value.trim(),
       capability_key: selectedCapability.value.id,
       size: settings.size,
-      n: settings.n > 1 ? settings.n : undefined,
-      quality: settings.quality !== 'auto' ? settings.quality : undefined,
+      n: settings.n,
+      quality: settings.quality,
       output_format: settings.outputFormat,
       reference_file_ids: referenceIds.length ? referenceIds : undefined,
       watermark: settings.watermark || undefined,
@@ -469,8 +407,8 @@ async function generateEdit() {
   try {
     const sourcePath = await toUploadablePath(editingImage.value.url)
     const [source, mask] = await Promise.all([
-      designerApi.uploadReference(sourcePath, 'source'),
-      designerApi.uploadReference(maskFile.value.path, 'mask'),
+      designerApi.uploadReference(sourcePath),
+      designerApi.uploadReference(maskFile.value.path),
     ])
 
     const response = await designerApi.generate({
@@ -479,7 +417,7 @@ async function generateEdit() {
       capability_key: selectedCapability.value.id,
       size: settings.size,
       n: 1,
-      quality: settings.quality !== 'auto' ? settings.quality : undefined,
+      quality: settings.quality,
       output_format: settings.outputFormat,
       reference_file_ids: [source.file_id],
       mask_file_id: mask.file_id,

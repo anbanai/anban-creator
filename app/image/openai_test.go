@@ -69,6 +69,15 @@ func TestMapToImageSize(t *testing.T) {
 	}
 }
 
+func TestOpenAIRequestSizeUsesProviderAutoForSemanticTaskGeneration(t *testing.T) {
+	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", true); got != "auto" {
+		t.Fatalf("semantic request size = %q, want auto", got)
+	}
+	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", false); got != "1024x1536" {
+		t.Fatalf("Designer request size = %q, want fixed provider size", got)
+	}
+}
+
 func TestOpenAIGenerateClassifiesHTMLResponseAsEndpointProtocolError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

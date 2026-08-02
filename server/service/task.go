@@ -544,6 +544,16 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
+	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
+	if effectiveImageRatio == "" {
+		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+	}
+	if effectiveImageRatio == "" {
+		effectiveImageRatio = model.DefaultImageRatio(project.Platform)
+	}
+	if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
+		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
 		return nil, err
@@ -659,7 +669,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Type:                     taskType,
 			Status:                   model.TaskStatusPending,
 			Prompt:                   taskPrompt,
-			ImageRatio:               p.ImageRatio,
+			ImageRatio:               effectiveImageRatio,
 			ImageCapabilityKey:       effectiveImageCapabilityKey,
 			ReferenceImageAssetID:    p.ReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
@@ -883,6 +893,16 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
+	effectiveImageRatio := strings.TrimSpace(plan.ImageRatio)
+	if effectiveImageRatio == "" && project != nil {
+		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+	}
+	if effectiveImageRatio == "" {
+		effectiveImageRatio = model.DefaultImageRatio(taskType)
+	}
+	if project != nil && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
+		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
@@ -891,9 +911,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
 		if err != nil {
 			return nil, fmt.Errorf("resolve plan image capability: %w", err)
-		}
-		if plan.ImageRatio != "" && !stringInSet(plan.ImageRatio, resolved.SupportedSizes) {
-			return nil, &ImageCapabilitySizeError{Requested: plan.ImageRatio, SupportedSizes: append([]string(nil), resolved.SupportedSizes...)}
 		}
 		effectiveImageCapabilityKey = resolved.Key
 	}
@@ -927,7 +944,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
 		ImageCapabilityKey:       effectiveImageCapabilityKey,
-		ImageRatio:               plan.ImageRatio,
+		ImageRatio:               effectiveImageRatio,
 		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,

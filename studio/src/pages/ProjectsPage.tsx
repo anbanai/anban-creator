@@ -89,7 +89,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     delivery_targets: [],
   },
   reference_image: null,
-  image_ratio: '',
+  image_ratio: '3:4',
   enable_publishing: false,
   require_publish_approval: false,
 }
@@ -137,7 +137,7 @@ function projectToForm(ch: Project): ProjectFormValues {
       delivery_targets: ch.montage_defaults?.delivery_targets || [],
     },
     reference_image: ch.reference_image ?? null,
-    image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || '',
+    image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || 'auto',
     enable_publishing: ch.config?.enable_publishing ?? false,
     require_publish_approval: ch.config?.require_publish_approval ?? false,
   }
@@ -193,23 +193,11 @@ export default function ProjectsPage() {
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
   const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
-  const ecommerceImageCapabilityKey = useWatch({ control: form.control, name: 'ecommerce_image_capability_key' })
-  const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
   const {
     items: imageCapabilityOptions,
     defaultCapability: defaultImageCapability,
     isLoading: imageCapabilitiesLoading,
   } = useImageCapabilities()
-  const selectedImageCapability = useMemo(
-    () => imageCapabilityOptions.find((option) => option.key === (ecommerceImageCapabilityKey || defaultImageCapability)),
-    [defaultImageCapability, ecommerceImageCapabilityKey, imageCapabilityOptions],
-  )
-  const imageRatioUnsupported = Boolean(
-    isEcommerce
-    && watchedImageRatio
-    && selectedImageCapability?.features?.size_presets
-    && !selectedImageCapability.features.size_presets.includes(watchedImageRatio),
-  )
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -439,9 +427,11 @@ export default function ProjectsPage() {
   function openCreate() {
     setEditingProject(null)
     setProfileFetchHint(null)
+    const platform = projectPlatformFromIntent(createIntent.type)
     form.reset({
       ...CHANNEL_FORM_DEFAULTS,
-      platform: projectPlatformFromIntent(createIntent.type),
+      platform,
+      image_ratio: (platformConfigMap[platform]?.default_image_ratio || 'auto') as ProjectFormValues['image_ratio'],
     })
     setSelectedTemplate(null)
     setReferenceAnalysisUrl('')
@@ -527,15 +517,6 @@ export default function ProjectsPage() {
       toast.error('该图像能力已停用，请重新选择')
       return
     }
-    if (
-      values.platform === 'ecommerce'
-      && values.image_ratio
-      && submittedImageCapability?.features?.size_presets
-      && !submittedImageCapability.features.size_presets.includes(values.image_ratio)
-    ) {
-      toast.error('当前图像能力不支持所选比例，请重新选择比例或智能适配')
-      return
-    }
     const payload: CreateProjectRequest = {
       platform: values.platform,
       agent_config: values.agent_config,
@@ -549,7 +530,7 @@ export default function ProjectsPage() {
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
       // 导入模型：模板只用于填充视觉提示，不发送 template_id，不参与运行时解析。
-      image_ratio: values.image_ratio || undefined,
+      image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
@@ -712,6 +693,11 @@ export default function ProjectsPage() {
                       onValueChange={(v) => {
                         field.onChange(v)
                         form.setValue('agent_config', {}, { shouldDirty: true })
+                        form.setValue(
+                          'image_ratio',
+                          (v ? platformConfigMap[v]?.default_image_ratio : 'auto') as ProjectFormValues['image_ratio'],
+                          { shouldDirty: true, shouldValidate: true },
+                        )
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
                         form.setValue('enable_publishing', false)
@@ -721,7 +707,7 @@ export default function ProjectsPage() {
                       <SelectTrigger className="w-full">
                         {selectedPlatform ? (
                           <span className="flex items-center gap-1.5">
-                            {renderPlatformIcon(selectedPlatform)}
+                            {selectedPlatform ? renderPlatformIcon(selectedPlatform) : null}
                             {platformOptions.find(o => o.value === selectedPlatform)?.label || selectedPlatform}
                           </span>
                         ) : (
@@ -1010,16 +996,13 @@ export default function ProjectsPage() {
                     <FormLabel>默认图像比例</FormLabel>
                     <FormControl>
                       <ImageAspectRatioField
-                        value={field.value || ''}
-                        defaultValue=""
-                        supportedSizes={selectedImageCapability?.features?.size_presets}
+                        value={field.value || 'auto'}
+                        defaultValue={currentPlatformConfig?.default_image_ratio}
+                        ratios={currentPlatformConfig?.supported_image_ratios ?? []}
                         onChange={field.onChange}
                       />
                     </FormControl>
                     <FormDescription>选择智能适配时，每个任务可再明确指定，或由创作流程按产物决定。</FormDescription>
-                    {imageRatioUnsupported && (
-                      <p className="text-sm font-medium text-destructive">当前图像能力不支持所选比例，请重新选择比例或智能适配</p>
-                    )}
                     <FormMessage />
                   </FormItem>
                 )} />

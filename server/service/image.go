@@ -366,7 +366,7 @@ func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time
 // If outputPath is provided, also saves the image to that path and returns file_path.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID, size string,
+	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID string,
 	resolved *ResolvedImageModel,
 	watermark *bool,
 ) (*ImageResult, error) {
@@ -392,10 +392,7 @@ func (s *ImageService) GenerateImage(
 	// workflow decision and therefore belongs to the calling Agent or Skill.
 	providerRequestID := "internal:image:" + uuid.NewString()
 	rawResult, err := s.generateProviderImage(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
-		if size != "" {
-			return processor.GenerateRawWithSize(attemptCtx, prompt, size)
-		}
-		return processor.GenerateRaw(attemptCtx, prompt)
+		return processor.GenerateRawSemantic(attemptCtx, prompt)
 	}, imageType)
 	if err != nil {
 		s.recordFailedImageProviderCost(ctx, taskID, providerRequestID, resolved)

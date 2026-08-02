@@ -79,6 +79,8 @@ for (const path of [
   'src/pages/settings/password.vue',
   'src/components/business/ImageCapabilitySelector.vue',
   'src/components/business/ImageAspectRatioField.vue',
+  'src/components/business/ImageGenerationToolbar.vue',
+  'src/components/business/DesignerGenerationToolbar.vue',
 ]) {
   assertFile(path)
 }
@@ -286,10 +288,9 @@ assertNotContains('src/pages/tasks/detail.vue', [
 
 assertContains('src/types/project.ts', [
   'description?: string',
+  'supported_image_ratios: string[]',
   'layout: string',
-  'image_preset: string',
   'layout?: string',
-  'image_preset?: string',
 ])
 
 assertContains('src/types/viral-analysis.ts', [
@@ -310,7 +311,7 @@ assertContains('src/api/image-capabilities.ts', ["'/image-capabilities'", 'Image
 assertContains('src/types/imageCapability.ts', [
   'export interface ImageCapabilityOption',
   'price_credits?: number',
-  'features?: ImageCapabilityFeatures',
+  'designer_features?: ImageCapabilityFeatures',
   'size_presets: string[]',
   'max_reference_images: number',
 ])
@@ -326,12 +327,39 @@ assertContains('src/components/business/ImageCapabilitySelector.vue', [
 assertNotContains('src/components/business/ImageCapabilitySelector.vue', ['provider', 'model_name'])
 assertContains('src/components/business/ImageAspectRatioField.vue', [
   '智能适配',
-  'supportedSizes',
-  "value: ''",
-  "value: '21:9'",
+  'ratios',
+  "value: 'auto'",
+  'ratio-sheet',
+])
+assertNotContains('src/components/business/ImageAspectRatioField.vue', ['supportedSizes', "value: '21:9'"])
+assertContains('src/components/business/ImageGenerationToolbar.vue', [
+  '智能适配',
+  '每张 {{ option.price_credits.toLocaleString() }} 积分',
+  'generation-sheet',
+  "emit('update:ratio'",
+  "emit('update:capabilityKey'",
+])
+assertContains('src/components/business/DesignerGenerationToolbar.vue', [
+  '固定规格',
+  '每张 {{ capability.credits.toLocaleString() }} 积分',
+  'designer-sheet',
+  "emit('update:capabilityKey'",
+  "emit('update:settings'",
 ])
 
-assertContains('src/types/designer.ts', ['capability_key: string', 'capability_name?: string'])
+assertContains('src/types/designer.ts', [
+  'capability_key: string',
+  'quality: string',
+  'size: string',
+  'n: number',
+  'output_format: string',
+  'capability_name?: string',
+])
+const designerRequestType = read('src/types/designer.ts').match(/export interface GenerateRequest \{[\s\S]*?\n\}/)?.[0] ?? ''
+const designerRequestLines = designerRequestType.split('\n').map((line) => line.trim())
+for (const optionalField of ['quality?: string', 'size?: string', 'n?: number', 'output_format?: string']) {
+  assert.equal(designerRequestLines.includes(optionalField), false, `GenerateRequest should not contain ${optionalField}`)
+}
 assertNotContains('src/types/designer.ts', ['provider_id', 'provider: string', 'model: string', 'getModelCapabilities'])
 
 for (const path of [
@@ -349,13 +377,11 @@ for (const path of [
 assertContains('src/pages/projects/detail.vue', [
   "resourcesApi.list('themes'",
   "resourcesApi.list('layouts'",
-  "resourcesApi.list('image_presets'",
   'topicPoolApi.list',
   'topicPoolApi.create',
   'topicPoolApi.reset',
   'topicPoolApi.delete',
   'layout',
-  'image_preset',
 ])
 
 // Task detail clone is now server-side (tasksApi.retry preserves ALL fields —
@@ -374,13 +400,16 @@ assertContains('src/pages/tasks/detail.vue', [
 ])
 
 assertContains('src/pages/designer/index.vue', [
-  '<ImageCapabilitySelector',
-  ':model-value="selectedCapabilityKey"',
-  '@update:model-value="selectCapability"',
+  '<DesignerGenerationToolbar',
+  ':capability-key="selectedCapabilityKey"',
+  '@update:capability-key="selectCapability"',
+  ':settings="settings"',
   'canInpaint',
   'startEdit',
   'mask_file_id',
   'capability_key: selectedCapability.value.id',
+  'n: settings.n',
+  'quality: settings.quality',
   'chooseMask',
   'generateEdit',
   'const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))',
@@ -392,9 +421,21 @@ assertContains('src/components/business/ImageCapabilitySelector.vue', [
   'capability-option--disabled',
 ])
 assertContains('src/api/designer.ts', ["'/designer/quote'", "'/designer/generate'", 'request_fingerprint'])
+assertContains('src/api/designer.ts', ["name: 'file'"])
+assertNotContains('src/api/designer.ts', ["name = 'file'"])
 assertNotContains('src/api/designer.ts', ["'/designer/providers'", 'getProviders'])
+assertContains('src/pages/designer/index.vue', [
+  'designerApi.uploadReference(sourcePath)',
+  'designerApi.uploadReference(maskFile.value.path)',
+])
+assertNotContains('src/pages/designer/index.vue', [
+  "designerApi.uploadReference(sourcePath, 'source')",
+  "designerApi.uploadReference(maskFile.value.path, 'mask')",
+])
 assertNotContains('src/pages/designer/index.vue', [
   'class="capability-card"',
+  '<ImageCapabilitySelector',
+  '<AbSelect',
   'selectedProvider',
   'provider_id',
   'item.provider',
@@ -417,19 +458,24 @@ assertContains('src/pages/tasks/create.vue', [
   'taskPriceForExecutionProfile',
   'execution_profile: executionProfile',
   'image_capability_key: form.image_capability_key || undefined',
-  '<ImageCapabilitySelector',
-  '<ImageAspectRatioField',
+  '<ImageGenerationToolbar',
+  ':ratios="allowedImageRatios"',
+  'v-model:ratio="form.image_ratio"',
+  'v-model:capability-key="form.image_capability_key"',
   'form.execution_profile = String(query.execution_profile) as AgentExecutionProfileID',
   'resolveExecutionProfileSelection',
-  'imageRatioUnsupported',
-  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
   'const imageCapabilityUnavailable = computed(() =>',
   'selectedCapability.value.enabled !== true',
   '该图像能力已停用，请重新选择',
+  '创建 ${form.quantity} 个任务',
 ])
 assertOccurrenceCount('src/pages/tasks/create.vue', 'if (imageCapabilityUnavailable.value)', 2)
 assertNotContains('src/pages/tasks/create.vue', [
   "if (form.image_ratio && supported && !supported.includes(form.image_ratio)) form.image_ratio = ''",
+  'imageRatioUnsupported',
+  'selectedCapability?.features?.size_presets',
+  '<ImageCapabilitySelector',
+  '<ImageAspectRatioField',
 ])
 assertNotContains('src/pages/tasks/create.vue', ['provider:', 'models:', 'claude:'])
 
@@ -452,12 +498,12 @@ assertContains('src/pages/plans/create.vue', [
   'taskPriceForExecutionProfile',
   'execution_profile: executionProfile',
   'image_capability_key: form.imageCapabilityKey || undefined',
-  '<ImageCapabilitySelector',
-  '<ImageAspectRatioField',
+  '<ImageGenerationToolbar',
+  ':ratios="allowedImageRatios"',
+  'v-model:ratio="form.imageRatio"',
+  'v-model:capability-key="form.imageCapabilityKey"',
   'form.executionProfile = plan.execution_profile',
   'resolveExecutionProfileSelection',
-  'imageRatioUnsupported',
-  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
   'const imageCapabilityUnavailable = computed(() =>',
   'selectedCapability.value.enabled !== true',
   '该图像能力已停用，请重新选择',
@@ -465,6 +511,10 @@ assertContains('src/pages/plans/create.vue', [
 assertOccurrenceCount('src/pages/plans/create.vue', 'if (imageCapabilityUnavailable.value)', 2)
 assertNotContains('src/pages/plans/create.vue', [
   "if (form.imageRatio && supported && !supported.includes(form.imageRatio)) form.imageRatio = ''",
+  'imageRatioUnsupported',
+  'selectedCapability?.features?.size_presets',
+  '<ImageCapabilitySelector',
+  '<ImageAspectRatioField',
 ])
 assertNotContains('src/pages/plans/create.vue', ['provider:', 'models:', 'claude:'])
 
@@ -479,9 +529,8 @@ assertContains('src/pages/projects/detail.vue', [
   'reference_image: form.reference_image',
   '<ImageCapabilitySelector',
   '<ImageAspectRatioField',
+  ':ratios="selectedChannelConfig?.supported_image_ratios || []"',
   'image_capability_key: form.image_capability_key || undefined',
-  'imageRatioUnsupported',
-  '当前图像能力不支持所选比例，请重新选择比例或智能适配',
   'const imageCapabilityUnavailable = computed(() =>',
   'selectedCapability.value.enabled !== true',
   '该图像能力已停用，请重新选择',
@@ -489,6 +538,9 @@ assertContains('src/pages/projects/detail.vue', [
 assertOccurrenceCount('src/pages/projects/detail.vue', 'if (imageCapabilityUnavailable.value)', 1)
 assertNotContains('src/pages/projects/detail.vue', [
   "if (form.image_ratio && supported && !supported.includes(form.image_ratio)) form.image_ratio = ''",
+  "resourcesApi.list('image_presets'",
+  'imageRatioUnsupported',
+  'selectedCapability?.features?.size_presets',
 ])
 
 assertContains('src/types/asset.ts', [
@@ -518,6 +570,8 @@ for (const path of filesUnder(resolve(root, 'src'))) {
   assert.equal(body.includes('/image-models'), false, `${path} still uses the removed image models endpoint`)
   assert.equal(body.includes('/designer/providers'), false, `${path} still uses the removed designer providers endpoint`)
   assert.equal(body.includes('/model-config'), false, `${path} still uses the removed model config endpoint`)
+  assert.equal(body.includes('supportedSizes'), false, `${path} still filters task ratios through Designer sizes`)
+  assert.equal(body.includes('imageRatioUnsupported'), false, `${path} still rejects business ratios through capability presets`)
 }
 
 // === channel→project migration (2026-06-27): miniapp must call /projects, never /channels ===

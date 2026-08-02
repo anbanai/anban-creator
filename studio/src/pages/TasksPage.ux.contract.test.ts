@@ -49,7 +49,9 @@ describe('TasksPage recovery workspace contract', () => {
     expect(dialogSource).toContain('switchTaskFormDefaults')
     expect(dialogSource).toContain('taskCreationCostPreview')
     expect(dialogSource).toContain('creationBlocker')
-    expect(dialogSource).toContain('ImageAspectRatioField')
+    expect(dialogSource).toContain('ImageGenerationToolbar')
+    expect(dialogSource).toContain('leadingTools=')
+    expect(dialogSource).not.toContain('ImageAspectRatioField')
     expect(dialogSource).not.toContain('01 类型')
   })
 

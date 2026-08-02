@@ -15,7 +15,6 @@ type ResourceManager struct {
 	themes           map[string]*ResourceEntry
 	writers          map[string]*ResourceEntry
 	layouts          map[string]*ResourceEntry
-	imagePresets     map[string]*ResourceEntry
 	articleTemplates map[string]*ResourceEntry
 	rawContent       map[Category]map[string][]byte
 }
@@ -39,14 +38,12 @@ func NewResourceManager() (*ResourceManager, error) {
 		themes:           make(map[string]*ResourceEntry),
 		writers:          make(map[string]*ResourceEntry),
 		layouts:          make(map[string]*ResourceEntry),
-		imagePresets:     make(map[string]*ResourceEntry),
 		articleTemplates: make(map[string]*ResourceEntry),
 		rawContent:       make(map[Category]map[string][]byte),
 	}
 	rm.rawContent[CategoryTheme] = make(map[string][]byte)
 	rm.rawContent[CategoryWriter] = make(map[string][]byte)
 	rm.rawContent[CategoryLayout] = make(map[string][]byte)
-	rm.rawContent[CategoryImagePreset] = make(map[string][]byte)
 	rm.rawContent[CategoryArticleTemplate] = make(map[string][]byte)
 
 	if err := rm.loadThemes(); err != nil {
@@ -57,9 +54,6 @@ func NewResourceManager() (*ResourceManager, error) {
 	}
 	if err := rm.loadLayouts(); err != nil {
 		return nil, fmt.Errorf("load layouts: %w", err)
-	}
-	if err := rm.loadImagePresets(); err != nil {
-		return nil, fmt.Errorf("load image presets: %w", err)
 	}
 	if err := rm.loadArticleTemplates(); err != nil {
 		return nil, fmt.Errorf("load article templates: %w", err)
@@ -81,10 +75,6 @@ func (rm *ResourceManager) List(category Category) []ResourceEntry {
 		}
 	case CategoryLayout:
 		for _, e := range rm.layouts {
-			items = append(items, *e)
-		}
-	case CategoryImagePreset:
-		for _, e := range rm.imagePresets {
 			items = append(items, *e)
 		}
 	case CategoryArticleTemplate:
@@ -111,11 +101,6 @@ func (rm *ResourceManager) Get(category Category, name string) *ResourceEntry {
 		}
 	case CategoryLayout:
 		if e, ok := rm.layouts[name]; ok {
-			cp := *e
-			return &cp
-		}
-	case CategoryImagePreset:
-		if e, ok := rm.imagePresets[name]; ok {
 			cp := *e
 			return &cp
 		}
@@ -377,50 +362,6 @@ func (rm *ResourceManager) loadArticleTemplates() error {
 		}
 		rm.articleTemplates[raw.Name] = entry
 		rm.rawContent[CategoryArticleTemplate][raw.Name] = data
-	}
-	return nil
-}
-
-func (rm *ResourceManager) loadImagePresets() error {
-	entries, err := fs.ReadDir(ImagePresetsFS, "image_presets")
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") && !strings.HasSuffix(e.Name(), ".yml") {
-			continue
-		}
-		data, err := fs.ReadFile(ImagePresetsFS, "image_presets/"+e.Name())
-		if err != nil {
-			return err
-		}
-		var raw struct {
-			Name                    string   `yaml:"name"`
-			Kind                    string   `yaml:"kind"`
-			Description             string   `yaml:"description"`
-			Archetype               string   `yaml:"archetype"`
-			RecommendedAspectRatios []string `yaml:"recommended_aspect_ratios"`
-			DefaultAspectRatio      string   `yaml:"default_aspect_ratio"`
-			Tags                    []string `yaml:"tags"`
-		}
-		if err := yaml.Unmarshal(data, &raw); err != nil {
-			continue
-		}
-		if raw.Name == "" {
-			continue
-		}
-		entry := &ResourceEntry{
-			Name:         raw.Name,
-			Category:     CategoryImagePreset,
-			Description:  raw.Description,
-			Kind:         raw.Kind,
-			Archetype:    raw.Archetype,
-			AspectRatios: raw.RecommendedAspectRatios,
-			DefaultRatio: raw.DefaultAspectRatio,
-			Tags:         raw.Tags,
-		}
-		rm.imagePresets[raw.Name] = entry
-		rm.rawContent[CategoryImagePreset][raw.Name] = data
 	}
 	return nil
 }

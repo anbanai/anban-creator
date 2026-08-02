@@ -218,9 +218,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
-	if err := ValidateImageRatioForCapability(req.ImageCapabilityKey, req.ImageRatio, h.imageCapabilityRoutes); err != nil {
-		return respondImageCapabilityRatioError(c, err)
-	}
 
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
@@ -425,17 +422,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		if err := h.validateImageCapabilityKeyForUser(c, userID, *req.ImageCapabilityKey); err != nil {
 			return Error(c, fiber.StatusForbidden, err.Error())
 		}
-	}
-	effectiveCapabilityKey := existing.ImageCapabilityKey
-	if req.ImageCapabilityKey != nil {
-		effectiveCapabilityKey = *req.ImageCapabilityKey
-	}
-	effectiveImageRatio := existing.ImageRatio
-	if req.ImageRatio != nil {
-		effectiveImageRatio = *req.ImageRatio
-	}
-	if err := ValidateImageRatioForCapability(effectiveCapabilityKey, effectiveImageRatio, h.imageCapabilityRoutes); err != nil {
-		return respondImageCapabilityRatioError(c, err)
 	}
 
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {

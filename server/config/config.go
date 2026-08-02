@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -321,20 +322,20 @@ type VideoUnderstandingRouteConfig struct {
 }
 
 type ImageGenerationRouteConfig struct {
-	Provider       string                       `yaml:"provider" json:"-"`
-	Model          string                       `yaml:"model" json:"-"`
-	Timeout        time.Duration                `yaml:"timeout" json:"-"`
-	MinTier        string                       `yaml:"min_tier" json:"min_tier"`
-	Alias          string                       `yaml:"alias"`
-	Description    string                       `yaml:"description"`
-	SortOrder      int                          `yaml:"sort_order" json:"sort_order"`
-	BillingSKU     string                       `yaml:"billing_sku" json:"-"`
-	Enabled        bool                         `yaml:"enabled"`
-	QualityRank    int                          `yaml:"quality_rank" json:"quality_rank"`
-	ResponseFormat string                       `yaml:"response_format" json:"-"`
-	BaseURL        string                       `yaml:"base_url" json:"-"`
-	APIKey         string                       `yaml:"api_key" json:"-"`
-	Features       DesignerProviderCapabilities `yaml:"features" json:"features"`
+	Provider         string                       `yaml:"provider" json:"-"`
+	Model            string                       `yaml:"model" json:"-"`
+	Timeout          time.Duration                `yaml:"timeout" json:"-"`
+	MinTier          string                       `yaml:"min_tier" json:"min_tier"`
+	Alias            string                       `yaml:"alias"`
+	Description      string                       `yaml:"description"`
+	SortOrder        int                          `yaml:"sort_order" json:"sort_order"`
+	BillingSKU       string                       `yaml:"billing_sku" json:"-"`
+	Enabled          bool                         `yaml:"enabled"`
+	QualityRank      int                          `yaml:"quality_rank" json:"quality_rank"`
+	ResponseFormat   string                       `yaml:"response_format" json:"-"`
+	BaseURL          string                       `yaml:"base_url" json:"-"`
+	APIKey           string                       `yaml:"api_key" json:"-"`
+	DesignerFeatures DesignerProviderCapabilities `yaml:"designer_features" json:"designer_features"`
 }
 
 func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -343,7 +344,7 @@ func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 		"min_tier": true, "alias": true,
 		"description": true, "sort_order": true, "billing_sku": true,
 		"enabled": true, "quality_rank": true, "response_format": true,
-		"base_url": true, "api_key": true, "features": true,
+		"base_url": true, "api_key": true, "designer_features": true,
 	}); err != nil {
 		return err
 	}
@@ -1250,6 +1251,8 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 	}
 	if strings.TrimSpace(route.Provider) == "" {
 		errs = append(errs, path+".provider is required")
+	} else if !supportsSemanticTaskAspectRatioProvider(route.Provider) {
+		errs = append(errs, path+".provider does not implement the semantic task aspect-ratio protocol")
 	}
 	if strings.TrimSpace(route.Model) == "" {
 		errs = append(errs, path+".model is required")
@@ -1277,13 +1280,22 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 	if route.QualityRank <= 0 {
 		errs = append(errs, path+".quality_rank must be positive")
 	}
-	if err := validateDesignerProviderCapabilities(path+".features", route.Features); err != nil {
+	if err := validateDesignerProviderCapabilities(path+".designer_features", route.DesignerFeatures); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func supportsSemanticTaskAspectRatioProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapabilities) error {
@@ -1304,6 +1316,9 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 	if len(caps.OutputFormats) == 0 {
 		errs = append(errs, "output_formats is required")
 	}
+	if len(caps.QualityLevels) == 0 {
+		errs = append(errs, "quality_levels is required")
+	}
 
 	hasDefaultSize := false
 	for _, preset := range caps.SizePresets {
@@ -1311,6 +1326,9 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 		if preset == "" {
 			errs = append(errs, "size_presets must not contain empty values")
 			continue
+		}
+		if !isDesignerFixedSizePreset(preset) {
+			errs = append(errs, "size_presets must use width:height:1K|2K|4K format")
 		}
 		if strings.EqualFold(preset, defaultSize) {
 			hasDefaultSize = true
@@ -1333,6 +1351,24 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 		return fmt.Errorf("%s invalid: %s", path, strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func isDesignerFixedSizePreset(value string) bool {
+	parts := strings.Split(strings.ToUpper(strings.TrimSpace(value)), ":")
+	if len(parts) != 3 {
+		return false
+	}
+	width, widthErr := strconv.Atoi(parts[0])
+	height, heightErr := strconv.Atoi(parts[1])
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return false
+	}
+	switch parts[2] {
+	case "1K", "2K", "4K":
+		return true
+	default:
+		return false
+	}
 }
 
 func imageAPIFromCapability(route ImageGenerationRouteConfig) *appconfig.ImageAPI {

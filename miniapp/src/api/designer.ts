@@ -12,7 +12,7 @@ import type {
 import { TOKEN_KEY } from '@/utils/constants'
 
 function normalizeCapability(raw: ImageCapabilityOption): DesignerCapability {
-  const features = raw.features
+  const features = raw.designer_features
   return {
     id: raw.key,
     name: raw.display_name,
@@ -22,7 +22,7 @@ function normalizeCapability(raw: ImageCapabilityOption): DesignerCapability {
     priceAvailable: raw.price_available,
     enabled: raw.enabled !== false,
     idx: raw.sort_order ?? 0,
-    features: {
+    designerFeatures: {
       qualityLevels: features?.quality_levels ?? [],
       sizePresets: features?.size_presets ?? [],
       defaultSize: features?.default_size ?? 'auto',
@@ -66,13 +66,13 @@ export const designerApi = {
     })
   },
 
-  uploadReference: (filePath: string, name = 'file') =>
+  uploadReference: (filePath: string) =>
     new Promise<{ file_id: string; filename: string; size: number }>((resolve, reject) => {
       const token = uni.getStorageSync(TOKEN_KEY)
       uni.uploadFile({
         url: uploadUrl('/designer/upload-reference'),
         filePath,
-        name,
+        name: 'file',
         header: token ? { Authorization: `Bearer ${token}` } : undefined,
         success(res) {
           try {

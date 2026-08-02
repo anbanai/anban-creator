@@ -92,6 +92,13 @@
           :maxlength="5120"
           :rows="3"
         />
+        <ImageGenerationToolbar
+          v-model:ratio="form.imageRatio"
+          v-model:capability-key="form.imageCapabilityKey"
+          :ratios="allowedImageRatios"
+          :capabilities="imageCapabilities"
+          :loading="imageCapabilitiesLoading"
+        />
       </view>
 
       <!-- Template (optional) -->
@@ -103,25 +110,6 @@
           <text v-if="form.templateId" class="picker-row__clear" @tap.stop="clearTemplate">清除</text>
           <text v-else class="picker-row__arrow">›</text>
         </view>
-      </view>
-
-      <!-- Image capability -->
-      <view class="form-section">
-        <text class="form-section__label">图像能力</text>
-        <ImageCapabilitySelector
-          v-model="form.imageCapabilityKey"
-          :options="imageCapabilities"
-          :loading="imageCapabilitiesLoading"
-        />
-      </view>
-
-      <view class="form-section">
-        <text class="form-section__label">图片比例</text>
-        <ImageAspectRatioField
-          v-model="form.imageRatio"
-          :supported-sizes="selectedCapability?.features?.size_presets"
-        />
-        <text v-if="imageRatioUnsupported" class="form-section__error">当前图像能力不支持所选比例，请重新选择比例或智能适配</text>
       </view>
 
       <!-- Visual style -->
@@ -318,10 +306,10 @@ import type {
   ResourceEntry,
   ReferenceImageSelection,
   ImageCapabilityOption,
+  PlatformConfig,
 } from '@/types'
 import ProjectSelector from '@/components/business/ProjectSelector.vue'
-import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
-import ImageAspectRatioField from '@/components/business/ImageAspectRatioField.vue'
+import ImageGenerationToolbar from '@/components/business/ImageGenerationToolbar.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import SchedulePicker from '@/components/business/SchedulePicker.vue'
 import AbButton from '@/components/common/AbButton.vue'
@@ -341,7 +329,7 @@ const form = reactive({
   prompt: '',
   weekdays: [] as number[],
   imageCapabilityKey: '',
-  imageRatio: '',
+  imageRatio: 'auto',
   visual_style: '',
   writer_key: '',
   theme: '',
@@ -384,6 +372,7 @@ const selectedProject = ref<Project | null>(null)
 const imageCapabilities = ref<ImageCapabilityOption[]>([])
 const imageCapabilitiesLoading = ref(false)
 const defaultImageCapability = ref('')
+const platformConfigs = ref<PlatformConfig[]>([])
 // Platform-dependent resources, loaded on project change.
 const platformTemplates = ref<Template[]>([])
 const platformThemes = ref<ResourceEntry[]>([])
@@ -428,10 +417,7 @@ const imageCapabilityUnavailable = computed(() =>
     || selectedCapability.value.price_available !== true
   ),
 )
-const imageRatioUnsupported = computed(() => {
-  const supported = selectedCapability.value?.features?.size_presets
-  return !!form.imageRatio && !!supported && !supported.includes(form.imageRatio)
-})
+const allowedImageRatios = computed(() => platformConfigs.value.find((item) => item.id === platform.value)?.supported_image_ratios || [])
 const isArticle = computed(() => platform.value === 'article')
 const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
@@ -455,7 +441,6 @@ const canSubmit = computed(() => {
   if (!form.cronExpr.trim() || (form.goalMode && !form.goal.trim())) return false
   if (!form.executionProfile || !selectedExecutionProfileAvailable.value) return false
   if (imageCapabilityUnavailable.value) return false
-  if (imageRatioUnsupported.value) return false
   if (resolvedPlanPrice.value === undefined) return false
   return !submitting.value && !referenceUploading.value && !executionProfilesLoading.value
 })
@@ -521,7 +506,7 @@ function updateCronWithWeekdays() {
 function onProjectChange(project: Project) {
   selectedProject.value = project
   form.projectId = project.id
-  form.imageRatio = project.image_ratio || ''
+  form.imageRatio = project.image_ratio || 'auto'
   form.imageCapabilityKey = project.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
   errors.projectId = ''
   ensureExecutionProfileSelection()
@@ -626,11 +611,6 @@ function validate(): boolean {
     return false
   }
 
-  if (imageRatioUnsupported.value) {
-    uni.showToast({ title: '当前图像能力不支持所选比例，请重新选择比例或智能适配', icon: 'none' })
-    return false
-  }
-
   // Plans only support seednote / article (matches studio planSchema).
   if (planUnsupported.value) {
     uni.showToast({ title: '该账号类型暂不支持计划，请选公众号/种草笔记', icon: 'none' })
@@ -682,7 +662,7 @@ async function handleSubmit() {
       prompt: form.prompt.trim() || undefined,
       project_id: form.projectId,
       image_capability_key: form.imageCapabilityKey || undefined,
-      image_ratio: form.imageRatio || undefined,
+      image_ratio: form.imageRatio,
       visual_style: form.visual_style.trim() || undefined,
       writer_key: isArticle.value && form.writer_key.trim() ? form.writer_key.trim() : undefined,
       theme: isArticle.value && form.theme ? form.theme : undefined,
@@ -732,7 +712,7 @@ async function loadPlan(planId: string) {
     form.cronExpr = plan.cron_expr || '0 9 * * 1,3,5'
     form.prompt = plan.prompt || ''
     form.imageCapabilityKey = plan.image_capability_key || ''
-    form.imageRatio = plan.image_ratio || ''
+    form.imageRatio = plan.image_ratio || 'auto'
     form.visual_style = plan.visual_style || ''
     form.writer_key = plan.writer_key || ''
     form.theme = plan.theme || ''
@@ -824,10 +804,19 @@ async function loadImageCapabilities() {
   }
 }
 
+async function loadPlatformConfigs() {
+  try {
+    platformConfigs.value = await projectsApi.platformConfigs()
+  } catch {
+    platformConfigs.value = []
+  }
+}
+
 // --- Page lifecycle ---
 onLoad((query) => {
   void loadExecutionConfiguration()
   void loadImageCapabilities()
+  void loadPlatformConfigs()
   if (query?.id) {
     editingId.value = query.id
     loadPlan(query.id)

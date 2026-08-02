@@ -1,6 +1,6 @@
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce' | 'xls'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce'
 export type ProjectStatus = 'active' | 'archived'
 
 export interface ProjectConfig {
@@ -44,7 +44,6 @@ export interface Project {
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   layout: string
-  image_preset: string
   max_concurrent_tasks: number
   config: ProjectConfig
   status: ProjectStatus
@@ -89,7 +88,6 @@ export interface CreateProjectRequest {
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   layout?: string
-  image_preset?: string
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
@@ -132,6 +130,7 @@ export interface PlatformConfig {
   supports_auto_fetch: boolean
   profile_url_pattern: string
   default_image_ratio: string
+  supported_image_ratios: string[]
   fields: PlatformFieldConfig[]
 }
 

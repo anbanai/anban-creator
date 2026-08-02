@@ -11,11 +11,11 @@ import (
 func registerResourceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_resources",
-		Description: "List available embedded resources (themes, writers, layouts, image presets, article templates). Returns metadata for each resource including name, description, and category-specific fields.",
+		Description: "List available embedded resources (themes, writers, layouts, article templates). Returns metadata for each resource including name, description, and category-specific fields.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"category": map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "image_presets", "article_templates"}, "description": "Resource category to list"},
+				"category": map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category to list"},
 				"platform": map[string]any{"type": "string", "description": "Filter by platform: article or seednote (optional)"},
 			},
 			"required": []any{"category"},
@@ -28,7 +28,7 @@ func registerResourceTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"category":    map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "image_presets", "article_templates"}, "description": "Resource category"},
+				"category":    map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category"},
 				"name":        map[string]any{"type": "string", "description": "Resource name"},
 				"include_raw": map[string]any{"type": "boolean", "description": "Include read-only raw YAML for exact agent consumption"},
 			},

@@ -112,12 +112,12 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx),
 		TaskID: stringArg(args, "task_id"), ProjectID: stringArg(args, "project_id"),
 		Prompt: stringArg(args, "prompt"), ImageType: stringArg(args, "image_type"),
-		OutputPath: stringArg(args, "output_path"), Size: stringArg(args, "size"),
+		OutputPath: stringArg(args, "output_path"), AspectRatio: stringArg(args, "aspect_ratio"),
 		ReferencePaths: referencePaths, Watermark: watermark,
 	})
 	if err != nil {
 		failure := classifyImageToolFailure(parentCtx, ctx, err, "generate", operationTimeout, false)
-		if isImageTimeoutFailure(failure.Code) || failure.Code == "image_capability_size_unsupported" {
+		if isImageTimeoutFailure(failure.Code) || failure.Code == "image_ratio_not_allowed" || failure.Code == "image_ratio_mismatch" {
 			return imageFailureResult(failure), nil
 		}
 		return billingError("generate image", err), nil
@@ -129,13 +129,17 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 type imageToolFailure struct {
-	Code           string   `json:"code"`
-	Message        string   `json:"message"`
-	Stage          string   `json:"stage"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
-	Durable        bool     `json:"durable_task_file"`
-	Requested      string   `json:"requested,omitempty"`
-	SupportedSizes []string `json:"supported_sizes,omitempty"`
+	Code               string   `json:"code"`
+	Message            string   `json:"message"`
+	Stage              string   `json:"stage"`
+	TimeoutMS          int64    `json:"timeout_ms,omitempty"`
+	Durable            bool     `json:"durable_task_file"`
+	RequestedRatio     string   `json:"requested_ratio,omitempty"`
+	AllowedImageRatios []string `json:"allowed_image_ratios,omitempty"`
+	TaskImageRatio     string   `json:"task_image_ratio,omitempty"`
+	ActualWidth        int      `json:"actual_width,omitempty"`
+	ActualHeight       int      `json:"actual_height,omitempty"`
+	CapabilityKey      string   `json:"capability_key,omitempty"`
 }
 
 func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
@@ -148,11 +152,18 @@ func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
 
 func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error, stage string, timeout time.Duration, durable bool) imageToolFailure {
 	code := categorizeImageGenFailure(err, "")
-	var sizeErr *service.ImageCapabilitySizeError
-	if errors.As(err, &sizeErr) {
+	var ratioErr *service.ImageRatioNotAllowedError
+	if errors.As(err, &ratioErr) {
 		return imageToolFailure{
-			Code: "image_capability_size_unsupported", Message: sizeErr.Error(), Stage: stage, Durable: durable,
-			Requested: sizeErr.Requested, SupportedSizes: append([]string(nil), sizeErr.SupportedSizes...),
+			Code: "image_ratio_not_allowed", Message: ratioErr.Error(), Stage: stage, Durable: durable,
+			RequestedRatio: ratioErr.RequestedRatio, AllowedImageRatios: append([]string(nil), ratioErr.AllowedImageRatios...), TaskImageRatio: ratioErr.TaskImageRatio,
+		}
+	}
+	var mismatch *service.ImageRatioMismatchError
+	if errors.As(err, &mismatch) {
+		return imageToolFailure{
+			Code: "image_ratio_mismatch", Message: mismatch.Error(), Stage: stage, Durable: durable,
+			RequestedRatio: mismatch.RequestedRatio, ActualWidth: mismatch.ActualWidth, ActualHeight: mismatch.ActualHeight, CapabilityKey: mismatch.CapabilityKey,
 		}
 	}
 	switch {
@@ -293,12 +304,12 @@ func generateImageInputSchema() map[string]any {
 			"prompt":          map[string]any{"type": "string", "description": "Creative image prompt"},
 			"image_type":      map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Semantic asset role"},
 			"output_path":     map[string]any{"type": "string", "description": "Task-relative output path, such as output/cover.png"},
-			"size":            map[string]any{"type": "string", "description": "Requested aspect ratio, such as 3:4, 16:9, or 1:1"},
+			"aspect_ratio":    map[string]any{"type": "string", "description": "Concrete business aspect ratio such as 3:4, 16:9, or 1:1; auto and pixel sizes are not accepted"},
 			"ref_image_path":  map[string]any{"type": "string", "description": "Optional single task or server-local reference image path"},
 			"ref_image_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional ordered reference image paths"},
 			"watermark":       map[string]any{"type": "boolean", "description": "Whether the generated image should include a watermark", "default": false},
 		},
-		"required": []any{"project_id", "task_id", "prompt", "output_path", "size"},
+		"required": []any{"project_id", "task_id", "prompt", "output_path", "aspect_ratio"},
 	}
 }
 

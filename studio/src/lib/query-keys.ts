@@ -41,7 +41,6 @@ export const queryKeys = {
     themes: ['resources', 'themes'] as const,
     writers: ['resources', 'writers'] as const,
     layouts: ['resources', 'layouts'] as const,
-    imagePresets: ['resources', 'image_presets'] as const,
   },
   usage: {
     stats: (params?: { from?: string; to?: string; project_id?: string }) =>

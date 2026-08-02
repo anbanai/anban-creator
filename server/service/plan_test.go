@@ -494,16 +494,16 @@ func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
 		UserID:           "user-1",
 		ProjectID:        projectID,
 		CronExpr:         "0 9 * * *",
-		ImageRatio:       "21:9",
+		ImageRatio:       "4:3",
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	if plan.ImageRatio != "21:9" {
-		t.Fatalf("created image ratio = %q, want 21:9", plan.ImageRatio)
+	if plan.ImageRatio != "4:3" {
+		t.Fatalf("created image ratio = %q, want 4:3", plan.ImageRatio)
 	}
 
-	nextRatio := "9:16"
+	nextRatio := "auto"
 	updated, err := svc.Update(ctx, UpdatePlanParams{
 		ID:               plan.ID,
 		ExecutionProfile: "effective",

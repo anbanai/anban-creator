@@ -20,6 +20,8 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
 		"output/material-analysis.md",
 		"output/content.md",
+		"output/image-prompts.md",
+		"output/moments-image.png",
 		"output/quality-review.md",
 	} {
 		if !strings.Contains(claudeAgent, want) {
@@ -41,6 +43,8 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		`get_project_profile(project_id="$PROJECT_ID", scope="moments", task_id="$TASK_ID")`,
 		"output/material-analysis.md",
 		"output/content.md",
+		"output/image-prompts.md",
+		"output/moments-image.png",
 		"output/quality-review.md",
 	} {
 		if !strings.Contains(codexAgent, want) {
@@ -76,7 +80,7 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 		t.Fatal("claudecode moments final summary must precede feedback")
 	}
 	finalSummary := claudeAgent[finalSummaryAt:feedbackAt]
-	for _, want := range []string{"output/material-analysis.md", "output/content.md", "output/quality-review.md", "质量复盘状态", "证据不足", "人工复核点"} {
+	for _, want := range []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md", "质量复盘状态", "证据不足", "人工复核点"} {
 		if !strings.Contains(finalSummary, want) {
 			t.Fatalf("claudecode moments delivery validation missing %q", want)
 		}
@@ -112,6 +116,8 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 				"人设层",
 				"output/material-analysis.md",
 				"output/content.md",
+				"output/image-prompts.md",
+				"output/moments-image.png",
 				"output/quality-review.md",
 				"不默认使用“彩卉”人设",
 				"不伪造客户案例、成交数据、用户反馈",

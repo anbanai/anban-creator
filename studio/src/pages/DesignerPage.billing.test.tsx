@@ -81,11 +81,11 @@ const provider = {
   priceAvailable: true,
   enabled: true,
   idx: 0,
-  features: {
+  designerFeatures: {
     qualityLevels: ['auto', 'low', 'medium', 'high'],
-    sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
-    defaultSize: 'auto',
-    maxBatch: 10,
+    sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K'],
+    defaultSize: '1:1:2K',
+    maxBatch: 1,
     maxReferenceImages: 16,
     supportsReference: true,
     supportsMask: true,
@@ -147,7 +147,7 @@ describe('Designer billing guidance', () => {
   it('does not expose Agent execution profiles for image operations', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('专业增强')
+    await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
   })
 
@@ -171,7 +171,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('专业增强')
+    await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -188,7 +188,7 @@ describe('Designer billing guidance', () => {
 
     renderWithQueryClient(queryClient)
 
-    await screen.findAllByText('专业增强')
+    await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
     await waitFor(() => expect(queryClient.getQueryState(['billing', 'wallet'])?.status).toBe('error'))
     expect(screen.queryByText('每张 500 积分 · 余额 1,000')).not.toBeInTheDocument()
     expect(screen.getByText('每张 500 积分')).toBeInTheDocument()
@@ -197,7 +197,7 @@ describe('Designer billing guidance', () => {
   it('refreshes the wallet after a normal generation is accepted', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('专业增强')
+    await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -252,7 +252,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findAllByText('专业增强')
+    await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })

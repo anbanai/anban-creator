@@ -1089,8 +1089,8 @@ func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *tes
 	}
 
 	routes := config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]config.ImageGenerationRouteConfig{
-		"standard":     {Enabled: true, MinTier: "free", Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
-		"professional": {Enabled: true, MinTier: "free", Features: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
+		"standard":     {Enabled: true, MinTier: "free", DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+		"professional": {Enabled: true, MinTier: "free", DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
 	}}
 	logger := zerolog.New(io.Discard)
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
@@ -1100,7 +1100,7 @@ func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *tes
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"21:9","product_photos":["https://cdn.example.com/cup.png"]}`)
+	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"3:4","product_photos":["https://cdn.example.com/cup.png"]}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -1110,7 +1110,7 @@ func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *tes
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("tasks = %#v, err=%v", tasks, err)
 	}
-	if tasks[0].ImageCapabilityKey != "professional" || tasks[0].ImageRatio != "21:9" {
+	if tasks[0].ImageCapabilityKey != "professional" || tasks[0].ImageRatio != "3:4" {
 		t.Fatalf("frozen image config = %q/%q", tasks[0].ImageCapabilityKey, tasks[0].ImageRatio)
 	}
 }
@@ -1244,7 +1244,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
-	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
+	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
@@ -1654,10 +1654,10 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 		{
 			name:       "ecommerce",
 			platform:   model.PlatformEcommerce,
-			typeFields: `"product_photos":["https://example.com/product.png"],"selected_modules":{"main_images":2},"target_platform":"amazon","selling_points":"durable","language":"en","provider_strategy_override":"balanced"`,
+			typeFields: `"product_photos":["https://example.com/product.png"],"selected_modules":{"main_images":2},"target_platform":"amazon","selling_points":"durable","language":"en"`,
 			assert: func(t *testing.T, task *model.Task) {
 				got := task.Ecommerce.Data()
-				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || got.ProviderStrategyOverride != "balanced" || len(got.ProductPhotos) != 1 {
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || len(got.ProductPhotos) != 1 {
 					t.Fatalf("ecommerce config = %#v", got)
 				}
 			},
@@ -1681,17 +1681,6 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 				got := task.Ecommerce.Data()
 				if got.SelectedModules["main_images"] != 1 || got.Language != "zh-CN" {
 					t.Fatalf("language-only ecommerce config = %#v", got)
-				}
-			},
-		},
-		{
-			name:       "ecommerce provider strategy only",
-			platform:   model.PlatformEcommerce,
-			typeFields: `"provider_strategy_override":"quality"`,
-			assert: func(t *testing.T, task *model.Task) {
-				got := task.Ecommerce.Data()
-				if got.SelectedModules["main_images"] != 1 || got.ProviderStrategyOverride != "quality" {
-					t.Fatalf("provider-only ecommerce config = %#v", got)
 				}
 			},
 		},
@@ -2290,7 +2279,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			h.SetRepository(repo)
 			h.SetStore(store)
 			h.SetReferenceAssetService(referenceSvc)
-			h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, Features: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
+			h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}}}})
 			app := fiber.New()
 			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
