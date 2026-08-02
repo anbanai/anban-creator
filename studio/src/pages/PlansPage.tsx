@@ -25,7 +25,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -549,28 +549,6 @@ export default function PlansPage() {
       submitting={isSubmitting}
       submitDisabled={!watchedProjectId}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
-      contextBar={editingPlan ? (
-        <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
-      ) : (
-        <ProjectContextControl
-          mode="select"
-          projects={planContextProjects}
-          value={watchedProjectId || null}
-          allowNoProject={false}
-          placeholder="选择项目"
-          onValueChange={(id, project) => {
-            setMontageUploading(false)
-            form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-            if (!id || !project?.platform) return
-            const nextType = project.platform as PlanType
-			const fullProject = projectMap[id]
-			form.setValue('type', nextType, { shouldDirty: true })
-			form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
-			form.setValue('agent_input', {}, { shouldDirty: true })
-			form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
-          }}
-        />
-      )}
       leadingTools={!isMontagePlan ? (
         <ImageGenerationToolbar
           ratios={businessImageRatios}
