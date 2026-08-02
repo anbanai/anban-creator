@@ -233,6 +233,31 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(document.querySelectorAll('form form')).toHaveLength(0)
   })
 
+  it('puts the single project field before content type', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+
+    const projectLabel = within(dialog).getByText('项目', { selector: 'label' })
+    const typeLabel = within(dialog).getByText('内容类型', { selector: 'label' })
+    expect(projectLabel.compareDocumentPosition(typeLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(dialog).getAllByRole('combobox', { name: '项目上下文' })).toHaveLength(1)
+  })
+
+  it('blocks submission when a weekly schedule has no selected day', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+
+    for (const day of ['周一', '周三', '周五']) {
+      fireEvent.click(within(dialog).getByRole('button', { name: day }))
+    }
+    expect(within(dialog).getAllByText('请至少选择一天').length).toBeGreaterThan(0)
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
   it('shows an error toast when pausing a plan fails (was previously silent)', async () => {
     // pause is wired through useSubmitLock().submit(mutateAsync) with no catch —
     // before this fix, a rejection surfaced nothing to the user. Now the server's
@@ -257,7 +282,8 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const [typeSelect] = within(dialog).getAllByRole('combobox')
+    const typeField = within(dialog).getByText('内容类型', { selector: 'label' }).parentElement
+    const typeSelect = within(typeField as HTMLElement).getByRole('combobox')
     fireEvent.click(typeSelect)
 
     expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()

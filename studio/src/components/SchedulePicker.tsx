@@ -1,57 +1,66 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import TimePicker from '@/components/TimePicker'
 
 interface SchedulePickerProps {
-  value: string          // cron expression, e.g. "0 9 * * 1,3,5"
+  value: string
   onChange: (cron: string) => void
   onInteraction?: () => void
+  onValidityChange?: (valid: boolean) => void
+  footer?: ReactNode
 }
 
 type Frequency = 'daily' | 'weekly'
 
 const WEEK_DAYS = [
-  { value: 1, label: '周一' },
-  { value: 2, label: '周二' },
-  { value: 3, label: '周三' },
-  { value: 4, label: '周四' },
-  { value: 5, label: '周五' },
-  { value: 6, label: '周六' },
-  { value: 0, label: '周日' },
+  { value: 1, label: '周一', shortLabel: '一' },
+  { value: 2, label: '周二', shortLabel: '二' },
+  { value: 3, label: '周三', shortLabel: '三' },
+  { value: 4, label: '周四', shortLabel: '四' },
+  { value: 5, label: '周五', shortLabel: '五' },
+  { value: 6, label: '周六', shortLabel: '六' },
+  { value: 0, label: '周日', shortLabel: '日' },
 ]
 
 function parseCron(cron: string): { frequency: Frequency; days: number[]; hour: number; minute: number } {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return { frequency: 'daily', days: [], hour: 9, minute: 0 }
-  const [min, hourStr, , , weekday] = parts
-  const parsedHour = Number.parseInt(hourStr, 10)
-  const parsedMinute = Number.parseInt(min, 10)
+  const [minuteText, hourText, , , weekday] = parts
+  const parsedHour = Number.parseInt(hourText, 10)
+  const parsedMinute = Number.parseInt(minuteText, 10)
   const hour = Number.isNaN(parsedHour) ? 9 : parsedHour
   const minute = Number.isNaN(parsedMinute) ? 0 : parsedMinute
-  if (weekday === '*') {
-    return { frequency: 'daily', days: [], hour, minute }
-  }
+  if (weekday === '*') return { frequency: 'daily', days: [], hour, minute }
   return {
     frequency: 'weekly',
-    days: weekday.split(',').map(Number).filter(n => !isNaN(n)),
+    days: weekday.split(',').map(Number).filter((day) => WEEK_DAYS.some(({ value }) => value === day)),
     hour,
     minute,
   }
 }
 
-function toCron(frequency: Frequency, days: number[], hour: number, minute: number): string {
-  if (frequency === 'daily') {
-    return `${minute} ${hour} * * *`
-  }
-  const sortedDays = [...days].sort((a, b) => a - b)
-  return `${minute} ${hour} * * ${sortedDays.join(',')}`
+function toCron(frequency: Frequency, days: number[], time: string): string | null {
+  const [hour, minute] = time.split(':').map(Number)
+  if (frequency === 'weekly' && days.length === 0) return null
+  const weekday = frequency === 'daily' ? '*' : WEEK_DAYS
+    .filter(({ value }) => days.includes(value))
+    .map(({ value }) => value)
+    .join(',')
+  return `${minute || 0} ${hour || 0} * * ${weekday}`
 }
 
-export default function SchedulePicker({ value, onChange, onInteraction }: SchedulePickerProps) {
+export default function SchedulePicker({
+  value,
+  onChange,
+  onInteraction,
+  onValidityChange,
+  footer,
+}: SchedulePickerProps) {
   const parsed = parseCron(value)
   const [frequency, setFrequency] = useState<Frequency>(parsed.frequency)
   const [days, setDays] = useState<number[]>(parsed.days)
   const [time, setTime] = useState(`${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`)
+  const valid = frequency === 'daily' || days.length > 0
 
   useEffect(() => {
     const next = parseCron(value)
@@ -61,75 +70,97 @@ export default function SchedulePicker({ value, onChange, onInteraction }: Sched
   }, [value])
 
   useEffect(() => {
-    const [h, m] = time.split(':').map(Number)
-    onChange(toCron(frequency, days, h || 0, m || 0))
-  }, [frequency, days, time, onChange])
+    onValidityChange?.(valid)
+  }, [onValidityChange, valid])
 
-  function handleFrequencyChange(val: string[]) {
-    onInteraction?.()
-    const freq = (val[0] || 'daily') as Frequency
-    setFrequency(freq)
-    if (freq === 'daily') setDays([])
+  function emit(nextFrequency: Frequency, nextDays: number[], nextTime: string) {
+    const cron = toCron(nextFrequency, nextDays, nextTime)
+    if (cron) onChange(cron)
   }
 
-  function handleDaysChange(val: string[]) {
+  function handleFrequencyChange(values: string[]) {
     onInteraction?.()
-    setDays(val.map(Number))
+    const nextFrequency = (values[0] || frequency) as Frequency
+    const nextDays = nextFrequency === 'weekly' && days.length === 0 ? [1] : days
+    setFrequency(nextFrequency)
+    setDays(nextDays)
+    emit(nextFrequency, nextDays, time)
   }
 
-  const dayLabels = [...days]
-    .sort((a, b) => a - b)
-    .map(d => WEEK_DAYS.find(w => w.value === d)?.label)
-    .filter(Boolean)
+  function handleDaysChange(values: string[]) {
+    onInteraction?.()
+    const nextDays = values.map(Number)
+    setDays(nextDays)
+    emit(frequency, nextDays, time)
+  }
+
+  function handleTimeChange(nextTime: string) {
+    onInteraction?.()
+    setTime(nextTime)
+    emit(frequency, days, nextTime)
+  }
+
+  const dayLabels = WEEK_DAYS
+    .filter(({ value }) => days.includes(value))
+    .map(({ shortLabel }) => shortLabel)
 
   return (
-    <div className="space-y-3">
-      {/* Frequency selection */}
-      <ToggleGroup
-        value={[frequency]}
-        onValueChange={handleFrequencyChange}
-        variant="outline"
-        size="sm"
-        spacing={2}
-      >
-        <ToggleGroupItem value="daily">每天</ToggleGroupItem>
-        <ToggleGroupItem value="weekly">每周</ToggleGroupItem>
-      </ToggleGroup>
-
-      {/* Day of week selection (weekly only) */}
-      {frequency === 'weekly' && (
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="space-y-4 p-3 sm:p-4">
         <ToggleGroup
-          value={days.map(String)}
-          onValueChange={handleDaysChange}
-        multiple
-        variant="outline"
-        size="sm"
-        spacing={1}
-        className="grid w-full grid-cols-4 sm:grid-cols-7"
-      >
-          {WEEK_DAYS.map(day => (
-            <ToggleGroupItem key={day.value} value={String(day.value)}>
-              {day.label}
-            </ToggleGroupItem>
-          ))}
+          value={[frequency]}
+          onValueChange={handleFrequencyChange}
+          variant="outline"
+          size="sm"
+          spacing={0}
+          className="grid w-full grid-cols-2"
+          aria-label="执行频率"
+        >
+          <ToggleGroupItem value="daily" className="w-full">每天</ToggleGroupItem>
+          <ToggleGroupItem value="weekly" className="w-full">每周</ToggleGroupItem>
         </ToggleGroup>
-      )}
 
-      {/* Time selection */}
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-muted-foreground">时间</label>
-        <TimePicker value={time} onChange={(next) => { onInteraction?.(); setTime(next) }} />
+        {frequency === 'weekly' && (
+          <ToggleGroup
+            value={days.map(String)}
+            onValueChange={handleDaysChange}
+            multiple
+            variant="outline"
+            size="sm"
+            spacing={1}
+            className="grid w-full grid-cols-7"
+            aria-label="每周执行日期"
+          >
+            {WEEK_DAYS.map((day) => (
+              <ToggleGroupItem
+                key={day.value}
+                value={String(day.value)}
+                aria-label={day.label}
+                className="h-9 min-w-0 px-0"
+              >
+                <span className="hidden sm:inline">{day.label}</span>
+                <span className="sm:hidden">{day.shortLabel}</span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        )}
+
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-foreground">执行时间</label>
+          <TimePicker value={time} onChange={handleTimeChange} />
+        </div>
+
+        {valid ? (
+          <p className="text-sm text-muted-foreground">
+            {frequency === 'daily'
+              ? `每天 ${time} 自动执行`
+              : `每周${dayLabels.join('、')} ${time} 自动执行`}
+          </p>
+        ) : (
+          <p role="alert" className="text-sm font-medium text-destructive">请至少选择一天</p>
+        )}
       </div>
-
-      {/* Preview */}
-      <p className="text-xs text-muted-foreground">
-        {frequency === 'daily'
-          ? `每天 ${time} 自动执行`
-          : dayLabels.length > 0
-            ? `每${dayLabels.join('、')} ${time} 自动执行`
-            : '请选择至少一天'
-        }
-      </p>
+      {footer ? <div className="border-t border-border bg-muted/20 p-3 sm:px-4">{footer}</div> : null}
     </div>
   )
 }

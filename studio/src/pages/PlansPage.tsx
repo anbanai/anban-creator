@@ -114,6 +114,7 @@ export default function PlansPage() {
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const [montageUploading, setMontageUploading] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
+  const [scheduleValid, setScheduleValid] = useState(true)
   const { submit } = useSubmitLock()
   const {
     items: imageCapabilityOptions,
@@ -201,6 +202,12 @@ export default function PlansPage() {
 		&& selectedImageCapability?.features?.size_presets
 		&& !selectedImageCapability.features.size_presets.includes(watchedImageRatio),
 	)
+
+  const handleScheduleValidityChange = useCallback((valid: boolean) => {
+    setScheduleValid(valid)
+    if (valid) form.clearErrors('cron_expr')
+    else form.setError('cron_expr', { type: 'validate', message: '请至少选择一天' })
+  }, [form])
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -523,7 +530,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
+    if (!scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -551,28 +558,6 @@ export default function PlansPage() {
       submitting={isSubmitting}
       submitDisabled={!watchedProjectId}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
-      contextBar={editingPlan ? (
-        <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
-      ) : (
-        <ProjectContextControl
-          mode="select"
-          projects={planContextProjects}
-          value={watchedProjectId || null}
-          allowNoProject={false}
-          placeholder="选择项目"
-          onValueChange={(id, project) => {
-            setMontageUploading(false)
-            form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-            if (!id || !project?.platform) return
-            const nextType = project.platform as PlanType
-			const fullProject = projectMap[id]
-			form.setValue('type', nextType, { shouldDirty: true })
-			form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
-			form.setValue('agent_input', {}, { shouldDirty: true })
-			form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
-          }}
-        />
-      )}
       />
       {attachmentSubmitError ? (
         <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
@@ -729,6 +714,37 @@ export default function PlansPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="plan-form" onSubmit={handlePlanSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto">
+              <FormField control={form.control} name="project_id" render={() => (
+                <FormItem>
+                  <FormLabel>项目</FormLabel>
+                  <FormControl>
+                    {editingPlan ? (
+                      <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
+                    ) : (
+                      <ProjectContextControl
+                        mode="select"
+                        projects={planContextProjects}
+                        value={watchedProjectId || null}
+                        allowNoProject={false}
+                        placeholder="选择项目"
+                        onValueChange={(id, project) => {
+                          setMontageUploading(false)
+                          form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+                          if (!id || !project?.platform) return
+                          const nextType = project.platform as PlanType
+                          const fullProject = projectMap[id]
+                          form.setValue('type', nextType, { shouldDirty: true })
+                          form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
+                          form.setValue('agent_input', {}, { shouldDirty: true })
+                          form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
+                        }}
+                      />
+                    )}
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
@@ -754,9 +770,6 @@ export default function PlansPage() {
                       </SelectContent>
                     </Select>
                   </FormControl>
-                  {form.watch('project_id') && (
-                    <FormDescription>内容类型随所选项目自动确定</FormDescription>
-                  )}
                   <FormMessage />
                 </FormItem>
               )} />
@@ -783,15 +796,22 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>排期设置</FormLabel>
                   <FormControl>
-                    <SchedulePicker value={field.value} onChange={field.onChange} onInteraction={() => { scheduleManuallyChangedRef.current = true }} />
+                    <SchedulePicker
+                      value={field.value}
+                      onChange={field.onChange}
+                      onInteraction={() => { scheduleManuallyChangedRef.current = true }}
+                      onValidityChange={handleScheduleValidityChange}
+                      footer={(
+                        <TaskTimePricingNotice
+                          catalog={billingCatalog}
+                          taskType={watchedType}
+                          executionProfile={(watchedExecutionProfile || undefined) as AgentExecutionProfileID | undefined}
+                          selectedTime={cronTime(field.value)}
+                          recommendationUnavailable={!editingPlan && recommendationUnavailable}
+                        />
+                      )}
+                    />
                   </FormControl>
-                  <TaskTimePricingNotice
-                    catalog={billingCatalog}
-                    taskType={watchedType}
-                    executionProfile={(watchedExecutionProfile || undefined) as AgentExecutionProfileID | undefined}
-                    selectedTime={cronTime(field.value)}
-                    recommendationUnavailable={!editingPlan && recommendationUnavailable}
-                  />
                   <FormMessage />
                 </FormItem>
               )} />
