@@ -252,7 +252,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     for (const day of ['周一', '周三', '周五']) {
       fireEvent.click(within(dialog).getByRole('button', { name: day }))
     }
-    expect(within(dialog).getAllByText('请至少选择一天').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText('请至少选择一天')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
     expect(api.plans.create).not.toHaveBeenCalled()

@@ -206,7 +206,7 @@ export default function PlansPage() {
   const handleScheduleValidityChange = useCallback((valid: boolean) => {
     setScheduleValid(valid)
     if (valid) form.clearErrors('cron_expr')
-    else form.setError('cron_expr', { type: 'validate', message: '请至少选择一天' })
+    else form.setError('cron_expr', { type: 'validate' })
   }, [form])
 
   // Warn before closing with unsaved changes
@@ -812,7 +812,6 @@ export default function PlansPage() {
                       )}
                     />
                   </FormControl>
-                  <FormMessage />
                 </FormItem>
               )} />
 
