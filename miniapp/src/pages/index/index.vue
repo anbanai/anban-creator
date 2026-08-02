@@ -64,7 +64,7 @@
         </view>
         <view class="control-tile" @tap="goTemplates">
           <text class="control-tile__icon">▦</text>
-          <text class="control-tile__label">模板资产</text>
+          <text class="control-tile__label">模板参考</text>
         </view>
       </view>
 
@@ -290,7 +290,7 @@ const nextSuggestion = computed(() => {
   }
   return {
     title: '复用最近产出继续放大',
-    description: '从工坊拆解爆款、生成海报或沉淀模板，把单次结果变成下一轮任务。',
+    description: '从工坊拆解爆款或生成海报，把单次结果变成下一轮任务。',
     cta: '进入工坊',
     action: 'workshop',
     tone: 'reuse',

@@ -345,6 +345,41 @@ func TestAgentProfileEnvsMigrationContracts(t *testing.T) {
 	}
 }
 
+func TestSeednoteTemplatesContractMigrationIsGuarded(t *testing.T) {
+	raw, err := os.ReadFile("20260802_seednote_templates_contract.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"SIGNAL SQLSTATE '45000'",
+		"template prompt backfill is incomplete",
+		"project visual style backfill is incomplete",
+		"DROP COLUMN `style_prompt`",
+		"DROP COLUMN `template_id`",
+		"information_schema.COLUMNS",
+		"DROP PROCEDURE IF EXISTS `assert_seednote_templates_contract_ready`",
+		"DROP PROCEDURE IF EXISTS `apply_seednote_templates_contract_schema`",
+		"TRIM(COALESCE(`prompt`, '''')) = ''''",
+		"TRIM(COALESCE(p.`style`, '''')) = ''''",
+		"UPDATE `templates` SET `prompt` = `style_prompt`",
+		"UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("template contract migration missing %q", required)
+		}
+	}
+	if strings.Index(sql, "SIGNAL SQLSTATE '45000'") > strings.Index(sql, "DROP COLUMN `style_prompt`") {
+		t.Fatal("template contract migration changes schema before preflight assertions")
+	}
+	if strings.Index(sql, "UPDATE `templates` SET `prompt` = `style_prompt`") > strings.Index(sql, "SIGNAL SQLSTATE '45000'") {
+		t.Fatal("template contract migration validates before the final post-rollout prompt backfill")
+	}
+	if strings.Index(sql, "UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`") > strings.Index(sql, "SIGNAL SQLSTATE '45000'") {
+		t.Fatal("template contract migration validates before the final post-rollout project style backfill")
+	}
+}
+
 func TestAgentProfileEnvsQuoteExpiryIsNarrow(t *testing.T) {
 	raw, err := os.ReadFile("20260730_agent_profile_envs_expire_quotes.sql")
 	if err != nil {

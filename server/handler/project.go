@@ -187,7 +187,6 @@ type projectRequest struct {
 	Writer                string                           `json:"writer"`
 	Theme                 string                           `json:"theme"`
 	Author                string                           `json:"author"`
-	TemplateID            string                           `json:"template_id"`
 	ReferenceImage        *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet     bool                             `json:"-"`
 	ReferenceImageAssetID string                           `json:"-"`
@@ -233,7 +232,6 @@ func (req *projectRequest) toProject() *model.Project {
 		Writer:                req.Writer,
 		Theme:                 req.Theme,
 		Author:                req.Author,
-		CreatedFromTemplateID: req.TemplateID,
 		ReferenceImageAssetID: req.ReferenceImageAssetID,
 		ReferenceImageSet:     req.ReferenceImageSet,
 		ImageRatio:            req.ImageRatio,
@@ -423,7 +421,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	created.ReferenceImage = referenceView
 
 	// For Seednote projects, include recommended templates.
-	recommended := []*model.Template{}
+	recommended := []templateResponse{}
 	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
 		if rec := h.getRecommendedTemplates(c.Context(), created); rec != nil {
 			// Sign each recommended template's image URLs so the cross-account
@@ -431,8 +429,8 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 			// viewer may not have uploaded).
 			for _, t := range rec {
 				service.SignTemplateURLs(c.Context(), h.store, h.logger, t)
+				recommended = append(recommended, canonicalTemplateResponse(t))
 			}
-			recommended = rec
 		}
 	}
 

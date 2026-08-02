@@ -23,7 +23,7 @@ const projectWithReference: Project = {
   writer: '',
   theme: '',
   author: '作者',
-  template_id: '',
+
   reference_image: {
     asset_id: '44444444-4444-4444-8444-444444444444',
     file_name: 'project-reference.png',
@@ -281,7 +281,7 @@ describe('ProjectsPage deletion feedback', () => {
       writer: '',
       theme: '',
       author: '',
-      template_id: '',
+
       reference_image: null,
       image_ratio: '',
       montage_defaults: {},
@@ -338,7 +338,7 @@ describe('ProjectsPage deletion feedback', () => {
       writer: '',
       theme: '',
       author: '',
-      template_id: '',
+
       reference_image: null,
       image_ratio: '',
       montage_defaults: {

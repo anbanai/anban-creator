@@ -45,7 +45,7 @@ const fixtures = vi.hoisted(() => {
     writer: '',
     theme: '',
     author: '',
-    template_id: '',
+
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
     config: {},

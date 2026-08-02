@@ -21,7 +21,7 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
     writer: '',
     theme: '',
     author: '',
-    template_id: '',
+
     image_ratio: '',
     max_concurrent_tasks: 1,
     config: { enable_publishing: true },
@@ -167,6 +167,17 @@ vi.mock('@/lib/api', async () => {
       apiKeys: {
         ...actual.api.apiKeys,
         list: vi.fn().mockResolvedValue({ items: [{ id: 'key-1' }] }),
+      },
+      templates: {
+        ...actual.api.templates,
+        list: vi.fn().mockResolvedValue({
+          items: [{
+            id: 'template-1', type: 'seednote', name: '居家前后对比', category: '家居家装',
+            thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+            is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
+          }],
+          total: 1,
+        }),
       },
     },
   }
@@ -364,6 +375,24 @@ describe('DashboardPage AI entry', () => {
       project_id: 'project-2',
       text: '写一篇小红书种草笔记',
     })))
+  })
+
+  it('选择小红书项目后用模板覆盖 Prompt 并保留附件', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...seednoteProject }])
+    render(<DashboardPage />)
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目'))
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.change(prompt, { target: { value: '已有需求' } })
+    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+      target: { files: [new File(['image'], 'keep.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByText('keep.png')).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /居家前后对比/ }))
+
+    expect(prompt).toHaveValue('模板视觉 Prompt')
+    expect(screen.getByText('keep.png')).toBeInTheDocument()
   })
 
   it('does not render legacy shortcut cards for project types that cannot create plans', async () => {

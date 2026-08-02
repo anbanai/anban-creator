@@ -133,17 +133,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated }))
   }, [])
 
-  // Verify token on mount by fetching current user
+  // Verify the token and refresh database-backed authorization on each token
+  // session. Cached user fields are only an initial rendering snapshot.
   useEffect(() => {
-    if (state.token && !state.user) {
-      api.auth.me().then((user) => {
-        setUser(user)
-      }).catch(() => {
-        clearStoredState()
-        setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
-      })
-    }
-  }, [state.token, state.user, setUser])
+    if (!state.token) return
+    let cancelled = false
+    api.auth.me().then((user) => {
+      if (!cancelled) setUser(user)
+    }).catch(() => {
+      if (cancelled) return
+      clearStoredState()
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+    })
+    return () => { cancelled = true }
+  }, [state.token, setUser])
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshAuthToken, setUser }}>

@@ -98,6 +98,17 @@ vi.mock('@/lib/api', async () => {
           items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }],
         }),
       },
+      templates: {
+        ...actual.api.templates,
+        list: vi.fn().mockResolvedValue({
+          items: [{
+            id: 'template-1', type: 'seednote', name: '知识卡片', category: '知识科普',
+            thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+            is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
+          }],
+          total: 1,
+        }),
+      },
     },
   }
 })
@@ -143,7 +154,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       writer: '',
       theme: '',
       author: '作者',
-      template_id: '',
+
       image_ratio: '16:9',
       max_concurrent_tasks: 2,
       config: { wechat_app_id: 'wx123' },
@@ -232,6 +243,43 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
     expect(document.querySelectorAll('form form')).toHaveLength(0)
+  })
+
+  it('在计划创建和编辑时用模板覆盖非空 Prompt', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'seednote-project', user_id: '1', platform: 'seednote', name: '种草项目', avatar_url: '',
+      profile_url: '', instructions: '', keywords: '', visual_style: '', writer: '', theme: '', author: '',
+ image_ratio: '3:4', max_concurrent_tasks: 2, config: {}, status: 'active',
+      created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
+    }])
+    vi.mocked(api.plans.list).mockResolvedValueOnce({
+      items: [{
+        id: 'seednote-plan', title: '种草计划', description: '', type: 'seednote', cron_expr: '0 9 * * 1', prompt: '已有计划 Prompt',
+        status: 'active', next_run_at: '2026-08-03T09:00:00Z', project_id: 'seednote-project',
+        execution_profile: 'effective', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
+      }],
+      total: 1,
+    })
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
+    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+    const createPrompt = within(createDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
+    fireEvent.change(createPrompt, { target: { value: '已有创建 Prompt' } })
+    fireEvent.click(await within(createDialog).findByRole('button', { name: /知识卡片/ }))
+    expect(createPrompt).toHaveValue('模板视觉 Prompt')
+    fireEvent.click(within(createDialog).getByRole('button', { name: '取消' }))
+    fireEvent.click(await screen.findByRole('button', { name: '放弃' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建计划' })).not.toBeInTheDocument())
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const editDialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    const editPrompt = within(editDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
+    expect(editPrompt).toHaveValue('已有计划 Prompt')
+    fireEvent.click(await within(editDialog).findByRole('button', { name: /知识卡片/ }))
+    expect(editPrompt).toHaveValue('模板视觉 Prompt')
   })
 
   it('puts the single project field before content type', async () => {
@@ -386,7 +434,7 @@ describe('PlansPage Seednote reference snapshots', () => {
     writer: '',
     theme: '',
     author: '',
-    template_id: '',
+
     image_ratio: '3:4',
     max_concurrent_tasks: 2,
     config: {},
@@ -711,7 +759,7 @@ describe('PlansPage Montage input', () => {
     writer: '',
     theme: '',
     author: '',
-    template_id: '',
+
     reference_image_url: '',
     image_ratio: '16:9',
     montage_defaults: {

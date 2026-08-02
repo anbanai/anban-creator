@@ -18,7 +18,7 @@ const currentProject: Project = {
   writer: '',
   theme: '',
   author: '',
-  template_id: '',
+
   image_ratio: '1:1',
   max_concurrent_tasks: 1,
   config: {},

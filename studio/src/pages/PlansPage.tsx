@@ -14,6 +14,7 @@ import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
@@ -746,6 +747,13 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              <SeednoteTemplateGallery
+                platform={selectedProject?.platform}
+                onApply={(templatePrompt) => {
+                  form.setValue('prompt', templatePrompt, { shouldDirty: true, shouldValidate: true })
+                }}
+              />
 
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>

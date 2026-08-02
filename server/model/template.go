@@ -1,16 +1,15 @@
 package model
 
 import (
-	"encoding/json"
 	"time"
 
 	"gorm.io/datatypes"
 )
 
-// Template is a visual template: a reusable image reference plus visual prompt
-// that can be imported into a project. It does NOT enter task/plan/runtime
-// resolution. Legacy columns remain on the model so old rows can still be read,
-// but new handlers only write visual metadata.
+// Template is a reusable image reference plus visual prompt. Selecting one is
+// a one-time prompt fill; it never binds to a project, task, plan, or runtime.
+// Legacy columns remain on the model so old rows can still be read, but new
+// handlers only write visual metadata.
 type Template struct {
 	ID           string         `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID       string         `gorm:"type:char(36);index" json:"user_id,omitempty"`
@@ -20,8 +19,10 @@ type Template struct {
 	Category     string         `gorm:"type:varchar(50);index" json:"category"`
 	ThumbnailURL string         `gorm:"type:varchar(500)" json:"thumbnail_url"`
 	Structure    map[string]any `gorm:"type:json;serializer:json" json:"structure"`
-	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
-	VisualStyle string `gorm:"column:style_prompt;type:text" json:"visual_style"`
+	Prompt       string         `gorm:"column:prompt;type:text" json:"prompt"`
+	// LegacyStylePrompt is read-only during the rolling deployment window. It is
+	// never migrated, written, or serialized by the canonical template surface.
+	LegacyStylePrompt string `gorm:"column:style_prompt;->;-:migration" json:"-"`
 	// Legacy content fields. New visual-template flows no longer write or read
 	// these as business config.
 	Writer         string                                        `gorm:"type:text" json:"writer"`
@@ -37,17 +38,6 @@ type Template struct {
 }
 
 func (Template) TableName() string { return "templates" }
-
-func (t Template) MarshalJSON() ([]byte, error) {
-	type Alias Template
-	return json.Marshal(struct {
-		Alias
-		StylePrompt string `json:"style_prompt"`
-	}{
-		Alias:       Alias(t),
-		StylePrompt: t.VisualStyle,
-	})
-}
 
 // EcommerceTemplateDefaults is a legacy payload kept so old template rows can be
 // decoded. E-commerce defaults now live on projects.

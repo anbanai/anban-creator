@@ -30,7 +30,6 @@ export interface Project {
   writer: string
   theme: string
   author: string
-  template_id: string
   reference_image?: ReferenceAssetView | null
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
@@ -86,7 +85,6 @@ export interface CreateProjectRequest {
   writer?: string
   theme?: string
   author?: string
-  template_id?: string
   reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults

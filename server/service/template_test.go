@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
+	"reflect"
+	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -23,12 +24,367 @@ func setupTemplateTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	// Use a unique table suffix per test to avoid cache=shared pollution.
-	if err := db.AutoMigrate(&model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.Template{}, &model.User{}); err != nil {
 		t.Fatalf("failed to migrate templates: %v", err)
 	}
 	// Clean slate.
 	db.Exec("DELETE FROM templates")
 	return db
+}
+
+func createTemplateTestUser(t *testing.T, repo repository.Repository, id string, isAdmin bool) {
+	t.Helper()
+	if err := repo.Users().Create(t.Context(), &model.User{
+		ID:         id,
+		Email:      id + "@example.com",
+		Password:   "test",
+		InviteCode: strings.ToUpper(strings.ReplaceAll(id, "-", ""))[:8],
+		IsAdmin:    isAdmin,
+	}); err != nil {
+		t.Fatalf("create test user %s: %v", id, err)
+	}
+}
+
+func TestTemplateServiceCreateRequiresDatabaseAdminAndSeednoteCategory(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "regular-user", false)
+	createTemplateTestUser(t, repo, "admin-user", true)
+
+	valid := func() *model.Template {
+		return &model.Template{
+			Name:     "晨光留白",
+			Type:     model.TemplateTypeSeednote,
+			Category: model.SeednoteTemplateCategoryProduct,
+			Prompt:   "暖色晨光，封面标题居中",
+		}
+	}
+
+	if _, err := svc.Create(ctx, valid(), "regular-user"); !errors.Is(err, ErrTemplateForbidden) {
+		t.Fatalf("regular Create error = %v, want ErrTemplateForbidden", err)
+	}
+
+	invalidType := valid()
+	invalidType.Type = model.TemplateTypeArticle
+	if _, err := svc.Create(ctx, invalidType, "admin-user"); !errors.Is(err, ErrTemplateTypeInvalid) {
+		t.Fatalf("article Create error = %v, want ErrTemplateTypeInvalid", err)
+	}
+
+	invalidCategory := valid()
+	invalidCategory.Category = "其他"
+	if _, err := svc.Create(ctx, invalidCategory, "admin-user"); !errors.Is(err, ErrTemplateCategoryInvalid) {
+		t.Fatalf("invalid category Create error = %v, want ErrTemplateCategoryInvalid", err)
+	}
+
+	created, err := svc.Create(ctx, valid(), "admin-user")
+	if err != nil {
+		t.Fatalf("admin Create valid template: %v", err)
+	}
+	if created.UserID != "admin-user" || created.Type != model.TemplateTypeSeednote {
+		t.Fatalf("created template = %+v", created)
+	}
+}
+
+func TestTemplateServiceRejectsBlankPromptOnCreateAndUpdate(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "admin-prompt-user", true)
+
+	if _, err := svc.Create(ctx, &model.Template{
+		Name: "无内容模板", Type: model.TemplateTypeSeednote,
+		Category: model.SeednoteTemplateCategoryProduct, Prompt: " \n\t ",
+	}, "admin-prompt-user"); err == nil {
+		t.Fatal("Create blank prompt error = nil, want validation error")
+	}
+
+	existing := &model.Template{
+		ID: "prompt-update-template", UserID: "admin-prompt-user", Name: "现有模板",
+		Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct,
+		Prompt: "原有视觉 Prompt", Visibility: "public", IsActive: true,
+	}
+	if err := repo.Templates().Create(ctx, existing); err != nil {
+		t.Fatalf("create existing template: %v", err)
+	}
+	blankPrompt := "  "
+	if _, err := svc.UpdatePatch(ctx, existing.ID, "admin-prompt-user", TemplatePatch{Prompt: &blankPrompt}); err == nil {
+		t.Fatal("UpdatePatch blank prompt error = nil, want validation error")
+	}
+	persisted, err := repo.Templates().FindByID(ctx, existing.ID)
+	if err != nil {
+		t.Fatalf("find existing template: %v", err)
+	}
+	if persisted.Prompt != "原有视觉 Prompt" {
+		t.Fatalf("prompt = %q, want unchanged original prompt", persisted.Prompt)
+	}
+}
+
+func TestTemplateServiceReadsLegacyPromptWrittenDuringRollingDeployment(t *testing.T) {
+	svc, _, db := setupTemplateService(t)
+	ctx := context.Background()
+
+	if err := db.Exec(`ALTER TABLE templates ADD COLUMN style_prompt TEXT`).Error; err != nil {
+		t.Fatalf("add legacy prompt column: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO templates
+			(id, type, name, category, visibility, is_active, prompt, style_prompt)
+		VALUES
+			('rolling-legacy-template', 'seednote', '滚动发布尾部写入', '好物种草', 'public', true, '', '旧 Pod 最后写入的视觉版式')
+	`).Error; err != nil {
+		t.Fatalf("insert rolling legacy template: %v", err)
+	}
+
+	templates, _, err := svc.List(ctx, model.TemplateTypeSeednote, "", "", "", "public", 0, 20)
+	if err != nil {
+		t.Fatalf("list templates: %v", err)
+	}
+	if len(templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(templates))
+	}
+	if templates[0].Prompt != "旧 Pod 最后写入的视觉版式" {
+		t.Fatalf("prompt = %q, want rolling-deployment legacy fallback", templates[0].Prompt)
+	}
+}
+
+func TestTemplateServiceNeverPersistsBlankName(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "admin-name-user", true)
+
+	created, err := svc.Create(ctx, &model.Template{
+		Name: "  ", Type: model.TemplateTypeSeednote,
+		Category: model.SeednoteTemplateCategoryProduct, Prompt: "清爽留白，标题居中",
+	}, "admin-name-user")
+	if err != nil {
+		t.Fatalf("Create whitespace name: %v", err)
+	}
+	if strings.TrimSpace(created.Name) == "" {
+		t.Fatalf("created name = %q, want derived non-blank name", created.Name)
+	}
+
+	blankName := " \n "
+	if _, err := svc.UpdatePatch(ctx, created.ID, "admin-name-user", TemplatePatch{Name: &blankName}); err == nil {
+		t.Fatal("UpdatePatch blank name error = nil, want validation error")
+	}
+	persisted, err := repo.Templates().FindByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("find created template: %v", err)
+	}
+	if persisted.Name != created.Name {
+		t.Fatalf("persisted name = %q, want unchanged %q", persisted.Name, created.Name)
+	}
+}
+
+func TestTemplateServiceListScopesDependOnDatabaseAdmin(t *testing.T) {
+	svc, repo, db := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "regular-list-user", false)
+	createTemplateTestUser(t, repo, "admin-list-user", true)
+
+	rows := []*model.Template{
+		{ID: "active-public", Name: "active public", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: true},
+		{ID: "active-private", Name: "active private", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "private", IsActive: true},
+		{ID: "inactive-public", Name: "inactive public", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: false},
+		{ID: "inactive-private", Name: "inactive private", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "private", IsActive: false},
+	}
+	for _, row := range rows {
+		if err := repo.Templates().Create(ctx, row); err != nil {
+			t.Fatalf("create template %s: %v", row.ID, err)
+		}
+		if strings.HasPrefix(row.ID, "inactive-") {
+			if err := db.Model(&model.Template{}).Where("id = ?", row.ID).UpdateColumn("is_active", false).Error; err != nil {
+				t.Fatalf("deactivate template %s: %v", row.ID, err)
+			}
+		}
+	}
+
+	for _, scope := range []string{"all", "public", "private", "inactive"} {
+		items, total, err := svc.List(ctx, "", "", "", "regular-list-user", scope, 0, 100)
+		if err != nil {
+			t.Fatalf("regular List scope=%s: %v", scope, err)
+		}
+		if total != 1 || len(items) != 1 || items[0].ID != "active-public" {
+			t.Errorf("regular scope=%s items=%v total=%d, want active-public only", scope, templateIDs(items), total)
+		}
+	}
+
+	tests := []struct {
+		scope string
+		want  []string
+	}{
+		{scope: "all", want: []string{"active-private", "active-public", "inactive-private", "inactive-public"}},
+		{scope: "public", want: []string{"active-public"}},
+		{scope: "private", want: []string{"active-private"}},
+		{scope: "inactive", want: []string{"inactive-private", "inactive-public"}},
+	}
+	for _, tt := range tests {
+		items, total, err := svc.List(ctx, "", "", "", "admin-list-user", tt.scope, 0, 100)
+		if err != nil {
+			t.Fatalf("admin List scope=%s: %v", tt.scope, err)
+		}
+		got := templateIDs(items)
+		sort.Strings(got)
+		if total != int64(len(tt.want)) || !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("admin scope=%s items=%v total=%d, want %v", tt.scope, got, total, tt.want)
+		}
+	}
+}
+
+func templateIDs(templates []*model.Template) []string {
+	ids := make([]string, 0, len(templates))
+	for _, tmpl := range templates {
+		ids = append(ids, tmpl.ID)
+	}
+	return ids
+}
+
+func TestTemplateServiceGetByIDRestrictsOrdinaryUsersAndAllowsDatabaseAdmin(t *testing.T) {
+	svc, repo, db := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "regular-get-user", false)
+	createTemplateTestUser(t, repo, "admin-get-user", true)
+
+	public := &model.Template{ID: "get-public", Name: "public", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: true}
+	private := &model.Template{ID: "get-private", Name: "private", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "private", IsActive: true}
+	inactive := &model.Template{ID: "get-inactive", Name: "inactive", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: true}
+	for _, row := range []*model.Template{public, private, inactive} {
+		if err := repo.Templates().Create(ctx, row); err != nil {
+			t.Fatalf("create %s: %v", row.ID, err)
+		}
+	}
+	if err := db.Model(&model.Template{}).Where("id = ?", inactive.ID).UpdateColumn("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate template: %v", err)
+	}
+
+	if _, err := svc.GetByID(ctx, public.ID, "regular-get-user"); err != nil {
+		t.Fatalf("regular public GetByID: %v", err)
+	}
+	for _, id := range []string{private.ID, inactive.ID} {
+		if _, err := svc.GetByID(ctx, id, "regular-get-user"); !errors.Is(err, ErrTemplateNotFound) {
+			t.Errorf("regular GetByID(%s) error = %v, want ErrTemplateNotFound", id, err)
+		}
+		if _, err := svc.GetByID(ctx, id, "admin-get-user"); err != nil {
+			t.Errorf("admin GetByID(%s): %v", id, err)
+		}
+	}
+}
+
+func TestTemplateServiceReadsExcludeLegacyTemplateTypes(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "regular-seednote-read", false)
+	createTemplateTestUser(t, repo, "admin-seednote-read", true)
+	seednote := &model.Template{ID: "seednote-read", Name: "seednote", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: true}
+	legacy := &model.Template{ID: "legacy-article-read", Name: "legacy", Type: model.TemplateTypeArticle, Visibility: "public", IsActive: true}
+	invalidCategory := &model.Template{ID: "invalid-category-read", Name: "invalid", Type: model.TemplateTypeSeednote, Category: "生活方式", Visibility: "public", IsActive: true}
+	for _, tmpl := range []*model.Template{seednote, legacy, invalidCategory} {
+		if err := repo.Templates().Create(ctx, tmpl); err != nil {
+			t.Fatalf("create %s: %v", tmpl.ID, err)
+		}
+	}
+
+	for _, userID := range []string{"regular-seednote-read", "admin-seednote-read"} {
+		items, total, err := svc.List(ctx, "", "", "", userID, "all", 0, 100)
+		if err != nil {
+			t.Fatalf("List user=%s: %v", userID, err)
+		}
+		if total != 1 || len(items) != 1 || items[0].ID != seednote.ID {
+			t.Errorf("List user=%s items=%v total=%d, want seednote only", userID, templateIDs(items), total)
+		}
+		for _, id := range []string{legacy.ID, invalidCategory.ID} {
+			if _, err := svc.GetByID(ctx, id, userID); !errors.Is(err, ErrTemplateNotFound) {
+				t.Errorf("GetByID invalid template %s user=%s error=%v, want ErrTemplateNotFound", id, userID, err)
+			}
+		}
+	}
+
+	newPrompt := "不应写入"
+	if _, err := svc.UpdatePatch(ctx, invalidCategory.ID, "admin-seednote-read", TemplatePatch{Prompt: &newPrompt}); !errors.Is(err, ErrTemplateNotFound) {
+		t.Fatalf("UpdatePatch invalid category error=%v, want ErrTemplateNotFound", err)
+	}
+}
+
+func TestTemplateServiceGetRecommendedWithoutProfileReturnsOnlyActivePublicSeednote(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	templates := []*model.Template{
+		{ID: "recommended-public-seednote", Name: "public", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: true, SortOrder: 10},
+		{ID: "recommended-private-seednote", Name: "private", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "private", IsActive: true, SortOrder: 30},
+		{ID: "recommended-inactive-seednote", Name: "inactive", Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct, Visibility: "public", IsActive: false, SortOrder: 20},
+		{ID: "recommended-public-article", Name: "article", Type: model.TemplateTypeArticle, Visibility: "public", IsActive: true, SortOrder: 40},
+	}
+	for _, tmpl := range templates {
+		if err := repo.Templates().Create(ctx, tmpl); err != nil {
+			t.Fatalf("create %s: %v", tmpl.ID, err)
+		}
+		if tmpl.ID == "recommended-inactive-seednote" {
+			tmpl.IsActive = false
+			if err := repo.Templates().Update(ctx, tmpl); err != nil {
+				t.Fatalf("deactivate %s: %v", tmpl.ID, err)
+			}
+		}
+	}
+
+	got, err := svc.GetRecommended(ctx, "", nil, 20)
+	if err != nil {
+		t.Fatalf("GetRecommended: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "recommended-public-seednote" {
+		t.Fatalf("GetRecommended IDs = %v, want [recommended-public-seednote]", templateIDs(got))
+	}
+}
+
+func TestTemplateServiceUpdateDeleteRequireDatabaseAdmin(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	createTemplateTestUser(t, repo, "regular-write-user", false)
+	createTemplateTestUser(t, repo, "admin-write-user", true)
+	tmpl := &model.Template{
+		ID:         "admin-managed-template",
+		UserID:     "someone-else",
+		Name:       "旧模板",
+		Type:       model.TemplateTypeSeednote,
+		Category:   model.SeednoteTemplateCategoryProduct,
+		Prompt:     "旧提示词",
+		Visibility: "public",
+		IsActive:   true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+
+	newPrompt := "新视觉与版式提示词"
+	if _, err := svc.UpdatePatch(ctx, tmpl.ID, "regular-write-user", TemplatePatch{Prompt: &newPrompt}); !errors.Is(err, ErrTemplateForbidden) {
+		t.Fatalf("regular UpdatePatch error = %v, want ErrTemplateForbidden", err)
+	}
+
+	invalidCategory := "其他"
+	if _, err := svc.UpdatePatch(ctx, tmpl.ID, "admin-write-user", TemplatePatch{Category: &invalidCategory}); !errors.Is(err, ErrTemplateCategoryInvalid) {
+		t.Fatalf("invalid category UpdatePatch error = %v, want ErrTemplateCategoryInvalid", err)
+	}
+
+	newCategory := model.SeednoteTemplateCategoryBeauty
+	private := "private"
+	inactive := false
+	updated, err := svc.UpdatePatch(ctx, tmpl.ID, "admin-write-user", TemplatePatch{
+		Prompt:     &newPrompt,
+		Category:   &newCategory,
+		Visibility: &private,
+		IsActive:   &inactive,
+	})
+	if err != nil {
+		t.Fatalf("admin UpdatePatch: %v", err)
+	}
+	if updated.Prompt != newPrompt || updated.Category != newCategory || updated.Visibility != private || updated.IsActive {
+		t.Fatalf("updated template = %+v", updated)
+	}
+
+	if err := svc.Delete(ctx, tmpl.ID, "regular-write-user"); !errors.Is(err, ErrTemplateForbidden) {
+		t.Fatalf("regular Delete error = %v, want ErrTemplateForbidden", err)
+	}
+	if err := svc.Delete(ctx, tmpl.ID, "admin-write-user"); err != nil {
+		t.Fatalf("admin Delete: %v", err)
+	}
 }
 
 func setupTemplateService(t *testing.T) (*TemplateService, repository.Repository, *gorm.DB) {
@@ -40,10 +396,28 @@ func setupTemplateService(t *testing.T) (*TemplateService, repository.Repository
 			sqlDB.Close()
 		}
 	})
-	repo := repository.New(db)
+	baseRepo := repository.New(db)
+	repo := &templateFixtureRepository{Repository: baseRepo, users: &templateFixtureUsers{UserRepository: baseRepo.Users()}}
 	logger := zerolog.Nop()
 	svc := NewTemplateService(repo, &logger)
 	return svc, repo, db
+}
+
+type templateFixtureRepository struct {
+	repository.Repository
+	users repository.UserRepository
+}
+
+func (r *templateFixtureRepository) Users() repository.UserRepository { return r.users }
+
+type templateFixtureUsers struct{ repository.UserRepository }
+
+func (r *templateFixtureUsers) FindByID(ctx context.Context, id string) (*model.User, error) {
+	user, err := r.UserRepository.FindByID(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &model.User{ID: id, IsAdmin: true}, nil
+	}
+	return user, err
 }
 
 func TestTemplateService_Create_AssignsDefaults(t *testing.T) {
@@ -53,8 +427,9 @@ func TestTemplateService_Create_AssignsDefaults(t *testing.T) {
 	tmpl := &model.Template{
 		Name:         "我的种草模板",
 		Type:         "seednote",
+		Category:     model.SeednoteTemplateCategoryProduct,
 		ThumbnailURL: "https://example.com/x.png",
-		VisualStyle:  "暖色调，柔和光线",
+		Prompt:       "暖色调，柔和光线",
 	}
 	userID := uuid.New().String()
 
@@ -80,11 +455,12 @@ func TestTemplateService_Create_DerivesNameFromStyle(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
 
-	// name 为空但 style_prompt 非空 → 从 style 截取前 20 字
+	// name 为空但 prompt 非空 → 从 style 截取前 20 字
 	created, err := svc.Create(ctx, &model.Template{
-		Name:        "",
-		Type:        "seednote",
-		VisualStyle: "治愈系水彩风格，柔和色调，手绘质感",
+		Name:     "",
+		Type:     "seednote",
+		Category: model.SeednoteTemplateCategoryProduct,
+		Prompt:   "治愈系水彩风格，柔和色调，手绘质感",
 	}, uuid.New().String())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -96,9 +472,9 @@ func TestTemplateService_Create_DerivesNameFromStyle(t *testing.T) {
 
 func TestTemplateService_Create_RejectsEmptyNameAndStyle(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
-	_, err := svc.Create(context.Background(), &model.Template{Name: "", Type: "seednote"}, uuid.New().String())
+	_, err := svc.Create(context.Background(), &model.Template{Name: "", Type: "seednote", Category: model.SeednoteTemplateCategoryProduct}, uuid.New().String())
 	if err == nil {
-		t.Fatalf("expected error when both name and style_prompt are empty, got nil")
+		t.Fatalf("expected error when both name and prompt are empty, got nil")
 	}
 	if !strings.Contains(err.Error(), "name") {
 		t.Errorf("expected name-related error, got %v", err)
@@ -111,8 +487,8 @@ func TestTemplateService_Create_InitializesEmptyTags(t *testing.T) {
 
 	// Tags 未设置（nil）→ 返回时必须是非 nil 空 slice，避免前端 tags.length 崩
 	created, err := svc.Create(ctx, &model.Template{
-		Name: "无标签模板",
-		Type: "poster",
+		Name: "无标签模板", Prompt: "清爽留白版式",
+		Type: model.TemplateTypeSeednote, Category: model.SeednoteTemplateCategoryProduct,
 	}, uuid.New().String())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -125,118 +501,6 @@ func TestTemplateService_Create_InitializesEmptyTags(t *testing.T) {
 	}
 }
 
-func TestTemplateServiceSaveGlobalConcurrentReturnsCanonicalTemplate(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "templates.db") + "?_busy_timeout=10000&_journal_mode=WAL"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.Template{}); err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB.SetMaxOpenConns(8)
-	t.Cleanup(func() { sqlDB.Close() })
-
-	svc := NewTemplateService(repository.New(db), nil)
-	const submissions = 12
-	type outcome struct {
-		id      string
-		created bool
-		err     error
-	}
-	outcomes := make(chan outcome, submissions)
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := 0; i < submissions; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			name := "通勤咖啡"
-			category := "生活方式"
-			style := "暖色晨光，干净排版"
-			tags := []string{"咖啡", "通勤"}
-			if i%2 == 1 {
-				name = " 通勤咖啡 "
-				category += " "
-				style += "\n"
-				tags = []string{"通勤", "咖啡", "咖啡"}
-			}
-			tmpl, created, err := svc.SaveGlobal(context.Background(), &model.Template{
-				Type: "seednote", Name: name, Category: category, VisualStyle: style, Tags: tags,
-			})
-			if err != nil {
-				outcomes <- outcome{err: err}
-				return
-			}
-			outcomes <- outcome{id: tmpl.ID, created: created}
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-	close(outcomes)
-
-	var canonicalID string
-	createdCount := 0
-	for outcome := range outcomes {
-		if outcome.err != nil {
-			t.Fatalf("concurrent SaveGlobal: %v", outcome.err)
-		}
-		if canonicalID == "" {
-			canonicalID = outcome.id
-		}
-		if outcome.id != canonicalID {
-			t.Fatalf("template ID = %s, want canonical %s", outcome.id, canonicalID)
-		}
-		if outcome.created {
-			createdCount++
-		}
-	}
-	if createdCount != 1 {
-		t.Fatalf("created responses = %d, want exactly 1", createdCount)
-	}
-	var count int64
-	if err := db.Model(&model.Template{}).Count(&count).Error; err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("template row count = %d, want 1", count)
-	}
-}
-
-func TestTemplateServiceSaveGlobalCreatedDoesNotDependOnRowsAffected(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.Template{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Callback().Create().After("gorm:create").Register("test:zero_rows_affected", func(tx *gorm.DB) {
-		tx.RowsAffected = 0
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	svc := NewTemplateService(repository.New(db), nil)
-	tmpl, created, err := svc.SaveGlobal(context.Background(), &model.Template{
-		Type: "seednote", Name: "晨间咖啡", Category: "生活方式", VisualStyle: "自然晨光", Tags: []string{"咖啡"},
-	})
-	if err != nil {
-		t.Fatalf("SaveGlobal: %v", err)
-	}
-	if !created {
-		t.Fatal("successful deterministic-ID insert was reported as existing when RowsAffected was zero")
-	}
-	if tmpl.ID == "" {
-		t.Fatal("created template has no canonical ID")
-	}
-}
-
 func TestTemplateService_List_ReturnsNonNilTags(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
@@ -245,6 +509,8 @@ func TestTemplateService_List_ReturnsNonNilTags(t *testing.T) {
 	if _, err := svc.Create(ctx, &model.Template{
 		Name:       "test",
 		Type:       "seednote",
+		Category:   model.SeednoteTemplateCategoryProduct,
+		Prompt:     "清爽留白版式",
 		Visibility: "public",
 	}, userID); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -280,40 +546,11 @@ func TestDeriveNameFromStyle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deriveNameFromStyle(tc.style)
+			got := deriveNameFromPrompt(tc.style)
 			if got != tc.want {
-				t.Errorf("deriveNameFromStyle(%q) = %q, want %q", tc.style, got, tc.want)
+				t.Errorf("deriveNameFromPrompt(%q) = %q, want %q", tc.style, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestTemplateService_Update_OwnerOnly(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	ownerID := uuid.New().String()
-	otherID := uuid.New().String()
-
-	created, err := svc.Create(ctx, &model.Template{Name: "原始", Type: "article"}, ownerID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Non-owner update fails.
-	if _, err := svc.Update(ctx, created.ID, otherID, &model.Template{Name: "篡改"}); err == nil {
-		t.Fatalf("expected error for non-owner update")
-	}
-
-	// Owner update succeeds.
-	updated, err := svc.Update(ctx, created.ID, ownerID, &model.Template{Name: "新名字", Visibility: "private"})
-	if err != nil {
-		t.Fatalf("Update owner: %v", err)
-	}
-	if updated.Name != "新名字" {
-		t.Errorf("Name = %q, want 新名字", updated.Name)
-	}
-	if updated.Visibility != "private" {
-		t.Errorf("Visibility = %q, want private", updated.Visibility)
 	}
 }
 
@@ -324,14 +561,14 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 
 	tmpl := &model.Template{
 		Name:           "视觉模板",
-		Type:           "article",
-		VisualStyle:    "暖色生活摄影",
+		Type:           model.TemplateTypeSeednote,
+		Prompt:         "暖色生活摄影",
 		Writer:         "犀利、接地气",
 		Theme:          "autumn-warm",
 		Author:         "老李",
 		Structure:      map[string]any{"text": "钩子 → 论点 → 行动"},
 		ExampleContent: map[string]any{"text": "示例正文"},
-		Category:       "个人成长",
+		Category:       model.SeednoteTemplateCategoryKnowledge,
 		Tags:           []string{"干货", "方法论"},
 	}
 	tmpl.SetEcommerce(model.EcommerceTemplateDefaults{
@@ -345,11 +582,11 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.VisualStyle != "暖色生活摄影" {
-		t.Errorf("VisualStyle = %q, want 暖色生活摄影", created.VisualStyle)
+	if created.Prompt != "暖色生活摄影" {
+		t.Errorf("Prompt = %q, want 暖色生活摄影", created.Prompt)
 	}
-	if created.Category != "个人成长" {
-		t.Errorf("Category = %q, want 个人成长", created.Category)
+	if created.Category != model.SeednoteTemplateCategoryKnowledge {
+		t.Errorf("Category = %q, want %s", created.Category, model.SeednoteTemplateCategoryKnowledge)
 	}
 	if len(created.Tags) != 2 || created.Tags[0] != "干货" || created.Tags[1] != "方法论" {
 		t.Errorf("Tags = %v, want [干货 方法论]", created.Tags)
@@ -364,7 +601,7 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 		t.Fatalf("Ecommerce = %+v, want empty visual-only payload", ec)
 	}
 
-	refetched, err := svc.GetByID(ctx, created.ID)
+	refetched, err := svc.GetByID(ctx, created.ID, ownerID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
@@ -374,7 +611,7 @@ func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 	}
 }
 
-func TestTemplateService_Update_IgnoresLegacyBusinessFields(t *testing.T) {
+func TestTemplateService_Update_IgnoresLegacyBusinessFieldsAndTags(t *testing.T) {
 	svc, repo, _ := setupTemplateService(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
@@ -383,14 +620,14 @@ func TestTemplateService_Update_IgnoresLegacyBusinessFields(t *testing.T) {
 		ID:             uuid.NewString(),
 		UserID:         ownerID,
 		Name:           "旧模板",
-		Type:           "article",
-		VisualStyle:    "旧视觉",
+		Type:           model.TemplateTypeSeednote,
+		Prompt:         "旧视觉",
 		Writer:         "legacy-writer",
 		Theme:          "legacy-theme",
 		Author:         "legacy-author",
 		Structure:      map[string]any{"text": "legacy-structure"},
 		ExampleContent: map[string]any{"text": "legacy-example"},
-		Category:       "旧分类",
+		Category:       model.SeednoteTemplateCategoryProduct,
 		Tags:           []string{"旧标签"},
 	}
 	legacy.SetEcommerce(model.EcommerceTemplateDefaults{TargetPlatform: "legacy-platform"})
@@ -400,23 +637,23 @@ func TestTemplateService_Update_IgnoresLegacyBusinessFields(t *testing.T) {
 
 	updated, err := svc.Update(ctx, legacy.ID, ownerID, &model.Template{
 		Name:           "新模板",
-		VisualStyle:    "新视觉",
+		Prompt:         "新视觉",
 		Writer:         "new-writer",
 		Theme:          "new-theme",
 		Author:         "new-author",
 		Structure:      map[string]any{"text": "new-structure"},
 		ExampleContent: map[string]any{"text": "new-example"},
-		Category:       "新分类",
+		Category:       model.SeednoteTemplateCategoryBeauty,
 		Tags:           []string{"新标签"},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Name != "新模板" || updated.VisualStyle != "新视觉" || updated.Category != "新分类" {
-		t.Fatalf("updated visual metadata = name:%q visual:%q category:%q", updated.Name, updated.VisualStyle, updated.Category)
+	if updated.Name != "新模板" || updated.Prompt != "新视觉" || updated.Category != model.SeednoteTemplateCategoryBeauty {
+		t.Fatalf("updated visual metadata = name:%q visual:%q category:%q", updated.Name, updated.Prompt, updated.Category)
 	}
-	if len(updated.Tags) != 1 || updated.Tags[0] != "新标签" {
-		t.Fatalf("Tags = %v, want [新标签]", updated.Tags)
+	if len(updated.Tags) != 1 || updated.Tags[0] != "旧标签" {
+		t.Fatalf("Tags = %v, want preserved [旧标签]", updated.Tags)
 	}
 	if updated.Writer != "legacy-writer" || updated.Theme != "legacy-theme" || updated.Author != "legacy-author" {
 		t.Fatalf("legacy writer/theme/author = %q/%q/%q, want preserved legacy values", updated.Writer, updated.Theme, updated.Author)
@@ -429,15 +666,16 @@ func TestTemplateService_Update_IgnoresLegacyBusinessFields(t *testing.T) {
 	}
 }
 
-func TestTemplateService_Update_LegacyRuntimePatchDoesNotClearVisualStyle(t *testing.T) {
+func TestTemplateService_Update_LegacyRuntimePatchDoesNotClearPrompt(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
 
 	created, err := svc.Create(ctx, &model.Template{
-		Name:        "视觉模板",
-		Type:        "article",
-		VisualStyle: "暖色生活摄影",
+		Name:     "视觉模板",
+		Type:     model.TemplateTypeSeednote,
+		Category: model.SeednoteTemplateCategoryProduct,
+		Prompt:   "暖色生活摄影",
 	}, ownerID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -447,115 +685,10 @@ func TestTemplateService_Update_LegacyRuntimePatchDoesNotClearVisualStyle(t *tes
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.VisualStyle != "暖色生活摄影" {
-		t.Fatalf("VisualStyle = %q, want existing style preserved", updated.VisualStyle)
+	if updated.Prompt != "暖色生活摄影" {
+		t.Fatalf("Prompt = %q, want existing style preserved", updated.Prompt)
 	}
 	if updated.Theme != "" {
 		t.Fatalf("Theme = %q, want ignored legacy runtime field", updated.Theme)
 	}
-}
-
-func TestTemplateService_Delete_OwnerOnly(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	ownerID := uuid.New().String()
-	otherID := uuid.New().String()
-
-	created, err := svc.Create(ctx, &model.Template{Name: "待删", Type: "poster"}, ownerID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Non-owner delete fails.
-	if err := svc.Delete(ctx, created.ID, otherID); err == nil {
-		t.Fatalf("expected error for non-owner delete")
-	}
-
-	// Owner delete succeeds.
-	if err := svc.Delete(ctx, created.ID, ownerID); err != nil {
-		t.Fatalf("Delete owner: %v", err)
-	}
-	if _, err := svc.GetByID(ctx, created.ID); err == nil {
-		t.Fatalf("expected error fetching deleted template")
-	}
-}
-
-func TestTemplateService_List_ScopeVisibility(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	alice := uuid.New().String()
-	bob := uuid.New().String()
-
-	// Alice owns a public + a private template.
-	pub, err := svc.Create(ctx, &model.Template{Name: "alice-pub", Type: "seednote", Visibility: "public"}, alice)
-	if err != nil {
-		t.Fatalf("Create pub: %v", err)
-	}
-	priv, err := svc.Create(ctx, &model.Template{Name: "alice-priv", Type: "seednote", Visibility: "private"}, alice)
-	if err != nil {
-		t.Fatalf("Create priv: %v", err)
-	}
-	// Bob owns a private template.
-	bobPriv, err := svc.Create(ctx, &model.Template{Name: "bob-priv", Type: "seednote", Visibility: "private"}, bob)
-	if err != nil {
-		t.Fatalf("Create bobPriv: %v", err)
-	}
-	_ = pub
-	_ = priv
-
-	// scope=mine: alice sees only her own (both private + public).
-	mine, _, err := svc.List(ctx, "", "", "", alice, "mine", 0, 100)
-	if err != nil {
-		t.Fatalf("List mine: %v", err)
-	}
-	if len(mine) != 2 {
-		t.Errorf("alice mine: got %d templates, want 2", len(mine))
-	}
-
-	// scope=public: alice sees only public (her own public; bob's private excluded).
-	pubOnly, _, err := svc.List(ctx, "", "", "", alice, "public", 0, 100)
-	if err != nil {
-		t.Fatalf("List public: %v", err)
-	}
-	if len(pubOnly) != 1 {
-		t.Errorf("alice public: got %d templates, want 1", len(pubOnly))
-	}
-	if pubOnly[0].Visibility != "public" {
-		t.Errorf("expected only public template, got %q", pubOnly[0].Visibility)
-	}
-
-	// scope=all: alice sees her 2 + any other public (no other public here, so 2).
-	all, _, err := svc.List(ctx, "", "", "", alice, "all", 0, 100)
-	if err != nil {
-		t.Fatalf("List all: %v", err)
-	}
-	if len(all) != 2 {
-		t.Errorf("alice all: got %d templates, want 2", len(all))
-	}
-
-	// bob can see only his own private in scope=mine, but in scope=all he should
-	// see his private + alice's public (2), NOT alice's private.
-	bobAll, _, err := svc.List(ctx, "", "", "", bob, "all", 0, 100)
-	if err != nil {
-		t.Fatalf("bob List all: %v", err)
-	}
-	if len(bobAll) != 2 {
-		t.Errorf("bob all: got %d templates, want 2 (his private + alice public)", len(bobAll))
-	}
-	for _, tmpl := range bobAll {
-		if tmpl.UserID != bob && tmpl.Visibility != "public" {
-			t.Errorf("bob should not see other users' private templates; got %q owned by %q", tmpl.Name, tmpl.UserID)
-		}
-	}
-
-	// Unauthenticated (empty userID) only sees public regardless of scope.
-	anon, _, err := svc.List(ctx, "", "", "", "", "all", 0, 100)
-	if err != nil {
-		t.Fatalf("anon List: %v", err)
-	}
-	if len(anon) != 1 {
-		t.Errorf("anon all: got %d, want 1 (only the one public)", len(anon))
-	}
-
-	_ = bobPriv
 }

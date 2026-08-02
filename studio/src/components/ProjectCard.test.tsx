@@ -18,7 +18,7 @@ function project(overrides: Partial<Project> = {}): Project {
     writer: '犀利',
     theme: '简洁',
     author: 'Anban',
-    template_id: '',
+
     image_ratio: '',
     max_concurrent_tasks: 1,
     config: { enable_publishing: true, require_publish_approval: true },

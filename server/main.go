@@ -109,6 +109,9 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
+		}
 		if err := service.MigratePlanReferenceAttachments(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate plan reference attachments")
 		}
@@ -537,6 +540,10 @@ func main() {
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
+		templateHandler.SetUploadRepository(repo)
+		if imageUnderstandingBaseClient != nil {
+			templateHandler.SetVisionClient(imageUnderstandingBaseClient)
+		}
 		if store != nil {
 			templateHandler.SetStore(store)
 		}
@@ -627,7 +634,6 @@ func main() {
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
 			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
-			TemplateSvc:            templateSvc,
 			LiveSliceSvc:           liveSliceSvc,
 			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
 			FileUploadSvc:          service.NewFileUploadService(store),

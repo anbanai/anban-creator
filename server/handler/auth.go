@@ -152,6 +152,7 @@ type authUserResponse struct {
 	Tier        model.Tier `json:"tier"`
 	InviteCode  string     `json:"invite_code"`
 	InviteCount int        `json:"invite_count"`
+	IsAdmin     bool       `json:"is_admin"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
@@ -265,6 +266,7 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 			Tier:        model.ResolveTier(user.Tier),
 			InviteCode:  user.InviteCode,
 			InviteCount: user.InviteCount,
+			IsAdmin:     user.IsAdmin,
 			CreatedAt:   user.CreatedAt,
 			UpdatedAt:   user.UpdatedAt,
 		}
@@ -740,6 +742,7 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		"max_concurrent_limit": model.GetTierMaxConcurrentTasks(tier),
 		"invite_code":          user.InviteCode,
 		"invite_count":         user.InviteCount,
+		"is_admin":             user.IsAdmin,
 		"max_invites":          h.maxInvitePerUser,
 		"has_password":         user.Password != "",
 		"created_at":           user.CreatedAt,

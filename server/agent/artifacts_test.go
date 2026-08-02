@@ -25,7 +25,7 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 }
 
 func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
-	required := []string{"source-analysis.md", "viral-template.json", "template-meta.json"}
+	required := []string{"source-analysis.md", "viral-template.json"}
 	tests := []struct {
 		name         string
 		missing      string
@@ -36,7 +36,6 @@ func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
 		{name: "failure state blocks complete deliverables", failureState: true},
 		{name: "missing source analysis", missing: "source-analysis.md"},
 		{name: "missing viral template", missing: "viral-template.json"},
-		{name: "missing template metadata", missing: "template-meta.json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

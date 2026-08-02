@@ -1,34 +1,5 @@
 <template>
   <view class="page poster-page">
-    <!-- Template selection -->
-    <view class="pp-section">
-      <text class="field-label">选择模板</text>
-      <scroll-view scroll-x class="pp-template-scroll" v-if="templates.length > 0">
-        <view class="pp-template-list">
-          <view
-            v-for="tpl in templates"
-            :key="tpl.id"
-            class="pp-template-card"
-            :class="{ 'pp-template-card--active': form.template_id === tpl.id }"
-            @tap="selectTemplate(tpl)"
-          >
-            <image
-              :src="tpl.thumbnail_url"
-              class="pp-template-card__thumb"
-              mode="aspectFill"
-            />
-            <text class="pp-template-card__name">{{ tpl.name }}</text>
-          </view>
-        </view>
-      </scroll-view>
-      <view v-if="templateLoading" class="pp-template-loading">
-        <AbLoading size="sm" text="加载模板..." />
-      </view>
-      <view v-if="!templateLoading && templates.length === 0" class="pp-template-empty">
-        <text class="pp-template-empty__text">暂无可用模板</text>
-      </view>
-    </view>
-
     <!-- Form fields -->
     <view class="pp-section">
       <text class="field-label">标题 <text class="field-required">*</text></text>
@@ -104,7 +75,6 @@
       <view class="pp-result-actions">
         <AbButton type="primary" size="sm" :loading="submitting" @click="regenerateVariant">继续变体</AbButton>
         <AbButton type="ghost" size="sm" @click="copyPosterPrompt">复制 Prompt</AbButton>
-        <AbButton type="ghost" size="sm" :loading="templateSaving" @click="savePosterTemplate">设为模板</AbButton>
       </view>
     </view>
 
@@ -130,9 +100,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import type { Template, PosterTask, PosterImage } from '@/types'
-import { templatesApi } from '@/api/templates'
+import { ref, reactive, computed, onUnmounted } from 'vue'
+import type { PosterTask, PosterImage } from '@/types'
 import { postersApi } from '@/api/posters'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
@@ -148,16 +117,12 @@ const styleOptions = [
   { value: 'fresh', label: '清新自然' },
 ]
 
-const templates = ref<Template[]>([])
-const templateLoading = ref(false)
 const submitting = ref(false)
-const templateSaving = ref(false)
 const currentTask = ref<PosterTask | null>(null)
 const generatedImages = ref<PosterImage[]>([])
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 const form = reactive({
-  template_id: '',
   title: '',
   selling_points: [''],
   brand: '',
@@ -175,10 +140,6 @@ const isGenerating = computed(() => {
 const canSubmit = computed(() => {
   return !!form.title.trim() && !submitting.value && !isGenerating.value
 })
-
-function selectTemplate(tpl: Template) {
-  form.template_id = form.template_id === tpl.id ? '' : tpl.id
-}
 
 function addSellingPoint() {
   if (form.selling_points.length < 5) {
@@ -230,30 +191,6 @@ async function regenerateVariant() {
   await onGenerate()
 }
 
-async function savePosterTemplate() {
-  if (!generatedImages.value.length || templateSaving.value) return
-  templateSaving.value = true
-  try {
-    await templatesApi.create({
-      name: form.title.trim() || '海报模板',
-      type: 'poster',
-      thumbnail_url: generatedImages.value[0]?.url || '',
-      style_prompt: form.style_preference || buildPosterPrompt(),
-      visibility: 'private',
-      writer_key: buildPosterPrompt(),
-      structure: form.selling_points.filter((point) => point.trim()).join('\n'),
-      example_content: buildPosterPrompt(),
-      category: form.brand.trim() || '海报',
-      tags: form.selling_points.filter((point) => point.trim()).slice(0, 5),
-    })
-    uni.showToast({ title: '模板已保存', icon: 'success' })
-  } catch (err: any) {
-    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
-  } finally {
-    templateSaving.value = false
-  }
-}
-
 function validate(): boolean {
   Object.keys(errors).forEach(k => delete errors[k])
 
@@ -271,7 +208,6 @@ async function onGenerate() {
   submitting.value = true
   try {
     const task = await postersApi.create({
-      template_id: form.template_id || undefined,
       input_content: {
         title: form.title.trim(),
         selling_points: form.selling_points.filter(s => s.trim()),
@@ -332,19 +268,6 @@ function stopPolling() {
   }
 }
 
-async function loadTemplates() {
-  templateLoading.value = true
-  try {
-    const res = await templatesApi.list({ type: 'poster', limit: 20 })
-    templates.value = res.items || []
-  } catch (err) {
-    console.error('Failed to load templates:', err)
-  } finally {
-    templateLoading.value = false
-  }
-}
-
-onMounted(loadTemplates)
 onUnmounted(stopPolling)
 </script>
 
@@ -382,62 +305,6 @@ onUnmounted(stopPolling)
   padding: $ab-space-md;
   margin-bottom: $ab-space-sm;
   box-shadow: $ab-shadow-sm;
-}
-
-// Template scroll
-.pp-template-scroll {
-  white-space: nowrap;
-  margin: 0 (-$ab-space-sm);
-}
-
-.pp-template-list {
-  display: flex;
-  gap: $ab-space-sm;
-  padding: 0 $ab-space-sm;
-}
-
-.pp-template-card {
-  display: inline-flex;
-  flex-direction: column;
-  width: 180rpx;
-  flex-shrink: 0;
-  border-radius: $ab-radius-sm;
-  overflow: hidden;
-  border: 4rpx solid transparent;
-  transition: border-color 0.2s ease;
-  background-color: $ab-divider;
-
-  &--active {
-    border-color: $ab-primary;
-  }
-
-  &__thumb {
-    width: 180rpx;
-    height: 240rpx;
-  }
-
-  &__name {
-    font-size: $ab-text-xs;
-    color: $ab-text-secondary;
-    text-align: center;
-    padding: 8rpx 4rpx;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    background-color: $ab-surface;
-  }
-}
-
-.pp-template-loading,
-.pp-template-empty {
-  padding: $ab-space-md 0;
-}
-
-.pp-template-empty__text {
-  font-size: $ab-text-sm;
-  color: $ab-text-tertiary;
-  text-align: center;
-  display: block;
 }
 
 // Selling points

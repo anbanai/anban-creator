@@ -1,24 +1,26 @@
-export type TemplateType = 'poster' | 'seednote' | 'article' | 'ecommerce'
+export type TemplateType = 'seednote'
 export type TemplateVisibility = 'public' | 'private'
-export type TemplateScope = 'all' | 'public' | 'mine'
+export type TemplateScope = 'all' | 'public' | 'private' | 'inactive'
+
+export const SEEDNOTE_TEMPLATE_CATEGORIES = [
+  '好物种草',
+  '美妆护肤',
+  '健康养生',
+  '美食生活',
+  '家居家装',
+  '知识科普',
+] as const
+
+export type SeednoteTemplateCategory = (typeof SEEDNOTE_TEMPLATE_CATEGORIES)[number]
 
 export interface Template {
   id: string
   type: TemplateType
   name: string
-  user_id?: string
-  visibility: TemplateVisibility
   category: string
   thumbnail_url: string
-  structure: Record<string, unknown>
-  style_prompt: string
-  // Legacy columns kept on older rows. New templates are visual-only and Studio
-  // does not send or render these fields.
-  writer?: string
-  theme?: string
-  author?: string
-  example_content: Record<string, unknown>
-  tags: string[]
+  prompt: string
+  visibility: TemplateVisibility
   sort_order: number
   is_active: boolean
   created_at: string
@@ -28,11 +30,12 @@ export interface Template {
 export interface CreateTemplateRequest {
   name: string
   type: TemplateType
+  category: SeednoteTemplateCategory
   thumbnail_url: string
-  style_prompt: string
+  prompt: string
   visibility: TemplateVisibility
-  category?: string
-  tags?: string[]
+  sort_order: number
+  is_active: boolean
 }
 
 export type UpdateTemplateRequest = CreateTemplateRequest

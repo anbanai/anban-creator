@@ -6,6 +6,12 @@ import GlobalCommandPalette from './GlobalCommandPalette'
 import { commandPaletteStore } from '@/lib/command-palette'
 import { render as renderWithProviders } from '@/test/test-utils'
 
+const authState = vi.hoisted(() => ({ isAdmin: false }))
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { is_admin: authState.isAdmin } }),
+}))
+
 vi.mock('next-themes', () => ({
   ThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useTheme: () => ({
@@ -56,7 +62,7 @@ vi.mock('@/lib/api', async () => {
           writer: '',
           theme: '',
           author: '',
-          template_id: '',
+
           image_ratio: '',
           max_concurrent_tasks: 1,
           config: {},
@@ -83,6 +89,7 @@ vi.mock('@/lib/api', async () => {
 
 describe('GlobalCommandPalette actions', () => {
   beforeEach(() => {
+    authState.isAdmin = false
     commandPaletteStore.close()
   })
 
@@ -108,5 +115,19 @@ describe('GlobalCommandPalette actions', () => {
 
     expect(await screen.findByText('检查接入设置')).toBeInTheDocument()
     expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
+  })
+
+  it('only exposes template administration navigation to administrators', async () => {
+    const regularView = renderWithProviders(<GlobalCommandPalette />)
+    act(() => commandPaletteStore.open())
+    expect(await screen.findByRole('dialog', { name: '行动面板' })).toBeInTheDocument()
+    expect(screen.queryByText('模板库')).not.toBeInTheDocument()
+    regularView.unmount()
+
+    commandPaletteStore.close()
+    authState.isAdmin = true
+    renderWithProviders(<GlobalCommandPalette />)
+    act(() => commandPaletteStore.open())
+    expect(await screen.findByText('模板库')).toBeInTheDocument()
   })
 })

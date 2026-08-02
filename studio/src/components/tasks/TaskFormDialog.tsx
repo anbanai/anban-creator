@@ -40,6 +40,7 @@ import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, 
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
 import { ExecutionProfileSelector } from './ExecutionProfileSelector'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
+import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
   allowedTypes: ['image'],
@@ -490,6 +491,13 @@ export function TaskFormDialog({
 
               <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
+                {!isViralAnalysisTask ? (
+                  <SeednoteTemplateGallery
+                    platform={selectedProject?.platform}
+                    onApply={(prompt) => setFormValue('prompt', prompt)}
+                    className="mb-4"
+                  />
+                ) : null}
                 {!isMontageTask ? promptComposer : null}
                 {hasIncompatibleSeednoteAttachments ? (
                   <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>

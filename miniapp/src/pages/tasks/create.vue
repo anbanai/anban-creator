@@ -24,17 +24,6 @@
       </view>
     </view>
 
-    <!-- Template (optional) -->
-    <view class="task-create__section">
-      <text class="field-label">使用模板</text>
-      <view class="picker-row" @tap="pickTemplate">
-        <text v-if="selectedTemplateName" class="picker-row__value">{{ selectedTemplateName }}</text>
-        <text v-else class="picker-row__placeholder">可选，套用预设风格</text>
-        <text v-if="form.template_id" class="picker-row__clear" @tap.stop="clearTemplate">清除</text>
-        <text v-else class="picker-row__arrow">›</text>
-      </view>
-    </view>
-
     <!-- Prompt -->
     <view class="task-create__section">
       <text class="field-label">创作要求 <text class="field-required">*</text></text>
@@ -383,7 +372,6 @@ import type {
   AgentExecutionProfileID,
   BillingCatalog,
   Project,
-  Template,
   ResourceEntry,
   ReferenceImageSelection,
   ImageCapabilityOption,
@@ -391,7 +379,6 @@ import type {
 } from '@/types'
 import { agentProfilesApi } from '@/api/agent-profiles'
 import { tasksApi } from '@/api/tasks'
-import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { billingApi } from '@/api/billing'
 import { projectsApi } from '@/api/projects'
@@ -437,13 +424,13 @@ const submitting = ref(false)
 const inspirationIndex = ref(0)
 const requestedType = ref('')
 const prefillProjectId = ref('')
+const prefillPrompt = ref('')
 const advancedOpen = ref(false)
 const projectSelectorRef = ref<{ refresh?: () => void } | null>(null)
 const referenceUploading = ref(false)
 const referencePreviewUrl = ref('')
 
 // Loaded on platform change
-const platformTemplates = ref<Template[]>([])
 const platformThemes = ref<ResourceEntry[]>([])
 const imageCapabilities = ref<ImageCapabilityOption[]>([])
 const imageCapabilitiesLoading = ref(false)
@@ -465,8 +452,6 @@ const form = reactive({
   persona_avatar: '',
   goal_mode: false,
   goal: '',
-  template_id: '',
-  template_name: '',
   has_content_image: false,
   has_tail_image: false,
   // Article image toggles (公众号文章): cover + content images each independently
@@ -590,7 +575,6 @@ function removeProductPhoto(index: number) {
 
 const currentInspiration = computed(() => inspirations[inspirationIndex.value % inspirations.length])
 
-const selectedTemplateName = computed(() => form.template_name)
 const selectedThemeName = computed(() => {
   const t = platformThemes.value.find((x) => x.name === form.theme)
   return t?.display_name || t?.name || form.theme || ''
@@ -670,13 +654,6 @@ async function applyProjectById(projectId: string) {
 async function loadPlatformResources() {
   if (!selectedProject.value) return
   const plat = selectedProject.value.platform
-  // Templates for this platform/type
-  try {
-    const res = await templatesApi.list({ type: plat, limit: 50 })
-    platformTemplates.value = res.items || []
-  } catch {
-    platformTemplates.value = []
-  }
   // Themes (article)
   if (plat === 'article') {
     try {
@@ -688,71 +665,6 @@ async function loadPlatformResources() {
   } else {
     platformThemes.value = []
   }
-}
-
-function pickTemplate() {
-  if (platformTemplates.value.length === 0) {
-    uni.showToast({ title: '暂无可用模板', icon: 'none' })
-    return
-  }
-  const labels = platformTemplates.value.map((t) => t.name)
-  uni.showActionSheet({
-    itemList: labels,
-    success: (res) => {
-      const tpl = platformTemplates.value[res.tapIndex]
-      if (tpl) {
-        applyTemplate(tpl)
-      }
-    },
-  })
-}
-
-function applyTemplate(tpl: Template) {
-  form.template_id = tpl.id
-  form.template_name = tpl.name
-  if (tpl.style_prompt) form.visual_style = tpl.style_prompt
-  if (tpl.writer_key) form.writer_key = tpl.writer_key
-  if (tpl.theme) form.theme = tpl.theme
-  if (tpl.author_name) form.byline = tpl.author_name
-  if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
-  if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
-  if (tpl.ecommerce?.image_capability_key) form.image_capability_key = tpl.ecommerce.image_capability_key
-  if (tpl.ecommerce?.default_selected_modules) {
-    form.selected_modules = { ...tpl.ecommerce.default_selected_modules }
-  }
-  if (tpl.ecommerce?.target_platform) form.target_platform = tpl.ecommerce.target_platform
-  if (tpl.ecommerce?.brand_brief && !form.selling_points) {
-    form.selling_points = tpl.ecommerce.brand_brief
-  }
-  if (
-    tpl.style_prompt ||
-    tpl.writer_key ||
-    tpl.theme ||
-    tpl.author_name ||
-    tpl.writing_voice ||
-    tpl.persona_avatar ||
-    tpl.ecommerce
-  ) {
-    advancedOpen.value = true
-  }
-  delete errors.prompt
-}
-
-async function applyTemplateFromId(templateId: string) {
-  if (!templateId) return
-  form.template_id = templateId
-  try {
-    const tpl = await templatesApi.get(templateId)
-    applyTemplate(tpl)
-  } catch (err) {
-    console.error('Failed to prefill template:', err)
-    uni.showToast({ title: '模板加载失败，请手动选择', icon: 'none' })
-  }
-}
-
-function clearTemplate() {
-  form.template_id = ''
-  form.template_name = ''
 }
 
 function pickTheme() {
@@ -867,7 +779,6 @@ async function onSubmit() {
       visual_style: form.visual_style.trim() || undefined,
       writer_key: isArticle.value && form.writer_key.trim() ? form.writer_key.trim() : undefined,
       theme: isArticle.value && form.theme ? form.theme : undefined,
-      template_id: form.template_id || undefined,
       byline: form.byline.trim() || undefined,
       writing_voice: form.writing_voice.trim() || undefined,
       persona_avatar: form.persona_avatar.trim() || undefined,
@@ -971,13 +882,11 @@ onLoad((query) => {
     requestedType.value = String(query.type)
   }
   if (query?.prompt) {
-    form.prompt = safeDecodeQuery(String(query.prompt))
+    prefillPrompt.value = safeDecodeQuery(String(query.prompt))
+    form.prompt = prefillPrompt.value
   }
   if (query?.project_id) {
     void applyProjectById(String(query.project_id))
-  }
-  if (query?.template_id) {
-    void applyTemplateFromId(String(query.template_id))
   }
 })
 

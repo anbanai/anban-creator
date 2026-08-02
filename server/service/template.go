@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -31,10 +30,11 @@ type TemplatePatch struct {
 	Name         *string
 	Type         *string
 	ThumbnailURL *string
-	VisualStyle  *string
+	Prompt       *string
 	Visibility   *string
 	Category     *string
-	Tags         *[]string
+	SortOrder    *int
+	IsActive     *bool
 }
 
 // NewTemplateService creates a new TemplateService.
@@ -45,10 +45,56 @@ func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *Tem
 // Sentinel errors for template operations. Handlers should use errors.Is to
 // map these to appropriate HTTP status codes (404 vs 403 vs 500).
 var (
-	ErrTemplateNotFound    = errors.New("template not found")
-	ErrTemplateForbidden   = errors.New("forbidden: not the owner")
-	ErrTemplateNameMissing = errors.New("name or style_prompt is required")
+	ErrTemplateNotFound        = errors.New("template not found")
+	ErrTemplateForbidden       = errors.New("template administration requires admin")
+	ErrTemplateNameMissing     = errors.New("template name is required")
+	ErrTemplatePromptMissing   = errors.New("template prompt is required")
+	ErrTemplateTypeInvalid     = errors.New("template type must be seednote")
+	ErrTemplateCategoryInvalid = errors.New("invalid seednote template category")
+	ErrTemplateScopeInvalid    = errors.New("invalid template scope")
 )
+
+func (s *TemplateService) requireAdmin(ctx context.Context, userID string) error {
+	isAdmin, err := s.isAdmin(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
+		return ErrTemplateForbidden
+	}
+	return nil
+}
+
+// AuthorizeAdmin performs the same database-backed authorization used by all
+// template mutations. Handlers call it before storage side effects.
+func (s *TemplateService) AuthorizeAdmin(ctx context.Context, userID string) error {
+	return s.requireAdmin(ctx, userID)
+}
+
+func (s *TemplateService) isAdmin(ctx context.Context, userID string) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, nil
+	}
+	user, err := s.repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("find template user: %w", err)
+	}
+	return user.IsAdmin, nil
+}
+
+func validateSeednoteTemplate(tmpl *model.Template) error {
+	if tmpl.Type != model.TemplateTypeSeednote {
+		return ErrTemplateTypeInvalid
+	}
+	if !model.IsSeednoteTemplateCategory(tmpl.Category) {
+		return ErrTemplateCategoryInvalid
+	}
+	return nil
+}
 
 // ensureTagsNotNil 保证 Tags 字段在 JSON 序列化时输出 [] 而非 null。
 // Go 标准 json.Marshal(nil slice) 会输出 null，前端访问 tags.length 会崩。
@@ -60,9 +106,9 @@ func ensureTagsNotNil(ts ...*model.Template) {
 	}
 }
 
-// deriveNameFromStyle 从 style_prompt 截取第一段并限长 20 rune，作为默认 name。
+// deriveNameFromPrompt 从 prompt 截取第一段并限长 20 rune，作为默认 name。
 // 当调用方未提供 name 时使用，前后端语义保持一致。
-func deriveNameFromStyle(style string) string {
+func deriveNameFromPrompt(style string) string {
 	for _, sep := range []string{"\n", "。", "，", ",", "."} {
 		if i := strings.Index(style, sep); i > 0 {
 			style = style[:i]
@@ -83,16 +129,42 @@ func deriveNameFromStyle(style string) string {
 	return string(runes)
 }
 
-// Create saves a new template to the database. When userID is non-empty the
-// template is owned by that user; when empty it is a system template (e.g.
-// seeded via MCP) that no end user can modify.
-// visibility must be "public" or "private"; an empty value defaults to "public".
-func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, userID string) (*model.Template, error) {
-	if tmpl.Name == "" {
-		tmpl.Name = deriveNameFromStyle(tmpl.VisualStyle)
+// ResolveTemplateName returns an explicit trimmed name or derives one from the
+// visual Prompt. Callers use it before any storage side effects and again at
+// the persistence boundary so blank template names cannot be committed.
+func ResolveTemplateName(name, prompt string) string {
+	name = strings.TrimSpace(name)
+	if name != "" {
+		return name
 	}
+	return deriveNameFromPrompt(prompt)
+}
+
+// Create saves a new admin-managed template to the database. Visibility must
+// be "public" or "private"; an empty value defaults to "public".
+func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, userID string) (*model.Template, error) {
+	return s.create(ctx, tmpl, userID, true)
+}
+
+// CreateWithActive is the HTTP admin creation path, where is_active is an
+// explicit canonical field rather than an omitted-value default.
+func (s *TemplateService) CreateWithActive(ctx context.Context, tmpl *model.Template, userID string, isActive bool) (*model.Template, error) {
+	return s.create(ctx, tmpl, userID, isActive)
+}
+
+func (s *TemplateService) create(ctx context.Context, tmpl *model.Template, userID string, isActive bool) (*model.Template, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	if err := validateSeednoteTemplate(tmpl); err != nil {
+		return nil, err
+	}
+	tmpl.Name = ResolveTemplateName(tmpl.Name, tmpl.Prompt)
 	if tmpl.Name == "" {
 		return nil, ErrTemplateNameMissing
+	}
+	if strings.TrimSpace(tmpl.Prompt) == "" {
+		return nil, ErrTemplatePromptMissing
 	}
 	if tmpl.Visibility != "public" && tmpl.Visibility != "private" {
 		tmpl.Visibility = "public"
@@ -101,56 +173,12 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 		tmpl.ID = uuid.NewString()
 	}
 	prepareTemplateForCreate(tmpl, userID)
+	tmpl.IsActive = isActive
 
 	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
 	}
 	return tmpl, nil
-}
-
-// SaveGlobal idempotently creates an MCP-managed global template. Its stable
-// ID is derived only from the visual fields persisted by save_template.
-func (s *TemplateService) SaveGlobal(ctx context.Context, tmpl *model.Template) (*model.Template, bool, error) {
-	normalized := normalizeGlobalTemplate(tmpl)
-	if normalized.Name == "" {
-		normalized.Name = deriveNameFromStyle(normalized.VisualStyle)
-	}
-	if normalized.Name == "" {
-		return nil, false, ErrTemplateNameMissing
-	}
-
-	fingerprintPayload, err := json.Marshal(struct {
-		Type        string   `json:"type"`
-		Name        string   `json:"name"`
-		Category    string   `json:"category"`
-		VisualStyle string   `json:"style_prompt"`
-		Tags        []string `json:"tags"`
-	}{
-		Type:        normalized.Type,
-		Name:        normalized.Name,
-		Category:    normalized.Category,
-		VisualStyle: normalized.VisualStyle,
-		Tags:        normalized.Tags,
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("marshal template fingerprint: %w", err)
-	}
-	normalized.ID = uuid.NewSHA1(uuid.NameSpaceOID, fingerprintPayload).String()
-
-	prepareTemplateForCreate(normalized, "")
-	createErr := s.repo.Templates().Create(ctx, normalized)
-	if createErr == nil {
-		return normalized, true, nil
-	}
-	canonical, findErr := s.repo.Templates().FindByID(ctx, normalized.ID)
-	if findErr != nil {
-		return nil, false, fmt.Errorf("create template: %w", createErr)
-	}
-	ensureTagsNotNil(canonical)
-	if !sameGlobalTemplatePayload(canonical, normalized) {
-		return nil, false, fmt.Errorf("template fingerprint collision for %s", normalized.ID)
-	}
-	return canonical, false, nil
 }
 
 func prepareTemplateForCreate(tmpl *model.Template, userID string) {
@@ -168,48 +196,7 @@ func prepareTemplateForCreate(tmpl *model.Template, userID string) {
 	ensureTagsNotNil(tmpl)
 }
 
-func normalizeGlobalTemplate(tmpl *model.Template) *model.Template {
-	normalized := *tmpl
-	normalized.Type = strings.TrimSpace(normalized.Type)
-	normalized.Name = strings.TrimSpace(normalized.Name)
-	normalized.Category = strings.TrimSpace(normalized.Category)
-	normalized.VisualStyle = strings.TrimSpace(strings.ReplaceAll(normalized.VisualStyle, "\r\n", "\n"))
-
-	tagSet := make(map[string]struct{}, len(normalized.Tags))
-	normalized.Tags = make([]string, 0, len(tmpl.Tags))
-	for _, tag := range tmpl.Tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
-		}
-		if _, exists := tagSet[tag]; exists {
-			continue
-		}
-		tagSet[tag] = struct{}{}
-		normalized.Tags = append(normalized.Tags, tag)
-	}
-	sort.Strings(normalized.Tags)
-	return &normalized
-}
-
-func sameGlobalTemplatePayload(left, right *model.Template) bool {
-	if left.Type != right.Type || left.Name != right.Name || left.Category != right.Category || left.VisualStyle != right.VisualStyle {
-		return false
-	}
-	if len(left.Tags) != len(right.Tags) {
-		return false
-	}
-	for i := range left.Tags {
-		if left.Tags[i] != right.Tags[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// Update modifies an existing template. Only the owner can update. Returns
-// ErrTemplateNotFound if the id does not match a row, or ErrTemplateForbidden
-// if userID is not the owner.
+// Update modifies an existing template through the explicit patch path.
 func (s *TemplateService) Update(ctx context.Context, id string, userID string, patch *model.Template) (*model.Template, error) {
 	p := TemplatePatch{}
 	if patch.Name != "" {
@@ -221,8 +208,8 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.ThumbnailURL != "" {
 		p.ThumbnailURL = &patch.ThumbnailURL
 	}
-	if patch.VisualStyle != "" {
-		p.VisualStyle = &patch.VisualStyle
+	if patch.Prompt != "" {
+		p.Prompt = &patch.Prompt
 	}
 	if patch.Visibility != "" {
 		p.Visibility = &patch.Visibility
@@ -230,14 +217,29 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.Category != "" {
 		p.Category = &patch.Category
 	}
-	if len(patch.Tags) > 0 {
-		p.Tags = &patch.Tags
+	if patch.SortOrder != 0 {
+		p.SortOrder = &patch.SortOrder
 	}
 	return s.UpdatePatch(ctx, id, userID, p)
 }
 
 // UpdatePatch modifies an existing template with explicit PATCH semantics.
 func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID string, patch TemplatePatch) (*model.Template, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	if patch.Type != nil && *patch.Type != model.TemplateTypeSeednote {
+		return nil, ErrTemplateTypeInvalid
+	}
+	if patch.Category != nil && !model.IsSeednoteTemplateCategory(*patch.Category) {
+		return nil, ErrTemplateCategoryInvalid
+	}
+	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
+		return nil, ErrTemplateNameMissing
+	}
+	if patch.Prompt != nil && strings.TrimSpace(*patch.Prompt) == "" {
+		return nil, ErrTemplatePromptMissing
+	}
 	existing, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -245,12 +247,11 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 		}
 		return nil, fmt.Errorf("find template: %w", err)
 	}
-	if existing.UserID != userID {
-		return nil, ErrTemplateForbidden
+	if err := validateSeednoteTemplate(existing); err != nil {
+		return nil, ErrTemplateNotFound
 	}
-
 	if patch.Name != nil {
-		existing.Name = *patch.Name
+		existing.Name = strings.TrimSpace(*patch.Name)
 	}
 	if patch.Type != nil {
 		existing.Type = *patch.Type
@@ -258,8 +259,8 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 	if patch.ThumbnailURL != nil {
 		existing.ThumbnailURL = *patch.ThumbnailURL
 	}
-	if patch.VisualStyle != nil {
-		existing.VisualStyle = *patch.VisualStyle
+	if patch.Prompt != nil {
+		existing.Prompt = *patch.Prompt
 	}
 	if patch.Visibility != nil && (*patch.Visibility == "public" || *patch.Visibility == "private") {
 		existing.Visibility = *patch.Visibility
@@ -267,8 +268,11 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 	if patch.Category != nil {
 		existing.Category = *patch.Category
 	}
-	if patch.Tags != nil {
-		existing.Tags = *patch.Tags
+	if patch.SortOrder != nil {
+		existing.SortOrder = *patch.SortOrder
+	}
+	if patch.IsActive != nil {
+		existing.IsActive = *patch.IsActive
 	}
 
 	ensureTagsNotNil(existing)
@@ -278,9 +282,11 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 	return existing, nil
 }
 
-// Delete removes a template. Only the owner can delete. Returns
-// ErrTemplateNotFound or ErrTemplateForbidden with the same semantics as Update.
+// Delete removes a template after database-backed admin authorization.
 func (s *TemplateService) Delete(ctx context.Context, id string, userID string) error {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return err
+	}
 	existing, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -288,8 +294,8 @@ func (s *TemplateService) Delete(ctx context.Context, id string, userID string) 
 		}
 		return fmt.Errorf("find template: %w", err)
 	}
-	if existing.UserID != userID {
-		return ErrTemplateForbidden
+	if err := validateSeednoteTemplate(existing); err != nil {
+		return ErrTemplateNotFound
 	}
 	if err := s.repo.Templates().Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete template: %w", err)
@@ -297,9 +303,9 @@ func (s *TemplateService) Delete(ctx context.Context, id string, userID string) 
 	return nil
 }
 
-// GetByID returns a template by its ID. Private templates are only visible to
-// their owner; callers should enforce visibility at the handler layer.
-func (s *TemplateService) GetByID(ctx context.Context, id string) (*model.Template, error) {
+// GetByID returns any template to admins and only active public templates to
+// ordinary callers.
+func (s *TemplateService) GetByID(ctx context.Context, id, userID string) (*model.Template, error) {
 	tmpl, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -307,20 +313,50 @@ func (s *TemplateService) GetByID(ctx context.Context, id string) (*model.Templa
 		}
 		return nil, fmt.Errorf("find template by id: %w", err)
 	}
+	if err := validateSeednoteTemplate(tmpl); err != nil {
+		return nil, ErrTemplateNotFound
+	}
+	isAdmin, err := s.isAdmin(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin && (!tmpl.IsActive || tmpl.Visibility != "public") {
+		return nil, ErrTemplateNotFound
+	}
 	ensureTagsNotNil(tmpl)
 	return tmpl, nil
 }
 
-// List returns paginated templates filtered by type, category, tag, and an
-// ownership/visibility scope (all|mine|public). When userID is empty, only
-// public templates are returned regardless of scope.
+// List returns paginated templates filtered by type, category, and tag.
+// Admins may select all|public|private|inactive. Ordinary and anonymous callers
+// always receive active public templates regardless of the requested scope.
 func (s *TemplateService) List(ctx context.Context, templateType, category, tag, userID, scope string, offset, limit int) ([]*model.Template, int64, error) {
-	templates, err := s.repo.Templates().List(ctx, templateType, category, tag, userID, scope, offset, limit)
+	if templateType != "" && templateType != model.TemplateTypeSeednote {
+		return []*model.Template{}, 0, nil
+	}
+	templateType = model.TemplateTypeSeednote
+	repositoryScope := "public"
+	if strings.TrimSpace(userID) != "" {
+		isAdmin, err := s.isAdmin(ctx, userID)
+		if err != nil {
+			return nil, 0, err
+		}
+		if isAdmin {
+			switch scope {
+			case "all", "public", "private", "inactive":
+				repositoryScope = scope
+			default:
+				return nil, 0, ErrTemplateScopeInvalid
+			}
+		}
+	}
+
+	templates, err := s.repo.Templates().List(ctx, templateType, category, tag, userID, repositoryScope, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list templates: %w", err)
 	}
 
-	total, err := s.repo.Templates().Count(ctx, templateType, category, tag, userID, scope)
+	total, err := s.repo.Templates().Count(ctx, templateType, category, tag, userID, repositoryScope)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count templates: %w", err)
 	}
@@ -335,8 +371,14 @@ func (s *TemplateService) ListByIDs(ctx context.Context, ids []string) ([]*model
 	if err != nil {
 		return nil, fmt.Errorf("list templates by ids: %w", err)
 	}
-	ensureTagsNotNil(templates...)
-	return templates, nil
+	seednoteTemplates := templates[:0]
+	for _, tmpl := range templates {
+		if validateSeednoteTemplate(tmpl) == nil {
+			seednoteTemplates = append(seednoteTemplates, tmpl)
+		}
+	}
+	ensureTagsNotNil(seednoteTemplates...)
+	return seednoteTemplates, nil
 }
 
 // GetRecommended returns recommended templates based on a user's profile category and tags.
@@ -346,7 +388,7 @@ func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory st
 	var results []*model.Template
 
 	if profileCategory != "" {
-		categoryTemplates, err := s.repo.Templates().List(ctx, "", profileCategory, "", "", "public", 0, limit)
+		categoryTemplates, err := s.repo.Templates().List(ctx, model.TemplateTypeSeednote, profileCategory, "", "", "public", 0, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list templates by category %s: %w", profileCategory, err)
 		}
@@ -360,7 +402,7 @@ func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory st
 
 	if len(profileTags) > 0 {
 		for _, tag := range profileTags {
-			tagTemplates, err := s.repo.Templates().List(ctx, "", "", tag, "", "public", 0, limit)
+			tagTemplates, err := s.repo.Templates().List(ctx, model.TemplateTypeSeednote, "", tag, "", "public", 0, limit)
 			if err != nil {
 				return nil, fmt.Errorf("list templates by tag %s: %w", tag, err)
 			}
@@ -374,9 +416,9 @@ func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory st
 	}
 
 	if profileCategory == "" && len(profileTags) == 0 {
-		templates, err := s.repo.Templates().ListActive(ctx, "")
+		templates, err := s.repo.Templates().List(ctx, model.TemplateTypeSeednote, "", "", "", "public", 0, limit)
 		if err != nil {
-			return nil, fmt.Errorf("list active templates: %w", err)
+			return nil, fmt.Errorf("list public templates: %w", err)
 		}
 		results = templates
 	}

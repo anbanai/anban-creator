@@ -64,7 +64,7 @@ export const queryKeys = {
   },
   templates: {
     all: ['templates'] as const,
-    list: (filters?: { type?: string; category?: string; tag?: string; scope?: string }) =>
+    list: (filters?: { type?: string; category?: string; scope?: string }) =>
       ['templates', filters] as const,
     detail: (id: string) => ['template', id] as const,
   },

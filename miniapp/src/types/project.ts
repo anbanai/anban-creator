@@ -30,9 +30,6 @@ export interface Project {
   instructions?: string
   // Visual style dimension — independent from writer_key/theme.
   visual_style: string
-  // Optional template binding (article/ecommerce). When set, persona fields may
-  // be sourced from the bound template at runtime (task>template>project chain).
-  template_id?: string
   // Article-only persona fields — byline (署名) is DISTINCT from writer_key.
   // Per project memory: byline NEVER auto-fills from persona.
   writer_key?: string
@@ -81,7 +78,6 @@ export interface CreateProjectRequest {
   writer_key?: string
   writing_voice?: string
   persona_avatar?: string
-  template_id?: string
   theme?: string
   byline?: string
   reference_image?: ReferenceImageSelection | null

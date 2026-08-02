@@ -101,17 +101,6 @@
         />
       </view>
 
-      <!-- Template (optional) -->
-      <view class="form-section" v-if="!isEcommerce">
-        <text class="form-section__label">使用模板</text>
-        <view class="picker-row" @tap="pickTemplate">
-          <text v-if="selectedTemplateName" class="picker-row__value">{{ selectedTemplateName }}</text>
-          <text v-else class="picker-row__placeholder">可选，套用预设风格</text>
-          <text v-if="form.templateId" class="picker-row__clear" @tap.stop="clearTemplate">清除</text>
-          <text v-else class="picker-row__arrow">›</text>
-        </view>
-      </view>
-
       <!-- Visual style -->
       <view class="form-section" v-if="!isEcommerce">
         <text class="form-section__label">视觉风格</text>
@@ -289,7 +278,6 @@ import { agentProfilesApi } from '@/api/agent-profiles'
 import { billingApi } from '@/api/billing'
 import { plansApi } from '@/api/plans'
 import { projectsApi } from '@/api/projects'
-import { templatesApi } from '@/api/templates'
 import { resourcesApi } from '@/api/resources'
 import { imageCapabilitiesApi } from '@/api/image-capabilities'
 import { contentTypeLabel } from '@/utils/labels'
@@ -302,7 +290,6 @@ import type {
   AgentExecutionProfileID,
   BillingCatalog,
   Project,
-  Template,
   ResourceEntry,
   ReferenceImageSelection,
   ImageCapabilityOption,
@@ -347,7 +334,6 @@ const form = reactive({
   watermark: false,
   goalMode: false,
   goal: '',
-  templateId: '',
 })
 
 const selectedTime = ref('09:00')
@@ -374,7 +360,6 @@ const imageCapabilitiesLoading = ref(false)
 const defaultImageCapability = ref('')
 const platformConfigs = ref<PlatformConfig[]>([])
 // Platform-dependent resources, loaded on project change.
-const platformTemplates = ref<Template[]>([])
 const platformThemes = ref<ResourceEntry[]>([])
 
 function chooseReferenceImage() {
@@ -445,10 +430,6 @@ const canSubmit = computed(() => {
   return !submitting.value && !referenceUploading.value && !executionProfilesLoading.value
 })
 
-const selectedTemplateName = computed(() => {
-  const t = platformTemplates.value.find((x) => x.id === form.templateId)
-  return t?.name || ''
-})
 const selectedThemeName = computed(() => {
   const t = platformThemes.value.find((x) => x.name === form.theme)
   return t?.display_name || t?.name || form.theme || ''
@@ -524,17 +505,10 @@ function ensureExecutionProfileSelection() {
   )
 }
 
-// Loads templates + themes for the selected platform. Mirrors task-create.
+// Loads platform resources for the selected project.
 async function loadPlatformResources() {
   if (!selectedProject.value) return
   const plat = selectedProject.value.platform
-  // Templates
-  try {
-    const res = await templatesApi.list({ type: plat, limit: 50 })
-    platformTemplates.value = res.items || []
-  } catch {
-    platformTemplates.value = []
-  }
   // Themes (article only)
   if (plat === 'article') {
     try {
@@ -546,36 +520,6 @@ async function loadPlatformResources() {
   } else {
     platformThemes.value = []
   }
-}
-
-// --- Template picker ---
-function pickTemplate() {
-  if (platformTemplates.value.length === 0) {
-    uni.showToast({ title: '暂无可用模板', icon: 'none' })
-    return
-  }
-  const labels = platformTemplates.value.map((t) => t.name)
-  uni.showActionSheet({
-    itemList: labels,
-    success: (res) => {
-      const tpl = platformTemplates.value[res.tapIndex]
-      if (!tpl) return
-      // Re-selecting the same template is a no-op (preserve edits, mirror studio).
-      if (form.templateId === tpl.id) return
-      form.templateId = tpl.id
-      // Template → 3 dimensions + persona. Mirrors studio handleTemplateSelect.
-      if (tpl.style_prompt) form.visual_style = tpl.style_prompt
-      if (tpl.writer_key) form.writer_key = tpl.writer_key
-      if (tpl.theme) form.theme = tpl.theme
-      if (tpl.author_name) form.byline = tpl.author_name
-      if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
-      if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
-    },
-  })
-}
-
-function clearTemplate() {
-  form.templateId = ''
 }
 
 // --- Theme picker (article) ---
@@ -680,7 +624,6 @@ async function handleSubmit() {
       article_with_content_images: isArticle.value ? form.articleWithContentImages : undefined,
       skip_reference_image: form.skipReferenceImage || undefined,
       reference_image: form.referenceImage,
-      template_id: form.templateId || undefined,
     }
 
     if (isEditing.value && editingId.value) {
@@ -731,7 +674,6 @@ async function loadPlan(planId: string) {
     form.watermark = plan.watermark || false
     form.goalMode = plan.goal_mode || false
     form.goal = plan.goal || ''
-    form.templateId = plan.template_id || ''
 
     // Extract time from cron
     const parts = (plan.cron_expr || '').trim().split(/\s+/)

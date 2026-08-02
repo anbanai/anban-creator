@@ -1,57 +1,12 @@
 <template>
   <view class="page clone-page">
-    <!-- Source selection -->
     <view class="cp-section">
-      <text class="field-label">内容来源</text>
-      <view class="cp-source-tabs">
-        <view
-          class="cp-source-tab"
-          :class="{ 'cp-source-tab--active': sourceType === 'url' }"
-          @tap="sourceType = 'url'"
-        >
-          <text class="cp-source-tab__icon">链</text>
-          <text class="cp-source-tab__text">粘贴链接</text>
-        </view>
-        <view
-          class="cp-source-tab"
-          :class="{ 'cp-source-tab--active': sourceType === 'template' }"
-          @tap="goToTemplates"
-        >
-          <text class="cp-source-tab__icon">模</text>
-          <text class="cp-source-tab__text">从模板选</text>
-        </view>
-      </view>
-    </view>
-
-    <!-- URL input (shown when sourceType === 'url') -->
-    <view v-if="sourceType === 'url'" class="cp-section">
       <text class="field-label">粘贴种草笔记链接</text>
       <AbInput
         v-model="sourceUrl"
         placeholder="https://xhslink.com/..."
         :error="errors.sourceUrl"
       />
-    </view>
-
-    <!-- Selected template indicator (shown when sourceType === 'template') -->
-    <view v-if="sourceType === 'template' && selectedTemplate" class="cp-section">
-      <view class="cp-selected-template">
-        <image
-          :src="selectedTemplate.thumbnail_url"
-          class="cp-selected-template__thumb"
-          mode="aspectFill"
-        />
-        <view class="cp-selected-template__info">
-          <text class="cp-selected-template__name">{{ selectedTemplate.name }}</text>
-          <text class="cp-selected-template__change" @tap="goToTemplates">更换模板</text>
-        </view>
-      </view>
-    </view>
-    <view v-if="sourceType === 'template' && !selectedTemplate" class="cp-section">
-      <view class="cp-no-template" @tap="goToTemplates">
-        <text class="cp-no-template__text">请先选择一个模板</text>
-        <text class="cp-no-template__arrow">›</text>
-      </view>
     </view>
 
     <!-- Clone depth selection -->
@@ -136,7 +91,6 @@ import type {
   AgentExecutionProfileID,
   BillingCatalog,
   Project,
-  Template,
 } from '@/types'
 import { agentProfilesApi } from '@/api/agent-profiles'
 import { billingApi } from '@/api/billing'
@@ -176,9 +130,7 @@ const depthOptions = [
   },
 ]
 
-const sourceType = ref<'url' | 'template'>('url')
 const sourceUrl = ref('')
-const selectedTemplate = ref<Template | null>(null)
 const cloneDepth = ref('medium')
 const submitting = ref(false)
 const selectedProject = ref<Project | null>(null)
@@ -196,10 +148,7 @@ const form = reactive({
 const errors = reactive<Record<string, string>>({})
 
 const canSubmit = computed(() => {
-  const hasSource = sourceType.value === 'url'
-    ? !!sourceUrl.value.trim()
-    : !!selectedTemplate.value
-  return hasSource
+  return !!sourceUrl.value.trim()
     && !!form.project_id
     && !!selectedExecutionProfile.value
     && resolvedPrice.value !== undefined
@@ -214,13 +163,6 @@ const resolvedPrice = computed(() => {
     selectedExecutionProfile.value,
   )
 })
-
-function goToTemplates() {
-  // Navigate to templates page with return flag
-  uni.navigateTo({
-    url: '/pages/templates/index?mode=clone',
-  })
-}
 
 function onProjectChange(project: Project) {
   selectedProject.value = project
@@ -242,13 +184,8 @@ function ensureExecutionProfileSelection() {
 function validate(): boolean {
   Object.keys(errors).forEach(k => delete errors[k])
 
-  if (sourceType.value === 'url' && !sourceUrl.value.trim()) {
+  if (!sourceUrl.value.trim()) {
     errors.sourceUrl = '请输入种草笔记链接'
-    return false
-  }
-
-  if (sourceType.value === 'template' && !selectedTemplate.value) {
-    uni.showToast({ title: '请先选择模板', icon: 'none' })
     return false
   }
 
@@ -279,11 +216,7 @@ async function onClone() {
 
     let prompt = `【爆款复刻任务】\n复刻深度: ${depthLabel}（${depthDesc}）\n`
 
-    if (sourceType.value === 'url' && sourceUrl.value.trim()) {
-      prompt += `来源链接: ${sourceUrl.value.trim()}\n`
-    } else if (selectedTemplate.value) {
-      prompt += `来源模板: ${selectedTemplate.value.name}\n`
-    }
+    prompt += `来源链接: ${sourceUrl.value.trim()}\n`
 
     if (form.extra_prompt.trim()) {
       prompt += `额外要求: ${form.extra_prompt.trim()}\n`
@@ -330,18 +263,6 @@ async function loadExecutionConfiguration() {
 
 onMounted(() => {
   void loadExecutionConfiguration()
-  // Check if returning from template selection with a selected template
-  const eventProject = (uni as typeof uni & {
-    getOpenerEventProject?: () => { on: (event: string, callback: (data: { template: Template }) => void) => void }
-  }).getOpenerEventProject?.()
-  if (eventProject) {
-    eventProject.on('selectTemplate', (data: { template: Template }) => {
-      if (data?.template) {
-        selectedTemplate.value = data.template
-        sourceType.value = 'template'
-      }
-    })
-  }
 })
 </script>
 
@@ -391,101 +312,6 @@ onMounted(() => {
   padding: $ab-space-md;
   margin-bottom: $ab-space-sm;
   box-shadow: $ab-shadow-sm;
-}
-
-// Source tabs
-.cp-source-tabs {
-  display: flex;
-  gap: $ab-space-sm;
-}
-
-.cp-source-tab {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-  padding: $ab-space-md $ab-space-sm;
-  border: 2rpx solid $ab-border;
-  border-radius: $ab-radius-md;
-  transition: all 0.2s ease;
-
-  &--active {
-    border-color: $ab-primary;
-    background-color: $ab-primary-bg;
-  }
-
-  &__icon {
-    font-size: 48rpx;
-    line-height: 1;
-  }
-
-  &__text {
-    font-size: $ab-text-sm;
-    color: $ab-text-secondary;
-    font-weight: $ab-font-medium;
-  }
-
-  &--active &__text {
-    color: $ab-primary;
-  }
-}
-
-// Selected template
-.cp-selected-template {
-  display: flex;
-  gap: $ab-space-sm;
-  align-items: center;
-
-  &__thumb {
-    width: 96rpx;
-    height: 128rpx;
-    border-radius: $ab-radius-sm;
-    flex-shrink: 0;
-    background-color: $ab-divider;
-  }
-
-  &__info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8rpx;
-  }
-
-  &__name {
-    font-size: $ab-text-base;
-    color: $ab-text;
-    font-weight: $ab-font-medium;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__change {
-    font-size: $ab-text-sm;
-    color: $ab-primary;
-  }
-}
-
-.cp-no-template {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $ab-space-sm $ab-space-md;
-  background-color: $ab-background;
-  border-radius: $ab-radius-sm;
-  cursor: pointer;
-
-  &__text {
-    font-size: $ab-text-sm;
-    color: $ab-text-tertiary;
-  }
-
-  &__arrow {
-    font-size: $ab-text-lg;
-    color: $ab-text-tertiary;
-  }
 }
 
 // Depth cards

@@ -421,6 +421,7 @@ func NewRouter(svc *Services) *fiber.App {
 		templates := apiV1.Group("/templates")
 		templates.Get("/", svc.TemplateHandler.List)
 		templates.Post("/", svc.TemplateHandler.Create)
+		templates.Post("/analyze-thumbnail", svc.TemplateHandler.AnalyzeThumbnail)
 		templates.Get("/:id", svc.TemplateHandler.GetByID)
 		templates.Put("/:id", svc.TemplateHandler.Update)
 		templates.Delete("/:id", svc.TemplateHandler.Delete)

@@ -10,6 +10,7 @@ export interface User {
   invite_count: number
   max_invites: number
   has_password: boolean
+  is_admin: boolean
   created_at: string
   updated_at: string
 }

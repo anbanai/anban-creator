@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType } from '@/types'
+import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -21,7 +21,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
-import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
 import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
@@ -70,7 +69,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   writer: '',
   theme: '',
   author: '',
-  template_id: '',
   ecommerce_default_selected_modules: {},
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
@@ -122,7 +120,6 @@ function projectToForm(ch: Project): ProjectFormValues {
     writer: ch.writer || '',
     theme: ch.theme || '',
     author: ch.author || '',
-    template_id: ch.template_id || '',
     ecommerce_default_selected_modules: ch.ecommerce_defaults?.default_selected_modules || {},
     ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
     ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
@@ -161,10 +158,6 @@ export default function ProjectsPage() {
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [referenceAnalysisUrl, setReferenceAnalysisUrl] = useState('')
-  // 导入模型：项目 Owns 自己的人设（视觉/写作风格/排版/作者）。selectedTemplate 仅
-  // 用于 TemplatePicker 的高亮，标记"当前按哪个模板导入"——不写入表单，提交时也不发送
-  // template_id（后端 Update 无条件清空，存量绑定项目保存即迁移为自有值）。
-  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
@@ -184,8 +177,7 @@ export default function ProjectsPage() {
   const isMoments = selectedPlatform === 'moments'
   const isEcommerce = selectedPlatform === 'ecommerce'
   const isMontage = selectedPlatform === 'montage'
-  const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
-  const supportsVisualReference = !!visualTemplateType || isMoments
+  const supportsVisualReference = !isMontage
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
@@ -246,10 +238,6 @@ export default function ProjectsPage() {
   }
 
   const skipAutoFetchRef = useRef(false)
-  // 递增令牌：openEdit 触发的模板异步回填在 .then 中比对，若对话框已切到别的项目则丢弃，
-  // 避免陈旧回填串改其他项目的表单（与上方 cancelled 取消防护同一思路）。
-  const projectEditTokenRef = useRef(0)
-
   useEffect(() => {
     if (skipAutoFetchRef.current) {
       skipAutoFetchRef.current = false
@@ -433,7 +421,6 @@ export default function ProjectsPage() {
       platform,
       image_ratio: (platformConfigMap[platform]?.default_image_ratio || 'auto') as ProjectFormValues['image_ratio'],
     })
-    setSelectedTemplate(null)
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
     setModalOpen(true)
@@ -451,25 +438,7 @@ export default function ProjectsPage() {
     setReferenceUploading(false)
     form.reset(projectToForm(project))
     skipAutoFetchRef.current = true
-    setSelectedTemplate(null)
     setModalOpen(true)
-
-    // 存量兼容：旧项目可能仍带 template_id。打开编辑时只把模板视觉提示回填到空的
-    // visual_style；author/writer/theme 已由项目自身维护，不再从模板导入。
-    if (project.template_id) {
-      const token = ++projectEditTokenRef.current
-      api.templates
-        .get(project.template_id)
-        .then((t) => {
-          // 对话框已切到别的项目（或重开）则丢弃这条陈旧回填，避免串改。
-          if (projectEditTokenRef.current !== token) return
-          setSelectedTemplate(t)
-          if (!form.getValues('visual_style')) form.setValue('visual_style', t.style_prompt || '', { shouldDirty: false })
-        })
-        .catch(() => {
-          /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
-        })
-    }
   }
 
   function closeModal() {
@@ -485,21 +454,12 @@ export default function ProjectsPage() {
     setShowDirtyDialog(false)
     setEditingProject(null)
     setProfileFetchHint(null)
-    setSelectedTemplate(null)
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
     }
-  }
-
-  // 选模板=一次性把模板视觉提示导入表单（可编辑）。再次点击同一
-  // 卡片为 no-op（保留用户对风格文本框的改动），切换到别的模板则覆盖。
-  function handleProjectTemplateImport(template: Template) {
-    if (selectedTemplate?.id === template.id) return
-    setSelectedTemplate(template)
-    form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: ProjectFormValues) {
@@ -529,7 +489,6 @@ export default function ProjectsPage() {
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
-      // 导入模型：模板只用于填充视觉提示，不发送 template_id，不参与运行时解析。
       image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
@@ -940,10 +899,6 @@ export default function ProjectsPage() {
                       onUploadedPreview={setReferenceAnalysisUrl}
                     />
                   </div>
-
-                  {visualTemplateType && (
-                    <TemplatePicker type={visualTemplateType} selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
-                  )}
                 </div>
               )}
 

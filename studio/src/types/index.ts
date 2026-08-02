@@ -98,7 +98,8 @@ export type { UsageStats, TypeStatEntry } from './usage'
 export type { PaginatedResponse } from './common'
 
 // Template
-export type { TemplateType, TemplateVisibility, TemplateScope, Template, CreateTemplateRequest, UpdateTemplateRequest } from './template'
+export { SEEDNOTE_TEMPLATE_CATEGORIES } from './template'
+export type { TemplateType, TemplateVisibility, TemplateScope, SeednoteTemplateCategory, Template, CreateTemplateRequest, UpdateTemplateRequest } from './template'
 
 // Poster
 export type {

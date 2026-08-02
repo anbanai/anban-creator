@@ -9,6 +9,7 @@ import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextC
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
@@ -197,6 +198,12 @@ export default function DashboardPage() {
             )}
           />
         </div>
+
+        <SeednoteTemplateGallery
+          platform={selectedProject?.platform}
+          onApply={(templatePrompt) => setPrompt(templatePrompt)}
+          className="mx-auto w-full max-w-3xl"
+        />
 
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
           <div className="flex items-center justify-between gap-3">

@@ -17,6 +17,7 @@ import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPil
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { isDesktop } from "@/lib/tauri";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Tooltip,
   TooltipContent,
@@ -54,6 +55,7 @@ function useCollapsedState() {
 }
 
 export default function Sidebar() {
+  const { user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useCollapsedState();
 
@@ -168,7 +170,9 @@ export default function Sidebar() {
           </div>
           <SidebarSection label="创作" icon={Workflow} items={creationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          {user?.is_admin ? (
+            <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          ) : null}
           <SidebarSection label="经营" icon={BarChart3} items={businessItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="平台与设置" icon={Settings} items={connectSettingItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </nav>

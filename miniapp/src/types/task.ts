@@ -51,8 +51,7 @@ export interface Task {
   // Goal mode: condition is prepended to user prompt as /goal slash command.
   goal?: string
   goal_mode?: boolean
-  template_id?: string
-  // 公众号人设（task > template > project 解析链）：署名 + 写作风格模仿 + 可选头像
+  // 公众号人设：署名 + 写作风格模仿 + 可选头像
   byline?: string
   writing_voice?: string
   persona_avatar?: string
@@ -121,8 +120,7 @@ export interface CreateTaskRequest {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
-  template_id?: string
-  // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。空则兜底到模板/项目。
+  // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。空则兜底到项目。
   byline?: string
   writing_voice?: string
   persona_avatar?: string

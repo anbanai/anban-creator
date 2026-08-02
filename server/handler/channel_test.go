@@ -71,18 +71,26 @@ func assertFinalizedAsset(t *testing.T, repo repository.Repository, id, wantKey 
 }
 
 type fakeProjectLLM struct {
-	response string
-	err      error
-	prompt   string
+	response           string
+	validationResponse string
+	err                error
+	prompt             string
+	imagePrompt        string
+	validationPrompt   string
 }
 
 func (f *fakeProjectLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.prompt = userPrompt
+	f.validationPrompt = userPrompt
+	if f.validationResponse != "" {
+		return f.validationResponse, f.err
+	}
 	return f.response, f.err
 }
 
 func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
 	f.prompt = userPrompt
+	f.imagePrompt = userPrompt
 	return f.response, f.err
 }
 

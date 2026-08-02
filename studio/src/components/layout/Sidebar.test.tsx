@@ -10,6 +10,12 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { createTestQueryClient } from '@/test/test-utils'
 import Sidebar from './Sidebar'
 
+const authState = vi.hoisted(() => ({ isAdmin: false }))
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { is_admin: authState.isAdmin } }),
+}))
+
 vi.mock('next-themes', () => ({
   useTheme: () => ({
     theme: 'system',
@@ -55,6 +61,7 @@ function renderAuthenticatedShell(initialPath = '/') {
 
 describe('Sidebar', () => {
   beforeEach(() => {
+    authState.isAdmin = false
     commandPaletteStore.close()
     try {
       localStorage.clear()
@@ -69,6 +76,16 @@ describe('Sidebar', () => {
     expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByText('计划')).toBeInTheDocument()
     expect(screen.getByText('任务')).toBeInTheDocument()
+  })
+
+  it('只向管理员显示模板库导航', () => {
+    const regular = renderSidebar()
+    expect(screen.queryByRole('link', { name: '模板库' })).not.toBeInTheDocument()
+    regular.unmount()
+
+    authState.isAdmin = true
+    renderSidebar()
+    expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
   })
 
   it('renders user account popover', () => {

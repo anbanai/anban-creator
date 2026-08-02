@@ -112,9 +112,14 @@ func TestSeednoteAgentsStopAfterViralAnalysisArtifacts(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := string(raw)
-		for _, want := range []string{"viral_analysis", "output/source-analysis.md", "output/viral-template.json", "output/template-meta.json", "立即结束", "禁止进入", "seednote-writing"} {
+		for _, want := range []string{"viral_analysis", "output/source-analysis.md", "output/viral-template.json", "立即结束", "禁止进入", "seednote-writing"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing %q", path, want)
+			}
+		}
+		for _, forbidden := range []string{"output/template-meta.json", "save_template", "模板保存"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s still contains removed global-template contract %q", path, forbidden)
 			}
 		}
 	}

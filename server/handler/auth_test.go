@@ -85,6 +85,39 @@ func TestAuthUserCreationUsesProvisioningService(t *testing.T) {
 	}
 }
 
+func TestAuthMeReturnsDatabaseIsAdmin(t *testing.T) {
+	_, repo := newAuthProvisioningTestRepository(t)
+	h := newAuthProvisioningTestHandler(t, repo, nil, nil)
+	user := &model.User{
+		ID: "admin-auth-me", Email: "admin-auth-me@example.com", Password: "hashed",
+		InviteCode: "ADMINME1", IsAdmin: true,
+	}
+	if err := repo.Users().Create(t.Context(), user); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
+	app := fiber.New()
+	app.Get("/", func(c fiber.Ctx) error {
+		c.Locals("user_id", user.ID)
+		c.Locals("user", user)
+		return h.Me(c)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("GET /auth/me: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode /auth/me: %v", err)
+	}
+	if payload.Data["is_admin"] != true {
+		t.Fatalf("is_admin = %v, want true", payload.Data["is_admin"])
+	}
+}
+
 func isAuthUsersCall(expression ast.Expr) bool {
 	call, ok := expression.(*ast.CallExpr)
 	if !ok {

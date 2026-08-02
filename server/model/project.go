@@ -71,11 +71,7 @@ type Project struct {
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
 	// Author is the 作者（署名）— the published author name, passed to publish_draft.
-	Author string `gorm:"column:author;type:varchar(50)" json:"author"`
-	// CreatedFromTemplateID records the starter template used to create this project
-	// (audit only). Templates are project-creation starters, imported once then
-	// detached — this id does NOT enter the resolution chain.
-	CreatedFromTemplateID string        `gorm:"column:template_id;type:char(36);default:''" json:"created_from_template_id"`
+	Author                string        `gorm:"column:author;type:varchar(50)" json:"author"`
 	ReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView    `gorm:"-" json:"reference_image,omitempty"`
 	ReferenceImageSet     bool          `gorm:"-" json:"-"`

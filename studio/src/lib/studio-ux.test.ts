@@ -23,7 +23,7 @@ function project(overrides: Partial<Project> = {}): Project {
     writer: '',
     theme: '',
     author: '',
-    template_id: '',
+
     image_ratio: '',
     max_concurrent_tasks: 1,
     config: {},

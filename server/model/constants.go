@@ -265,6 +265,33 @@ const (
 	TemplateTypeArticle  = "article"
 )
 
+const (
+	SeednoteTemplateCategoryProduct   = "好物种草"
+	SeednoteTemplateCategoryBeauty    = "美妆护肤"
+	SeednoteTemplateCategoryHealth    = "健康养生"
+	SeednoteTemplateCategoryFood      = "美食生活"
+	SeednoteTemplateCategoryHome      = "家居家装"
+	SeednoteTemplateCategoryKnowledge = "知识科普"
+)
+
+var SeednoteTemplateCategories = [...]string{
+	SeednoteTemplateCategoryProduct,
+	SeednoteTemplateCategoryBeauty,
+	SeednoteTemplateCategoryHealth,
+	SeednoteTemplateCategoryFood,
+	SeednoteTemplateCategoryHome,
+	SeednoteTemplateCategoryKnowledge,
+}
+
+func IsSeednoteTemplateCategory(category string) bool {
+	for _, allowed := range SeednoteTemplateCategories {
+		if category == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 // Viral analysis source type constants.
 const (
 	ViralAnalysisSourceNote    = "note"

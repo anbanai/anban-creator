@@ -786,7 +786,6 @@ function createFollowUpTask() {
     `prompt=${encodeURIComponent(prompt)}`,
     `execution_profile=${encodeURIComponent(t.execution_profile)}`,
   ]
-  if (t.template_id) params.push(`template_id=${encodeURIComponent(t.template_id)}`)
   uni.navigateTo({ url: `/pages/tasks/create?${params.join('&')}` })
 }
 

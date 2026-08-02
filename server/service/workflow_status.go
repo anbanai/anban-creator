@@ -158,7 +158,7 @@ func buildViralAnalysisWorkflowStatus(files []*model.TaskFile) *WorkflowStatus {
 	for name := range pathsByName {
 		sort.Strings(pathsByName[name])
 	}
-	templatePaths := append(copyStrings(pathsByName["template-meta.json"]), pathsByName["viral-template.json"]...)
+	templatePaths := copyStrings(pathsByName["viral-template.json"])
 	sort.Strings(templatePaths)
 	stages := []WorkflowStage{
 		buildStage(WorkflowStageSourceNote, "源笔记", pathsByName["source-analysis.md"]),

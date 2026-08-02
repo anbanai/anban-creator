@@ -136,7 +136,7 @@ func TestBuildWorkflowStatusViralAnalysisUsesDedicatedStages(t *testing.T) {
 	want := []WorkflowStage{
 		{Key: "source_note", Label: "源笔记", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"source-analysis.md"}},
 		{Key: "evidence_analysis", Label: "证据分析", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"source-analysis.md"}},
-		{Key: "template_artifacts", Label: "模板产物", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"template-meta.json", "viral-template.json"}},
+		{Key: "template_artifacts", Label: "模板产物", Status: WorkflowStageStatusCompleted, ArtifactPaths: []string{"viral-template.json"}},
 	}
 	if len(status.Stages) != len(want) {
 		t.Fatalf("stages = %#v, want exactly three viral stages", status.Stages)

@@ -29,7 +29,7 @@ const projects: Project[] = [
     writer: 'default',
     theme: 'default',
     author: 'Editorial Desk',
-    template_id: '',
+
     image_ratio: '16:9',
     max_concurrent_tasks: 2,
     config: {},
@@ -51,7 +51,7 @@ const projects: Project[] = [
     writer: 'default',
     theme: 'default',
     author: 'Garden Desk',
-    template_id: '',
+
     image_ratio: '3:4',
     max_concurrent_tasks: 1,
     config: {},

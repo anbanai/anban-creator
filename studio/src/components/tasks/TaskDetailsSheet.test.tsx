@@ -18,7 +18,7 @@ const project: Project = {
   writer: '当前项目写作风格',
   theme: '当前项目排版',
   author: '当前项目作者',
-  template_id: '',
+
   image_ratio: '16:9',
   max_concurrent_tasks: 1,
   config: {},

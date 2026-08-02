@@ -201,6 +201,7 @@ func newProjectHandlerTestApp(repo repository.Repository, store *projectReferenc
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	projectSvc := service.NewProjectService(repo, &logger)
 	h := NewProjectHandler(projectSvc, &logger)
+	h.SetTemplateService(service.NewTemplateService(repo, &logger))
 	h.SetStore(store)
 	h.SetUploadRepository(repo)
 	h.SetReferenceAssetService(service.NewReferenceAssetService(repo, store, time.Now))
@@ -218,6 +219,33 @@ func newProjectHandlerTestApp(repo repository.Repository, store *projectReferenc
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
 	return app
+}
+
+func TestProjectHandlerCreateReturnsCanonicalRecommendedTemplates(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	tmpl := &model.Template{
+		ID: uuid.NewString(), UserID: "admin-secret", Type: model.TemplateTypeSeednote,
+		Name: "清透说明书", Category: model.SeednoteTemplateCategoryBeauty,
+		ThumbnailURL: "https://example.com/template.png", Prompt: "清透版式",
+		Visibility: "public", IsActive: true, Writer: "must-not-leak", Tags: []string{"must-not-leak"},
+	}
+	if err := repo.Templates().Create(t.Context(), tmpl); err != nil {
+		t.Fatalf("create recommended template: %v", err)
+	}
+
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), map[string]any{
+		"platform": "seednote",
+		"name":     "美妆账号",
+		"keywords": model.SeednoteTemplateCategoryBeauty,
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create project status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
+	}
+	items := decodeBody(t, resp)["data"].(map[string]any)["recommended_templates"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("recommended templates=%v, want one", items)
+	}
+	assertCanonicalTemplateResponse(t, items[0].(map[string]any))
 }
 
 func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {

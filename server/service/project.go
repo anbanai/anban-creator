@@ -268,8 +268,6 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	// 作者署名（author）：unconditional assign 以支持清空。
 	// 导入模型下"导入模板→清空署名"是合法操作，guarded assign 会让清空后的保存静默回填旧署名。
 	existing.Author = ch.Author
-	// 建项来源模板：unconditional assign 以支持清空。
-	existing.CreatedFromTemplateID = ch.CreatedFromTemplateID
 	if ch.ReferenceImageSet {
 		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
 	}

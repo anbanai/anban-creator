@@ -669,9 +669,8 @@ assertContains('src/pages/tasks/index.vue', [
 
 assertContains('src/pages/tasks/create.vue', [
   'onLoad',
-  'template_id',
   'prefillProjectId',
-  'applyTemplate',
+  'prefillPrompt',
   'advancedOpen',
 ])
 assertContains('src/pages/tasks/create.vue', [
@@ -721,6 +720,50 @@ assertContains('src/pages/workshop/clone.vue', [
 assertContains('src/pages/workshop/poster.vue', [
   'copyPosterPrompt',
   'regenerateVariant',
+])
+
+// === Seednote templates (2026-08-02): prompt-only, no persistent binding ===
+assertContains('src/types/template.ts', [
+  "export type TemplateType = 'seednote'",
+  'prompt: string',
+  'SEEDNOTE_TEMPLATE_CATEGORIES',
+])
+assertNotContains('src/types/template.ts', [
+  'style_prompt',
+  'user_id',
+  'structure:',
+  'tags:',
+  'EcommerceTemplateDefaults',
+])
+for (const path of [
+  'src/types/task.ts',
+  'src/types/plan.ts',
+  'src/types/project.ts',
+  'src/pages/tasks/create.vue',
+  'src/pages/plans/create.vue',
+  'src/pages/projects/detail.vue',
+  'src/pages/tasks/detail.vue',
+]) {
+  assertNotContains(path, ['template_id'])
+}
+for (const path of [
+  'src/pages/workshop/poster.vue',
+  'src/pages/workshop/viral-analysis.vue',
+]) {
+  assertNotContains(path, ['templatesApi', 'style_prompt'])
+}
+assertContains('src/pages/templates/index.vue', [
+  'SEEDNOTE_TEMPLATE_CATEGORIES',
+  "type: 'seednote'",
+  'tpl.prompt',
+  'prompt=',
+])
+assertNotContains('src/pages/templates/index.vue', [
+  'style_prompt',
+  'templatesApi.create',
+  'templatesApi.update',
+  'templatesApi.remove',
+  'template_id',
 ])
 
 assertContains('src/pages/designer/index.vue', [

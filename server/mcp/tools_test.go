@@ -65,12 +65,11 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	projectSvc := service.NewProjectService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 	planSvc := service.NewPlanService(repo, &logger)
-	templateSvc := service.NewTemplateService(repo, &logger)
 	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{}, accountInfoImageCapabilityResolver())
 
 	old := svcs
 	svcs = &Services{
-		ProjectSvc: projectSvc, TaskSvc: taskSvc, PlanSvc: planSvc, TemplateSvc: templateSvc,
+		ProjectSvc: projectSvc, TaskSvc: taskSvc, PlanSvc: planSvc,
 		AgentProjectProfileSvc: profileSvc,
 		ArticleScoreSvc:        service.NewArticleScoreService(),
 		SeednoteExportSvc:      service.NewSeednoteExportService(),

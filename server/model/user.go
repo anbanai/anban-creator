@@ -15,6 +15,7 @@ type User struct {
 	InviteCode  string    `gorm:"type:varchar(16);uniqueIndex" json:"invite_code"`
 	InvitedBy   string    `gorm:"type:char(36);index;nullable" json:"-"`
 	InviteCount int       `gorm:"default:0" json:"invite_count"`
+	IsAdmin     bool      `gorm:"default:false" json:"is_admin"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

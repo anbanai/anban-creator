@@ -46,7 +46,7 @@ const fixtures = vi.hoisted(() => {
     writer: 'concise',
     theme: 'clean',
     author: 'Anban',
-    template_id: '',
+
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
     config: {},
@@ -133,6 +133,10 @@ vi.mock('@/lib/api', async () => {
           { id: 'ecommerce', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4', '4:3', '16:9'], fields: [] },
         ]),
       },
+      templates: {
+        ...actual.api.templates,
+        list: vi.fn(),
+      },
       billing: {
         ...actual.api.billing,
         wallet: vi.fn(),
@@ -184,6 +188,14 @@ beforeEach(() => {
     fixtures.seednoteProject,
     fixtures.montageProject,
   ])
+  vi.mocked(api.templates.list).mockResolvedValue({
+    items: [{
+      id: 'template-1', type: 'seednote', name: '清透说明书', category: '美妆护肤',
+      thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+      is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
+    }],
+    total: 1,
+  })
   vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100000, promotional: 0, debt: 0, balance: 100000 })
   vi.mocked(api.billing.catalog).mockResolvedValue({
     catalog_id: 'retail-test-v1',
@@ -236,6 +248,38 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
   })
 
+  it('在任务创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {
+    const createView = renderDialog({ initialProjectId: fixtures.seednoteProject.id })
+    const createDialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const createPrompt = within(createDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
+    fireEvent.change(createPrompt, { target: { value: '已有创建要求' } })
+    fireEvent.click(await within(createDialog).findByRole('button', { name: /清透说明书/ }))
+    expect(createPrompt).toHaveValue('模板视觉 Prompt')
+    createView.unmount()
+
+    renderDialog({
+      mode: 'clone',
+      initialProjectId: undefined,
+      sourceTask: {
+        ...fixtures.sourceTask,
+        type: 'seednote',
+        project_id: fixtures.seednoteProject.id,
+        prompt: '已有克隆要求',
+        input_attachments: [{
+          type: 'image', upload_id: 'image-upload', key: 'uploads/pending/image.png',
+          file_name: 'image.png', content_type: 'image/png', size: 42,
+        }],
+      },
+    })
+    const cloneDialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    const clonePrompt = within(cloneDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
+    await waitFor(() => expect(clonePrompt).toHaveValue('已有克隆要求'))
+    expect(within(cloneDialog).getAllByText('image.png').length).toBeGreaterThan(0)
+    fireEvent.click(await within(cloneDialog).findByRole('button', { name: /清透说明书/ }))
+    expect(clonePrompt).toHaveValue('模板视觉 Prompt')
+    expect(within(cloneDialog).getAllByText('image.png').length).toBeGreaterThan(0)
+  })
+
   it('shows configuration-driven off-peak windows and current task prices', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
@@ -253,6 +297,10 @@ describe('TaskFormDialog', () => {
     expect(screen.queryByRole('option', { name: /公众号项目/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /剪辑项目/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('option', { name: /种草项目/ }))
+
+    expect(within(dialog).queryByText('参考模板')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /清透说明书/ })).not.toBeInTheDocument()
+    expect(api.templates.list).not.toHaveBeenCalled()
 
     expect(within(dialog).queryByText('封面比例')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('图像模型')).not.toBeInTheDocument()
@@ -275,6 +323,26 @@ describe('TaskFormDialog', () => {
       input_attachments: [],
       agent_input: {},
     }))
+  })
+
+  it('does not load templates when cloning a viral analysis task', async () => {
+    renderDialog({
+      mode: 'clone',
+      initialProjectId: undefined,
+      sourceTask: {
+        ...fixtures.sourceTask,
+        type: 'viral_analysis',
+        project_id: fixtures.seednoteProject.id,
+        prompt: 'https://www.xiaohongshu.com/explore/source-note',
+        input_attachments: [],
+      },
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    expect(await within(dialog).findByPlaceholderText('粘贴种草笔记链接或分享文本...')).toHaveValue('https://www.xiaohongshu.com/explore/source-note')
+    expect(within(dialog).queryByText('参考模板')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /清透说明书/ })).not.toBeInTheDocument()
+    expect(api.templates.list).not.toHaveBeenCalled()
   })
 
   it('requires a server-backed execution profile and submits the selected exact-price profile', async () => {

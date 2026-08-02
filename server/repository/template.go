@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
 
@@ -33,14 +34,18 @@ func (r *templateRepository) FindByID(ctx context.Context, id string) (*model.Te
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&template).Error; err != nil {
 		return nil, err
 	}
+	applyLegacyTemplatePrompt(&template)
 	return &template, nil
 }
 
 func (r *templateRepository) List(ctx context.Context, templateType string, category string, tag string, userID string, scope string, offset, limit int) ([]*model.Template, error) {
 	var templates []*model.Template
-	q := r.db.WithContext(ctx).Where("is_active = ?", true)
+	q := r.db.WithContext(ctx)
 	if templateType != "" {
 		q = q.Where("type = ?", templateType)
+	}
+	if templateType == model.TemplateTypeSeednote {
+		q = q.Where("category IN ?", model.SeednoteTemplateCategories)
 	}
 	if category != "" {
 		q = q.Where("category = ?", category)
@@ -56,14 +61,18 @@ func (r *templateRepository) List(ctx context.Context, templateType string, cate
 	if err := q.Find(&templates).Error; err != nil {
 		return nil, err
 	}
+	applyLegacyTemplatePrompts(templates)
 	return templates, nil
 }
 
 func (r *templateRepository) Count(ctx context.Context, templateType string, category string, tag string, userID string, scope string) (int64, error) {
 	var count int64
-	q := r.db.WithContext(ctx).Model(&model.Template{}).Where("is_active = ?", true)
+	q := r.db.WithContext(ctx).Model(&model.Template{})
 	if templateType != "" {
 		q = q.Where("type = ?", templateType)
+	}
+	if templateType == model.TemplateTypeSeednote {
+		q = q.Where("category IN ?", model.SeednoteTemplateCategories)
 	}
 	if category != "" {
 		q = q.Where("category = ?", category)
@@ -78,36 +87,34 @@ func (r *templateRepository) Count(ctx context.Context, templateType string, cat
 	return count, nil
 }
 
-// applyVisibilityScope scopes a template query by ownership and visibility.
-//
-// userID=="" is for MCP and internal callers — the HTTP path always has a
-// JWT-mandated userID. MCP intentionally lists only public templates, see
-// server/mcp/template_tools.go.
-//
-//	scope=mine    → only templates owned by userID
-//	scope=public  → only publicly visible templates
-//	scope=all     → templates owned by userID OR publicly visible (default)
+// applyVisibilityScope receives a service-authorized scope. Empty user IDs are
+// always reduced to the public pool as a final defense for internal callers.
 func applyVisibilityScope(q *gorm.DB, userID, scope string) *gorm.DB {
 	if userID == "" {
-		return q.Where("visibility = ?", "public")
+		return q.Where("is_active = ? AND visibility = ?", true, "public")
 	}
 	switch scope {
-	case "mine":
-		return q.Where("user_id = ?", userID)
 	case "public":
-		return q.Where("visibility = ?", "public")
-	default: // "all" or unspecified
-		return q.Where("user_id = ? OR visibility = ?", userID, "public")
+		return q.Where("is_active = ? AND visibility = ?", true, "public")
+	case "private":
+		return q.Where("is_active = ? AND visibility = ?", true, "private")
+	case "inactive":
+		return q.Where("is_active = ?", false)
+	case "all":
+		return q
+	default:
+		return q.Where("1 = 0")
 	}
 }
 
 func (r *templateRepository) ListByIDs(ctx context.Context, ids []string) ([]*model.Template, error) {
 	var templates []*model.Template
 	if err := r.db.WithContext(ctx).
-		Where("id IN ? AND is_active = ?", ids, true).
+		Where("id IN ? AND is_active = ? AND visibility = ?", ids, true, "public").
 		Find(&templates).Error; err != nil {
 		return nil, err
 	}
+	applyLegacyTemplatePrompts(templates)
 	return templates, nil
 }
 
@@ -120,11 +127,37 @@ func (r *templateRepository) ListActive(ctx context.Context, templateType string
 	if err := q.Order("sort_order DESC").Find(&templates).Error; err != nil {
 		return nil, err
 	}
+	applyLegacyTemplatePrompts(templates)
 	return templates, nil
 }
 
+func applyLegacyTemplatePrompts(templates []*model.Template) {
+	for _, template := range templates {
+		applyLegacyTemplatePrompt(template)
+	}
+}
+
+func applyLegacyTemplatePrompt(template *model.Template) {
+	if template != nil && strings.TrimSpace(template.Prompt) == "" {
+		template.Prompt = template.LegacyStylePrompt
+	}
+}
+
 func (r *templateRepository) Create(ctx context.Context, template *model.Template) error {
-	return r.db.WithContext(ctx).Create(template).Error
+	isActive := template.IsActive
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(template).Error; err != nil {
+			return err
+		}
+		if isActive {
+			return nil
+		}
+		if err := tx.Model(&model.Template{}).Where("id = ?", template.ID).UpdateColumn("is_active", false).Error; err != nil {
+			return err
+		}
+		template.IsActive = false
+		return nil
+	})
 }
 
 func (r *templateRepository) Update(ctx context.Context, template *model.Template) error {

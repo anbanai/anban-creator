@@ -258,18 +258,6 @@
         </view>
 
         <view v-if="isNew || sections.advanced" class="project-detail__fields">
-          <!-- Template import (article / ecommerce): one-shot import of persona/style -->
-          <view v-if="isArticle || isEcommerce" class="field-group">
-            <text class="field-label">从模板导入</text>
-            <view class="picker-row" @tap="pickTemplate">
-              <text v-if="selectedTemplateName" class="picker-row__value">{{ selectedTemplateName }}</text>
-              <text v-else class="picker-row__placeholder">可选，导入模板风格/人设</text>
-              <text v-if="form.template_id" class="picker-row__clear" @tap.stop="clearTemplateImport">清除</text>
-              <text v-else class="picker-row__arrow">›</text>
-            </view>
-            <text class="field-hint">选择模板后，视觉风格/作者/写作风格/排版将一次性填入，可继续编辑。</text>
-          </view>
-
           <!-- Persona block (article / seednote) — byline ≠ writer_key persona -->
           <view v-if="isArticle || isSeednote" class="persona-block">
             <text class="field-label persona-block__title">作者人设</text>
@@ -519,7 +507,6 @@ import type {
   CreateProjectRequest,
   ResourceEntry,
   TopicPool,
-  Template,
   ReferenceImageSelection,
   ImageCapabilityOption,
   EcommerceProjectDefaults,
@@ -527,7 +514,6 @@ import type {
 } from '@/types'
 import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
-import { templatesApi } from '@/api/templates'
 import { topicPoolApi } from '@/api/topic-pool'
 import { imageCapabilitiesApi } from '@/api/image-capabilities'
 import AbButton from '@/components/common/AbButton.vue'
@@ -578,7 +564,6 @@ const form = reactive({
   byline: '',
   writing_voice: '',
   persona_avatar: '',
-  template_id: '',
   theme: '',
   layout: '',
   reference_image: null as ReferenceImageSelection | null,
@@ -600,7 +585,6 @@ const keywordList = ref<string[]>([])
 const themes = ref<ResourceEntry[]>([])
 const layouts = ref<ResourceEntry[]>([])
 const resourcesLoading = ref(false)
-const platformTemplates = ref<Template[]>([])
 const topics = ref<TopicPool[]>([])
 const topicStatus = ref<'unused' | 'used' | ''>('unused')
 const topicsLoading = ref(false)
@@ -637,11 +621,6 @@ const topicStatusOptions = [
   { value: 'used', label: '已使用' },
   { value: '', label: '全部' },
 ]
-
-const selectedTemplateName = computed(() => {
-  const t = platformTemplates.value.find((x) => x.id === form.template_id)
-  return t?.name || ''
-})
 
 const maxStep = computed(() => {
   // Skip step 3 (publishing) for seednote
@@ -681,7 +660,6 @@ watch(() => form.platform, (val) => {
   if (val === 'ecommerce' && !form.image_capability_key) form.image_capability_key = defaultImageCapability.value
   if (isNew.value) form.image_ratio = selectedChannelConfig.value?.default_image_ratio || 'auto'
   void loadResources(val)
-  void loadPlatformTemplates(val)
 })
 
 watch(topicStatus, () => {
@@ -721,19 +699,6 @@ async function loadResources(platform?: string) {
   }
 }
 
-async function loadPlatformTemplates(platform?: string) {
-  if (!platform) {
-    platformTemplates.value = []
-    return
-  }
-  try {
-    const res = await templatesApi.list({ type: platform, limit: 50 })
-    platformTemplates.value = res.items || []
-  } catch {
-    platformTemplates.value = []
-  }
-}
-
 async function loadProject(id: string) {
   pageLoading.value = true
   try {
@@ -750,7 +715,6 @@ async function loadProject(id: string) {
     form.byline = ch.byline || ''
     form.writing_voice = ch.writing_voice || ''
     form.persona_avatar = ch.persona_avatar || ''
-    form.template_id = ch.template_id || ''
     form.theme = ch.theme || ''
     form.layout = ch.layout || ''
     form.reference_image = ch.reference_image?.asset_id
@@ -770,27 +734,6 @@ async function loadProject(id: string) {
     }
     stats.value = detail.stats || ch.stats || null
     await loadResources(form.platform)
-    await loadPlatformTemplates(form.platform)
-
-    // Imported-model compat: if a template_id is set, surface its persona as
-    // the default values for any empty project fields (matches studio). The
-    // backend clears template_id on next save (project owns its own persona).
-    if (form.template_id) {
-      try {
-        const tpl = await templatesApi.get(form.template_id)
-        if (!form.visual_style && tpl.style_prompt) form.visual_style = tpl.style_prompt
-        if (!form.byline && tpl.author_name) form.byline = tpl.author_name
-        if (!form.writing_voice && tpl.writing_voice) {
-          form.writing_voice = tpl.writing_voice
-        }
-        if (!form.persona_avatar && tpl.persona_avatar) {
-          form.persona_avatar = tpl.persona_avatar
-        }
-        if (!form.theme && tpl.theme) form.theme = tpl.theme
-      } catch {
-        /* template deleted — leave fields empty */
-      }
-    }
 
     await loadTopics()
   } catch (err) {
@@ -974,38 +917,6 @@ function clearReferenceImage() {
   referencePreviewUrl.value = ''
 }
 
-function pickTemplate() {
-  if (platformTemplates.value.length === 0) {
-    uni.showToast({ title: '该平台暂无可用模板', icon: 'none' })
-    return
-  }
-  const labels = platformTemplates.value.map((t) => t.name)
-  uni.showActionSheet({
-    itemList: labels,
-    success: (res) => {
-      const tpl = platformTemplates.value[res.tapIndex]
-      if (tpl) importTemplate(tpl)
-    },
-  })
-}
-
-// One-shot import of persona/style from a template (mirrors studio).
-// Per project memory: do NOT auto-fill byline from a writer-persona source
-// unless the template explicitly carries author_name.
-function importTemplate(tpl: Template) {
-  form.template_id = tpl.id
-  if (tpl.style_prompt) form.visual_style = tpl.style_prompt
-  if (tpl.author_name) form.byline = tpl.author_name
-  if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
-  if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
-  if (tpl.theme) form.theme = tpl.theme
-  uni.showToast({ title: `已导入「${tpl.name}」`, icon: 'success' })
-}
-
-function clearTemplateImport() {
-  form.template_id = ''
-}
-
 function validate(): boolean {
   Object.keys(errors).forEach((k) => delete errors[k])
 
@@ -1040,7 +951,6 @@ function buildPayload(): CreateProjectRequest {
     persona_avatar: (isArticle.value || isSeednote.value) && form.persona_avatar
       ? form.persona_avatar
       : undefined,
-    template_id: form.template_id || undefined,
     theme: form.theme || undefined,
     layout: form.layout || undefined,
     byline: form.byline || undefined,

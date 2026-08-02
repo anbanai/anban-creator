@@ -79,7 +79,7 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 	}
 	if task != nil && task.Type == model.TaskTypeViralAnalysis {
 		var missing []string
-		for _, name := range []string{"source-analysis.md", "viral-template.json", "template-meta.json"} {
+		for _, name := range []string{"source-analysis.md", "viral-template.json"} {
 			if !files[name] {
 				missing = append(missing, name)
 			}

@@ -73,7 +73,6 @@
         </view>
         <view class="va-reuse-card__actions">
           <AbButton type="primary" size="sm" @click="createCloneTask">创建复刻任务</AbButton>
-          <AbButton type="ghost" size="sm" :loading="templateSaving" @click="saveCloneTemplate">保存为模板</AbButton>
           <AbButton type="ghost" size="sm" @click="copyClonePrompt">复制 Prompt</AbButton>
         </view>
       </view>
@@ -190,7 +189,6 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { ViralAnalysis, AnalysisResult } from '@/types'
 import { viralAnalysesApi } from '@/api/viral-analyses'
-import { templatesApi } from '@/api/templates'
 import { relativeTime } from '@/utils/format'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
@@ -205,7 +203,6 @@ const selectedId = ref<string | null>(null)
 const currentAnalysis = ref<ViralAnalysis | null>(null)
 const historyList = ref<ViralAnalysis[]>([])
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
-const templateSaving = ref(false)
 
 const expandedDetails = reactive<Record<string, boolean>>({
   evidence: false,
@@ -379,31 +376,6 @@ function createCloneTask() {
   uni.navigateTo({
     url: `/pages/tasks/create?type=seednote&prompt=${encodeURIComponent(prompt)}`,
   })
-}
-
-async function saveCloneTemplate() {
-  if (!result.value || templateSaving.value) return
-  const r = result.value
-  templateSaving.value = true
-  try {
-    const meta = r.template_meta
-    await templatesApi.create({
-      name: meta?.name || '爆文复刻模板',
-      type: 'seednote',
-      thumbnail_url: '',
-      style_prompt: r.viral_template.cover_template || r.clone_suggestions.cover.join('；') || '复刻来源笔记的封面节奏与视觉钩子',
-      visibility: 'private',
-      structure: buildClonePrompt(),
-      example_content: r.viral_template.body_template,
-      category: meta?.category || '爆文复刻',
-      tags: meta?.tags || [],
-    })
-    uni.showToast({ title: '模板已保存', icon: 'success' })
-  } catch (err: any) {
-    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
-  } finally {
-    templateSaving.value = false
-  }
 }
 
 async function startAnalysis() {

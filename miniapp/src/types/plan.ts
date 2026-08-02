@@ -32,14 +32,10 @@ export interface Plan {
   // toggleable. Both default true; spawned article tasks inherit them.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  // 公众号人设（与项目/模板同链解析：plan > template > project），spawned task 继承。
+  // 公众号人设覆盖；spawned task 继承。
   byline?: string
   writing_voice?: string
   persona_avatar?: string
-  // template_id records the template selected when creating the plan; spawned
-  // tasks inherit it so the agent can surface the template's content scaffold
-  // via get_project_profile(task_id).
-  template_id?: string
   created_at: string
   updated_at: string
 }
@@ -71,7 +67,6 @@ export interface CreatePlanRequest {
   byline?: string
   writing_voice?: string
   persona_avatar?: string
-  template_id?: string
 }
 
 export interface UpdatePlanRequest {
@@ -100,5 +95,4 @@ export interface UpdatePlanRequest {
   byline?: string
   writing_voice?: string
   persona_avatar?: string
-  template_id?: string
 }

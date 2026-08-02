@@ -13,6 +13,7 @@ import ShortcutHelp from '@/components/ShortcutHelp'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette'
 import LocalExecutorLayer from '@/components/desktop/LocalExecutorLayer'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
+import AdminRoute from '@/components/auth/AdminRoute'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 // Lazy-loaded pages
@@ -135,7 +136,14 @@ function AppRoutes() {
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
-          <Route path="templates" element={<LazyPage component={TemplatesPage} />} />
+          <Route
+            path="templates"
+            element={(
+              <AdminRoute>
+                <LazyPage component={TemplatesPage} />
+              </AdminRoute>
+            )}
+          />
 
           <Route path="designer" element={<LazyPage component={DesignerPage} />} />
           <Route path="billing" element={<LazyPage component={BillingPage} />} />

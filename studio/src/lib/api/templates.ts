@@ -4,7 +4,6 @@ import type { Template, TemplateScope, CreateTemplateRequest, UpdateTemplateRequ
 export interface ListTemplatesParams {
   type?: string
   category?: string
-  tag?: string
   scope?: TemplateScope
   offset?: number
   limit?: number
@@ -25,4 +24,7 @@ export const templatesApi = {
 
   remove: (id: string) =>
     unwrap<{ deleted: string }>(http.delete(`/templates/${id}`)),
+
+  analyzeThumbnail: (data: { type: 'seednote'; thumbnail_url: string }) =>
+    unwrap<{ prompt: string }>(http.post('/templates/analyze-thumbnail', data)),
 }

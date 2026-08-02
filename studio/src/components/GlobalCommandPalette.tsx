@@ -18,6 +18,7 @@ import { commandPaletteStore } from '@/lib/command-palette'
 import { api } from '@/lib/api'
 import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref } from '@/lib/command-center'
 import { queryKeys } from '@/lib/query-keys'
+import { useAuth } from '@/contexts/AuthContext'
 
 const shortcutMap: Record<string, string> = {
   '首页': 'g d',
@@ -43,6 +44,7 @@ export default function GlobalCommandPalette() {
   const open = useSyncExternalStore(commandPaletteStore.subscribe, commandPaletteStore.getSnapshot)
   const navigate = useNavigate()
   const { setTheme } = useTheme()
+  const { user } = useAuth()
 
   const { data: tasksData } = useQuery({
     queryKey: ['command-palette', 'tasks'],
@@ -86,6 +88,10 @@ export default function GlobalCommandPalette() {
   const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
   const failedTasks = signals.failedTasks.slice(0, 5)
   const defaultProject = signals.projects[0]
+  const navigationItems = useMemo(
+    () => user?.is_admin ? allNavItems : allNavItems.filter((item) => item.to !== '/templates'),
+    [user?.is_admin],
+  )
 
   const setOpen = useCallback((v: boolean) => {
     if (v) commandPaletteStore.open()
@@ -173,7 +179,7 @@ export default function GlobalCommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="跳转">
-          {allNavItems.map((item) => (
+          {navigationItems.map((item) => (
             <CommandItem
               key={item.to}
               onSelect={() => handleSelect(() => navigate(item.to))}

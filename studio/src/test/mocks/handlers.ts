@@ -28,6 +28,7 @@ export const mockUser: User = {
   invite_count: 0,
   max_invites: 3,
   has_password: true,
+  is_admin: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 }
@@ -119,7 +120,7 @@ export const mockProjects: Project[] = [
     writer: '',
     theme: '',
     author: '作者',
-    template_id: '',
+
     image_ratio: '16:9',
     max_concurrent_tasks: 2,
     config: { wechat_app_id: 'wx123' },
