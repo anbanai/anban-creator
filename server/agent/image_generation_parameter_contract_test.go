@@ -175,6 +175,23 @@ func TestGeneratingSkillProseDoesNotDescribeTaskMCPSizeParameter(t *testing.T) {
 	}
 }
 
+func TestEcommercePlatformGuidanceDoesNotPassDesignerSizePresetsToTaskGeneration(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, rel := range []string{
+		"plugins/skills/ecommerce-platform-specs/SKILL.md",
+		"plugins/skills/ecommerce-platform-specs/references/platforms.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
+			for _, stale := range []string{"ratio:tier", "1:1:2K", "3:4:2K", "16:9:2K"} {
+				if strings.Contains(body, stale) {
+					t.Fatalf("%s still mixes Designer fixed size presets into task guidance via %q", rel, stale)
+				}
+			}
+		})
+	}
+}
+
 func TestMomentsGeneratesSemanticRatioImageArtifacts(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{
