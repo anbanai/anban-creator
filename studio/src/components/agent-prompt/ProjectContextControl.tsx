@@ -31,6 +31,7 @@ interface ProjectContextSelectProps {
   value: string | null
   onValueChange: (id: string | null, project?: ProjectContextProject) => void
   allowNoProject?: boolean
+  noProjectLabel?: string
   createProjectHref?: string
   loading?: boolean
   disabled?: boolean
@@ -61,7 +62,7 @@ interface ProjectItem extends ProjectContextProject {
 interface NoProjectItem {
   kind: 'none'
   id: '__no-project__'
-  name: '不使用项目'
+  name: string
 }
 
 type ProjectContextItem = ProjectItem | NoProjectItem
@@ -71,12 +72,6 @@ interface ProjectContextGroup {
   items: ProjectContextItem[]
 }
 
-const NO_PROJECT_ITEM: NoProjectItem = {
-  kind: 'none',
-  id: '__no-project__',
-  name: '不使用项目',
-}
-
 function isProjectContextItemEqual(item: ProjectContextItem, value: ProjectContextItem) {
   return item.kind === value.kind && item.id === value.id
 }
@@ -84,6 +79,7 @@ function isProjectContextItemEqual(item: ProjectContextItem, value: ProjectConte
 function projectGroups(
   projects: readonly ProjectContextProject[],
   allowNoProject: boolean,
+  noProjectItem: NoProjectItem,
 ): ProjectContextGroup[] {
   const groups = new Map<string, ProjectItem[]>()
   for (const project of projects) {
@@ -94,7 +90,7 @@ function projectGroups(
   }
 
   const result: ProjectContextGroup[] = []
-  if (allowNoProject) result.push({ value: '上下文', items: [NO_PROJECT_ITEM] })
+  if (allowNoProject) result.push({ value: '上下文', items: [noProjectItem] })
   for (const [value, items] of groups) result.push({ value, items })
   return result
 }
@@ -104,6 +100,7 @@ function SelectProjectContext({
   value,
   onValueChange,
   allowNoProject = false,
+  noProjectLabel = '不使用项目',
   createProjectHref,
   loading = false,
   disabled = false,
@@ -111,9 +108,14 @@ function SelectProjectContext({
   compact = false,
   ariaLabel = '项目上下文',
 }: ProjectContextSelectProps) {
+  const noProjectItem = useMemo<NoProjectItem>(() => ({
+    kind: 'none',
+    id: '__no-project__',
+    name: noProjectLabel,
+  }), [noProjectLabel])
   const groups = useMemo(
-    () => projectGroups(projects, allowNoProject),
-    [allowNoProject, projects],
+    () => projectGroups(projects, allowNoProject, noProjectItem),
+    [allowNoProject, noProjectItem, projects],
   )
   const projectItems = useMemo(
     () => groups.flatMap((group) => group.items),
@@ -121,9 +123,9 @@ function SelectProjectContext({
   )
   const selected = useMemo(() => (
     value === null
-      ? (allowNoProject ? NO_PROJECT_ITEM : null)
+      ? (allowNoProject ? noProjectItem : null)
       : projectItems.find((item) => item.kind === 'project' && item.id === value) ?? null
-  ), [allowNoProject, projectItems, value])
+  ), [allowNoProject, noProjectItem, projectItems, value])
   const isDisabled = loading || disabled
 
   return (

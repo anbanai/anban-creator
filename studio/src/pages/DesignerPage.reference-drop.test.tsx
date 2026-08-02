@@ -261,7 +261,7 @@ describe('Designer shared prompt composer', () => {
     const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
     await waitFor(() => expect(projectControl).not.toBeDisabled())
     fireEvent.click(projectControl)
-    fireEvent.click(await screen.findByRole('option', { name: '品牌项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /品牌项目/ }))
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '品牌图' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(

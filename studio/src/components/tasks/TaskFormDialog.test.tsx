@@ -227,10 +227,10 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
 
     fireEvent.click(within(dialog).getByRole('combobox', { name: '项目上下文' }))
-    expect(await screen.findByRole('option', { name: '种草项目' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '公众号项目' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '剪辑项目' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('option', { name: '种草项目' }))
+    expect(await screen.findByRole('option', { name: /种草项目/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /公众号项目/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /剪辑项目/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: /种草项目/ }))
 
     expect(within(dialog).queryByText('封面比例')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('图像模型')).not.toBeInTheDocument()
@@ -561,7 +561,7 @@ describe('TaskFormDialog', () => {
     await within(dialog).findByText('源图像')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目'))
     expect(screen.getByRole('radio', { name: '3:4 vertical default' })).toBeChecked()
@@ -593,7 +593,7 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('button', { name: '预览 pending.pdf' })).toBeInTheDocument()
     expect(screen.getByRole('status', { name: 'pending.pdf 状态' })).toHaveTextContent('上传中')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
 
     expect(screen.getByRole('button', { name: '预览 pending.pdf' })).toBeInTheDocument()
     await act(async () => uploadRequest.resolve({
@@ -617,7 +617,7 @@ describe('TaskFormDialog', () => {
     await within(dialog).findByText('源图像')
 
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
     })
@@ -638,7 +638,7 @@ describe('TaskFormDialog', () => {
     })
     expect(await screen.findByRole('alert', { name: 'failed.pdf 状态' })).toHaveTextContent('失败')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '种草项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
 
     expect(screen.getByRole('button', { name: '预览 failed.pdf' })).toBeInTheDocument()
     expect(screen.getByRole('alert', { name: 'failed.pdf 状态' })).toHaveTextContent('失败')
@@ -720,7 +720,7 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     await within(dialog).findByText('源图像')
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '剪辑项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /剪辑项目/ }))
 
     expect(await screen.findByDisplayValue('social-short')).toBeInTheDocument()
     expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)

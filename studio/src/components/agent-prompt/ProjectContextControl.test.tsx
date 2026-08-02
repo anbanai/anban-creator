@@ -75,6 +75,34 @@ describe('ProjectContextControl', () => {
     expect(onValueChange).toHaveBeenCalledWith(null, undefined)
   })
 
+  it('customizes the select no-project label without changing readonly semantics', async () => {
+    const { rerender } = render(
+      <ProjectContextControl
+        mode="select"
+        projects={projects}
+        value={null}
+        onValueChange={vi.fn()}
+        allowNoProject
+        noProjectLabel="全部项目"
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
+    expect(trigger).toHaveTextContent('全部项目')
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('option', { name: '全部项目' })).toBeInTheDocument()
+
+    rerender(
+      <ProjectContextControl
+        mode="readonly"
+        project={null}
+        noProjectLabel="独立任务"
+      />,
+    )
+    expect(screen.getByText('独立任务')).toBeInTheDocument()
+    expect(screen.queryByText('全部项目')).not.toBeInTheDocument()
+  })
+
   it('shows the no-project value and links to project creation', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     render(

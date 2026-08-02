@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { platformLabels } from '@/lib/labels'
-import { Combobox, type ComboboxOption } from '@/components/Combobox'
+import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 
 interface ProjectSelectorProps {
   value: string
@@ -19,32 +18,24 @@ export function ProjectSelector({ value, onChange, platform, excludePlatforms = 
 
   const visibleProjects = projects.filter((ch) => !excludePlatforms.includes(ch.platform))
 
-  const options: ComboboxOption[] = visibleProjects.map((ch) => ({
-    value: ch.id,
-    label: ch.name,
-    group: platformLabels[ch.platform] || ch.platform,
-  }))
-
-  if (isLoading) {
-    return <div className="h-8 animate-pulse rounded-lg bg-muted" />
-  }
-
   return (
-    <Combobox
-      options={options}
-      value={value}
-      onChange={(id) => {
-        if (!id) {
+    <ProjectContextControl
+      mode="select"
+      projects={visibleProjects}
+      value={value || null}
+      allowNoProject
+      noProjectLabel="全部项目"
+      compact
+      ariaLabel="筛选项目"
+      loading={isLoading}
+      disabled={disabled}
+      onValueChange={(id, project) => {
+        if (!id || !project) {
           onChange('', '')
           return
         }
-        const ch = visibleProjects.find((c) => c.id === id)
-        if (ch) onChange(ch.id, ch.platform)
+        onChange(id, project.platform ?? '')
       }}
-      placeholder="选择项目..."
-      searchPlaceholder="搜索项目..."
-      emptyText="没有找到项目"
-      disabled={disabled}
     />
   )
 }
