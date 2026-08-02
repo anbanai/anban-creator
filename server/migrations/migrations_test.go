@@ -345,23 +345,25 @@ func TestAgentProfileEnvsMigrationContracts(t *testing.T) {
 	}
 }
 
-func TestSeednoteTemplatesContractMigrationIsGuarded(t *testing.T) {
+func TestSeednoteTemplatesContractMigrationUsesSingleStatementSteps(t *testing.T) {
 	raw, err := os.ReadFile("20260802_seednote_templates_contract.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sql := string(raw)
 	for _, required := range []string{
-		"SIGNAL SQLSTATE '45000'",
-		"template prompt backfill is incomplete",
-		"project visual style backfill is incomplete",
+		"Step 1/6",
+		"Step 2/6",
+		"Step 3/6",
+		"Step 4/6",
+		"Step 5/6",
+		"Step 6/6",
+		"AS `template_prompt_incomplete`",
+		"AS `project_style_incomplete`",
 		"DROP COLUMN `style_prompt`",
 		"DROP COLUMN `template_id`",
-		"information_schema.COLUMNS",
-		"DROP PROCEDURE IF EXISTS `assert_seednote_templates_contract_ready`",
-		"DROP PROCEDURE IF EXISTS `apply_seednote_templates_contract_schema`",
-		"TRIM(COALESCE(`prompt`, '''')) = ''''",
-		"TRIM(COALESCE(p.`style`, '''')) = ''''",
+		"TRIM(COALESCE(`prompt`, '')) = ''",
+		"TRIM(COALESCE(p.`style`, '')) = ''",
 		"UPDATE `templates` SET `prompt` = `style_prompt`",
 		"UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`",
 	} {
@@ -369,14 +371,29 @@ func TestSeednoteTemplatesContractMigrationIsGuarded(t *testing.T) {
 			t.Fatalf("template contract migration missing %q", required)
 		}
 	}
-	if strings.Index(sql, "SIGNAL SQLSTATE '45000'") > strings.Index(sql, "DROP COLUMN `style_prompt`") {
-		t.Fatal("template contract migration changes schema before preflight assertions")
+	for _, forbidden := range []string{
+		"DELIMITER",
+		"PROCEDURE",
+		"PREPARE",
+		"EXECUTE",
+		"CALL",
+		"SIGNAL",
+	} {
+		if strings.Contains(strings.ToUpper(sql), forbidden) {
+			t.Fatalf("template contract migration contains unsupported multi-statement construct %q", forbidden)
+		}
 	}
-	if strings.Index(sql, "UPDATE `templates` SET `prompt` = `style_prompt`") > strings.Index(sql, "SIGNAL SQLSTATE '45000'") {
+	if got := strings.Count(sql, ";"); got != 6 {
+		t.Fatalf("template contract migration has %d SQL statements, want 6 single-statement steps", got)
+	}
+	if strings.Index(sql, "UPDATE `templates` SET `prompt` = `style_prompt`") > strings.Index(sql, "AS `template_prompt_incomplete`") {
 		t.Fatal("template contract migration validates before the final post-rollout prompt backfill")
 	}
-	if strings.Index(sql, "UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`") > strings.Index(sql, "SIGNAL SQLSTATE '45000'") {
+	if strings.Index(sql, "UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`") > strings.Index(sql, "AS `project_style_incomplete`") {
 		t.Fatal("template contract migration validates before the final post-rollout project style backfill")
+	}
+	if strings.Index(sql, "AS `project_style_incomplete`") > strings.Index(sql, "DROP COLUMN `style_prompt`") {
+		t.Fatal("template contract migration changes schema before the operational validation gates")
 	}
 }
 
