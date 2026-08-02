@@ -179,7 +179,7 @@ export function TaskFormDialog({
 	)
 	const selectedProject = projectMap.get(watchedProjectId ?? '')
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
 	const imageCapabilityOptionsForValue = useMemo(() => {

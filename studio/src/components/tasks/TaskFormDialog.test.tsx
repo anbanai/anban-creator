@@ -18,6 +18,7 @@ const toastMocks = vi.hoisted(() => ({
 vi.mock('sonner', () => ({ toast: toastMocks }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
+const useAgentPacksMock = vi.hoisted(() => vi.fn())
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -29,6 +30,8 @@ vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
   return { ...actual, uploadToOSS: uploadToOSSMock }
 })
+
+vi.mock('@/hooks/useAgentPacks', () => ({ useAgentPacks: useAgentPacksMock }))
 
 const fixtures = vi.hoisted(() => {
   const articleProject = {
@@ -203,6 +206,7 @@ beforeEach(() => {
     { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
     { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
   ])
+  useAgentPacksMock.mockReturnValue({ data: { packs: [] } })
   vi.mocked(api.imageCapabilities.list).mockResolvedValue({
     tier: 'pro',
     default_capability: 'standard',
@@ -224,6 +228,14 @@ beforeEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('keeps the task form usable when the optional Agent Pack catalog is unavailable', async () => {
+    useAgentPacksMock.mockReturnValueOnce({ data: { items: [] } })
+
+    renderDialog()
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+  })
+
   it('shows configuration-driven off-peak windows and current task prices', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
