@@ -8,8 +8,19 @@ import {
 } from './ProjectContextControl'
 
 const projects: ProjectContextProject[] = [
-  { id: 'article-1', name: 'Morning Brief', platform: 'article' },
-  { id: 'seednote-1', name: 'Garden Notes', platform: 'seednote' },
+  {
+    id: 'article-1',
+    name: 'Morning Brief',
+    platform: 'article',
+    avatar_url: 'https://example.com/morning.png',
+    description: 'Daily editorial briefing',
+  },
+  {
+    id: 'seednote-1',
+    name: 'Garden Notes',
+    platform: 'seednote',
+    description: 'Seasonal planting journal',
+  },
 ]
 
 describe('ProjectContextControl', () => {
@@ -25,17 +36,22 @@ describe('ProjectContextControl', () => {
     )
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).toHaveTextContent('Morning Brief')
+    expect(trigger).toHaveTextContent('Daily editorial briefing')
+    expect(trigger).toHaveTextContent('公众号项目')
+    expect(trigger.querySelector('img')).toHaveAttribute('src', 'https://example.com/morning.png')
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
     expect(await screen.findByText('公众号')).toBeInTheDocument()
     expect(screen.getByText('种草笔记')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Morning Brief' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveTextContent('Daily editorial briefing')
+    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveTextContent('公众号项目')
+    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
 
     const search = screen.getByPlaceholderText('搜索项目...')
-    fireEvent.change(search, { target: { value: 'Garden' } })
-    expect(screen.queryByRole('option', { name: 'Morning Brief' })).not.toBeInTheDocument()
-    const garden = screen.getByRole('option', { name: 'Garden Notes' })
+    fireEvent.change(search, { target: { value: 'Seasonal planting' } })
+    expect(screen.queryByRole('option', { name: /Morning Brief/ })).not.toBeInTheDocument()
+    const garden = screen.getByRole('option', { name: /Garden Notes/ })
     fireEvent.click(garden)
 
     expect(onValueChange).toHaveBeenCalledWith('seednote-1', projects[1])
@@ -90,6 +106,12 @@ describe('ProjectContextControl', () => {
       <ProjectContextControl mode="readonly" project={projects[0]} />,
     )
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
+    expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
+    expect(screen.getByText('公众号项目')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Morning Brief' })).toHaveAttribute(
+      'src',
+      'https://example.com/morning.png',
+    )
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
 
     rerender(
@@ -100,6 +122,28 @@ describe('ProjectContextControl', () => {
       />,
     )
     expect(screen.getByText('Independent task')).toBeInTheDocument()
+  })
+
+  it('compacts only the trigger while keeping popup options complete', async () => {
+    render(
+      <ProjectContextControl
+        mode="select"
+        projects={projects}
+        value="article-1"
+        onValueChange={vi.fn()}
+        compact
+        ariaLabel="Choose project context"
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
+    expect(trigger).toHaveTextContent('Morning Brief')
+    expect(trigger).not.toHaveTextContent('Daily editorial briefing')
+
+    fireEvent.click(trigger)
+    const option = await screen.findByRole('option', { name: /Morning Brief/ })
+    expect(option).toHaveTextContent('Daily editorial briefing')
+    expect(option).toHaveTextContent('公众号项目')
   })
 
   it('renders nothing in hidden mode', () => {
@@ -134,7 +178,7 @@ describe('ProjectContextControl', () => {
       />,
     )
     fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    expect(await screen.findByRole('option', { name: 'Morning Brief' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
 
     rerender(
       <ProjectContextControl
@@ -146,7 +190,7 @@ describe('ProjectContextControl', () => {
     )
 
     expect(screen.getByPlaceholderText('搜索项目...')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Morning Brief' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows the configured placeholder and an empty result', async () => {

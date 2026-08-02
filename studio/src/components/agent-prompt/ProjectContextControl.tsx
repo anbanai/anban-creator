@@ -18,12 +18,12 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { platformLabels } from '@/lib/labels'
 import { cn } from '@/lib/utils'
+import {
+  ProjectIdentity,
+  type ProjectIdentityProject,
+} from './ProjectIdentity'
 
-export interface ProjectContextProject {
-  id: string
-  name: string
-  platform?: string
-}
+export interface ProjectContextProject extends ProjectIdentityProject {}
 
 interface ProjectContextSelectProps {
   mode: 'select'
@@ -35,6 +35,8 @@ interface ProjectContextSelectProps {
   loading?: boolean
   disabled?: boolean
   placeholder?: string
+  compact?: boolean
+  ariaLabel?: string
 }
 
 interface ProjectContextReadonlyProps {
@@ -106,6 +108,8 @@ function SelectProjectContext({
   loading = false,
   disabled = false,
   placeholder = '选择项目...',
+  compact = false,
+  ariaLabel = '项目上下文',
 }: ProjectContextSelectProps) {
   const groups = useMemo(
     () => projectGroups(projects, allowNoProject),
@@ -133,7 +137,11 @@ function SelectProjectContext({
         items={groups}
         value={selected}
         disabled={isDisabled}
-        itemToStringValue={(item: ProjectContextItem) => item.name}
+        itemToStringValue={(item: ProjectContextItem) => (
+          item.kind === 'project'
+            ? [item.name, item.description].filter(Boolean).join(' ')
+            : item.name
+        )}
         isItemEqualToValue={isProjectContextItemEqual}
         onValueChange={(item: ProjectContextItem | null) => {
           if (!item || item.kind === 'none') {
@@ -149,9 +157,12 @@ function SelectProjectContext({
             <Button
               type="button"
               variant="outline"
-              aria-label="项目上下文"
+              aria-label={ariaLabel}
               disabled={isDisabled}
-              className="w-full min-w-0 justify-between font-normal"
+              className={cn(
+                'w-full min-w-0 justify-between font-normal',
+                selected?.kind === 'project' && (compact ? 'h-8' : 'h-auto min-h-14 py-2'),
+              )}
             />
           }
         >
@@ -161,6 +172,8 @@ function SelectProjectContext({
                 <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
                 加载项目...
               </span>
+            ) : selected?.kind === 'project' ? (
+              <ProjectIdentity project={selected} compact={compact} />
             ) : selected?.name ?? placeholder}
           </span>
         </ComboboxTrigger>
@@ -174,7 +187,9 @@ function SelectProjectContext({
                 <ComboboxCollection>
                   {(item: ProjectContextItem) => (
                     <ComboboxItem key={item.id} value={item}>
-                      {item.name}
+                      {item.kind === 'project' ? (
+                        <ProjectIdentity project={item} />
+                      ) : item.name}
                     </ComboboxItem>
                   )}
                 </ComboboxCollection>
@@ -209,13 +224,15 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
   if (props.mode === 'hidden') return null
   if (props.mode === 'readonly') {
     return (
-      <span
+      <div
         data-slot="project-context-control"
         data-mode="readonly"
-        className="inline-flex min-w-0 items-center truncate text-sm text-muted-foreground"
+        className="min-w-0"
       >
-        {props.project?.name ?? props.noProjectLabel ?? '未关联项目'}
-      </span>
+        {props.project ? (
+          <ProjectIdentity project={props.project} />
+        ) : props.noProjectLabel ?? '未关联项目'}
+      </div>
     )
   }
   return <SelectProjectContext {...props} />
