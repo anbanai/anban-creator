@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -37,10 +38,13 @@ func newJobCommand(bootstrap bootstrapJobFunc, run runAgentFunc) *cli.Command {
 					cfg := jobRuntimeConfig(jobCfg, response)
 					result := serverExecutionFailure(jobCfg.Workspace, err)
 					reporter := NewReporter(cfg)
-					window := newFinalizationWindow(cfg)
-					completeCtx, cancelComplete := window.completionContext()
-					_ = reporter.ReportComplete(completeCtx, result)
+					finalization := newFinalizationTimeouts(cfg)
+					completeCtx, cancelComplete := finalization.completionContext()
+					completeErr := reporter.ReportComplete(completeCtx, result)
 					cancelComplete()
+					if completeErr != nil {
+						return errors.Join(fmt.Errorf("bootstrap job: %w", err), &completionReportError{err: completeErr})
+					}
 				}
 				return fmt.Errorf("bootstrap job: %w", err)
 			}

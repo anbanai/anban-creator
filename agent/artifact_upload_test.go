@@ -187,12 +187,10 @@ func TestScanWorkspaceArtifactsSkipsDockerRuntimeHome(t *testing.T) {
 	}
 }
 
-func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
-	t.Setenv(jobFinalizationTimeoutEnv, "500ms")
-	previousReserve := jobCompletionReserve
-	jobCompletionReserve = 300 * time.Millisecond
-	t.Cleanup(func() { jobCompletionReserve = previousReserve })
-
+func TestRunAgentArtifactHashTimeoutStillGetsFreshCompletionBudget(t *testing.T) {
+	t.Setenv(homeTemplateEnv, "")
+	t.Setenv(jobArtifactTimeoutEnv, "40ms")
+	t.Setenv(jobCompletionTimeoutEnv, "250ms")
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/article.md", strings.Repeat("x", 256*1024))
 	previousOpen := openArtifactFile
@@ -219,30 +217,68 @@ func TestJobArtifactHashCancellationPreservesCompletionReserve(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &Config{ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}
-	reporter := NewReporter(cfg)
-	window := newFinalizationWindow(cfg)
-	workCtx, cancelWork := window.workContext()
-	started := time.Now()
-	err := NewArtifactUploader(cfg, reporter).UploadWorkspaceArtifacts(workCtx, &serveragent.ExecutionResult{Success: true, WorkDir: root})
-	cancelWork()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("UploadWorkspaceArtifacts error = %v, want deadline exceeded", err)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	cancelRun()
+	cfg := &Config{
+		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1",
+		TaskType: "article", Topic: "write", Workspace: root, MaxTurns: 1,
+		ArtifactUploadMode: ArtifactUploadDirect,
 	}
-	if elapsed := time.Since(started); elapsed > 300*time.Millisecond {
-		t.Fatalf("canceled artifact scan returned after %v", elapsed)
+	started := time.Now()
+	err := runAgent(runCtx, cfg, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("runAgent unexpectedly succeeded after runner and artifact failure")
+	}
+	elapsed := time.Since(started)
+	if elapsed < 40*time.Millisecond || elapsed > 400*time.Millisecond {
+		t.Fatalf("runAgent finalization elapsed = %v, want artifact timeout followed by fresh completion", elapsed)
 	}
 	if prepared || manifested {
-		t.Fatalf("canceled scan reached remote artifact calls: prepare=%v manifest=%v", prepared, manifested)
-	}
-
-	completionCtx, cancelCompletion := window.completionContext()
-	defer cancelCompletion()
-	if err := reporter.ReportComplete(completionCtx, &serveragent.ExecutionResult{Success: false}); err != nil {
-		t.Fatalf("ReportComplete: %v", err)
+		t.Fatalf("timed-out hash reached remote artifact calls: prepare=%v manifest=%v", prepared, manifested)
 	}
 	if !completed {
-		t.Fatal("completion reserve did not reach ReportComplete")
+		t.Fatal("artifact timeout prevented the fresh completion callback")
+	}
+}
+
+func TestRunAgentShutdownCancelsArtifactsAndStillReportsCompletion(t *testing.T) {
+	t.Setenv(homeTemplateEnv, "")
+	t.Setenv(jobArtifactTimeoutEnv, "200ms")
+	t.Setenv(jobCompletionTimeoutEnv, "250ms")
+	root := t.TempDir()
+	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
+
+	previousNotify := notifyRuntimeShutdown
+	notifyRuntimeShutdown = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, func() {}
+	}
+	t.Cleanup(func() { notifyRuntimeShutdown = previousNotify })
+
+	var prepared, manifested bool
+	completed := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/artifacts/prepare":
+			prepared = true
+		case "/api/v1/agent/artifacts/manifest":
+			manifested = true
+		case "/api/v1/agent/complete":
+			completed++
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := &Config{
+		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1",
+		TaskType: "article", Topic: "write", Workspace: root, MaxTurns: 1,
+		ArtifactUploadMode: ArtifactUploadDirect,
+	}
+	_ = runAgent(context.Background(), cfg, io.Discard, io.Discard)
+	if prepared || manifested || completed != 1 {
+		t.Fatalf("shutdown finalization = prepare:%v manifest:%v complete:%d", prepared, manifested, completed)
 	}
 }
 
@@ -482,8 +518,12 @@ func TestArtifactUploaderUploadsAndReportsManifest(t *testing.T) {
 		return "etag-1", nil
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	count, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	if err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("UploadWorkspaceArtifacts count = %d, want 1", count)
 	}
 	if len(reporter.prepared) != 1 || reporter.prepared[0].RelativePath != "output/article.md" {
 		t.Fatalf("prepared = %#v, want output/article.md", reporter.prepared)
@@ -520,7 +560,7 @@ func TestArtifactUploaderUsesConfiguredTransport(t *testing.T) {
 				return "etag", err
 			}
 
-			if err := uploader.UploadWorkspaceArtifacts(t.Context(), &serveragent.ExecutionResult{WorkDir: root}); err != nil {
+			if _, err := uploader.UploadWorkspaceArtifacts(t.Context(), &serveragent.ExecutionResult{WorkDir: root}); err != nil {
 				t.Fatal(err)
 			}
 			if mode == ArtifactUploadDirect {
@@ -559,7 +599,7 @@ func TestArtifactUploaderOpensStableArtifactOnce(t *testing.T) {
 		return "etag-1", err
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if openCalls != 1 {
@@ -582,7 +622,7 @@ func TestArtifactUploaderSkipsEmptyLegacyManifest(t *testing.T) {
 	reporter := &fakeArtifactReporter{}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if reporter.manifestCalls != 0 {
@@ -614,7 +654,7 @@ func TestArtifactUploaderRejectsMissingOrMismatchedPreparedSHA256(t *testing.T) 
 				return "etag", nil
 			}
 
-			err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+			_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 			if err == nil || !strings.Contains(err.Error(), "SHA-256") {
 				t.Fatalf("UploadWorkspaceArtifacts error = %v, want SHA-256 validation error", err)
 			}
@@ -641,7 +681,7 @@ func TestArtifactUploaderSkipsMatchingObjectButStillManifestsIt(t *testing.T) {
 		return "", nil
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 1 {
@@ -661,7 +701,7 @@ func TestArtifactUploaderUploadsFailureArtifactsForUnsuccessfulResult(t *testing
 		return "etag-failure", nil
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if len(reporter.prepared) != 1 || reporter.prepared[0].RelativePath != "output/failure-state.json" {
@@ -684,7 +724,7 @@ func TestJobArtifactUploaderSubmitsEmptyManifestWhenOutputIsMissing(t *testing.T
 		t.Fatal("job without output must not upload")
 		return "", nil
 	}
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reporter.prepared) != 0 || reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
@@ -703,7 +743,7 @@ func TestJobArtifactUploaderSubmitsEmptyManifest(t *testing.T) {
 	}
 	reporter := &fakeArtifactReporter{}
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", ExecutionID: "execution-1", Workspace: root}, reporter)
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: false, WorkDir: root}); err != nil {
 		t.Fatal(err)
 	}
 	if len(reporter.prepared) != 0 || reporter.manifestCalls != 1 || len(reporter.manifest.Files) != 0 || len(reporter.progress) != 0 {
@@ -733,11 +773,11 @@ func TestArtifactUploaderRetryAfterManifestFailureReusesUploadedObject(t *testin
 		return "reused-etag", nil
 	}
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, manifestErr) {
 		t.Fatalf("first collection error = %v, want manifest error", err)
 	}
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("second collection: %v", err)
 	}
 	if putCalls != 1 {
@@ -873,7 +913,7 @@ func TestArtifactUploaderRetainsOwnershipOfOSSUploadFile(t *testing.T) {
 		return "etag-owned", nil
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if ownerCloseCalls != 1 {
@@ -901,7 +941,7 @@ func TestArtifactUploaderRetriesFileChangedDuringUpload(t *testing.T) {
 		return fmt.Sprintf("etag-%d", putCalls), nil
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if putCalls != 2 {
@@ -934,7 +974,7 @@ func TestArtifactUploaderFailsWhenFileNeverStabilizes(t *testing.T) {
 		return fmt.Sprintf("etag-%d", putCalls), nil
 	}
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if err == nil || !strings.Contains(err.Error(), "changed during final collection") {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want mutation error", err)
 	}
@@ -955,7 +995,7 @@ func TestArtifactUploaderPreservesPrepareAndCloseErrors(t *testing.T) {
 	uploader := NewArtifactUploader(&Config{TaskID: "task-1", Workspace: root}, reporter)
 	installArtifactCloseFailure(t, closeErr)
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, prepareErr) || !errors.Is(err, closeErr) {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want prepare and close errors", err)
 	}
@@ -976,7 +1016,7 @@ func TestArtifactUploaderPreservesPutAndCloseErrors(t *testing.T) {
 	}
 	installArtifactCloseFailure(t, closeErr)
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, putErr) || !errors.Is(err, closeErr) {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want PUT and close errors", err)
 	}
@@ -1013,7 +1053,7 @@ func TestArtifactUploaderRetriesFileChangedDuringSnapshotOpen(t *testing.T) {
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	if openCalls != 2 || putCalls != 1 {
@@ -1060,7 +1100,7 @@ func TestArtifactUploaderUsesLatestSnapshotMIMEAfterPathReplacement(t *testing.T
 		return "etag-latest", err
 	}
 
-	if err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
+	if _, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root}); err != nil {
 		t.Fatalf("UploadWorkspaceArtifacts: %v", err)
 	}
 	wantHash := sha256Hex(string(latest))
@@ -1117,7 +1157,7 @@ func TestArtifactUploaderDoesNotRetryPostUploadDescriptorStatError(t *testing.T)
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, statErr) || !errors.Is(err, closeErr) {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want stat and close errors", err)
 	}
@@ -1149,7 +1189,7 @@ func TestArtifactUploaderDoesNotRetryPostUploadPathStatError(t *testing.T) {
 	}
 	installArtifactCloseFailure(t, closeErr)
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, fs.ErrNotExist) || !errors.Is(err, closeErr) {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want path stat and close errors", err)
 	}
@@ -1181,7 +1221,7 @@ func TestArtifactUploaderFailsWhenFileKeepsChangingWhileOpening(t *testing.T) {
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if err == nil || !strings.Contains(err.Error(), "artifact output/article.md changed during final collection") {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want persistent open-race error", err)
 	}
@@ -1227,7 +1267,7 @@ func TestArtifactUploaderPreservesOpenRaceAndCloseErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { openArtifactFile = previousOpen })
 
-	err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
+	_, err := uploader.UploadWorkspaceArtifacts(context.Background(), &serveragent.ExecutionResult{Success: true, WorkDir: root})
 	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "artifact changed while opening") {
 		t.Fatalf("UploadWorkspaceArtifacts error = %v, want mutation and close errors", err)
 	}

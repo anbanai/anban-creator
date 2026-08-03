@@ -111,13 +111,13 @@ func ScanWorkspaceArtifacts(ctx context.Context, root string) ([]WorkspaceArtifa
 	return scanWorkspaceArtifacts(ctx, root, "")
 }
 
-func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serveragent.ExecutionResult) error {
+func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serveragent.ExecutionResult) (int, error) {
 	if u == nil || u.cfg == nil || u.reporter == nil {
-		return fmt.Errorf("artifact uploader is not configured")
+		return 0, fmt.Errorf("artifact uploader is not configured")
 	}
 	workDir := u.cfg.Workspace
 	if err := artifactContextCause(ctx); err != nil {
-		return err
+		return 0, err
 	}
 	var (
 		files []WorkspaceArtifact
@@ -127,15 +127,15 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 		outputDir := filepath.Join(workDir, "output")
 		info, statErr := os.Lstat(outputDir)
 		if cause := artifactContextCause(ctx); cause != nil {
-			return cause
+			return 0, cause
 		}
 		switch {
 		case os.IsNotExist(statErr):
 			files = []WorkspaceArtifact{}
 		case statErr != nil:
-			return fmt.Errorf("inspect job output directory: %w", statErr)
+			return 0, fmt.Errorf("inspect job output directory: %w", statErr)
 		case !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
-			return fmt.Errorf("job output must be a real directory")
+			return 0, fmt.Errorf("job output must be a real directory")
 		default:
 			files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 		}
@@ -143,10 +143,10 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 		files, err = scanWorkspaceArtifacts(ctx, workDir, u.cfg.TaskType)
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(files) == 0 && strings.TrimSpace(u.cfg.ExecutionID) == "" {
-		return nil
+		return 0, nil
 	}
 
 	manifest := ArtifactManifestRequest{
@@ -156,24 +156,24 @@ func (u *ArtifactUploader) UploadWorkspaceArtifacts(ctx context.Context, _ *serv
 	}
 	for _, file := range files {
 		if err := artifactContextCause(ctx); err != nil {
-			return err
+			return 0, err
 		}
 		manifestFile, err := u.uploadWorkspaceArtifact(ctx, file)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		manifest.Files = append(manifest.Files, manifestFile)
 	}
 	if err := artifactContextCause(ctx); err != nil {
-		return err
+		return 0, err
 	}
 	if err := u.reporter.ReportArtifactManifest(ctx, manifest); err != nil {
-		return fmt.Errorf("report artifact manifest: %w", err)
+		return 0, fmt.Errorf("report artifact manifest: %w", err)
 	}
 	if len(manifest.Files) > 0 {
 		_ = u.reporter.ReportProgress(ctx, fmt.Sprintf("collected %d workspace artifact(s)", len(manifest.Files)))
 	}
-	return nil
+	return len(manifest.Files), nil
 }
 
 func (u *ArtifactUploader) uploadWorkspaceArtifact(ctx context.Context, file WorkspaceArtifact) (ArtifactManifestFile, error) {

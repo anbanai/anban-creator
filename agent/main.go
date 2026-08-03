@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,11 +20,18 @@ import (
 )
 
 var agentHeartbeatInterval = 30 * time.Second
-var jobFinalizationTimeout = 20 * time.Second
-var jobCompletionReserve = 5 * time.Second
-var finalizationNow = time.Now
+var jobArtifactTimeout = 120 * time.Second
+var jobCompletionTimeout = 20 * time.Second
 
-const jobFinalizationTimeoutEnv = "ANBAN_JOB_FINALIZATION_TIMEOUT"
+const (
+	jobArtifactTimeoutEnv   = "ANBAN_JOB_ARTIFACT_TIMEOUT"
+	jobCompletionTimeoutEnv = "ANBAN_JOB_COMPLETION_TIMEOUT"
+)
+
+var phaseTimeoutPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)(ms|s|m)$`)
+var notifyRuntimeShutdown = func() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+}
 
 func main() {
 	cmd := newAgentCommand(os.Stdout, os.Stderr, func(ctx context.Context, cfg *Config) error {
@@ -29,8 +39,28 @@ func main() {
 	})
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(processExitCode(err))
 	}
+}
+
+type completionReportError struct {
+	err error
+}
+
+func (e *completionReportError) Error() string {
+	return "failed to report completion: " + e.err.Error()
+}
+
+func (e *completionReportError) Unwrap() error {
+	return e.err
+}
+
+func processExitCode(err error) int {
+	var completionErr *completionReportError
+	if errors.As(err, &completionErr) {
+		return 2
+	}
+	return 1
 }
 
 type runAgentFunc func(context.Context, *Config) error
@@ -87,48 +117,56 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 	downloader := NewDownloader(cfg)
 	runner := NewRunner(cfg, reporter, downloader)
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	shutdownCtx, stopShutdown := notifyRuntimeShutdown()
+	defer stopShutdown()
+	runCtx, cancelRun := context.WithCancel(ctx)
+	stopRunOnShutdown := context.AfterFunc(shutdownCtx, cancelRun)
+	defer func() {
+		stopRunOnShutdown()
+		cancelRun()
+	}()
+	if shutdownCtx.Err() != nil {
+		cancelRun()
+	}
 
-	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	heartbeatCtx, stopHeartbeat := context.WithCancel(runCtx)
 	heartbeatDone := startHeartbeat(heartbeatCtx, reporter, stderr)
 	defer func() {
 		stopHeartbeat()
 		<-heartbeatDone
 	}()
 
-	result, runErr := runner.Run(ctx)
+	result, runErr := runner.Run(runCtx)
 	if result == nil {
 		result = serverExecutionFailure(cfg.Workspace, runErr)
 	}
 
-	if ctx.Err() != nil && !result.Success {
+	if shutdownCtx.Err() != nil && !result.Success {
 		if result.Error == "" {
 			result.Error = "agent shutdown: received termination signal"
 		}
 	}
-	finalization := newFinalizationWindow(cfg)
-	workCtx, cancelWork := finalization.workContext()
-	defer cancelWork()
+	finalization := newFinalizationTimeouts(cfg)
+	artifactCtx, cancelArtifact := finalization.artifactContext(shutdownCtx)
 
 	if cfg.ArtifactUploadMode == ArtifactUploadDirect || cfg.ArtifactUploadMode == ArtifactUploadStream {
 		uploader := NewArtifactUploader(cfg, reporter)
-		if uploadErr := uploader.UploadWorkspaceArtifacts(workCtx, result); uploadErr != nil {
-			_ = reporter.ReportProgress(workCtx, "artifact upload failed: "+uploadErr.Error())
+		if _, uploadErr := uploader.UploadWorkspaceArtifacts(artifactCtx, result); uploadErr != nil {
+			_ = reporter.ReportProgress(artifactCtx, "artifact upload failed: "+uploadErr.Error())
 			fmt.Fprintf(stderr, "failed to upload artifacts: %v\n", uploadErr)
 			runErr = applyArtifactUploadFailure(result, runErr, uploadErr)
 		}
 	}
-
-	cancelWork()
+	cancelArtifact()
 
 	// Signal terminal completion so the server can finalize the task. Safe in
 	// both modes: the server no-ops unless this is a local_claimed task still
 	// running. Uses a fresh context because the run ctx may be cancelled at
 	// shutdown, and this report must land for the task to reach a terminal state.
 	completionCtx, cancelCompletion := finalization.completionContext()
-	defer cancelCompletion()
-	if completeErr := reporter.ReportComplete(completionCtx, result); completeErr != nil {
+	completeErr := reporter.ReportComplete(completionCtx, result)
+	cancelCompletion()
+	if completeErr != nil {
 		fmt.Fprintf(stderr, "failed to report completion: %v\n", completeErr)
 	}
 
@@ -139,6 +177,9 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		}
 	}
 
+	if completeErr != nil {
+		return &completionReportError{err: completeErr}
+	}
 	if runErr != nil || !result.Success {
 		if runErr != nil {
 			return runErr
@@ -162,38 +203,59 @@ func applyArtifactUploadFailure(result *serveragent.ExecutionResult, runErr, upl
 	return runErr
 }
 
-type finalizationWindow struct {
-	job              bool
-	workDeadline     time.Time
-	completeDeadline time.Time
+type finalizationTimeouts struct {
+	job        bool
+	artifact   time.Duration
+	completion time.Duration
 }
 
-func newFinalizationWindow(cfg *Config) finalizationWindow {
+func newFinalizationTimeouts(cfg *Config) finalizationTimeouts {
 	if cfg == nil || strings.TrimSpace(cfg.ExecutionID) == "" {
-		return finalizationWindow{}
+		return finalizationTimeouts{}
 	}
-	total := jobFinalizationTimeout
-	if configured, err := time.ParseDuration(strings.TrimSpace(os.Getenv(jobFinalizationTimeoutEnv))); err == nil && configured > 0 && configured <= 5*time.Minute {
-		total = configured
+	return finalizationTimeouts{
+		job:        true,
+		artifact:   parsePhaseTimeout(os.Getenv(jobArtifactTimeoutEnv), jobArtifactTimeout, 5*time.Minute),
+		completion: parsePhaseTimeout(os.Getenv(jobCompletionTimeoutEnv), jobCompletionTimeout, time.Minute),
 	}
-	reserve := jobCompletionReserve
-	if reserve >= total {
-		reserve = total / 2
-	}
-	deadline := finalizationNow().Add(total)
-	return finalizationWindow{job: true, workDeadline: deadline.Add(-reserve), completeDeadline: deadline}
 }
 
-func (w finalizationWindow) workContext() (context.Context, context.CancelFunc) {
-	if w.job {
-		return context.WithDeadline(context.Background(), w.workDeadline)
+func parsePhaseTimeout(raw string, fallback, maximum time.Duration) time.Duration {
+	match := phaseTimeoutPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if match == nil {
+		return fallback
 	}
-	return context.WithCancel(context.Background())
+	value, err := strconv.ParseFloat(match[1], 64)
+	if err != nil {
+		return fallback
+	}
+	unit := time.Millisecond
+	switch match[2] {
+	case "s":
+		unit = time.Second
+	case "m":
+		unit = time.Minute
+	}
+	timeout := time.Duration(value * float64(unit))
+	if timeout <= 0 || timeout > maximum {
+		return fallback
+	}
+	return timeout
 }
 
-func (w finalizationWindow) completionContext() (context.Context, context.CancelFunc) {
-	if w.job {
-		return context.WithDeadline(context.Background(), w.completeDeadline)
+func (t finalizationTimeouts) artifactContext(shutdown context.Context) (context.Context, context.CancelFunc) {
+	if shutdown == nil {
+		shutdown = context.Background()
+	}
+	if t.job {
+		return context.WithTimeout(shutdown, t.artifact)
+	}
+	return context.WithCancel(shutdown)
+}
+
+func (t finalizationTimeouts) completionContext() (context.Context, context.CancelFunc) {
+	if t.job {
+		return context.WithTimeout(context.Background(), t.completion)
 	}
 	return context.WithCancel(context.Background())
 }

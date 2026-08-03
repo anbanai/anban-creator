@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,10 +21,8 @@ import (
 )
 
 func TestJobCommandDoesNotRunAfterInvalidBootstrapResponse(t *testing.T) {
-	t.Setenv(jobFinalizationTimeoutEnv, "60ms")
-	previousReserve := jobCompletionReserve
-	jobCompletionReserve = 20 * time.Millisecond
-	t.Cleanup(func() { jobCompletionReserve = previousReserve })
+	t.Setenv(jobArtifactTimeoutEnv, "40ms")
+	t.Setenv(jobCompletionTimeoutEnv, "80ms")
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte("workload"), 0o600); err != nil {
 		t.Fatal(err)
@@ -154,35 +153,72 @@ func TestJobCommandAcceptsOnlyBootstrapFlags(t *testing.T) {
 	cmd.Writer, cmd.ErrWriter = w, w
 }
 
-func TestFinalizationContextIsBoundedForJob(t *testing.T) {
-	t.Setenv(jobFinalizationTimeoutEnv, "40ms")
-	previousReserve := jobCompletionReserve
-	jobCompletionReserve = 15 * time.Millisecond
-	t.Cleanup(func() { jobCompletionReserve = previousReserve })
-	window := newFinalizationWindow(&Config{ExecutionID: "execution-1"})
-	workCtx, cancelWork := window.workContext()
-	defer cancelWork()
-	if _, ok := workCtx.Deadline(); !ok {
-		t.Fatal("job finalization context has no deadline")
+func TestFinalizationContextsUseIndependentBudgets(t *testing.T) {
+	t.Setenv(jobArtifactTimeoutEnv, "20ms")
+	t.Setenv(jobCompletionTimeoutEnv, "80ms")
+	timeouts := newFinalizationTimeouts(&Config{ExecutionID: "execution-1"})
+
+	artifactCtx, cancelArtifact := timeouts.artifactContext(context.Background())
+	defer cancelArtifact()
+	<-artifactCtx.Done()
+
+	completionCtx, cancelCompletion := timeouts.completionContext()
+	defer cancelCompletion()
+	if completionCtx.Err() != nil {
+		t.Fatalf("fresh completion context is already done: %v", completionCtx.Err())
 	}
-	select {
-	case <-workCtx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("job pre-completion context did not time out")
-	}
-	completeCtx, cancelComplete := window.completionContext()
-	defer cancelComplete()
-	if completeCtx.Err() != nil {
-		t.Fatalf("completion reserve was already expired: %v", completeCtx.Err())
+	deadline, ok := completionCtx.Deadline()
+	if !ok || time.Until(deadline) < 40*time.Millisecond {
+		t.Fatalf("completion did not receive its independent budget: %v", deadline)
 	}
 }
 
-func TestFinalizationContextCanBeCancelled(t *testing.T) {
-	ctx, cancel := newFinalizationWindow(&Config{ExecutionID: "execution-1"}).workContext()
-	cancel()
+func TestArtifactContextStopsOnShutdown(t *testing.T) {
+	shutdown, cancelShutdown := context.WithCancel(context.Background())
+	ctx, cancelArtifact := newFinalizationTimeouts(&Config{ExecutionID: "execution-1"}).artifactContext(shutdown)
+	defer cancelArtifact()
+	cancelShutdown()
 	select {
 	case <-ctx.Done():
-	default:
-		t.Fatal("cancel did not stop finalization context")
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not cancel artifact finalization")
+	}
+}
+
+func TestFinalizationTimeoutGrammarMatchesTypeScript(t *testing.T) {
+	t.Setenv(jobArtifactTimeoutEnv, " 45s ")
+	t.Setenv(jobCompletionTimeoutEnv, "1m30s")
+	timeouts := newFinalizationTimeouts(&Config{ExecutionID: "execution-1"})
+	if timeouts.artifact != 45*time.Second || timeouts.completion != jobCompletionTimeout {
+		t.Fatalf("timeouts = %#v, want trimmed single-unit artifact and fallback completion", timeouts)
+	}
+}
+
+func TestJobCommandSurfacesBootstrapCompletionFailure(t *testing.T) {
+	t.Setenv(jobCompletionTimeoutEnv, "80ms")
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("workload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agent/complete" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+			"execution_token": testExecutionToken(t, "execution-1", "task-1", "project-1"),
+			"task_id":         "task-1", "task_type": "", "project_id": "project-1", "prompt": "write",
+			"max_turns": 40, "agent_flag": "", "auto_memory_directory": ".claude/memory",
+		}})
+	}))
+	defer server.Close()
+	cmd := newJobCommand(testBootstrapJob, func(context.Context, *Config) error {
+		t.Fatal("run must not start after invalid bootstrap")
+		return nil
+	})
+	err := cmd.Run(context.Background(), []string{"job", "--server-url", server.URL, "--execution-id", "execution-1", "--workspace", t.TempDir(), "--workload-token-file", tokenFile})
+	var completionErr *completionReportError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("error = %v, want completionReportError", err)
 	}
 }

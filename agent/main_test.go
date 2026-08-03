@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -156,5 +157,14 @@ func fileRuntimePath(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("unsafe"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProcessExitCodeReservesTwoForCompletionReportFailure(t *testing.T) {
+	if got := processExitCode(&completionReportError{err: errors.New("server unavailable")}); got != 2 {
+		t.Fatalf("completion exit code = %d, want 2", got)
+	}
+	if got := processExitCode(errors.New("runner failed")); got != 1 {
+		t.Fatalf("ordinary exit code = %d, want 1", got)
 	}
 }
