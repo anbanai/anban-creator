@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
+import { ComposerQuantityControl } from '@/components/agent-prompt/ComposerQuantityControl'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { Button } from '@/components/common/button'
@@ -16,7 +17,6 @@ import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
@@ -30,7 +30,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { contentTypeLabel, ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
+import { ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { initialMontageInput } from '@/lib/montage-form'
 import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
@@ -38,7 +38,7 @@ import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
-import { ExecutionProfileSelector } from './ExecutionProfileSelector'
+import { ExecutionProfileToolbar } from './ExecutionProfileToolbar'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 
@@ -48,6 +48,11 @@ const SEEDNOTE_ATTACHMENT_POLICY = {
   maxBytes: GENERAL_AGENT_ATTACHMENT_POLICY.maxBytes,
 } as const
 const SEEDNOTE_ATTACHMENT_BLOCKER = '种草笔记仅支持图片附件，请移除其他附件后继续。'
+const BATCH_TASK_TYPES = new Set<TaskType>(['article', 'seednote', 'moments'])
+
+function maxTaskQuantity(type: TaskType) {
+  return BATCH_TASK_TYPES.has(type) ? 5 : 1
+}
 
 export interface TaskFormDialogProps {
   open: boolean
@@ -147,6 +152,7 @@ export function TaskFormDialog({
   const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' }) ?? ''
   const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' }) ?? ''
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
+  const taskQuantityMax = maxTaskQuantity(watchedType)
 
   useEffect(() => {
     const transition = billingCatalog?.task_time_pricing?.next_transition_at
@@ -312,6 +318,7 @@ export function TaskFormDialog({
       input_attachments: attachmentController.toInputAttachments(),
     }
     const switched = switchTaskFormDefaults(current, project)
+    switched.quantity = Math.min(switched.quantity, maxTaskQuantity(switched.type))
     form.reset(switched, { keepDefaultValues: true })
   }
 
@@ -326,6 +333,7 @@ export function TaskFormDialog({
   async function onSubmit(values: TaskFormDefaults) {
     const submittedValues: TaskFormDefaults = {
       ...values,
+      quantity: Math.min(values.quantity, maxTaskQuantity(values.type)),
       input_attachments: attachmentController.toInputAttachments(),
     }
     const request = taskFormValuesToRequest(submittedValues)
@@ -357,6 +365,10 @@ export function TaskFormDialog({
       ? { message: '请选择可用的执行配置。', href: '' }
       : selectedExecutionProfileUnavailable
         ? { message: '当前执行配置不可用，请重新选择。', href: '' }
+      : !isViralAnalysisTask && imageCapabilitiesError
+        ? { message: '图像能力暂时无法加载，请稍后重试。', href: '' }
+      : !isViralAnalysisTask && imageCapabilitiesLoading
+        ? { message: '正在加载图像能力，请稍候。', href: '' }
       : !costPreview.priceAvailable
     ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
     : mode === 'clone' && projectsLoading
@@ -375,25 +387,41 @@ export function TaskFormDialog({
                     ? { message: '电商出图需要先上传产品图。', href: '' }
                     : null
 
-  const projectContextBar = (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <ProjectContextControl
-        mode="select"
-        projects={availableProjects}
-        value={watchedProjectId || null}
-        allowNoProject={false}
-        loading={projectsLoading}
-        placeholder="选择项目"
-        createProjectHref={projectsReturnHref({ type: isViralAnalysisTask ? 'seednote' : watchedType, intent: 'new' })}
-        onValueChange={changeProject}
-      />
-      <Badge variant="secondary">{contentTypeLabel[watchedType] || watchedType}</Badge>
-    </div>
+  const projectControl = (
+    <ProjectContextControl
+      mode="select"
+      projects={availableProjects}
+      value={watchedProjectId || null}
+      allowNoProject={false}
+      loading={projectsLoading}
+      disabled={isSubmitting}
+      placeholder="选择项目"
+      createProjectHref={projectsReturnHref({ type: isViralAnalysisTask ? 'seednote' : watchedType, intent: 'new' })}
+      onValueChange={changeProject}
+      ariaLabel={selectedProject
+        ? `项目：${selectedProject.name}`
+        : projectsLoading
+          ? '项目：加载中'
+          : '项目：未选择'}
+      compact
+    />
+  )
+
+  const executionProfileControl = (
+    <ExecutionProfileToolbar
+      profiles={executionProfilesQuery.data ?? []}
+      value={watchedExecutionProfile}
+      onChange={(value) => setFormValue('execution_profile', value)}
+      loading={executionProfilesQuery.isLoading}
+      disabled={isSubmitting || executionProfilesQuery.isError}
+      catalog={billingCatalog}
+      taskType={watchedType}
+      priceUnit="task"
+    />
   )
 
   const promptComposer = isViralAnalysisTask ? (
-    <div data-slot="viral-analysis-prompt" className="space-y-2">
-      {projectContextBar}
+    <div data-slot="viral-analysis-prompt" className="flex flex-col gap-2">
       <Textarea
         aria-label="源笔记链接或分享文本"
         value={watchedPrompt}
@@ -401,6 +429,10 @@ export function TaskFormDialog({
         placeholder="粘贴种草笔记链接或分享文本..."
         className="min-h-32 resize-y"
       />
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {projectControl}
+        {executionProfileControl}
+      </div>
     </div>
   ) : (
     <AgentPromptInput
@@ -419,18 +451,32 @@ export function TaskFormDialog({
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
       submitDisabled={Boolean(creationBlocker)}
-      contextBar={projectContextBar}
-      leadingTools={!isMontageTask ? (
-        <ImageGenerationToolbar
-          ratios={businessImageRatios}
-          ratio={watchedImageRatio || 'auto'}
-          onRatioChange={(value) => setFormValue('image_ratio', value)}
-          capabilities={imageCapabilityOptionsForValue}
-          capabilityKey={effectiveImageCapabilityKey}
-          onCapabilityChange={(value) => setFormValue('image_capability_key', value)}
-          loading={imageCapabilitiesLoading}
-        />
-      ) : undefined}
+      leadingTools={(
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {projectControl}
+          {executionProfileControl}
+          {!isMontageTask ? (
+            <ImageGenerationToolbar
+              ratios={businessImageRatios}
+              ratio={watchedImageRatio || 'auto'}
+              onRatioChange={(value) => setFormValue('image_ratio', value)}
+              capabilities={imageCapabilityOptionsForValue}
+              capabilityKey={effectiveImageCapabilityKey}
+              onCapabilityChange={(value) => setFormValue('image_capability_key', value)}
+              loading={imageCapabilitiesLoading}
+              disabled={isSubmitting || imageCapabilitiesError}
+            />
+          ) : null}
+          <ComposerQuantityControl
+            label="任务数量"
+            value={quantity}
+            min={1}
+            max={taskQuantityMax}
+            onChange={(value) => setFormValue('quantity', value)}
+            disabled={isSubmitting}
+          />
+        </div>
+      )}
     />
   )
 
@@ -465,24 +511,6 @@ export function TaskFormDialog({
                 </div>
               ) : null}
 
-              <FormField control={form.control} name="execution_profile" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>执行配置</FormLabel>
-                  <FormControl>
-                    <ExecutionProfileSelector
-                      profiles={executionProfilesQuery.data ?? []}
-                      value={field.value}
-                      onChange={field.onChange}
-                      loading={executionProfilesQuery.isLoading}
-                      catalog={billingCatalog}
-                      taskType={watchedType}
-                      priceUnit="task"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               <TaskTimePricingNotice
                 catalog={billingCatalog}
                 taskType={watchedType}
@@ -506,25 +534,6 @@ export function TaskFormDialog({
 
               <div className="space-y-4 pt-1">
                 {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">图片/高级</p> : null}
-
-                {watchedType !== 'ecommerce' && !isMontageTask && !isViralAnalysisTask ? (
-                  <div className="space-y-2">
-                    <FormLabel>数量</FormLabel>
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5].map((nextQuantity) => (
-                        <Button
-                          key={nextQuantity}
-                          type="button"
-                          variant={quantity === nextQuantity ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setFormValue('quantity', nextQuantity)}
-                        >
-                          {nextQuantity}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
 
                 {isMontageTask ? (
                   <MontageCreationPanel
