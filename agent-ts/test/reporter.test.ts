@@ -15,6 +15,24 @@ describe("postJSONWithRetry", () => {
     expect(attempts).toBe(3);
   });
 
+  test("stops retry backoff when the completion deadline is cancelled", async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    const pending = postJSONWithRetry(
+      async () => {
+        attempts += 1;
+        throw new Error("temporary failure");
+      },
+      undefined,
+      controller.signal,
+    );
+    await Bun.sleep(10);
+    controller.abort(new Error("completion deadline exceeded"));
+
+    await expect(pending).rejects.toThrow("completion deadline exceeded");
+    expect(attempts).toBe(1);
+  });
+
   test("reports progress with the server task and execution identity", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const originalFetch = globalThis.fetch;

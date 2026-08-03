@@ -1,66 +1,158 @@
 import { pathToFileURL } from "node:url";
 
-import { uploadWorkspaceArtifacts } from "./artifacts.js";
-import { bootstrap, readWorkloadToken } from "./bootstrap.js";
+import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
+import { bootstrap, readWorkloadToken, type BootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
-import { runClaude } from "./runner.js";
+import { runClaude, type RunnerReporter } from "./runner.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
-const FINALIZATION_TIMEOUT_MS = 20_000;
-const COMPLETION_RESERVE_MS = 5_000;
+const ARTIFACT_TIMEOUT_MS = 120_000;
+const COMPLETION_TIMEOUT_MS = 20_000;
+const MAX_ARTIFACT_TIMEOUT_MS = 300_000;
+const MAX_COMPLETION_TIMEOUT_MS = 60_000;
 
-export function finalizationDeadlines(now: number, timeout = FINALIZATION_TIMEOUT_MS): { workDeadline: number; completionDeadline: number } {
-  const reserve = Math.min(COMPLETION_RESERVE_MS, Math.floor(timeout / 2));
-  return { workDeadline: now + timeout - reserve, completionDeadline: now + timeout };
+type HeartbeatReporter = Pick<Reporter, "heartbeat">;
+type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete">;
+
+export interface FinalizationTimeouts {
+  artifact: number;
+  completion: number;
 }
 
-export async function runJob(args: string[], stdout: NodeJS.WritableStream = process.stdout, stderr: NodeJS.WritableStream = process.stderr): Promise<ExecutionResult> {
-  const config = parseJobConfig(args);
-  const controller = new AbortController();
-  const onSignal = () => controller.abort();
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
-  let stopHeartbeat: (() => void) | undefined;
-  try {
-    const workloadToken = await readWorkloadToken(config.workloadTokenFile);
-    const data = await bootstrap(config, workloadToken, controller.signal);
-    await materializeBootstrapFiles(config.workspace, data.files, controller.signal);
-    await prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
-    const reporter = new Reporter(config, data.execution_token, data.task_id);
-    stopHeartbeat = startHeartbeat(reporter, stderr, controller.signal);
-    let result: ExecutionResult;
-    try {
-      result = await runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, controller.signal);
-    } catch (error) {
-      result = failure(config.workspace, error);
-    }
-    if (controller.signal.aborted && !result.success && !result.error) result.error = "agent shutdown: received termination signal";
-    const deadlines = finalizationDeadlines(Date.now(), finalizationTimeout(config));
-    const workAbort = abortAt(deadlines.workDeadline);
-    try {
-      await uploadWorkspaceArtifacts(config.workspace, data, reporter, workAbort.signal);
-    } catch (error) {
-      void reporter.progress(`artifact upload failed: ${(error as Error).message}`, workAbort.signal);
-      if (result.success) result = failure(config.workspace, new Error(`artifact upload failed: ${(error as Error).message}`));
-    } finally {
-      workAbort.abort();
-    }
-    const completionAbort = abortAt(deadlines.completionDeadline);
-    try { await reporter.complete(result, completionAbort.signal); } catch (error) { stderr.write(`failed to report completion: ${(error as Error).message}\n`); } finally { completionAbort.abort(); }
-    stdout.write(`${JSON.stringify(result)}\n`);
-    return result;
-  } finally {
-    stopHeartbeat?.();
-    process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
+export interface RunJobDependencies {
+  readWorkloadToken(path: string): Promise<string>;
+  bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<BootstrapResponse>;
+  materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
+  prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
+  createReporter(config: JobConfig, data: BootstrapResponse): JobReporter;
+  startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
+  runClaude(config: JobConfig, data: BootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
+  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
+  subscribeShutdown(onSignal: () => void): () => void;
+}
+
+export class CompletionReportError extends Error {
+  constructor(cause: Error) {
+    super(`failed to report completion: ${cause.message}`, { cause });
+    this.name = "CompletionReportError";
   }
 }
 
-function failure(workspace: string, error: unknown): ExecutionResult { return { success: false, error: error instanceof Error ? error.message : "agent execution failed", work_dir: workspace, terminal_reason: "platform_error" }; }
+export function exitCodeForError(error: unknown): number {
+  return error instanceof CompletionReportError ? 2 : 1;
+}
 
-function startHeartbeat(reporter: Reporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void {
+export function finalizationTimeouts(env: NodeJS.ProcessEnv = process.env): FinalizationTimeouts {
+  return {
+    artifact: parsePhaseTimeout(env.ANBAN_JOB_ARTIFACT_TIMEOUT, ARTIFACT_TIMEOUT_MS, MAX_ARTIFACT_TIMEOUT_MS),
+    completion: parsePhaseTimeout(env.ANBAN_JOB_COMPLETION_TIMEOUT, COMPLETION_TIMEOUT_MS, MAX_COMPLETION_TIMEOUT_MS),
+  };
+}
+
+function parsePhaseTimeout(raw: string | undefined, fallback: number, maximum: number): number {
+  if (!raw) return fallback;
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(raw.trim());
+  if (!match) return fallback;
+  const unit = match[2] === "m" ? 60_000 : match[2] === "s" ? 1_000 : 1;
+  const milliseconds = Number(match[1]) * unit;
+  return milliseconds > 0 && milliseconds <= maximum ? milliseconds : fallback;
+}
+
+const defaultRunJobDependencies: RunJobDependencies = {
+  readWorkloadToken,
+  bootstrap,
+  materializeBootstrapFiles,
+  prepareWorkspace,
+  createReporter: (config, data) => new Reporter(config, data.execution_token, data.task_id),
+  startHeartbeat,
+  runClaude: (config, data, reporter, signal) =>
+    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal),
+  uploadWorkspaceArtifacts,
+  subscribeShutdown: (onSignal) => {
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+    return () => {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+  },
+};
+
+export async function runJob(
+  args: string[],
+  stdout: NodeJS.WritableStream = process.stdout,
+  stderr: NodeJS.WritableStream = process.stderr,
+  dependencies: RunJobDependencies = defaultRunJobDependencies,
+): Promise<ExecutionResult> {
+  const config = parseJobConfig(args);
+  const shutdown = new AbortController();
+  const stopShutdown = dependencies.subscribeShutdown(() => shutdown.abort(new Error("agent shutdown: received termination signal")));
+  let stopHeartbeat: (() => void) | undefined;
+  try {
+    const workloadToken = await dependencies.readWorkloadToken(config.workloadTokenFile);
+    const data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
+    await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
+    await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
+    const reporter = dependencies.createReporter(config, data);
+    stopHeartbeat = dependencies.startHeartbeat(reporter, stderr, shutdown.signal);
+    let result: ExecutionResult;
+    try {
+      result = await dependencies.runClaude(config, data, reporter, shutdown.signal);
+    } catch (error) {
+      result = failure(config.workspace, error);
+    }
+    if (shutdown.signal.aborted && !result.success && !result.error) result.error = "agent shutdown: received termination signal";
+
+    const timeouts = finalizationTimeouts();
+    const artifactStartedAt = Date.now();
+    const artifactAbort = abortAfter(timeouts.artifact, shutdown.signal);
+    try {
+      stderr.write(`artifact finalization started: timeout_ms=${timeouts.artifact}\n`);
+      const count = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal);
+      stderr.write(`artifact finalization completed: files=${count} duration_ms=${Date.now() - artifactStartedAt}\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "artifact finalization failed";
+      stderr.write(`artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} error=${message}\n`);
+      void reporter.progress(`artifact upload failed: ${message}`, artifactAbort.signal).catch(() => {});
+      if (result.success) result = failure(config.workspace, new Error(`artifact upload failed: ${message}`));
+    } finally {
+      artifactAbort.abort();
+    }
+
+    const completionStartedAt = Date.now();
+    const completionAbort = abortAfter(timeouts.completion);
+    let completionError: Error | undefined;
+    try {
+      stderr.write(`completion report started: timeout_ms=${timeouts.completion}\n`);
+      await reporter.complete(result, completionAbort.signal);
+      stderr.write(`completion report acknowledged: duration_ms=${Date.now() - completionStartedAt}\n`);
+    } catch (error) {
+      completionError = error instanceof Error ? error : new Error("completion report failed");
+      stderr.write(`completion report exhausted: duration_ms=${Date.now() - completionStartedAt} error=${completionError.message}\n`);
+    } finally {
+      completionAbort.abort();
+    }
+    stdout.write(`${JSON.stringify(result)}\n`);
+    if (completionError) throw new CompletionReportError(completionError);
+    return result;
+  } finally {
+    stopHeartbeat?.();
+    stopShutdown();
+  }
+}
+
+function failure(workspace: string, error: unknown): ExecutionResult {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : "agent execution failed",
+    work_dir: workspace,
+    terminal_reason: "platform_error",
+  };
+}
+
+function startHeartbeat(reporter: HeartbeatReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void {
   let failures = 0;
   const report = async (): Promise<void> => {
     try { await reporter.heartbeat(signal); failures = 0; }
@@ -71,23 +163,24 @@ function startHeartbeat(reporter: Reporter, stderr: NodeJS.WritableStream, signa
   return () => clearInterval(interval);
 }
 
-function abortAt(deadline: number): AbortController {
+function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
-  controller.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
+  const timer = setTimeout(() => controller.abort(new Error("phase deadline exceeded")), timeout);
+  const abortFromParent = () => controller.abort(parent?.reason);
+  if (parent?.aborted) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+  controller.signal.addEventListener("abort", () => {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", abortFromParent);
+  }, { once: true });
   return controller;
 }
 
-function finalizationTimeout(_config: JobConfig): number {
-  const value = process.env.ANBAN_JOB_FINALIZATION_TIMEOUT;
-  if (!value) return FINALIZATION_TIMEOUT_MS;
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(value);
-  if (!match) return FINALIZATION_TIMEOUT_MS;
-  const unit = match[2] === "m" ? 60_000 : match[2] === "s" ? 1_000 : 1;
-  const milliseconds = Number(match[1]) * unit;
-  return milliseconds > 0 && milliseconds <= 300_000 ? milliseconds : FINALIZATION_TIMEOUT_MS;
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runJob(process.argv.slice(2)).then((result) => { if (!result.success) process.exitCode = 1; }).catch((error) => { process.stderr.write(`${(error as Error).message}\n`); process.exitCode = 1; });
+  runJob(process.argv.slice(2))
+    .then((result) => { if (!result.success) process.exitCode = 1; })
+    .catch((error) => {
+      process.stderr.write(`${error instanceof Error ? error.message : "agent job failed"}\n`);
+      process.exitCode = exitCodeForError(error);
+    });
 }

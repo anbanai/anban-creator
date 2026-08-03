@@ -46,19 +46,31 @@ export interface ArtifactManifestFile {
   role?: string;
 }
 
-type Sleep = (milliseconds: number) => Promise<void>;
-const sleep: Sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+const sleep: Sleep = (milliseconds, signal) => new Promise((resolve, reject) => {
+  const onAbort = () => {
+    clearTimeout(timer);
+    reject(signal?.reason ?? new Error("operation aborted"));
+  };
+  const timer = setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
+    resolve();
+  }, milliseconds);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+});
 
-export async function postJSONWithRetry(operation: () => Promise<void>, wait: Sleep = sleep): Promise<void> {
+export async function postJSONWithRetry(operation: () => Promise<void>, wait: Sleep = sleep, signal?: AbortSignal): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted();
     try {
       await operation();
       return;
     } catch (error) {
       lastError = error;
       if (attempt === 2) break;
-      await wait(250 * 2 ** attempt);
+      await wait(250 * 2 ** attempt, signal);
     }
   }
   throw lastError;
@@ -77,7 +89,7 @@ export class Reporter {
   }
 
   async complete(result: ExecutionResult, signal?: AbortSignal): Promise<void> {
-    await postJSONWithRetry(() => this.post("/api/v1/agent/complete", this.identity({ result }), signal));
+    await postJSONWithRetry(() => this.post("/api/v1/agent/complete", this.identity({ result }), signal), undefined, signal);
   }
 
   async prepareArtifactUpload(request: ArtifactPrepareRequest, signal?: AbortSignal): Promise<ArtifactPrepareResponse> {

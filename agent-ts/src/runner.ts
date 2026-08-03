@@ -145,8 +145,9 @@ const CLAUDE_ENVIRONMENT_KEYS_TO_UNSET = new Set([
 ]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
+export type RunnerReporter = Pick<Reporter, "progress">;
 
-export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
   const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
@@ -175,7 +176,7 @@ export function buildQueryOptions(
   workspace: string,
   serverURL = "https://server.invalid",
   token = "test-token",
-  reporter: Pick<Reporter, "progress"> = { progress: async () => {} },
+  reporter: RunnerReporter = { progress: async () => {} },
   controller = new AbortController(),
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
@@ -222,7 +223,7 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
 }
 
-async function consumeMessage(message: SDKMessage, reporter: Reporter, logText: string, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
+async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, logText: string, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
   if (message.type === "assistant") {
     for (const block of message.message.content) {
       if (block.type === "text" && block.text.trim()) {
