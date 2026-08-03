@@ -143,6 +143,23 @@ vi.mock('@/lib/api', async () => {
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
+        list: vi.fn().mockResolvedValue({
+          tier: 'pro',
+          default_capability: 'standard',
+          items: [
+            {
+              key: 'standard',
+              display_name: '标准图像',
+              min_tier: 'free',
+              enabled: true,
+              price_available: true,
+              price_credits: 500,
+            },
+          ],
+        }),
+      },
     },
   }
 })
@@ -172,7 +189,7 @@ describe('TasksPage unified prompt composer', () => {
     fireEvent.click(await screen.findByRole('button', { name: '新建任务' }))
     const dialog = await screen.findByRole('dialog')
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '创建任务' })).not.toBeInTheDocument()
     expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
     expect(document.querySelectorAll('form form')).toHaveLength(0)
@@ -209,7 +226,7 @@ describe('TasksPage unified prompt composer', () => {
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
     await screen.findByRole('dialog', { name: '新建任务' })
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目'))
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('created task detail')).toBeInTheDocument()
@@ -303,11 +320,12 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
-    fireEvent.click(await screen.findByRole('button', { name: /^性价比，/ }))
+    expect(await screen.findByRole('button', { name: /^执行配置：/ })).toBeInTheDocument()
     expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
-    expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
+    expect(screen.getByText('请选择可用的执行配置。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
     expect(screen.queryByText(/固定任务价：0/)).not.toBeInTheDocument()
+    expect(api.tasks.create).not.toHaveBeenCalled()
   })
 
   it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {
