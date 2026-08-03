@@ -45,12 +45,13 @@ export function DesignerGenerationToolbar({
   const sizePresets = designerFeatures?.sizePresets ?? []
   const outputFormats = designerFeatures?.outputFormats ?? []
   const maxBatch = Math.max(1, designerFeatures?.maxBatch ?? 1)
+  const quantity = Math.min(maxBatch, Math.max(1, settings.n))
   const summary = [
     selectedCapability?.name ?? '图像能力',
     settingLabel(settings.size),
     qualityLevels.length > 0 ? QUALITY_LABELS[settings.quality] ?? settings.quality : undefined,
     settings.outputFormat.toUpperCase(),
-    `${settings.n} 张`,
+    `${quantity} 张`,
   ].filter(Boolean).join(' · ')
 
   return (
@@ -159,7 +160,7 @@ export function DesignerGenerationToolbar({
         <section className="flex justify-end">
           <QuantityStepper
             label="图片数量"
-            value={settings.n}
+            value={quantity}
             min={1}
             max={maxBatch}
             onChange={(n) => onSettingsChange({ n })}

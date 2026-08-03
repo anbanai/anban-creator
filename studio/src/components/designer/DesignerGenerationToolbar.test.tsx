@@ -94,7 +94,7 @@ describe('DesignerGenerationToolbar', () => {
       <DesignerGenerationToolbar
         capabilities={singleImageCapabilities}
         capabilityKey="professional"
-        settings={settings}
+        settings={{ ...settings, n: 3 }}
         onCapabilityChange={vi.fn()}
         onSettingsChange={vi.fn()}
       />,

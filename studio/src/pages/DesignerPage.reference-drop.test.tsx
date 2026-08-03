@@ -256,6 +256,52 @@ describe('Designer shared prompt composer', () => {
     expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
   })
 
+  it('clamps image quantity when the selected capability lowers its batch limit', async () => {
+    vi.mocked(designerApi.getCapabilities).mockResolvedValueOnce({
+      items: [provider({ maxBatch: 3 })],
+      defaultCapability: 'professional',
+    })
+    const queryClient = createTestQueryClient()
+    testingRender(<DesignerPage />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+              <AgentPromptDropProvider>{children}</AgentPromptDropProvider>
+            </ThemeProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      ),
+    })
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '增加图片数量' }))
+    fireEvent.click(screen.getByRole('button', { name: '增加图片数量' }))
+    expect(screen.getByRole('button', {
+      name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 3 张',
+    })).toBeInTheDocument()
+
+    await act(async () => {
+      queryClient.setQueryData(['designer', 'capabilities'], {
+        items: [provider({ maxBatch: 1 })],
+        defaultCapability: 'professional',
+      })
+    })
+
+    expect(await screen.findByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {
+      name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+    }))
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '单张海报' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ n: 1 }),
+      expect.any(AbortSignal),
+    ))
+  })
+
   it('uses selected project for generation and explicit project IDs for history', async () => {
     render(<DesignerPage />)
     const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })

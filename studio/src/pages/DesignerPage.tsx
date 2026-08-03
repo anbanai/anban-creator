@@ -146,6 +146,11 @@ export default function DesignerPage() {
     !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits,
   )
   const effectiveDesignerFeatures = effectiveCapability?.designerFeatures
+  const effectiveMaxBatch = Math.max(1, effectiveDesignerFeatures?.maxBatch ?? 1)
+  const effectiveQuantity = Math.min(effectiveMaxBatch, Math.max(1, settings.n))
+  const effectiveSettings = settings.n === effectiveQuantity
+    ? settings
+    : { ...settings, n: effectiveQuantity }
   const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
   const projectID = selectedProjectId ?? 'default'
@@ -218,6 +223,13 @@ export default function DesignerPage() {
       toast.warning(`当前输入最多支持 ${referenceCapacity} 张参考图，已移除 ${overflow.length} 张`)
     }
   }, [attachmentController, effectiveCapability, imageCapabilityCatalog, referenceCapacity, resetSettingsForCapability, selectedCapabilityKey])
+
+  useEffect(() => {
+    setSettings((current) => {
+      const n = Math.min(effectiveMaxBatch, Math.max(1, current.n))
+      return current.n === n ? current : { ...current, n }
+    })
+  }, [effectiveMaxBatch])
 
   useEffect(() => () => {
     generationAttemptRef.current += 1
@@ -394,7 +406,7 @@ export default function DesignerPage() {
           capability_key: effectiveCapability.id,
           quality: settings.quality,
           size: settings.size,
-          n: settings.n,
+          n: effectiveQuantity,
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
@@ -411,7 +423,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveDesignerFeatures, effectiveCapability, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveDesignerFeatures, effectiveCapability, effectiveQuantity, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveCapability || !editingImage) return
@@ -459,7 +471,7 @@ export default function DesignerPage() {
           capability_key: effectiveCapability.id,
           quality: settings.quality,
           size: settings.size,
-          n: settings.n,
+          n: effectiveQuantity,
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
@@ -477,7 +489,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, effectiveDesignerFeatures, isGenerationAttemptActive, projectID, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, effectiveDesignerFeatures, effectiveQuantity, isGenerationAttemptActive, projectID, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
     generationAttemptRef.current += 1
@@ -578,7 +590,7 @@ export default function DesignerPage() {
                         <DesignerGenerationToolbar
                           capabilities={capabilityList}
                           capabilityKey={effectiveCapability.id}
-                          settings={settings}
+                          settings={effectiveSettings}
                           onCapabilityChange={handleCapabilityChange}
                           onSettingsChange={updateSettings}
                           disabled={isGenerating}
