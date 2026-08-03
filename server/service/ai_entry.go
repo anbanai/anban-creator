@@ -126,6 +126,31 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
+	quantity := req.Quantity
+	if quantity == 0 {
+		quantity = 1
+	}
+	if quantity < 1 || quantity > 5 {
+		return aiEntryError("创建任务失败：quantity must be between 1 and 5"), nil
+	}
+	imageRatio := strings.TrimSpace(req.ImageRatio)
+	if imageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, imageRatio) {
+		return aiEntryError(fmt.Sprintf("创建任务失败：%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, imageRatio)), nil
+	}
+	imageCapabilityKey := strings.TrimSpace(req.ImageCapabilityKey)
+	if imageCapabilityKey != "" {
+		if s.taskSvc.imageCapabilities == nil {
+			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
+		}
+		resolved, err := s.taskSvc.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
+		if err != nil {
+			return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+		}
+		if resolved == nil || strings.TrimSpace(resolved.Key) == "" {
+			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
+		}
+		imageCapabilityKey = resolved.Key
+	}
 	if s.llm == nil {
 		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用，请联系管理员。", ""), nil
 	}
@@ -141,30 +166,8 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
-	quantity := req.Quantity
-	if quantity == 0 {
-		quantity = 1
-	}
-	if quantity < 1 || quantity > 5 {
-		return aiEntryError("创建任务失败：quantity must be between 1 and 5"), nil
-	}
-	imageRatio := strings.TrimSpace(req.ImageRatio)
 	if imageRatio == "" {
 		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
-	}
-	imageCapabilityKey := strings.TrimSpace(req.ImageCapabilityKey)
-	if imageCapabilityKey != "" {
-		if s.taskSvc.imageCapabilities == nil {
-			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
-		}
-		resolved, err := s.taskSvc.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
-		if err != nil {
-			return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
-		}
-		if resolved == nil || strings.TrimSpace(resolved.Key) == "" {
-			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
-		}
-		imageCapabilityKey = resolved.Key
 	}
 
 	projectSnapshot := model.SnapshotProject(project)

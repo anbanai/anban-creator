@@ -587,8 +587,10 @@ func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testi
 			},
 		}},
 	}))
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
+	costs := &fakeProviderTokenCostRecorder{}
 	logger := zerolog.New(io.Discard)
-	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
@@ -600,9 +602,55 @@ func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testi
 	if result.Status != AIEntryStatusError || !strings.Contains(result.Message, "requires enterprise tier") {
 		t.Fatalf("result = %#v, want tier authorization failure", result)
 	}
+	if len(llm.calls) != 0 || len(costs.reconciled) != 0 || len(costs.unreconciled) != 0 {
+		t.Fatalf("LLM/cost side effects = calls %d, reconciled %d, unreconciled %d; want all zero", len(llm.calls), len(costs.reconciled), len(costs.unreconciled))
+	}
 	tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if findErr != nil || len(tasks) != 0 {
 		t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
+	}
+}
+
+func TestAIEntryServiceSubmitRejectsInvalidExplicitParametersBeforeIntentParsing(t *testing.T) {
+	tests := []struct {
+		name        string
+		quantity    int
+		imageRatio  string
+		wantMessage string
+	}{
+		{name: "negative quantity", quantity: -1, wantMessage: "quantity must be between 1 and 5"},
+		{name: "quantity above maximum", quantity: 6, wantMessage: "quantity must be between 1 and 5"},
+		{name: "ratio unsupported by article project", imageRatio: "9:16", wantMessage: model.ValidImageRatioHint},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
+			costs := &fakeProviderTokenCostRecorder{}
+			logger := zerolog.New(io.Discard)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+				UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
+				Quantity: tt.quantity, ImageRatio: tt.imageRatio,
+			})
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if result.Status != AIEntryStatusError || !strings.Contains(result.Message, tt.wantMessage) {
+				t.Fatalf("result = %#v, want error containing %q", result, tt.wantMessage)
+			}
+			if len(llm.calls) != 0 || len(costs.reconciled) != 0 || len(costs.unreconciled) != 0 {
+				t.Fatalf("LLM/cost side effects = calls %d, reconciled %d, unreconciled %d; want all zero", len(llm.calls), len(costs.reconciled), len(costs.unreconciled))
+			}
+			tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if findErr != nil || len(tasks) != 0 {
+				t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
+			}
+		})
 	}
 }
 
