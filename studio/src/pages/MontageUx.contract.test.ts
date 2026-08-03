@@ -5,10 +5,12 @@ describe('montage UX contracts', () => {
   it('tasks page uses dedicated montage input and no user execution target selector', () => {
     const pageSource = readFileSync('src/pages/TasksPage.tsx', 'utf8')
     const dialogSource = readFileSync('src/components/tasks/TaskFormDialog.tsx', 'utf8')
+    const toolbarSource = readFileSync('src/components/tasks/ExecutionProfileToolbar.tsx', 'utf8')
     expect(pageSource).toContain('TaskFormDialog')
     expect(dialogSource).toContain('montage_input')
     expect(dialogSource).toContain('MontageCreationPanel')
-    expect(dialogSource).toContain('ExecutionProfileSelector')
+    expect(dialogSource).toContain('ExecutionProfileToolbar')
+    expect(toolbarSource).toContain('ExecutionProfileSelector')
     expect(dialogSource).not.toContain('runThisTaskLocally')
     expect(dialogSource).not.toContain('execution_target')
     expect(dialogSource).not.toContain('MontageExecutionTarget')
