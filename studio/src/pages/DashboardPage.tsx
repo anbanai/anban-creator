@@ -117,7 +117,7 @@ export default function DashboardPage() {
   )
 
   useEffect(() => {
-    if (projectsLoading || platformConfigsQuery.isLoading) return
+    if (projectsLoading || platformConfigsQuery.isLoading || platformConfigsQuery.isError) return
     const nextProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
     if (!nextProject) {
       if (selectedProjectId !== null) setSelectedProjectId(null)
@@ -131,7 +131,7 @@ export default function DashboardPage() {
       const nextQuantityMax = ['article', 'seednote', 'moments'].includes(nextProject.platform) ? 5 : 1
       setQuantity((current) => Math.min(current, nextQuantityMax))
     }
-  }, [activeProjects, platformConfigMap, platformConfigsQuery.isLoading, projectsLoading, selectedProjectId])
+  }, [activeProjects, platformConfigMap, platformConfigsQuery.isError, platformConfigsQuery.isLoading, projectsLoading, selectedProjectId])
 
   useEffect(() => {
     if (!selectedProject || !defaultExecutionProfile) return
@@ -170,7 +170,7 @@ export default function DashboardPage() {
     },
   })
 
-  const hasError = projectsError
+  const hasError = projectsError || platformConfigsQuery.isError
   const dashboardBlocker = buildDashboardBlocker({
     projectsLoading,
     projectsError,
@@ -180,6 +180,8 @@ export default function DashboardPage() {
   const canSubmit = Boolean(selectedProjectId && selectedProject)
     && executionProfileReady
     && Boolean(effectiveImageCapabilityKey)
+    && !platformConfigsQuery.isLoading
+    && !platformConfigsQuery.isError
     && !dashboardBlocker?.blocking
     && !submitMutation.isPending
     && !attachmentController.uploading
@@ -262,8 +264,8 @@ export default function DashboardPage() {
                   value={selectedProjectId}
                   onValueChange={handleProjectChange}
                   allowNoProject={false}
-                  loading={projectsLoading}
-                  disabled={submitMutation.isPending}
+                  loading={projectsLoading || platformConfigsQuery.isLoading}
+                  disabled={submitMutation.isPending || platformConfigsQuery.isError}
                   placeholder="选择项目"
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
                   compact
@@ -331,7 +333,10 @@ export default function DashboardPage() {
       </section>
 
       {hasError ? (
-        <QueryErrorState onRetry={() => { refetchProjects() }} />
+        <QueryErrorState onRetry={() => {
+          void refetchProjects()
+          void platformConfigsQuery.refetch()
+        }} />
       ) : null}
     </div>
   )

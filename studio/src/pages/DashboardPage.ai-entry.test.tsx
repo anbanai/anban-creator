@@ -311,6 +311,79 @@ describe('DashboardPage AI entry', () => {
     }))
   })
 
+  it('waits for platform defaults before enabling project choice or submission', async () => {
+    const resolvedPlatformConfigs = platformConfigs.map((config) => ({
+      ...config,
+      supported_image_ratios: [...config.supported_image_ratios],
+      fields: [...config.fields],
+    }))
+    let resolvePlatformConfigs!: (value: typeof resolvedPlatformConfigs) => void
+    vi.mocked(api.projects.list).mockResolvedValueOnce([
+      { ...articleProject, image_ratio: '' },
+      { ...seednoteProject, image_ratio: '' },
+    ])
+    vi.mocked(api.projects.platformConfigs).mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePlatformConfigs = resolve
+    }))
+    render(<DashboardPage />)
+
+    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '按平台默认比例创作' },
+    })
+
+    expect(projectControl).toBeDisabled()
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolvePlatformConfigs(resolvedPlatformConfigs)
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(projectControl).toBeEnabled())
+    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+
+    fireEvent.click(projectControl)
+    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+    expect(screen.getByRole('button', { name: '图像设置：3:4 · Standard' })).toBeInTheDocument()
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'project-2',
+      image_ratio: '3:4',
+    })))
+  })
+
+  it('keeps creation blocked and retries when platform defaults fail to load', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([
+      { ...articleProject, image_ratio: '' },
+    ])
+    vi.mocked(api.projects.platformConfigs).mockRejectedValueOnce(new Error('platform defaults unavailable'))
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('加载失败')).toBeInTheDocument()
+    const projectControl = screen.getByRole('combobox', { name: '项目上下文' })
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '按平台默认比例创作' },
+    })
+
+    expect(projectControl).toBeDisabled()
+    expect(submit).toBeDisabled()
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.projects.platformConfigs).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(projectControl).toBeEnabled())
+    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+  })
+
   it('disables submission when the selected profile has no SKU after the project changes', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([
       { ...articleProject },
