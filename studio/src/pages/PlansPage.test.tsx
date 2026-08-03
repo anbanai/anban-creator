@@ -171,12 +171,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：性价比/ }))
+    expect(await screen.findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: /^平衡型，/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'ch-1',
+      type: 'article',
       execution_profile: 'balanced',
     })))
   })
@@ -213,7 +216,8 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
 
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await within(dialog).findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：极致效果/ }))
+    expect(await screen.findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
@@ -236,13 +240,39 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(api.plans.update).not.toHaveBeenCalled()
   })
 
-  it('renders the shared composer with project context in the create dialog', async () => {
+  it('keeps schedule above the create composer and orders its project, execution, and image controls', async () => {
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    await screen.findByRole('dialog')
-    expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
+    expect(composer).toBeInTheDocument()
+
+    const projectControl = await within(composer as HTMLElement).findByRole('combobox', { name: '项目：未选择' })
+    const executionControl = await within(composer as HTMLElement).findByRole('button', { name: /^执行配置：/ })
+    const imageControl = within(composer as HTMLElement).getByRole('button', { name: /^图像设置：/ })
+    expect(projectControl.compareDocumentPosition(executionControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(executionControl.compareDocumentPosition(imageControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const scheduleLabel = within(dialog).getByText('排期设置', { selector: 'label' })
+    expect(composer).not.toContainElement(scheduleLabel)
+    expect(scheduleLabel.compareDocumentPosition(composer as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
+    expect(within(composer as HTMLElement).queryByText(/(?:任务|图片)数量/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
     expect(document.querySelectorAll('form form')).toHaveLength(0)
+  })
+
+  it('renders the edited plan project as a compact readonly identity inside the composer', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
+    const projectControl = composer?.querySelector<HTMLElement>('[data-slot="project-context-control"]')
+    expect(projectControl).toHaveAttribute('data-mode', 'readonly')
+    expect(projectControl).toHaveAttribute('data-compact', 'true')
+    expect(projectControl).toHaveTextContent('测试项目')
+    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
   })
 
   it('在计划创建和编辑时用模板覆盖非空 Prompt', async () => {
@@ -264,7 +294,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
     const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目：未选择' }))
     fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
     const createPrompt = within(createDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
     fireEvent.change(createPrompt, { target: { value: '已有创建 Prompt' } })
@@ -280,17 +310,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(editPrompt).toHaveValue('已有计划 Prompt')
     fireEvent.click(await within(editDialog).findByRole('button', { name: /知识卡片/ }))
     expect(editPrompt).toHaveValue('模板视觉 Prompt')
-  })
-
-  it('puts the single project field before content type', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-
-    const projectLabel = within(dialog).getByText('项目', { selector: 'label' })
-    const typeLabel = within(dialog).getByText('内容类型', { selector: 'label' })
-    expect(projectLabel.compareDocumentPosition(typeLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(dialog).getAllByRole('combobox', { name: '项目上下文' })).toHaveLength(1)
   })
 
   it('blocks submission when a weekly schedule has no selected day', async () => {
@@ -324,20 +343,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     await waitFor(() => {
       expect(errorMock).toHaveBeenCalledWith('排期冲突，请检查现有计划')
     })
-  })
-
-  it('does not offer e-commerce as a plan content type', async () => {
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const typeField = within(dialog).getByText('内容类型', { selector: 'label' }).parentElement
-    const typeSelect = within(typeField as HTMLElement).getByRole('combobox')
-    fireEvent.click(typeSelect)
-
-    expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
   })
 
   it('highlights a plan addressed by the timeline highlight parameter', async () => {
