@@ -233,6 +233,7 @@ describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
     toastSuccessMock.mockClear()
+    uploadToOSSMock.mockClear()
     vi.mocked(api.aiEntry.submit).mockReset().mockResolvedValue({
       status: 'created',
       message: '已创建任务',
@@ -245,6 +246,7 @@ describe('DashboardPage AI entry', () => {
       fields: [...config.fields],
     })))
     vi.mocked(api.billing.catalog).mockReset().mockResolvedValue({ ...billingCatalog, skus: [...billingCatalog.skus] })
+    vi.mocked(api.agentProfiles.list).mockReset().mockResolvedValue([...executionProfiles])
     vi.mocked(api.imageCapabilities.list).mockReset().mockResolvedValue({
       ...imageCapabilities,
       items: [...imageCapabilities.items],
@@ -263,7 +265,7 @@ describe('DashboardPage AI entry', () => {
 
     const composer = document.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
-    const projectControl = await within(composer!).findByRole('combobox', { name: '项目上下文' })
+    const projectControl = await within(composer!).findByRole('combobox', { name: '项目：公众号项目' })
     const executionControl = await within(composer!).findByRole('button', { name: /^执行配置：/ })
     const imageControl = await within(composer!).findByRole('button', { name: /^图像设置：/ })
     const quantityControl = within(composer!).getByRole('button', { name: '任务数量：1' })
@@ -327,7 +329,7 @@ describe('DashboardPage AI entry', () => {
     }))
     render(<DashboardPage />)
 
-    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    const projectControl = await screen.findByRole('combobox', { name: '项目：公众号项目' })
     const submit = screen.getByRole('button', { name: '发送创建任务' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
@@ -366,7 +368,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
-    const projectControl = screen.getByRole('combobox', { name: '项目上下文' })
+    const projectControl = screen.getByRole('combobox', { name: '项目：公众号项目' })
     const submit = screen.getByRole('button', { name: '发送创建任务' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
@@ -382,6 +384,126 @@ describe('DashboardPage AI entry', () => {
     await waitFor(() => expect(projectControl).toBeEnabled())
     expect(projectControl).toHaveTextContent('公众号项目')
     expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+  })
+
+  it.each(['image-capabilities', 'execution-profiles', 'billing-catalog'] as const)(
+    'recovers all required composer queries after %s initially fails',
+    async (failedQuery) => {
+      if (failedQuery === 'image-capabilities') {
+        vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
+      } else if (failedQuery === 'execution-profiles') {
+        vi.mocked(api.agentProfiles.list).mockRejectedValueOnce(new Error('execution profiles unavailable'))
+      } else {
+        vi.mocked(api.billing.catalog).mockRejectedValueOnce(new Error('billing catalog unavailable'))
+      }
+      render(<DashboardPage />)
+
+      expect(await screen.findByText('加载失败')).toBeInTheDocument()
+      const submit = screen.getByRole('button', { name: '发送创建任务' })
+      const affectedControl = failedQuery === 'image-capabilities'
+        ? screen.getByRole('button', { name: /^图像设置：/ })
+        : screen.getByRole('button', { name: /^执行配置：/ })
+      fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+        target: { value: '恢复后创建任务' },
+      })
+
+      expect(affectedControl).toBeDisabled()
+      expect(submit).toBeDisabled()
+      expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+      await waitFor(() => {
+        expect(api.projects.list).toHaveBeenCalledTimes(2)
+        expect(api.projects.platformConfigs).toHaveBeenCalledTimes(2)
+        expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2)
+        expect(api.agentProfiles.list).toHaveBeenCalledTimes(2)
+        expect(api.billing.catalog).toHaveBeenCalledTimes(2)
+      })
+      await waitFor(() => expect(affectedControl).toBeEnabled())
+      await waitFor(() => expect(submit).toBeEnabled())
+      expect(screen.queryByText('加载失败')).not.toBeInTheDocument()
+    },
+  )
+
+  it('blocks cached image capabilities after their recovery refetch fails', async () => {
+    vi.mocked(api.imageCapabilities.list)
+      .mockReset()
+      .mockResolvedValueOnce({ ...imageCapabilities, items: [...imageCapabilities.items] })
+      .mockRejectedValueOnce(new Error('cached image capabilities are stale'))
+      .mockResolvedValue({ ...imageCapabilities, items: [...imageCapabilities.items] })
+    vi.mocked(api.billing.catalog)
+      .mockReset()
+      .mockRejectedValueOnce(new Error('billing catalog unavailable'))
+      .mockResolvedValue({ ...billingCatalog, skus: [...billingCatalog.skus] })
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('加载失败')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '缓存失效时不可提交' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.billing.catalog).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByText('加载失败')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+  })
+
+  it('retains composer input and requires reselection after an image capability rejection', async () => {
+    const file = new File(['reference'], 'keep-reference.png', { type: 'image/png' })
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
+      status: 'error',
+      message: '创建任务失败：image capability "professional" requires enterprise tier',
+    })
+    render(<DashboardPage />)
+
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
+    expect(await screen.findByText(file.name)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' }))
+    fireEvent.click(await screen.findByText('Professional'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.change(prompt, { target: { value: '保留这段 Prompt 和附件' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    expect(await screen.findByText(/请重新选择图片能力/)).toBeInTheDocument()
+    expect(prompt).toHaveValue('保留这段 Prompt 和附件')
+    expect(screen.getByText(file.name)).toBeInTheDocument()
+    await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '图像设置：16:9 · 图像能力' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '图像设置：16:9 · 图像能力' }))
+    fireEvent.click(await screen.findByText('Standard'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+    expect(api.aiEntry.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not force image capability reselection for unrelated AI Entry errors', async () => {
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
+      status: 'error',
+      message: 'AI 入口服务繁忙，请稍后重试。',
+    })
+    render(<DashboardPage />)
+
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.change(prompt, { target: { value: '普通错误仍可重试' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    expect(await screen.findByText('AI 入口服务繁忙，请稍后重试。')).toBeInTheDocument()
+    expect(prompt).toHaveValue('普通错误仍可重试')
+    expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled()
   })
 
   it('disables submission when the selected profile has no SKU after the project changes', async () => {
@@ -400,7 +522,7 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })
-    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '项目：公众号项目' }))
     fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
 
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
@@ -413,7 +535,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
-    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })
     expect(projectControl).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /创建第一个项目/ })).not.toBeInTheDocument()
     fireEvent.click(projectControl)
@@ -454,9 +576,9 @@ describe('DashboardPage AI entry', () => {
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目')
+    expect(await screen.findByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号')
+    expect(screen.getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号')
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
@@ -492,6 +614,12 @@ describe('DashboardPage AI entry', () => {
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
   })
 
+  it('exposes the selected project identity in the composer control name', async () => {
+    render(<DashboardPage />)
+
+    expect(await screen.findByRole('combobox', { name: '项目：公众号项目' })).toBeInTheDocument()
+  })
+
   it('keeps supported task quantities and project image defaults while clamping single-task projects', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([
       { ...articleProject },
@@ -502,7 +630,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     const selectProject = async (name: RegExp) => {
-      fireEvent.click(await screen.findByRole('combobox', { name: '项目上下文' }))
+      fireEvent.click(await screen.findByRole('combobox', { name: /^项目：/ }))
       fireEvent.click(await screen.findByRole('option', { name }))
     }
 
@@ -604,9 +732,9 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
 
-    fireEvent.click(await screen.findByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(await screen.findByRole('combobox', { name: '项目：公众号项目' }))
     fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目')
+    expect(screen.getByRole('combobox', { name: '项目：种草项目' })).toHaveTextContent('种草项目')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇小红书种草笔记' },
@@ -623,7 +751,7 @@ describe('DashboardPage AI entry', () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...seednoteProject }])
     render(<DashboardPage />)
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('种草项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：种草项目' })).toHaveTextContent('种草项目'))
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(prompt, { target: { value: '已有需求' } })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
@@ -645,7 +773,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '项目上下文' })).toHaveTextContent('电商项目')
+    expect(await screen.findByRole('combobox', { name: '项目：电商项目' })).toHaveTextContent('电商项目')
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()

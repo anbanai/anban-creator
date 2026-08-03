@@ -29,6 +29,8 @@ interface EntryError {
   actionUrl?: string
 }
 
+const IMAGE_CAPABILITY_REJECTION_PATTERN = /(image capability|图片能力|图像能力)/i
+
 export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -41,6 +43,7 @@ export default function DashboardPage() {
   const [quantity, setQuantity] = useState(1)
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
+  const [imageCapabilityReselectionRequired, setImageCapabilityReselectionRequired] = useState(false)
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -65,6 +68,7 @@ export default function DashboardPage() {
     items: imageCapabilities,
     defaultCapability: defaultImageCapability,
     isLoading: imageCapabilitiesLoading,
+    isError: imageCapabilitiesError,
   } = useImageCapabilities()
   const billingCatalogQuery = useQuery({
     queryKey: queryKeys.billing.catalog,
@@ -98,9 +102,9 @@ export default function DashboardPage() {
     && capability.enabled === true
     && capability.price_available === true
   ))
-  const effectiveImageCapabilityKey = selectedImageCapabilityAvailable
+  const effectiveImageCapabilityKey = !imageCapabilityReselectionRequired && selectedImageCapabilityAvailable
     ? imageCapabilityKey
-    : defaultCapabilityAvailable ? defaultImageCapability : ''
+    : !imageCapabilityReselectionRequired && defaultCapabilityAvailable ? defaultImageCapability : ''
   const defaultExecutionProfile = cheapestAvailableExecutionProfile(
     profilesQuery.data,
     billingCatalogQuery.data,
@@ -115,6 +119,9 @@ export default function DashboardPage() {
     && selectedExecutionProfile?.available
     && executionProfilePrice !== undefined,
   )
+  const requiredComposerQueryError = imageCapabilitiesError
+    || profilesQuery.isError
+    || billingCatalogQuery.isError
 
   useEffect(() => {
     if (projectsLoading || platformConfigsQuery.isLoading || platformConfigsQuery.isError) return
@@ -162,7 +169,15 @@ export default function DashboardPage() {
         setEntryError({ message: result.message || '还需要补充配置。', actionUrl: result.action_url })
         return
       }
-      setEntryError({ message: result.message || 'AI 入口暂不可用，请稍后重试。' })
+      const message = result.message || 'AI 入口暂不可用，请稍后重试。'
+      if (result.status === 'error' && IMAGE_CAPABILITY_REJECTION_PATTERN.test(message)) {
+        setImageCapabilityReselectionRequired(true)
+        setImageCapabilityKey('')
+        setEntryError({ message: `${message} 请重新选择图片能力。` })
+        await queryClient.refetchQueries({ queryKey: queryKeys.imageCapabilities.all, exact: true })
+        return
+      }
+      setEntryError({ message })
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : '创建任务失败，请重试。'
@@ -170,7 +185,7 @@ export default function DashboardPage() {
     },
   })
 
-  const hasError = projectsError || platformConfigsQuery.isError
+  const hasError = projectsError || platformConfigsQuery.isError || requiredComposerQueryError
   const dashboardBlocker = buildDashboardBlocker({
     projectsLoading,
     projectsError,
@@ -182,6 +197,7 @@ export default function DashboardPage() {
     && Boolean(effectiveImageCapabilityKey)
     && !platformConfigsQuery.isLoading
     && !platformConfigsQuery.isError
+    && !requiredComposerQueryError
     && !dashboardBlocker?.blocking
     && !submitMutation.isPending
     && !attachmentController.uploading
@@ -233,6 +249,14 @@ export default function DashboardPage() {
     ))
   }
 
+  function handleImageCapabilityChange(capabilityKey: string) {
+    setImageCapabilityKey(capabilityKey)
+    if (imageCapabilityReselectionRequired) {
+      setImageCapabilityReselectionRequired(false)
+      setEntryError(null)
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col px-1 pb-8">
       <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col justify-center gap-5 py-8 md:py-12">
@@ -268,6 +292,11 @@ export default function DashboardPage() {
                   disabled={submitMutation.isPending || platformConfigsQuery.isError}
                   placeholder="选择项目"
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
+                  ariaLabel={selectedProject
+                    ? `项目：${selectedProject.name}`
+                    : projectsLoading || platformConfigsQuery.isLoading
+                      ? '项目：加载中'
+                      : '项目：未选择'}
                   compact
                 />
                 <ExecutionProfileToolbar
@@ -275,7 +304,7 @@ export default function DashboardPage() {
                   value={executionProfile}
                   onChange={setExecutionProfile}
                   loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
-                  disabled={submitMutation.isPending}
+                  disabled={submitMutation.isPending || profilesQuery.isError || billingCatalogQuery.isError}
                   catalog={billingCatalogQuery.data}
                   taskType={selectedProject?.platform}
                 />
@@ -285,9 +314,9 @@ export default function DashboardPage() {
                   onRatioChange={setImageRatio}
                   capabilities={imageCapabilities}
                   capabilityKey={effectiveImageCapabilityKey}
-                  onCapabilityChange={setImageCapabilityKey}
+                  onCapabilityChange={handleImageCapabilityChange}
                   loading={imageCapabilitiesLoading}
-                  disabled={submitMutation.isPending}
+                  disabled={submitMutation.isPending || imageCapabilitiesError}
                 />
                 <ComposerQuantityControl
                   label="任务数量"
@@ -336,6 +365,9 @@ export default function DashboardPage() {
         <QueryErrorState onRetry={() => {
           void refetchProjects()
           void platformConfigsQuery.refetch()
+          void queryClient.refetchQueries({ queryKey: queryKeys.imageCapabilities.all, exact: true })
+          void profilesQuery.refetch()
+          void billingCatalogQuery.refetch()
         }} />
       ) : null}
     </div>
