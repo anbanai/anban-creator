@@ -364,6 +364,52 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
 
+  it('rejects a stale project from the URL intent', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=missing-project&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
+    await within(dialog).findByRole('button', { name: /^执行配置：性价比/ })
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unsupported project platform from the URL intent', async () => {
+    const momentsProject = {
+      id: 'moments-project', user_id: '1', platform: 'moments', name: '朋友圈项目', avatar_url: '',
+      profile_url: '', instructions: '', keywords: '', visual_style: '', writer: '', theme: '', author: '',
+      image_ratio: '1:1', max_concurrent_tasks: 2, config: {}, status: 'active',
+      created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
+    } as Project
+    vi.mocked(api.projects.list).mockResolvedValueOnce([momentsProject])
+    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${momentsProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
+  it('shows and blocks an image capability query failure for an article plan', async () => {
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
   it('uses the cheapest available profile price for article plan runs', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
@@ -516,7 +562,9 @@ describe('PlansPage Seednote reference snapshots', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
     expect(await screen.findByRole('button', { name: '预览 plan-reference.png' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    const updateButton = screen.getByRole('button', { name: '更新' })
+    await waitFor(() => expect(updateButton).toBeEnabled())
+    fireEvent.click(updateButton)
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
@@ -841,6 +889,25 @@ describe('PlansPage Montage input', () => {
         pipeline_key: 'project-pipeline',
       }),
     })))
+  })
+
+  it('creates a Montage plan without querying image capabilities', async () => {
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
+    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '无需图片能力的 Montage' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: montageProject.id,
+      type: 'montage',
+    })))
+    expect(api.imageCapabilities.list).not.toHaveBeenCalled()
   })
 
   it('inherits project defaults and creates a plan with complete Montage input', async () => {
