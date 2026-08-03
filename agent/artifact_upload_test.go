@@ -212,6 +212,8 @@ func TestRunAgentArtifactHashTimeoutStillGetsFreshCompletionBudget(t *testing.T)
 			manifested = true
 		case "/api/v1/agent/complete":
 			completed = true
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -225,7 +227,8 @@ func TestRunAgentArtifactHashTimeoutStillGetsFreshCompletionBudget(t *testing.T)
 		ArtifactUploadMode: ArtifactUploadDirect,
 	}
 	started := time.Now()
-	err := runAgent(runCtx, cfg, io.Discard, io.Discard)
+	var stderr bytes.Buffer
+	err := runAgent(runCtx, cfg, io.Discard, &stderr)
 	if err == nil {
 		t.Fatal("runAgent unexpectedly succeeded after runner and artifact failure")
 	}
@@ -238,6 +241,16 @@ func TestRunAgentArtifactHashTimeoutStillGetsFreshCompletionBudget(t *testing.T)
 	}
 	if !completed {
 		t.Fatal("artifact timeout prevented the fresh completion callback")
+	}
+	for _, want := range []string{
+		"artifact finalization started: timeout_ms=40",
+		"artifact finalization failed: duration_ms=",
+		"completion report started: timeout_ms=250",
+		"completion report exhausted: duration_ms=",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+		}
 	}
 }
 
@@ -299,8 +312,10 @@ func (r *slowArtifactReader) Stat() (fs.FileInfo, error) {
 	return r.file.Stat()
 }
 
-func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testing.T) {
+func TestArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testing.T) {
 	t.Setenv(homeTemplateEnv, "")
+	t.Setenv(jobArtifactTimeoutEnv, "250ms")
+	t.Setenv(jobCompletionTimeoutEnv, "250ms")
 	root := t.TempDir()
 	writeAgentArtifactTestFile(t, root, "output/article.md", "# article")
 
@@ -308,7 +323,10 @@ func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/agent/artifacts/prepare" {
 			prepared.Store(true)
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"upload_required": false,
+				"key":             "objects/article.md",
+			}})
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -318,14 +336,25 @@ func TestLocalArtifactFinalizationUsesFreshContextAfterRunCancellation(t *testin
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	cancelRun()
 	cfg := &Config{
-		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", TaskType: "article",
+		ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1", TaskType: "article",
 		Topic: "write", Workspace: root, MaxTurns: 1, ArtifactUploadMode: ArtifactUploadDirect,
 	}
-	if err := runAgent(runCtx, cfg, io.Discard, io.Discard); err == nil {
+	var stderr bytes.Buffer
+	if err := runAgent(runCtx, cfg, io.Discard, &stderr); err == nil {
 		t.Fatal("canceled agent run unexpectedly succeeded")
 	}
 	if !prepared.Load() {
 		t.Fatal("local artifact finalization inherited the canceled run context")
+	}
+	for _, want := range []string{
+		"artifact finalization started: timeout_ms=250",
+		"artifact finalization completed: files=1 duration_ms=",
+		"completion report started: timeout_ms=250",
+		"completion report acknowledged: duration_ms=",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+		}
 	}
 }
 

@@ -148,26 +148,41 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 	}
 	finalization := newFinalizationTimeouts(cfg)
 	artifactCtx, cancelArtifact := finalization.artifactContext(shutdownCtx)
+	artifactStartedAt := time.Now()
+	fmt.Fprintf(stderr, "artifact finalization started: timeout_ms=%d\n", finalization.artifact.Milliseconds())
+	artifactCount := 0
+	var artifactErr error
 
 	if cfg.ArtifactUploadMode == ArtifactUploadDirect || cfg.ArtifactUploadMode == ArtifactUploadStream {
 		uploader := NewArtifactUploader(cfg, reporter)
-		if _, uploadErr := uploader.UploadWorkspaceArtifacts(artifactCtx, result); uploadErr != nil {
+		var uploadErr error
+		artifactCount, uploadErr = uploader.UploadWorkspaceArtifacts(artifactCtx, result)
+		artifactErr = uploadErr
+		if uploadErr != nil {
 			_ = reporter.ReportProgress(artifactCtx, "artifact upload failed: "+uploadErr.Error())
-			fmt.Fprintf(stderr, "failed to upload artifacts: %v\n", uploadErr)
 			runErr = applyArtifactUploadFailure(result, runErr, uploadErr)
 		}
 	}
 	cancelArtifact()
+	if artifactErr != nil {
+		fmt.Fprintf(stderr, "artifact finalization failed: duration_ms=%d error=%v\n", time.Since(artifactStartedAt).Milliseconds(), artifactErr)
+	} else {
+		fmt.Fprintf(stderr, "artifact finalization completed: files=%d duration_ms=%d\n", artifactCount, time.Since(artifactStartedAt).Milliseconds())
+	}
 
 	// Signal terminal completion so the server can finalize the task. Safe in
 	// both modes: the server no-ops unless this is a local_claimed task still
 	// running. Uses a fresh context because the run ctx may be cancelled at
 	// shutdown, and this report must land for the task to reach a terminal state.
 	completionCtx, cancelCompletion := finalization.completionContext()
+	completionStartedAt := time.Now()
+	fmt.Fprintf(stderr, "completion report started: timeout_ms=%d\n", finalization.completion.Milliseconds())
 	completeErr := reporter.ReportComplete(completionCtx, result)
 	cancelCompletion()
 	if completeErr != nil {
-		fmt.Fprintf(stderr, "failed to report completion: %v\n", completeErr)
+		fmt.Fprintf(stderr, "completion report exhausted: duration_ms=%d error=%v\n", time.Since(completionStartedAt).Milliseconds(), completeErr)
+	} else {
+		fmt.Fprintf(stderr, "completion report acknowledged: duration_ms=%d\n", time.Since(completionStartedAt).Milliseconds())
 	}
 
 	if err := json.NewEncoder(stdout).Encode(result); err != nil {
