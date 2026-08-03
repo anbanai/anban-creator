@@ -22,12 +22,14 @@ import (
 )
 
 type fakeAIEntrySubmitter struct {
-	req service.AIEntrySubmitRequest
-	res service.AIEntrySubmitResult
-	err error
+	req   service.AIEntrySubmitRequest
+	res   service.AIEntrySubmitResult
+	err   error
+	calls int
 }
 
 func (f *fakeAIEntrySubmitter) Submit(_ context.Context, req service.AIEntrySubmitRequest) (*service.AIEntrySubmitResult, error) {
+	f.calls++
 	f.req = req
 	return &f.res, f.err
 }
@@ -126,13 +128,13 @@ func TestAIEntryHandlerMapsAgentProfileErrors(t *testing.T) {
 	}
 }
 
-func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
+func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	task := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "写文章"}
 	submitter := &fakeAIEntrySubmitter{
 		res: service.AIEntrySubmitResult{
 			Status:  service.AIEntryStatusCreated,
-			Task:    task,
+			Tasks:   []*model.Task{task},
 			Message: "已创建任务",
 		},
 	}
@@ -149,6 +151,9 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 			"project_id":"project-1",
 			"execution_profile":"effective",
 			"text":"帮我写文章",
+			"quantity":2,
+			"image_ratio":"3:4",
+			"image_capability_key":"professional",
 		"execution_target":"local",
 		"attachments":[{
 			"type":"image",
@@ -171,6 +176,9 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	if submitter.req.UserID != userID || submitter.req.ProjectID != "project-1" || submitter.req.Text != "帮我写文章" {
 		t.Fatalf("submitted req = %#v", submitter.req)
 	}
+	if submitter.req.Quantity != 2 || submitter.req.ImageRatio != "3:4" || submitter.req.ImageCapabilityKey != "professional" {
+		t.Fatalf("explicit parameters = quantity %d, ratio %q, capability %q", submitter.req.Quantity, submitter.req.ImageRatio, submitter.req.ImageCapabilityKey)
+	}
 	if submitter.req.ExecutionTarget != model.ExecutionTargetLocal {
 		t.Fatalf("execution target = %q", submitter.req.ExecutionTarget)
 	}
@@ -186,8 +194,56 @@ func TestAIEntryHandlerSubmitPassesRequestAndReturnsCreatedTask(t *testing.T) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
-	if data.Status != service.AIEntryStatusCreated || data.Task == nil || data.Task.ID != task.ID {
+	if data.Status != service.AIEntryStatusCreated || len(data.Tasks) != 1 || data.Tasks[0].ID != task.ID {
 		t.Fatalf("response data = %#v", data)
+	}
+}
+
+func TestAIEntryHandlerSubmitValidatesAndDefaultsQuantity(t *testing.T) {
+	tests := []struct {
+		name       string
+		quantity   string
+		wantStatus int
+		wantCalls  int
+		wantValue  int
+	}{
+		{name: "explicit zero", quantity: `,"quantity":0`, wantStatus: fiber.StatusBadRequest},
+		{name: "above maximum", quantity: `,"quantity":6`, wantStatus: fiber.StatusBadRequest},
+		{name: "omitted defaults to one", wantStatus: fiber.StatusOK, wantCalls: 1, wantValue: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			submitter := &fakeAIEntrySubmitter{res: service.AIEntrySubmitResult{Status: service.AIEntryStatusCreated}}
+			h := NewAIEntryHandler(submitter, nil, nil, &logger)
+			app := fiber.New()
+			app.Post("/ai-entry/submit", func(c fiber.Ctx) error {
+				c.Locals("user_id", "user-1")
+				return h.Submit(c)
+			})
+
+			body := `{"project_id":"project-1","execution_profile":"effective","text":"write"` + tt.quantity + `}`
+			req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var decoded Response
+			if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.wantStatus || submitter.calls != tt.wantCalls {
+				t.Fatalf("status/calls = %d/%d, want %d/%d", resp.StatusCode, submitter.calls, tt.wantStatus, tt.wantCalls)
+			}
+			if tt.wantStatus == fiber.StatusBadRequest && decoded.Msg != "quantity must be between 1 and 5" {
+				t.Fatalf("error = %q, want quantity boundary message", decoded.Msg)
+			}
+			if tt.wantCalls == 1 && submitter.req.Quantity != tt.wantValue {
+				t.Fatalf("quantity = %d, want %d", submitter.req.Quantity, tt.wantValue)
+			}
+		})
 	}
 }
 
@@ -197,7 +253,7 @@ func TestAIEntryHandlerSubmitFinalizesUploadSession(t *testing.T) {
 	submitter := &fakeAIEntrySubmitter{
 		res: service.AIEntrySubmitResult{
 			Status:  service.AIEntryStatusCreated,
-			Task:    task,
+			Tasks:   []*model.Task{task},
 			Message: "已创建任务",
 		},
 	}

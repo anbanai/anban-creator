@@ -22,20 +22,23 @@ const (
 )
 
 type AIEntrySubmitRequest struct {
-	UserID           string                  `json:"-"`
-	Channel          string                  `json:"channel"`
-	ProjectID        string                  `json:"project_id"`
-	ExecutionProfile string                  `json:"execution_profile"`
-	Text             string                  `json:"text"`
-	Attachments      []model.EntryAttachment `json:"attachments,omitempty"`
-	ExecutionTarget  string                  `json:"execution_target,omitempty"`
+	UserID             string                  `json:"-"`
+	Channel            string                  `json:"channel"`
+	ProjectID          string                  `json:"project_id"`
+	ExecutionProfile   string                  `json:"execution_profile"`
+	Text               string                  `json:"text"`
+	Attachments        []model.EntryAttachment `json:"attachments,omitempty"`
+	Quantity           int                     `json:"quantity,omitempty"`
+	ImageRatio         string                  `json:"image_ratio,omitempty"`
+	ImageCapabilityKey string                  `json:"image_capability_key,omitempty"`
+	ExecutionTarget    string                  `json:"execution_target,omitempty"`
 }
 
 type AIEntrySubmitResult struct {
-	Status    string      `json:"status"`
-	Task      *model.Task `json:"task,omitempty"`
-	Message   string      `json:"message,omitempty"`
-	ActionURL string      `json:"action_url,omitempty"`
+	Status    string        `json:"status"`
+	Tasks     []*model.Task `json:"tasks,omitempty"`
+	Message   string        `json:"message,omitempty"`
+	ActionURL string        `json:"action_url,omitempty"`
 }
 
 type AIEntrySubmitter interface {
@@ -138,18 +141,44 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
+	quantity := req.Quantity
+	if quantity == 0 {
+		quantity = 1
+	}
+	if quantity < 1 || quantity > 5 {
+		return aiEntryError("创建任务失败：quantity must be between 1 and 5"), nil
+	}
+	imageRatio := strings.TrimSpace(req.ImageRatio)
+	if imageRatio == "" {
+		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
+	}
+	imageCapabilityKey := strings.TrimSpace(req.ImageCapabilityKey)
+	if imageCapabilityKey != "" {
+		if s.taskSvc.imageCapabilities == nil {
+			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
+		}
+		resolved, err := s.taskSvc.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
+		if err != nil {
+			return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
+		}
+		if resolved == nil || strings.TrimSpace(resolved.Key) == "" {
+			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
+		}
+		imageCapabilityKey = resolved.Key
+	}
 
 	projectSnapshot := model.SnapshotProject(project)
 	params := CreateManualParams{
-		UserID:           req.UserID,
-		ProjectID:        req.ProjectID,
-		ExecutionProfile: req.ExecutionProfile,
-		Prompt:           prompt,
-		Quantity:         1,
-		ImageRatio:       normalizeAIEntryImageRatio(intent.ImageRatio),
-		InputAttachments: normalizeEntryAttachments(req.Attachments),
-		ExecutionTarget:  normalizeAIEntryExecutionTarget(req.ExecutionTarget),
-		ProjectSnapshot:  &projectSnapshot,
+		UserID:             req.UserID,
+		ProjectID:          req.ProjectID,
+		ExecutionProfile:   req.ExecutionProfile,
+		Prompt:             prompt,
+		Quantity:           quantity,
+		ImageRatio:         imageRatio,
+		ImageCapabilityKey: imageCapabilityKey,
+		InputAttachments:   normalizeEntryAttachments(req.Attachments),
+		ExecutionTarget:    normalizeAIEntryExecutionTarget(req.ExecutionTarget),
+		ProjectSnapshot:    &projectSnapshot,
 	}
 	var referenceView *model.AssetView
 
@@ -216,11 +245,17 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if len(tasks) == 0 {
 		return aiEntryError("创建任务失败：未生成任务。"), nil
 	}
-	tasks[0].ReferenceImage = referenceView
+	for _, task := range tasks {
+		task.ReferenceImage = referenceView
+	}
+	message := "已创建任务。"
+	if len(tasks) > 1 {
+		message = fmt.Sprintf("已创建 %d 个任务。", len(tasks))
+	}
 	return &AIEntrySubmitResult{
 		Status:  AIEntryStatusCreated,
-		Task:    tasks[0],
-		Message: "已创建任务。",
+		Tasks:   tasks,
+		Message: message,
 	}, nil
 }
 

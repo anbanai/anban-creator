@@ -129,10 +129,10 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -255,23 +255,26 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 				UserID: userID, ProjectID: projectID, Text: "write content",
+				Quantity:    2,
 				Attachments: []model.EntryAttachment{{Type: "image", UploadID: asset.ID, URL: "https://staging.example.com/ref.png", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}},
 			})
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil {
+			if result.Status != AIEntryStatusCreated || len(result.Tasks) != 2 {
 				t.Fatalf("result = %#v", result)
 			}
-			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
-			if err != nil {
-				t.Fatalf("find task: %v", err)
-			}
-			if found.ReferenceImageAssetID != asset.ID {
-				t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
-			}
-			if result.Task.ReferenceImage.AssetID != asset.ID {
-				t.Fatalf("reference asset view = %#v", result.Task.ReferenceImage)
+			for _, task := range result.Tasks {
+				found, err := repo.Tasks().FindByID(ctx, task.ID)
+				if err != nil {
+					t.Fatalf("find task: %v", err)
+				}
+				if found.ReferenceImageAssetID != asset.ID {
+					t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
+				}
+				if task.ReferenceImage == nil || task.ReferenceImage.AssetID != asset.ID {
+					t.Fatalf("reference asset view = %#v", task.ReferenceImage)
+				}
 			}
 			if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 				t.Fatalf("signed keys = %#v, want direct attachment only", store.signedKeys)
@@ -306,10 +309,10 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 || result.Tasks[0].ReferenceImage == nil || result.Tasks[0].ReferenceImage.AssetID != asset.ID {
 		t.Fatalf("result = %#v", result)
 	}
-	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	persisted, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,10 +351,10 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 || result.Tasks[0].ReferenceImage == nil || result.Tasks[0].ReferenceImage.AssetID != asset.ID {
 		t.Fatalf("result = %#v", result)
 	}
-	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	persisted, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,10 +510,10 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -519,6 +522,87 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	}
 	if found.ImageCapabilityKey != "" {
 		t.Fatalf("image_capability_key = %q, want LLM model key ignored", found.ImageCapabilityKey)
+	}
+}
+
+func TestAIEntryServiceSubmitUsesExplicitImageParametersForEveryTask(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, &srvconfig.Config{
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+				"standard":     {Enabled: true, MinTier: "free"},
+				"professional": {Enabled: true, MinTier: "enterprise"},
+			},
+		}},
+	}))
+	llm := &fakeAIEntryLLM{responses: []string{
+		`{"prompt":"写新品文章","image_ratio":"3:4","image_capability_key":"untrusted"}`,
+	}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "写新品文章",
+		Quantity: 2, ImageRatio: " 16:9 ", ImageCapabilityKey: " professional ",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 2 {
+		t.Fatalf("result = %#v, want two created tasks", result)
+	}
+	if result.Message != "已创建 2 个任务。" {
+		t.Fatalf("message = %q", result.Message)
+	}
+	for _, task := range result.Tasks {
+		if task.ImageRatio != "16:9" || task.ImageCapabilityKey != "professional" {
+			t.Fatalf("task image parameters = ratio %q, capability %q", task.ImageRatio, task.ImageCapabilityKey)
+		}
+	}
+}
+
+func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	taskSvc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, &srvconfig.Config{
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+				"standard":     {Enabled: true, MinTier: "free"},
+				"professional": {Enabled: true, MinTier: "enterprise"},
+			},
+		}},
+	}))
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
+		ImageCapabilityKey: "professional",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusError || !strings.Contains(result.Message, "requires enterprise tier") {
+		t.Fatalf("result = %#v, want tier authorization failure", result)
+	}
+	tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if findErr != nil || len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
 	}
 }
 
@@ -578,10 +662,10 @@ func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -622,10 +706,10 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
-		if result.Status != AIEntryStatusCreated || result.Task == nil {
+		if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 			t.Fatalf("result = %#v, want created task", result)
 		}
-		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 		if err != nil {
 			t.Fatalf("find task: %v", err)
 		}
@@ -662,10 +746,10 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
-		if result.Status != AIEntryStatusCreated || result.Task == nil {
+		if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 			t.Fatalf("result = %#v, want created task", result)
 		}
-		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 		if err != nil {
 			t.Fatalf("find task: %v", err)
 		}
@@ -837,10 +921,10 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -882,10 +966,10 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if result.Status != AIEntryStatusCreated || result.Task == nil {
+			if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 				t.Fatalf("result = %#v, want created task", result)
 			}
-			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+			found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 			if err != nil {
 				t.Fatalf("find task: %v", err)
 			}

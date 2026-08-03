@@ -97,10 +97,10 @@ func (s *IlinkConversationService) handleAIEntryCreate(ctx context.Context, bind
 	}
 	switch result.Status {
 	case AIEntryStatusCreated:
-		if result.Task == nil {
+		if len(result.Tasks) == 0 || result.Tasks[0] == nil {
 			return "创建任务失败：未生成任务。"
 		}
-		t := result.Task
+		t := result.Tasks[0]
 		return fmt.Sprintf("已创建%s任务\n《%s》\n任务ID: %s\n完成或失败后我会在这里通知你。", taskTypeLabel(t.Type), taskSubject(t), t.ID)
 	case AIEntryStatusNeedsConfiguration:
 		if result.ActionURL != "" {

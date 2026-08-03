@@ -16,11 +16,14 @@ export interface AIEntrySubmitRequest {
   text: string
   attachments?: AIEntryAttachment[]
   execution_profile: AgentExecutionProfileID
+  quantity?: number
+  image_ratio?: string
+  image_capability_key?: string
 }
 
 export interface AIEntrySubmitResult {
   status: AIEntryStatus
-  task?: Task
+  tasks?: Task[]
   message?: string
   action_url?: string
 }
