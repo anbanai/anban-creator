@@ -320,9 +320,14 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
-    expect(await screen.findByRole('button', { name: /^执行配置：/ })).toBeInTheDocument()
+    const executionControl = await screen.findByRole('button', { name: /^执行配置：/ })
+    fireEvent.click(executionControl)
+    fireEvent.click(await screen.findByRole('button', { name: '性价比，全部用户' }))
+    await waitFor(() => expect(executionControl).toHaveAccessibleName('执行配置：性价比'))
+    fireEvent.click(executionControl)
+
     expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
-    expect(screen.getByText('请选择可用的执行配置。')).toBeInTheDocument()
+    expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
     expect(screen.queryByText(/固定任务价：0/)).not.toBeInTheDocument()
     expect(api.tasks.create).not.toHaveBeenCalled()
