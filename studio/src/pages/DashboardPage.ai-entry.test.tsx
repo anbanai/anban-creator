@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DashboardPage from './DashboardPage'
@@ -7,13 +7,25 @@ import { render } from '@/test/test-utils'
 
 const navigateMock = vi.fn()
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
+const toastSuccessMock = vi.hoisted(() => vi.fn())
 
-const { articleProject, seednoteProject, ecommerceProject, executionProfiles, billingCatalog } = vi.hoisted(() => {
+const {
+  articleProject,
+  seednoteProject,
+  momentsProject,
+  ecommerceProject,
+  executionProfiles,
+  billingCatalog,
+  platformConfigs,
+  imageCapabilities,
+  createdTask,
+} = vi.hoisted(() => {
   const articleProject = {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'article',
     name: '公众号项目',
+    description: '品牌公众号内容',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -22,7 +34,7 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
     theme: '',
     author: '',
 
-    image_ratio: '',
+    image_ratio: '16:9',
     max_concurrent_tasks: 1,
     config: { enable_publishing: true },
     status: 'active',
@@ -37,6 +49,17 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       id: 'project-2',
       platform: 'seednote',
       name: '种草项目',
+      description: '种草笔记内容',
+      image_ratio: '3:4',
+      config: {},
+    } as const,
+    momentsProject: {
+      ...articleProject,
+      id: 'project-4',
+      platform: 'moments',
+      name: '朋友圈项目',
+      description: '朋友圈内容',
+      image_ratio: '1:1',
       config: {},
     } as const,
     ecommerceProject: {
@@ -44,6 +67,8 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
       id: 'project-3',
       platform: 'ecommerce',
       name: '电商项目',
+      description: '电商图片内容',
+      image_ratio: '4:3',
       config: {},
     } as const,
     executionProfiles: [
@@ -76,6 +101,37 @@ const { articleProject, seednoteProject, ecommerceProject, executionProfiles, bi
         { id: 'task.seednote.balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
       ],
     } as const,
+    platformConfigs: [
+      { id: 'article', label: '公众号文章', badge_variant: 'default', supports_publishing: true, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '3:4', '1:1'], fields: [] },
+      { id: 'seednote', label: '种草笔记', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
+      { id: 'moments', label: '朋友圈', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4'], fields: [] },
+      { id: 'ecommerce', label: '电商图', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
+    ] as const,
+    imageCapabilities: {
+      tier: 'pro',
+      default_capability: 'standard',
+      items: [
+        { key: 'standard', display_name: 'Standard', description: '日常图片生成', enabled: true, price_available: true, price_credits: 300 },
+        { key: 'professional', display_name: 'Professional', description: '复杂高质量构图', enabled: true, price_available: true, price_credits: 500 },
+      ],
+    } as const,
+    createdTask: {
+      id: 'task-ai-1',
+      type: 'article',
+      prompt: '帮我写一篇新品发布公众号文章',
+      status: 'pending',
+      progress: 0,
+      plan_id: null,
+      project_id: 'project-1',
+      execution_profile: 'effective',
+      result: null,
+      published: false,
+      published_at: null,
+      billing_price_credits: 6000,
+      created_at: '2026-07-07T00:00:00.000Z',
+      started_at: '',
+      completed_at: '',
+    } as const,
   }
 })
 
@@ -98,7 +154,7 @@ vi.mock('@/contexts/AuthContext', () => ({
   }),
 }))
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), message: vi.fn(), success: toastSuccessMock } }))
 
 vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
@@ -125,22 +181,7 @@ vi.mock('@/lib/api', async () => {
         submit: vi.fn().mockResolvedValue({
           status: 'created',
           message: '已创建任务',
-          task: {
-            id: 'task-ai-1',
-            type: 'article',
-            prompt: '帮我写一篇新品发布公众号文章',
-            status: 'pending',
-            progress: 0,
-            plan_id: null,
-            project_id: 'project-1',
-            result: null,
-            published: false,
-            published_at: null,
-            billing_price_credits: 6000,
-            created_at: '2026-07-07T00:00:00.000Z',
-            started_at: '',
-            completed_at: '',
-          },
+          tasks: [createdTask],
         }),
       },
       billing: {
@@ -163,6 +204,11 @@ vi.mock('@/lib/api', async () => {
       projects: {
         ...actual.api.projects,
         list: vi.fn().mockResolvedValue([{ ...articleProject }]),
+        platformConfigs: vi.fn().mockResolvedValue(platformConfigs),
+      },
+      imageCapabilities: {
+        ...actual.api.imageCapabilities,
+        list: vi.fn().mockResolvedValue(imageCapabilities),
       },
       apiKeys: {
         ...actual.api.apiKeys,
@@ -186,7 +232,23 @@ vi.mock('@/lib/api', async () => {
 describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
-    vi.mocked(api.aiEntry.submit).mockClear()
+    toastSuccessMock.mockClear()
+    vi.mocked(api.aiEntry.submit).mockReset().mockResolvedValue({
+      status: 'created',
+      message: '已创建任务',
+      tasks: [{ ...createdTask }],
+    })
+    vi.mocked(api.projects.list).mockReset().mockResolvedValue([{ ...articleProject }])
+    vi.mocked(api.projects.platformConfigs).mockReset().mockResolvedValue(platformConfigs.map((config) => ({
+      ...config,
+      supported_image_ratios: [...config.supported_image_ratios],
+      fields: [...config.fields],
+    })))
+    vi.mocked(api.billing.catalog).mockReset().mockResolvedValue({ ...billingCatalog, skus: [...billingCatalog.skus] })
+    vi.mocked(api.imageCapabilities.list).mockReset().mockResolvedValue({
+      ...imageCapabilities,
+      items: [...imageCapabilities.items],
+    })
     uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
       uploadId: `upload-${file.name}`,
       key: `uploads/pending/user/${file.name}`,
@@ -196,21 +258,42 @@ describe('DashboardPage AI entry', () => {
     }))
   })
 
-  it('renders the shared prompt composer', async () => {
-    render(<DashboardPage />)
-    await screen.findByRole('heading', { name: '首页' })
-    expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
-  })
-
-  it('defaults to the cheapest available profile and submits the selected profile', async () => {
+  it('renders ordered composer parameters and submits explicit selections', async () => {
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('group', { name: 'Agent 执行配置' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^性价比，全部用户/ })).toHaveAttribute('aria-pressed', 'true')
+    const composer = document.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
+    expect(composer).toBeInTheDocument()
+    const projectControl = await within(composer!).findByRole('combobox', { name: '项目上下文' })
+    const executionControl = await within(composer!).findByRole('button', { name: /^执行配置：/ })
+    const imageControl = await within(composer!).findByRole('button', { name: /^图像设置：/ })
+    const quantityControl = within(composer!).getByRole('button', { name: '任务数量：1' })
+
+    for (const [left, right] of [
+      [projectControl, executionControl],
+      [executionControl, imageControl],
+      [imageControl, quantityControl],
+    ]) {
+      expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(projectControl.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
+    expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
+    expect(screen.queryByText('执行配置')).not.toBeInTheDocument()
     expect(screen.queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
-    expect(screen.getByText('4,000 积分')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
-    expect(await screen.findByText('6,000 积分')).toBeInTheDocument()
+
+    fireEvent.click(executionControl)
+    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，Pro 版及以上/ }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(quantityControl)
+    fireEvent.click(await screen.findByRole('button', { name: '增加任务数量' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^图像设置：/ }))
+    fireEvent.click(await screen.findByText('3:4'))
+    fireEvent.click(screen.getByText('Professional'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
     })
@@ -222,6 +305,9 @@ describe('DashboardPage AI entry', () => {
       text: '写一篇新品介绍',
       execution_profile: 'balanced',
       attachments: [],
+      quantity: 2,
+      image_ratio: '3:4',
+      image_capability_key: 'professional',
     }))
   })
 
@@ -236,6 +322,7 @@ describe('DashboardPage AI entry', () => {
     })
     render(<DashboardPage />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /^执行配置：/ }))
     fireEvent.click(await screen.findByRole('button', { name: /^平衡型，Pro 版及以上/ }))
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
@@ -296,7 +383,7 @@ describe('DashboardPage AI entry', () => {
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
     expect(await screen.findByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    expect(screen.getByText('公众号文章')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('公众号')
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
@@ -317,6 +404,9 @@ describe('DashboardPage AI entry', () => {
       project_id: 'project-1',
       text: '帮我写一篇新品发布公众号文章',
       execution_profile: 'effective',
+      quantity: 1,
+      image_ratio: '16:9',
+      image_capability_key: 'standard',
       attachments: files.map((file, index) => ({
         type: (['image', 'audio', 'video', 'document', 'text'] as const)[index],
         upload_id: `upload-${file.name}`,
@@ -327,6 +417,85 @@ describe('DashboardPage AI entry', () => {
       })),
     }))
     expect(navigateMock).toHaveBeenCalledWith('/tasks/task-ai-1')
+  })
+
+  it('keeps supported task quantities and project image defaults while clamping single-task projects', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([
+      { ...articleProject },
+      { ...seednoteProject },
+      { ...momentsProject },
+      { ...ecommerceProject },
+    ])
+    render(<DashboardPage />)
+
+    const selectProject = async (name: RegExp) => {
+      fireEvent.click(await screen.findByRole('combobox', { name: '项目上下文' }))
+      fireEvent.click(await screen.findByRole('option', { name }))
+    }
+
+    expect(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '图像设置：16:9 · Standard' }))
+    fireEvent.click(await screen.findByText('Professional'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(screen.getByRole('button', { name: '任务数量：1' }))
+    const increment = await screen.findByRole('button', { name: '增加任务数量' })
+    fireEvent.click(increment)
+    fireEvent.click(increment)
+    fireEvent.click(increment)
+    fireEvent.click(increment)
+    expect(increment).toBeDisabled()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await selectProject(/种草项目/)
+    expect(await screen.findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '图像设置：3:4 · Professional' })).toBeInTheDocument()
+
+    await selectProject(/朋友圈项目/)
+    expect(await screen.findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '图像设置：1:1 · Professional' })).toBeInTheDocument()
+
+    await selectProject(/电商项目/)
+    expect(await screen.findByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    expect(screen.queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '图像设置：4:3 · Professional' })).toBeInTheDocument()
+  })
+
+  it('routes multiple created tasks to the task list and shows the server message', async () => {
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
+      status: 'created',
+      message: '已创建 2 个任务',
+      tasks: [
+        { ...createdTask },
+        { ...createdTask, id: 'task-ai-2' },
+      ],
+    })
+    render(<DashboardPage />)
+
+    fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '创建两篇文章' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/tasks'))
+    expect(toastSuccessMock).toHaveBeenCalledWith('已创建 2 个任务')
+  })
+
+  it.each(['empty', 'missing'] as const)('handles a %s created task collection without crashing', async (variant) => {
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
+      status: 'created',
+      message: '没有创建任何任务',
+      ...(variant === 'empty' ? { tasks: [] } : {}),
+    })
+    render(<DashboardPage />)
+
+    fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '创建文章' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    expect(await screen.findByText('没有创建任何任务')).toBeInTheDocument()
+    expect(navigateMock).not.toHaveBeenCalled()
   })
 
   it('disables submission while the shared reference input is uploading', async () => {

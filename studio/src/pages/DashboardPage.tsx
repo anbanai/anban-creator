@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
+import { ComposerQuantityControl } from '@/components/agent-prompt/ComposerQuantityControl'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
+import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import QueryErrorState from '@/components/QueryErrorState'
-import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { ExecutionProfileToolbar } from '@/components/tasks/ExecutionProfileToolbar'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
-import { contentTypeLabel } from '@/lib/labels'
 import { cheapestAvailableExecutionProfile, taskCostFor } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
+import { normalizeImageRatio, type ImageRatio } from '@/lib/schemas'
 import { buildDashboardBlocker } from '@/lib/studio-ux'
 import type { AgentExecutionProfileID } from '@/types'
 import type { PromptAttachment } from '@/types/input-attachment'
@@ -34,6 +38,9 @@ export default function DashboardPage() {
   const [entryError, setEntryError] = useState<EntryError | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
+  const [quantity, setQuantity] = useState(1)
+  const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
+  const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -54,14 +61,46 @@ export default function DashboardPage() {
   })
 
   const profilesQuery = useAgentExecutionProfiles()
+  const {
+    items: imageCapabilities,
+    defaultCapability: defaultImageCapability,
+    isLoading: imageCapabilitiesLoading,
+  } = useImageCapabilities()
   const billingCatalogQuery = useQuery({
     queryKey: queryKeys.billing.catalog,
     queryFn: () => api.billing.catalog(),
     staleTime: 60_000,
   })
+  const platformConfigsQuery = useQuery({
+    queryKey: queryKeys.projects.platformConfigs,
+    queryFn: () => api.projects.platformConfigs(),
+    staleTime: Infinity,
+  })
 
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
+  const platformConfigMap = useMemo(
+    () => new Map((platformConfigsQuery.data ?? []).map((config) => [config.id, config])),
+    [platformConfigsQuery.data],
+  )
+  const supportedImageRatios = platformConfigMap.get(selectedProject?.platform ?? '')?.supported_image_ratios ?? []
+  const taskQuantityMax = selectedProject
+    && ['article', 'seednote', 'moments'].includes(selectedProject.platform)
+    ? 5
+    : 1
+  const selectedImageCapabilityAvailable = imageCapabilities.some((capability) => (
+    capability.key === imageCapabilityKey
+    && capability.enabled === true
+    && capability.price_available === true
+  ))
+  const defaultCapabilityAvailable = imageCapabilities.some((capability) => (
+    capability.key === defaultImageCapability
+    && capability.enabled === true
+    && capability.price_available === true
+  ))
+  const effectiveImageCapabilityKey = selectedImageCapabilityAvailable
+    ? imageCapabilityKey
+    : defaultCapabilityAvailable ? defaultImageCapability : ''
   const defaultExecutionProfile = cheapestAvailableExecutionProfile(
     profilesQuery.data,
     billingCatalogQuery.data,
@@ -78,7 +117,7 @@ export default function DashboardPage() {
   )
 
   useEffect(() => {
-    if (projectsLoading) return
+    if (projectsLoading || platformConfigsQuery.isLoading) return
     const nextProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
     if (!nextProject) {
       if (selectedProjectId !== null) setSelectedProjectId(null)
@@ -86,8 +125,13 @@ export default function DashboardPage() {
     }
     if (selectedProjectId !== nextProject.id) {
       setSelectedProjectId(nextProject.id)
+      setImageRatio(normalizeImageRatio(
+        nextProject.image_ratio || platformConfigMap.get(nextProject.platform)?.default_image_ratio,
+      ))
+      const nextQuantityMax = ['article', 'seednote', 'moments'].includes(nextProject.platform) ? 5 : 1
+      setQuantity((current) => Math.min(current, nextQuantityMax))
     }
-  }, [activeProjects, projectsLoading, selectedProjectId])
+  }, [activeProjects, platformConfigMap, platformConfigsQuery.isLoading, projectsLoading, selectedProjectId])
 
   useEffect(() => {
     if (!selectedProject || !defaultExecutionProfile) return
@@ -100,12 +144,18 @@ export default function DashboardPage() {
   const submitMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.aiEntry.submit>[0]) => api.aiEntry.submit(payload),
     onSuccess: async (result) => {
-      if (result.status === 'created' && result.task?.id) {
+      const createdTasks = (result.tasks ?? []).filter((task) => Boolean(task?.id))
+      if (result.status === 'created' && createdTasks.length > 0) {
         setEntryError(null)
         setPrompt('')
         attachmentController.clear()
         await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-        navigate(`/tasks/${result.task.id}`)
+        if (createdTasks.length === 1) {
+          navigate(`/tasks/${createdTasks[0].id}`)
+          return
+        }
+        toast.success(result.message || `已创建 ${createdTasks.length} 个任务`)
+        navigate('/tasks')
         return
       }
       if (result.status === 'needs_configuration') {
@@ -129,6 +179,7 @@ export default function DashboardPage() {
   })
   const canSubmit = Boolean(selectedProjectId && selectedProject)
     && executionProfileReady
+    && Boolean(effectiveImageCapabilityKey)
     && !dashboardBlocker?.blocking
     && !submitMutation.isPending
     && !attachmentController.uploading
@@ -148,14 +199,36 @@ export default function DashboardPage() {
       setEntryError({ message: '所选执行配置当前不可用，请重新选择。' })
       return
     }
+    if (!effectiveImageCapabilityKey) {
+      setEntryError({ message: '当前图像能力不可用，请稍后重试。' })
+      return
+    }
     setEntryError(null)
     await submitMutation.mutateAsync({
       channel: 'studio',
       project_id: selectedProject.id,
       text,
       execution_profile: executionProfile as AgentExecutionProfileID,
+      quantity,
+      image_ratio: imageRatio,
+      image_capability_key: effectiveImageCapabilityKey,
       attachments: attachmentController.toInputAttachments(),
     })
+  }
+
+  function handleProjectChange(projectId: string | null) {
+    setSelectedProjectId(projectId)
+    const nextProject = activeProjects.find((candidate) => candidate.id === projectId)
+    if (!nextProject) {
+      setQuantity(1)
+      setImageRatio('auto')
+      return
+    }
+    const nextQuantityMax = ['article', 'seednote', 'moments'].includes(nextProject.platform) ? 5 : 1
+    setQuantity((current) => Math.min(current, nextQuantityMax))
+    setImageRatio(normalizeImageRatio(
+      nextProject.image_ratio || platformConfigMap.get(nextProject.platform)?.default_image_ratio,
+    ))
   }
 
   return (
@@ -181,19 +254,47 @@ export default function DashboardPage() {
             submitLabel="发送创建任务"
             submitting={submitMutation.isPending}
             submitDisabled={!canSubmit}
-            contextBar={(
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            leadingTools={(
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
                 <ProjectContextControl
                   mode="select"
                   projects={activeProjects}
                   value={selectedProjectId}
-                  onValueChange={(projectId) => setSelectedProjectId(projectId)}
+                  onValueChange={handleProjectChange}
                   allowNoProject={false}
                   loading={projectsLoading}
+                  disabled={submitMutation.isPending}
                   placeholder="选择项目"
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
+                  compact
                 />
-                {selectedProject ? <ComposerMetaItem>{contentTypeLabel[selectedProject.platform] || selectedProject.platform}</ComposerMetaItem> : null}
+                <ExecutionProfileToolbar
+                  profiles={profilesQuery.data ?? []}
+                  value={executionProfile}
+                  onChange={setExecutionProfile}
+                  loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
+                  disabled={submitMutation.isPending}
+                  catalog={billingCatalogQuery.data}
+                  taskType={selectedProject?.platform}
+                />
+                <ImageGenerationToolbar
+                  ratios={supportedImageRatios}
+                  ratio={imageRatio}
+                  onRatioChange={setImageRatio}
+                  capabilities={imageCapabilities}
+                  capabilityKey={effectiveImageCapabilityKey}
+                  onCapabilityChange={setImageCapabilityKey}
+                  loading={imageCapabilitiesLoading}
+                  disabled={submitMutation.isPending}
+                />
+                <ComposerQuantityControl
+                  label="任务数量"
+                  value={quantity}
+                  min={1}
+                  max={taskQuantityMax}
+                  onChange={setQuantity}
+                  disabled={submitMutation.isPending}
+                />
               </div>
             )}
           />
@@ -204,24 +305,6 @@ export default function DashboardPage() {
           onApply={(templatePrompt) => setPrompt(templatePrompt)}
           className="mx-auto w-full max-w-3xl"
         />
-
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-foreground">执行配置</p>
-            {executionProfilePrice !== undefined ? (
-              <p aria-live="polite" className="text-sm tabular-nums text-muted-foreground">
-                {executionProfilePrice.toLocaleString()} 积分
-              </p>
-            ) : null}
-          </div>
-          <ExecutionProfileSelector
-            profiles={profilesQuery.data ?? []}
-            value={executionProfile}
-            onChange={setExecutionProfile}
-            loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
-            disabled={submitMutation.isPending}
-          />
-        </div>
 
         {dashboardBlocker && !entryError && (
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm">
@@ -251,13 +334,5 @@ export default function DashboardPage() {
         <QueryErrorState onRetry={() => { refetchProjects() }} />
       ) : null}
     </div>
-  )
-}
-
-function ComposerMetaItem({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground">
-      {children}
-    </span>
   )
 }
