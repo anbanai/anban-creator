@@ -142,6 +142,11 @@ capability authorization path. The service uses explicit values when present.
 Intent-derived values only fill missing values for non-Studio callers or older
 request sources that legitimately omit the optional fields.
 
+Quantity presence is preserved during JSON decoding: omission defaults to one,
+while explicit `0` is rejected. Image capability authorization is enforced in
+`TaskService.CreateManual` before persistence so AI Entry cannot bypass the
+same current-key, enabled-state, and user-tier checks used by task creation.
+
 AI Entry returns the created task collection rather than assuming one task.
 Studio navigates directly to the task detail when exactly one task was created
 and to the task list with a success message when multiple tasks were created.
@@ -209,8 +214,12 @@ while each page remains responsible for its request type and validation.
 
 - Project, profile, image capability, or price load failures keep their current
   explicit unavailable states and block submission when required.
-- A stale or unauthorized image capability is rejected by the Server; Studio
-  refreshes capabilities and asks the user to select again.
+- A stale image capability is rejected with HTTP 409, code `46011`, and
+  `image_capability_stale`; a tier-inaccessible capability is rejected with HTTP
+  403, code `46012`, and `image_capability_access_denied`. Homepage, task, plan,
+  and Designer flows refresh capabilities,
+  clear the invalid selection, and ask the user to select again without an
+  automatic resubmit.
 - Homepage quantity outside 1-5 returns a structured bad-request response and
   never reaches task creation.
 - Homepage batch creation is atomic under the existing manual-task service

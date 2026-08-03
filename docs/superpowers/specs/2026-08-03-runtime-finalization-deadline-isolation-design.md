@@ -153,6 +153,11 @@ Test TypeScript and Go parity:
 - completion exhaustion exits 2
 - success adds no fixed wait
 
+The artifact-timeout and shutdown cases must drive the real `runJob` and
+`runAgent` orchestration functions through artifact finalization and into the
+completion callback. Parser/context-helper tests alone are not sufficient for
+the incident regression.
+
 Test Server integration:
 
 - Kubernetes no longer injects the shared timeout
@@ -165,8 +170,8 @@ Test Server integration:
 Run:
 
 ```bash
-cd agent-ts && bun test
-go test ./...
+(cd agent-ts && bun test && bun run typecheck && bun run build)
+go test ./... -count=1
 go build -o /tmp/anban ./agent
 go build -o /tmp/anban-creator-server ./server
 ```
@@ -177,8 +182,8 @@ Container and production proof remain separate from local tests.
 
 No database migration is needed. In one deployment window:
 
-1. Publish Article, Seednote, and Montage runtime images.
-2. Publish Server and configure the three immutable runtime digests.
+1. Publish the changed Go and TypeScript Article, Seednote, and Montage runtime images.
+2. Publish Server and configure each route with the new immutable digest from the same implementation family it already runs; the incident Seednote route must receive the TypeScript image.
 3. Roll out Server and create a fresh Seednote task.
 4. Inspect the task, execution, manifest, upload sessions, and Job exit state.
 

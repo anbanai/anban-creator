@@ -13,10 +13,15 @@
 ## File Map
 
 - `agent-ts/src/main.ts`: parse phase timeouts, sequence independent finalization phases, preserve completion errors, and emit exit code 2.
-- `agent-ts/src/artifacts.ts`: propagate cancellation through scan, hash, signed upload, and OSS upload; return the collected file count.
-- `agent-ts/test/main.test.ts`: prove timeout parsing, independent phase deadlines, and completion exit classification.
+- `agent-ts/src/artifacts.ts`: expose a structural artifact-reporter interface, propagate cancellation through scan, hash, signed upload, and OSS upload, and return the collected file count.
+- `agent-ts/src/reporter.ts`: make completion retry backoff abort-aware so the phase cannot outlive its deadline.
+- `agent-ts/src/runner.ts`: accept the structural progress-only reporter contract it actually uses.
+- `agent-ts/src/types/ali-oss.d.ts`: declare cancellable stream uploads and the SDK request timeout used by artifact finalization.
+- `agent-ts/test/main.test.ts`: drive `runJob` through artifact timeout and shutdown, then prove a fresh completion budget and exit classification.
 - `agent-ts/test/artifacts.test.ts`: prove pre-cancelled scans and uploads stop without manifest submission.
+- `agent-ts/test/reporter.test.ts`: prove completion retry stops during backoff when its deadline is cancelled.
 - `agent/main.go`: replace the shared finalization window, separate shutdown from caller cancellation, and return a typed completion-report error.
+- `agent/artifact_upload.go`: return the committed artifact count with the existing upload error.
 - `agent/job.go`: preserve completion-report failure when bootstrap can authenticate but cannot finish.
 - `agent/job_test.go`: prove independent Go phase contexts, signal cancellation, and bootstrap completion handling.
 - `agent/artifact_upload_test.go`: adapt the existing slow-hash test to the independent budgets.
@@ -33,20 +38,29 @@
 **Files:**
 - Modify: `agent-ts/src/main.ts`
 - Modify: `agent-ts/src/artifacts.ts`
+- Modify: `agent-ts/src/reporter.ts`
+- Modify: `agent-ts/src/runner.ts`
+- Modify: `agent-ts/src/types/ali-oss.d.ts`
 - Test: `agent-ts/test/main.test.ts`
 - Test: `agent-ts/test/artifacts.test.ts`
+- Test: `agent-ts/test/reporter.test.ts`
 
-- [ ] **Step 1: Replace the shared-deadline test with failing timeout and exit-code tests**
+- [ ] **Step 1: Replace the shared-deadline test and add abort-aware retry tests**
 
 Replace `agent-ts/test/main.test.ts` with tests for the public contract that the implementation will expose:
 
 ```ts
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { PassThrough } from "node:stream";
 
+import type { BootstrapResponse } from "../src/bootstrap.js";
+import type { ExecutionResult } from "../src/reporter.js";
 import {
   CompletionReportError,
   exitCodeForError,
   finalizationTimeouts,
+  runJob,
+  type RunJobDependencies,
 } from "../src/main.js";
 
 describe("finalizationTimeouts", () => {
@@ -61,8 +75,9 @@ describe("finalizationTimeouts", () => {
     })).toEqual({ artifact: 45_000, completion: 750 });
     expect(finalizationTimeouts({
       ANBAN_JOB_ARTIFACT_TIMEOUT: "6m",
-      ANBAN_JOB_COMPLETION_TIMEOUT: "0s",
+      ANBAN_JOB_COMPLETION_TIMEOUT: "1m30s",
     })).toEqual({ artifact: 120_000, completion: 20_000 });
+    expect(finalizationTimeouts({ ANBAN_JOB_ARTIFACT_TIMEOUT: " 45s " }).artifact).toBe(45_000);
   });
 });
 
@@ -74,15 +89,23 @@ describe("exitCodeForError", () => {
 });
 ```
 
+Add a `postJSONWithRetry` case in `agent-ts/test/reporter.test.ts` that starts a
+retryable failing operation, enters the first backoff, aborts the supplied
+completion signal, and asserts that the promise rejects with the signal reason
+without making a second attempt. This test must use the real default wait path,
+not a no-op injected sleeper, so it defends the 20-second upper bound rather
+than only the fetch cancellation.
+
 - [ ] **Step 2: Run the TypeScript contract test and confirm it fails**
 
 Run:
 
 ```bash
-cd agent-ts && bun test test/main.test.ts
+cd agent-ts && bun test test/main.test.ts test/reporter.test.ts
 ```
 
-Expected: FAIL because `CompletionReportError`, `exitCodeForError`, and the new `finalizationTimeouts` contract do not exist.
+Expected: FAIL because `CompletionReportError`, `exitCodeForError`, the new
+`finalizationTimeouts` contract, and abort-aware retry backoff do not exist.
 
 - [ ] **Step 3: Implement timeout parsing and completion error classification**
 
@@ -119,13 +142,128 @@ export function finalizationTimeouts(env: NodeJS.ProcessEnv = process.env): Fina
 
 function parsePhaseTimeout(raw: string | undefined, fallback: number, maximum: number): number {
   if (!raw) return fallback;
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(raw);
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(raw.trim());
   if (!match) return fallback;
   const unit = match[2] === "m" ? 60_000 : match[2] === "s" ? 1_000 : 1;
   const milliseconds = Number(match[1]) * unit;
   return milliseconds > 0 && milliseconds <= maximum ? milliseconds : fallback;
 }
 ```
+
+In `agent-ts/src/reporter.ts`, extend the existing retry helper to accept an
+optional `AbortSignal`. Check the signal before every attempt and replace the
+plain timer sleep with an abort-aware wait that clears its timer and rejects
+with `signal.reason` when cancelled. Pass the completion signal from
+`Reporter.complete` into this helper. Keep the existing three-attempt
+250/500-millisecond retry policy unchanged when no signal aborts:
+
+```ts
+type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+
+const sleep: Sleep = (milliseconds, signal) => new Promise((resolve, reject) => {
+  const onAbort = () => {
+    clearTimeout(timer);
+    reject(signal?.reason ?? new Error("operation aborted"));
+  };
+  const timer = setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
+    resolve();
+  }, milliseconds);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+});
+
+export async function postJSONWithRetry(
+  operation: () => Promise<void>,
+  wait: Sleep = sleep,
+  signal?: AbortSignal,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted();
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 2) break;
+      await wait(250 * 2 ** attempt, signal);
+    }
+  }
+  throw lastError;
+}
+```
+
+`Reporter.complete` calls
+`postJSONWithRetry(operation, undefined, signal)`. No other reporter method
+gains retries, and no retry count or delay changes.
+
+Keep `runJob` directly testable with one optional dependency object rather than module-global mocks. Add these narrow interfaces beside `runJob`; production passes nothing and uses `defaultRunJobDependencies`:
+
+```ts
+import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
+import { runClaude, type RunnerReporter } from "./runner.js";
+
+type HeartbeatReporter = Pick<Reporter, "heartbeat">;
+type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete">;
+
+export interface RunJobDependencies {
+  readWorkloadToken(path: string): Promise<string>;
+  bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<BootstrapResponse>;
+  materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
+  prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
+  createReporter(config: JobConfig, data: BootstrapResponse): JobReporter;
+  startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
+  runClaude(config: JobConfig, data: BootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
+  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
+  subscribeShutdown(onSignal: () => void): () => void;
+}
+```
+
+In `agent-ts/src/artifacts.ts`, export `type ArtifactReporter = Pick<Reporter, "progress" | "prepareArtifactUpload" | "streamArtifactContent" | "reportArtifactManifest">` and change its functions to accept `ArtifactReporter` instead of the nominal `Reporter` class. Import that type into `main.ts`. This keeps production on `Reporter` while allowing a structurally complete test reporter with no unsafe cast.
+
+In `agent-ts/src/runner.ts`, export `type RunnerReporter = Pick<Reporter,
+"progress">` and change only `runClaude` and its internal helper parameters from
+`Reporter` to `RunnerReporter`. The runner uses only `progress`; this removes the
+class's private-field nominal constraint without widening runtime behavior.
+
+The default wrappers call the existing imported functions and construct `Reporter`; `subscribeShutdown` registers and removes the current `SIGINT`/`SIGTERM` listeners. Change only the final optional parameter of `runJob`:
+
+```ts
+const defaultRunJobDependencies: RunJobDependencies = {
+  readWorkloadToken,
+  bootstrap,
+  materializeBootstrapFiles,
+  prepareWorkspace,
+  createReporter: (config, data) => new Reporter(config, data.execution_token, data.task_id),
+  startHeartbeat,
+  runClaude: (config, data, reporter, signal) =>
+    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal),
+  uploadWorkspaceArtifacts,
+  subscribeShutdown: (onSignal) => {
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+    return () => {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
+  },
+};
+```
+
+```ts
+export async function runJob(
+  args: string[],
+  stdout: NodeJS.WritableStream = process.stdout,
+  stderr: NodeJS.WritableStream = process.stderr,
+  dependencies: RunJobDependencies = defaultRunJobDependencies,
+): Promise<ExecutionResult>
+```
+
+Route every existing call in `runJob` through `dependencies`. This seam owns no business behavior; it only lets the regression test trigger shutdown without sending a real process signal.
+Change the local `startHeartbeat` reporter parameter from concrete `Reporter` to
+`HeartbeatReporter`; it uses only `heartbeat`. No default wrapper may use a type
+assertion or cast.
 
 Replace `abortAt` with a relative timeout helper that optionally follows the shutdown signal:
 
@@ -146,7 +284,120 @@ function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
 
 Do not retain an absolute completion deadline. The completion controller must be created only after artifact work ends.
 
-- [ ] **Step 4: Add failing artifact cancellation tests**
+- [ ] **Step 4: Add end-to-end `runJob` finalization regressions**
+
+Extend `agent-ts/test/main.test.ts` with a `runJobDependencies` fixture that returns a successful `runClaude`, no-op bootstrap/workspace/heartbeat functions, a captured shutdown callback, and a reporter whose `complete` records its signal. Then add both cases:
+
+```ts
+test("runJob gives completion a fresh budget after artifact timeout", async () => {
+  process.env.ANBAN_JOB_ARTIFACT_TIMEOUT = "10ms";
+  process.env.ANBAN_JOB_COMPLETION_TIMEOUT = "100ms";
+  const harness = runJobHarness();
+  harness.dependencies.uploadWorkspaceArtifacts = async (_workspace, _data, _reporter, signal) => {
+    harness.artifactSignal = signal;
+    await new Promise<void>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    return 0;
+  };
+  harness.complete = async (_result, signal) => {
+    harness.completionSignal = signal;
+    expect(signal?.aborted).toBe(false);
+    await Bun.sleep(30);
+    expect(signal?.aborted).toBe(false);
+  };
+
+  const result = await runJob(jobArgs, harness.stdout, harness.stderr, harness.dependencies);
+  expect(result.success).toBe(false);
+  expect(harness.completeCalls).toBe(1);
+});
+
+test("runJob cancels artifact work on shutdown and still reports completion", async () => {
+  const harness = runJobHarness();
+  harness.complete = async (_result, signal) => { harness.completionSignal = signal; };
+  harness.dependencies.uploadWorkspaceArtifacts = async (_workspace, _data, _reporter, signal) => {
+    harness.artifactSignal = signal;
+    harness.triggerShutdown();
+    await new Promise<void>((_resolve, reject) => {
+      if (signal?.aborted) reject(signal.reason);
+      else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    return 0;
+  };
+
+  await runJob(jobArgs, harness.stdout, harness.stderr, harness.dependencies);
+  expect(harness.artifactSignal?.aborted).toBe(true);
+  expect(harness.completionSignal?.aborted).toBe(false);
+  expect(harness.completeCalls).toBe(1);
+});
+```
+
+Use this complete fixture above the tests:
+
+```ts
+const jobArgs = [
+  "job", "--server-url", "https://creator.example.test",
+  "--execution-id", "execution-1", "--workspace", "/workspace",
+  "--workload-token-file", "/token",
+];
+
+const bootstrapData: BootstrapResponse = {
+  execution_token: "execution-token", task_id: "task-1", task_type: "article",
+  agent_pack_id: "article", agent_pack_version: "1.0.0", agent_pack_digest: "0".repeat(64),
+  runtime_profile: "article", runtime_adapter: "standard", project_id: "project-1", prompt: "write",
+  execution_profile: {
+    profile_id: "effective", provider: "deepseek", protocol: "anthropic", display_name: "effective",
+    profile_fingerprint: "1".repeat(64), envs: {}, model_usage_aliases: {},
+  },
+  max_turns: 1, agent_flag: "anban:article", auto_memory_directory: ".claude/memory",
+  files: [], artifact_transport: { mode: "direct" },
+};
+
+function runJobHarness() {
+  let shutdown = () => {};
+  let completeCalls = 0;
+  let completeImpl = async (_result: ExecutionResult, _signal?: AbortSignal) => {};
+  const reporter = {
+    progress: async () => {}, heartbeat: async () => {},
+    prepareArtifactUpload: async () => ({ upload_required: false, key: "existing" }),
+    streamArtifactContent: async () => ({ object_key: "existing", content_type: "text/plain", size: 0, sha256: "0".repeat(64) }),
+    reportArtifactManifest: async () => {},
+    complete: async (result: ExecutionResult, signal?: AbortSignal) => {
+      completeCalls += 1;
+      await completeImpl(result, signal);
+    },
+  };
+  const dependencies: RunJobDependencies = {
+    readWorkloadToken: async () => "workload-token",
+    bootstrap: async () => bootstrapData,
+    materializeBootstrapFiles: async () => {},
+    prepareWorkspace: async () => {},
+    createReporter: () => reporter,
+    startHeartbeat: () => () => {},
+    runClaude: async () => ({ success: true, work_dir: "/workspace" }),
+    uploadWorkspaceArtifacts: async () => 0,
+    subscribeShutdown: (callback) => { shutdown = callback; return () => {}; },
+  };
+  return {
+    dependencies,
+    stdout: new PassThrough(), stderr: new PassThrough(),
+    artifactSignal: undefined as AbortSignal | undefined,
+    completionSignal: undefined as AbortSignal | undefined,
+    triggerShutdown: () => shutdown(),
+    get completeCalls() { return completeCalls; },
+    set complete(value: typeof completeImpl) { completeImpl = value; },
+  };
+}
+
+afterEach(() => {
+  delete process.env.ANBAN_JOB_ARTIFACT_TIMEOUT;
+  delete process.env.ANBAN_JOB_COMPLETION_TIMEOUT;
+});
+```
+
+The first test must take longer than the 10 ms artifact budget while completion remains live after 30 ms. The second calls the captured subscription callback, not `process.emit`, so it cannot disturb the test runner.
+
+- [ ] **Step 5: Add failing artifact cancellation tests**
 
 Append to `agent-ts/test/artifacts.test.ts`:
 
@@ -220,7 +471,7 @@ test("cancels a signed upload without submitting a partial manifest", async () =
 });
 ```
 
-- [ ] **Step 5: Run the artifact tests and confirm the new cases fail**
+- [ ] **Step 6: Run the artifact tests and confirm the new cases fail**
 
 Run:
 
@@ -230,7 +481,7 @@ cd agent-ts && bun test test/artifacts.test.ts
 
 Expected: FAIL because scan/hash/upload do not consistently consume the phase signal.
 
-- [ ] **Step 6: Propagate cancellation through artifact collection**
+- [ ] **Step 7: Propagate cancellation through artifact collection**
 
 In `agent-ts/src/artifacts.ts`, change the public signatures to:
 
@@ -238,7 +489,7 @@ In `agent-ts/src/artifacts.ts`, change the public signatures to:
 export async function uploadWorkspaceArtifacts(
   workspace: string,
   bootstrap: BootstrapResponse,
-  reporter: Reporter,
+  reporter: ArtifactReporter,
   signal?: AbortSignal,
 ): Promise<number>
 
@@ -285,12 +536,35 @@ try {
 }
 ```
 
+Update `agent-ts/src/types/ali-oss.d.ts` so the implementation type-checks against the API it actually uses:
+
+```ts
+declare module "ali-oss" {
+  interface OSSOptions {
+    region?: string;
+    endpoint?: string;
+    bucket: string;
+    accessKeyId: string;
+    accessKeySecret: string;
+    stsToken: string;
+  }
+  export default class OSS {
+    constructor(options: OSSOptions);
+    put(
+      name: string,
+      file: string | import("node:stream").Readable,
+      options?: { headers?: Record<string, string>; timeout?: number },
+    ): Promise<unknown>;
+  }
+}
+```
+
 Preserve the existing contextual prefixes (`hash artifact`, `prepare artifact
 upload`, `upload artifact`, and `report artifact manifest`) and wrap a top-level
 scan failure as `scan workspace artifacts: ...`. Do not add a new error type or
 submit a manifest after any file fails.
 
-- [ ] **Step 7: Sequence independent phases in `runJob`**
+- [ ] **Step 8: Sequence independent phases in `runJob`**
 
 In `agent-ts/src/main.ts`, replace the current shared-window block with this order:
 
@@ -337,28 +611,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : "agent job failed"}\n`);
       process.exitCode = exitCodeForError(error);
-    });
+    })
 }
 ```
 
 An acknowledged failed result still exits 1; only a thrown
 `CompletionReportError` exits 2.
 
-- [ ] **Step 8: Run TypeScript tests and type checking**
+- [ ] **Step 9: Run TypeScript tests and type checking**
 
 Run:
 
 ```bash
-cd agent-ts && bun test test/main.test.ts test/artifacts.test.ts test/reporter.test.ts
-cd agent-ts && bun run typecheck
+(cd agent-ts && bun test test/main.test.ts test/artifacts.test.ts test/reporter.test.ts)
+(cd agent-ts && bun run typecheck)
 ```
 
 Expected: all selected tests PASS and TypeScript exits 0.
 
-- [ ] **Step 9: Commit the TypeScript runtime change**
+- [ ] **Step 10: Commit the TypeScript runtime change**
 
 ```bash
-git add agent-ts/src/main.ts agent-ts/src/artifacts.ts agent-ts/test/main.test.ts agent-ts/test/artifacts.test.ts
+git add agent-ts/src/main.ts agent-ts/src/artifacts.ts agent-ts/src/reporter.ts agent-ts/src/runner.ts agent-ts/src/types/ali-oss.d.ts agent-ts/test/main.test.ts agent-ts/test/artifacts.test.ts agent-ts/test/reporter.test.ts
 git commit -m "fix: isolate TypeScript finalization deadlines"
 ```
 
@@ -367,6 +641,7 @@ git commit -m "fix: isolate TypeScript finalization deadlines"
 **Files:**
 - Modify: `agent/main.go`
 - Modify: `agent/job.go`
+- Modify: `agent/artifact_upload.go`
 - Test: `agent/main_test.go`
 - Test: `agent/job_test.go`
 - Test: `agent/artifact_upload_test.go`
@@ -407,6 +682,15 @@ func TestArtifactContextStopsOnShutdown(t *testing.T) {
 		t.Fatal("shutdown did not cancel artifact finalization")
 	}
 }
+
+func TestFinalizationTimeoutGrammarMatchesTypeScript(t *testing.T) {
+	t.Setenv(jobArtifactTimeoutEnv, " 45s ")
+	t.Setenv(jobCompletionTimeoutEnv, "1m30s")
+	timeouts := newFinalizationTimeouts(&Config{ExecutionID: "execution-1"})
+	if timeouts.artifact != 45*time.Second || timeouts.completion != jobCompletionTimeout {
+		t.Fatalf("timeouts = %#v, want trimmed single-unit artifact and fallback completion", timeouts)
+	}
+}
 ```
 
 Add `errors` to the imports in `agent/main_test.go`, then append:
@@ -427,7 +711,7 @@ func TestProcessExitCodeReservesTwoForCompletionReportFailure(t *testing.T) {
 Run:
 
 ```bash
-go test ./agent -run 'Test(FinalizationContextsUseIndependentBudgets|ArtifactContextStopsOnShutdown|ProcessExitCodeReservesTwo)' -count=1
+go test ./agent -run 'Test(FinalizationContextsUseIndependentBudgets|FinalizationTimeoutGrammarMatchesTypeScript|ArtifactContextStopsOnShutdown|ProcessExitCodeReservesTwo)' -count=1
 ```
 
 Expected: FAIL because the new timeout fields, contexts, and typed error do not exist.
@@ -470,12 +754,20 @@ func processExitCode(err error) int {
 Add the parser and constructor:
 
 ```go
+var finalizationDurationPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)(ms|s|m)$`)
+
 func parseFinalizationDuration(name string, fallback, maximum time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
 		return fallback
 	}
-	value, err := time.ParseDuration(raw)
+	match := finalizationDurationPattern.FindStringSubmatch(raw)
+	if match == nil {
+		return fallback
+	}
+	amount, err := strconv.ParseFloat(match[1], 64)
+	unit := map[string]time.Duration{"ms": time.Millisecond, "s": time.Second, "m": time.Minute}[match[2]]
+	value := time.Duration(amount * float64(unit))
 	if err != nil || value <= 0 || value > maximum {
 		return fallback
 	}
@@ -493,6 +785,16 @@ func newFinalizationTimeouts(cfg *Config) finalizationTimeouts {
 	}
 }
 ```
+
+Add `regexp` and `strconv` imports. Both runtimes now accept one positive
+single-unit duration (`ms`, `s`, or `m`), trim surrounding whitespace, and
+fall back for compound values such as `1m30s`.
+
+In `agent/artifact_upload.go`, change `UploadWorkspaceArtifacts` to return
+`(int, error)`. Return `len(files)` after the manifest is acknowledged and `0`
+on every pre-manifest error. Update package tests mechanically from `err :=` to
+`_, err :=` or `if _, err := ...`; do not add a second upload method or retain
+the old signature.
 
 Implement contexts so completion starts its timeout when called, not when artifact starts:
 
@@ -540,10 +842,18 @@ func main() {
 
 - [ ] **Step 4: Separate signal cancellation from caller cancellation**
 
+Add the same narrow signal test seam already used elsewhere in the package for file I/O:
+
+```go
+var notifyRuntimeShutdown = func() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+}
+```
+
 In `runAgent`, replace `signal.NotifyContext(ctx, ...)` with:
 
 ```go
-shutdownCtx, stopShutdown := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+shutdownCtx, stopShutdown := notifyRuntimeShutdown()
 defer stopShutdown()
 runCtx, cancelRun := context.WithCancel(ctx)
 stopForward := context.AfterFunc(shutdownCtx, cancelRun)
@@ -559,14 +869,17 @@ timeouts := newFinalizationTimeouts(cfg)
 artifactStarted := time.Now()
 fmt.Fprintf(stderr, "artifact finalization started: timeout_ms=%d\n", timeouts.artifact.Milliseconds())
 artifactCtx, cancelArtifact := timeouts.artifactContext(shutdownCtx)
+artifactCount := 0
+var uploadErr error
 if cfg.ArtifactUploadMode == ArtifactUploadDirect || cfg.ArtifactUploadMode == ArtifactUploadStream {
 	uploader := NewArtifactUploader(cfg, reporter)
-	if uploadErr := uploader.UploadWorkspaceArtifacts(artifactCtx, result); uploadErr != nil {
-		fmt.Fprintf(stderr, "artifact finalization failed: duration_ms=%d error=%v\n", time.Since(artifactStarted).Milliseconds(), uploadErr)
-		runErr = applyArtifactUploadFailure(result, runErr, uploadErr)
-	} else {
-		fmt.Fprintf(stderr, "artifact finalization completed: duration_ms=%d\n", time.Since(artifactStarted).Milliseconds())
-	}
+	artifactCount, uploadErr = uploader.UploadWorkspaceArtifacts(artifactCtx, result)
+}
+if uploadErr != nil {
+	fmt.Fprintf(stderr, "artifact finalization failed: duration_ms=%d error=%v\n", time.Since(artifactStarted).Milliseconds(), uploadErr)
+	runErr = applyArtifactUploadFailure(result, runErr, uploadErr)
+} else {
+	fmt.Fprintf(stderr, "artifact finalization completed: files=%d duration_ms=%d\n", artifactCount, time.Since(artifactStarted).Milliseconds())
 }
 cancelArtifact()
 
@@ -605,18 +918,52 @@ if completeErr != nil {
 
 Add the `errors` import. Keep the authenticated bootstrap error as the result sent to the Server.
 
-- [ ] **Step 6: Update the slow-hash regression test**
+- [ ] **Step 6: Drive `runAgent` through artifact timeout and shutdown regressions**
 
-In `agent/artifact_upload_test.go`, update `TestJobArtifactHashCancellationPreservesCompletionReserve` to set:
+In `agent/artifact_upload_test.go`, replace the helper-only `TestJobArtifactHashCancellationPreservesCompletionReserve` with `TestRunAgentArtifactHashTimeoutStillGetsFreshCompletionBudget`. Keep its slow reader and HTTP capture, but call the real `runAgent` finalization path:
 
 ```go
-t.Setenv(jobArtifactTimeoutEnv, "200ms")
-t.Setenv(jobCompletionTimeoutEnv, "500ms")
-timeouts := newFinalizationTimeouts(&Config{ExecutionID: "execution-1"})
-workCtx, cancelWork := timeouts.artifactContext(context.Background())
+t.Setenv(homeTemplateEnv, "")
+t.Setenv(jobArtifactTimeoutEnv, "40ms")
+t.Setenv(jobCompletionTimeoutEnv, "250ms")
+
+runCtx, cancelRun := context.WithCancel(context.Background())
+cancelRun() // finish the runner immediately; caller cancellation must not consume finalization budgets
+cfg := &Config{
+	ServerURL: server.URL, APIKey: "key", TaskID: "task-1", ExecutionID: "execution-1",
+	TaskType: "article", Topic: "write", Workspace: root, MaxTurns: 1,
+	ArtifactUploadMode: ArtifactUploadDirect,
+}
+err := runAgent(runCtx, cfg, io.Discard, io.Discard)
+if err == nil {
+	t.Fatal("runAgent unexpectedly succeeded after runner and artifact failure")
+}
+if prepared || manifested {
+	t.Fatalf("timed-out hash reached remote artifact calls: prepare=%v manifest=%v", prepared, manifested)
+}
+if !completed {
+	t.Fatal("artifact timeout prevented the fresh completion callback")
+}
 ```
 
-After the slow hash returns `context.DeadlineExceeded`, create `completionCtx := timeouts.completionContext()` and retain the existing assertion that `/api/v1/agent/complete` is reached. Rename the test to `TestJobArtifactHashTimeoutStillGetsFreshCompletionBudget`.
+The server handler must record `/api/v1/agent/complete`, and the test must assert total elapsed time is greater than the 40 ms artifact timeout but less than the 250 ms completion budget plus a 150 ms scheduling allowance. This proves the real `runAgent` path starts completion after artifact exhaustion.
+
+Add `TestRunAgentShutdownCancelsArtifactsAndStillReportsCompletion`. Override `notifyRuntimeShutdown` with a pre-cancelled context and restore it with `t.Cleanup`; use the same real `runAgent` call with direct artifact mode. Assert artifact prepare/manifest are never called, `/api/v1/agent/complete` is called once, and the completion request arrives with a live context. This test represents `SIGTERM` without sending a process-wide signal:
+
+```go
+previousNotify := notifyRuntimeShutdown
+notifyRuntimeShutdown = func() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx, func() {}
+}
+t.Cleanup(func() { notifyRuntimeShutdown = previousNotify })
+
+_ = runAgent(context.Background(), cfg, io.Discard, io.Discard)
+if prepared || manifested || completed != 1 {
+	t.Fatalf("shutdown finalization = prepare:%v manifest:%v complete:%d", prepared, manifested, completed)
+}
+```
 
 Add `errors` to the imports in `agent/job_test.go`. Update
 `TestJobCommandDoesNotRunAfterInvalidBootstrapResponse` to set
@@ -659,7 +1006,7 @@ func TestJobCommandSurfacesBootstrapCompletionFailure(t *testing.T) {
 Run:
 
 ```bash
-go test ./agent -run 'Test(Finalization|ArtifactContext|ProcessExitCode|JobArtifactHash|JobCommandDoesNotRun)' -count=1
+go test ./agent -run 'Test(Finalization|ArtifactContext|ProcessExitCode|RunAgentArtifact|RunAgentShutdown|JobCommandDoesNotRun)' -count=1
 go test ./agent -count=1
 ```
 
@@ -668,7 +1015,7 @@ Expected: targeted and full Agent package tests PASS.
 - [ ] **Step 8: Commit the Go runtime change**
 
 ```bash
-git add agent/main.go agent/job.go agent/main_test.go agent/job_test.go agent/artifact_upload_test.go
+git add agent/main.go agent/job.go agent/artifact_upload.go agent/main_test.go agent/job_test.go agent/artifact_upload_test.go
 git commit -m "fix: isolate Go finalization deadlines"
 ```
 
@@ -779,9 +1126,7 @@ git commit -m "fix: preserve completion report failures"
 - [ ] **Step 1: Run all TypeScript runtime checks**
 
 ```bash
-cd agent-ts && bun test
-cd agent-ts && bun run typecheck
-cd agent-ts && bun run build
+(cd agent-ts && bun test && bun run typecheck && bun run build)
 ```
 
 Expected: all commands exit 0 with no failed tests or TypeScript diagnostics.
@@ -810,17 +1155,36 @@ Expected: `rg` returns no matches; `git diff --check` is silent. `git status` ma
 - [ ] **Step 4: Build runtime images on a Docker-capable host**
 
 ```bash
-make docker-agent-image
-make docker-seednote-agent-image
-make docker-montage-agent-image
-make docker-server-image
+: "${ANBAN_IMAGE_REGISTRY:?set ANBAN_IMAGE_REGISTRY, for example registry.example.com/anban}"
+: "${ANBAN_RELEASE_TAG:?set ANBAN_RELEASE_TAG to an immutable source tag}"
+
+ARTICLE_GO_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-article:$ANBAN_RELEASE_TAG"
+SEEDNOTE_GO_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-seednote:$ANBAN_RELEASE_TAG"
+MONTAGE_GO_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-montage:$ANBAN_RELEASE_TAG"
+ARTICLE_TS_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-article-ts:$ANBAN_RELEASE_TAG"
+SEEDNOTE_TS_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-seednote-ts:$ANBAN_RELEASE_TAG"
+MONTAGE_TS_REF="$ANBAN_IMAGE_REGISTRY/creator-agent-montage-ts:$ANBAN_RELEASE_TAG"
+SERVER_REF="$ANBAN_IMAGE_REGISTRY/anban-creator-server:$ANBAN_RELEASE_TAG"
+
+make AGENT_IMAGE="$ARTICLE_GO_REF" docker-agent-image
+make SEEDNOTE_AGENT_IMAGE="$SEEDNOTE_GO_REF" docker-seednote-agent-image
+make MONTAGE_AGENT_IMAGE="$MONTAGE_GO_REF" docker-montage-agent-image
+make TS_AGENT_IMAGE="$ARTICLE_TS_REF" docker-agent-ts-image
+make TS_SEEDNOTE_AGENT_IMAGE="$SEEDNOTE_TS_REF" docker-seednote-agent-ts-image
+make TS_MONTAGE_AGENT_IMAGE="$MONTAGE_TS_REF" docker-montage-agent-ts-image
+make SERVER_IMAGE="$SERVER_REF" docker-server-image
+
+for image in "$ARTICLE_GO_REF" "$SEEDNOTE_GO_REF" "$MONTAGE_GO_REF" "$ARTICLE_TS_REF" "$SEEDNOTE_TS_REF" "$MONTAGE_TS_REF" "$SERVER_REF"; do
+  docker push "$image"
+  docker image inspect --format '{{json .RepoDigests}}' "$image"
+done
 ```
 
-Expected: all four images build successfully. Record immutable published digests for Article, Seednote, Montage, and Server; do not treat a local Go/TypeScript build as image proof.
+Expected: all seven images build and push successfully, and every inspect output contains the registry digest. Record one immutable digest for each of the three Go runtime variants, three TypeScript runtime variants, and Server; do not treat a local build or mutable tag as image proof. This preserves Scope A parity without silently changing the implementation family used by an environment.
 
 - [ ] **Step 5: Deploy in dependency order**
 
-Publish the three runtime images first. Set `ANBAN_AGENT_IMAGE_ARTICLE`, `ANBAN_AGENT_IMAGE_SEEDNOTE`, and `ANBAN_AGENT_IMAGE_MONTAGE` to their immutable digests, then deploy the new Server image and wait for its rollout to finish. Existing executions retain their frozen runtime image and are not production proof for this change.
+Publish all six runtime images first. Read the currently deployed values of `ANBAN_AGENT_IMAGE_ARTICLE`, `ANBAN_AGENT_IMAGE_SEEDNOTE`, and `ANBAN_AGENT_IMAGE_MONTAGE`, preserve whether each route uses Go or TypeScript, and replace each with the matching newly published immutable digest. The incident route currently uses the TypeScript Seednote runtime, so production acceptance must deploy the digest published from `creator-agent-seednote-ts`; do not switch it to `creator-agent-seednote` as part of this fix. Then deploy the new Server digest and wait for its rollout to finish. Existing executions retain their frozen runtime image and are not production proof for this change.
 
 - [ ] **Step 6: Run one fresh production Seednote acceptance task**
 
@@ -841,9 +1205,11 @@ Against a non-production Server or intercepted completion endpoint, return retry
 - [ ] **Step 8: Review the final diff and commit history**
 
 ```bash
-git log -4 --oneline
-git diff HEAD~3..HEAD --check
+git fetch origin main
+git log --oneline origin/main..HEAD
+git diff origin/main --check
+git diff --stat origin/main
 git status --short --branch
 ```
 
-Expected: three focused implementation commits follow the design/plan commits, the combined diff is clean, and unrelated untracked files remain untouched.
+Expected: the explicit `origin/main` range contains all focused implementation commits plus any current worktree fixes, the complete diff is clean, and unrelated untracked files remain untouched.

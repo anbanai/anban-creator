@@ -24,6 +24,8 @@
 - Create `studio/src/components/tasks/ExecutionProfileToolbar.test.tsx`: selected summary, price, availability, and selection coverage.
 - Modify `studio/src/components/agent-prompt/ProjectContextControl.tsx`: allow compact readonly rendering and toolbar-sized wrapper styling without losing complete project options.
 - Modify `studio/src/components/agent-prompt/ProjectContextControl.test.tsx`: compact readonly and complete popover identity coverage.
+- Modify `studio/src/components/agent-prompt/ProjectIdentity.tsx`: keep avatar, name, description, and localized content type visible in compact toolbar identity.
+- Modify `studio/src/components/agent-prompt/ProjectIdentity.test.tsx`: defend the complete compact identity contract.
 
 **Backend and API**
 
@@ -31,8 +33,16 @@
 - Modify `server/billing/catalog_contract_test.go`: defend distinct Standard and Professional prices.
 - Modify `server/service/ai_entry.go`: accept explicit quantity, ratio, and capability; return a task collection.
 - Modify `server/service/ai_entry_test.go`: explicit-field precedence, batch creation, references, and result collection.
+- Modify `server/service/image_capability_resolver.go`: return typed unavailable/access-denied errors for capability selection.
+- Modify `server/service/image_capability_resolver_test.go`: distinguish unknown, disabled, and tier-inaccessible capabilities.
+- Modify `server/service/task.go`: authorize and canonicalize image capability keys inside `CreateManual`.
+- Modify `server/service/task_capability_test.go`: prove manual creation rejects stale and unauthorized keys before persistence.
+- Modify `server/handler/image_capability.go` and `server/handler/image_capability_test.go`: provide one structured stale/access-denied response contract.
 - Modify `server/handler/ai_entry.go`: normalize and validate request fields at the HTTP boundary.
 - Modify `server/handler/ai_entry_test.go`: forwarding and invalid-quantity coverage.
+- Modify `server/handler/task.go` and `server/handler/task_test.go`: map create-time capability races to the structured response.
+- Modify `server/handler/plan.go` and `server/handler/plan_test.go`: map plan capability validation to the structured response.
+- Modify `server/handler/designer.go` and create `server/handler/designer_capability_test.go`: reuse and defend the structured response for quote/generate capability failures.
 - Modify `server/service/ilink_conversation.go` and `server/service/ilink_conversation_test.go`: consume the task collection while preserving one-task iLink behavior.
 - Modify `studio/src/lib/api/ai-entry.ts`: mirror the request and response contract.
 - Create `studio/src/lib/api/ai-entry.test.ts`: defend the exact request and plural response transport.
@@ -158,6 +168,8 @@ git commit -m "feat(billing): separate image capability prices"
 - Create: `studio/src/components/tasks/ExecutionProfileToolbar.test.tsx`
 - Modify: `studio/src/components/agent-prompt/ProjectContextControl.tsx`
 - Modify: `studio/src/components/agent-prompt/ProjectContextControl.test.tsx`
+- Modify: `studio/src/components/agent-prompt/ProjectIdentity.tsx`
+- Modify: `studio/src/components/agent-prompt/ProjectIdentity.test.tsx`
 
 - [ ] **Step 1: Write failing quantity component tests**
 
@@ -216,8 +228,14 @@ Add this to `ProjectContextControl.test.tsx`:
 it('renders readonly project identity in compact toolbar form', () => {
   render(<ProjectContextControl mode="readonly" project={projects[0]} compact />)
   expect(screen.getByText('Morning Brief')).toBeInTheDocument()
-  expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
+  expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
+  expect(screen.getByText('公众号图文项目')).toBeInTheDocument()
   expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
+})
+
+it('names the compact project trigger with the current selection', () => {
+  render(<ProjectContextControl mode="select" projects={projects} value={projects[0].id} onValueChange={vi.fn()} compact />)
+  expect(screen.getByRole('combobox', { name: '项目：Morning Brief' })).toBeInTheDocument()
 })
 ```
 
@@ -282,7 +300,7 @@ export function QuantityStepper({ label, value, min, max, onChange, disabled = f
 </Popover>
 ```
 
-Add `compact?: boolean` to readonly project props, render `ProjectIdentity` with that value, and add `data-compact` for both select and readonly modes. Do not change full option rendering.
+Add `compact?: boolean` to readonly project props, render `ProjectIdentity` with that value, and add `data-compact` for both select and readonly modes. In `ProjectIdentity`, compact changes spacing only: use a compact two-line layout while still rendering the avatar, name, localized type badge, and description/fallback. Remove the current `!compact` conditions around the type badge and description. For select mode, replace the default static `aria-label="项目上下文"` with `项目：${selected.name}` or `项目：未选择`; retain an explicitly supplied `ariaLabel` override. Do not change full option rendering or hide project identity fields to make the toolbar shorter.
 
 - [ ] **Step 6: Run component tests and verify GREEN**
 
@@ -293,7 +311,7 @@ Expected: PASS with no React accessibility or nested-button warnings.
 - [ ] **Step 7: Commit shared controls**
 
 ```bash
-git add studio/src/components/agent-prompt/QuantityStepper.tsx studio/src/components/agent-prompt/QuantityStepper.test.tsx studio/src/components/agent-prompt/ComposerQuantityControl.tsx studio/src/components/agent-prompt/ComposerQuantityControl.test.tsx studio/src/components/tasks/ExecutionProfileToolbar.tsx studio/src/components/tasks/ExecutionProfileToolbar.test.tsx studio/src/components/agent-prompt/ProjectContextControl.tsx studio/src/components/agent-prompt/ProjectContextControl.test.tsx
+git add studio/src/components/agent-prompt/QuantityStepper.tsx studio/src/components/agent-prompt/QuantityStepper.test.tsx studio/src/components/agent-prompt/ComposerQuantityControl.tsx studio/src/components/agent-prompt/ComposerQuantityControl.test.tsx studio/src/components/tasks/ExecutionProfileToolbar.tsx studio/src/components/tasks/ExecutionProfileToolbar.test.tsx studio/src/components/agent-prompt/ProjectContextControl.tsx studio/src/components/agent-prompt/ProjectContextControl.test.tsx studio/src/components/agent-prompt/ProjectIdentity.tsx studio/src/components/agent-prompt/ProjectIdentity.test.tsx
 git commit -m "feat(studio): add composer parameter controls"
 ```
 
@@ -302,8 +320,20 @@ git commit -m "feat(studio): add composer parameter controls"
 **Files:**
 - Modify: `server/service/ai_entry.go:24-39,99-224`
 - Modify: `server/service/ai_entry_test.go`
+- Modify: `server/service/image_capability_resolver.go:13-137`
+- Modify: `server/service/image_capability_resolver_test.go`
+- Modify: `server/service/task.go:492-621`
+- Modify: `server/service/task_capability_test.go`
+- Modify: `server/handler/image_capability.go`
+- Modify: `server/handler/image_capability_test.go`
 - Modify: `server/handler/ai_entry.go:30-67`
 - Modify: `server/handler/ai_entry_test.go`
+- Modify: `server/handler/task.go`
+- Modify: `server/handler/task_test.go`
+- Modify: `server/handler/plan.go`
+- Modify: `server/handler/plan_test.go`
+- Modify: `server/handler/designer.go`
+- Create: `server/handler/designer_capability_test.go`
 - Modify: `server/service/ilink_conversation.go:71-105`
 - Modify: `server/service/ilink_conversation_test.go`
 - Modify: `studio/src/lib/api/ai-entry.ts:13-25`
@@ -322,21 +352,33 @@ Extend the successful forwarding body with:
 Assert:
 
 ```go
-if submitter.req.Quantity != 2 || submitter.req.ImageRatio != "3:4" || submitter.req.ImageCapabilityKey != "professional" {
+if submitter.req.Quantity == nil || *submitter.req.Quantity != 2 || submitter.req.ImageRatio != "3:4" || submitter.req.ImageCapabilityKey != "professional" {
     t.Fatalf("explicit fields = %#v", submitter.req)
 }
 ```
 
-Add a table test for `quantity: 0` and `quantity: 6` that expects HTTP 400 with `quantity must be between 1 and 5` and verifies the submitter was not called. Omitted quantity must normalize to one.
+Add a table test for `quantity: 0` and `quantity: 6` that expects HTTP 400 with `quantity must be between 1 and 5` and verifies the submitter was not called. Add a separate omitted-quantity case that reaches the submitter with `Quantity == nil`; the service, not JSON zero-value decoding, normalizes omission to one.
+
+Add handler mapping tests for typed capability errors:
+
+```go
+{err: service.ErrImageCapabilityUnavailable, status: fiber.StatusConflict, code: 46011, msg: "image_capability_stale"},
+{err: service.ErrImageCapabilityAccessDenied, status: fiber.StatusForbidden, code: 46012, msg: "image_capability_access_denied"},
+```
+
+Add the same response assertions to task create/clone, plan create/update, and
+Designer quote/generate handler tests so every Studio capability control has the
+same recovery signal.
 
 - [ ] **Step 2: Write failing service tests for precedence and batch results**
 
 Add a service test where the LLM returns conflicting values but the request wins:
 
 ```go
+quantity := 2
 result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
     UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
-    Quantity: 2, ImageRatio: "16:9", ImageCapabilityKey: "professional",
+    Quantity: &quantity, ImageRatio: "16:9", ImageCapabilityKey: "professional",
 })
 if err != nil { t.Fatal(err) }
 if len(result.Tasks) != 2 { t.Fatalf("tasks = %d", len(result.Tasks)) }
@@ -349,6 +391,8 @@ for _, task := range result.Tasks {
 
 Configure the test task service with a capability registry that authorizes `professional`; do not bypass production authorization. Keep the existing unsafe-LLM-field test and change it to assert that LLM-provided capability keys remain ignored when the request omitted the field.
 
+In `server/service/task_capability_test.go`, add table cases that call `CreateManual` with an unknown key, a configured but disabled key, and an Enterprise-only key as a Free user. Assert the first two wrap `ErrImageCapabilityUnavailable`, the tier case wraps `ErrImageCapabilityAccessDenied`, no task is persisted, and no enqueue occurs. Add a valid-key case that proves the resolver's canonical key is stored. These tests defend the shared service boundary used by AI Entry and ordinary task creation.
+
 Add an iLink test asserting its omitted quantity defaults to one and the success reply uses `result.Tasks[0]`.
 
 - [ ] **Step 3: Run targeted Go tests and verify RED**
@@ -356,7 +400,7 @@ Add an iLink test asserting its omitted quantity defaults to one and the success
 Run:
 
 ```bash
-go test ./server/handler ./server/service -run 'TestAIEntry|TestIlinkConversation.*Create' -count=1
+go test ./server/handler ./server/service -run 'TestAIEntry|TestIlinkConversation.*Create|Test.*ImageCapabilitySelection' -count=1
 ```
 
 Expected: FAIL because the request fields and `Tasks` result do not exist.
@@ -373,7 +417,7 @@ type AIEntrySubmitRequest struct {
     ExecutionProfile string `json:"execution_profile"`
     Text string `json:"text"`
     Attachments []model.EntryAttachment `json:"attachments,omitempty"`
-    Quantity int `json:"quantity,omitempty"`
+    Quantity *int `json:"quantity,omitempty"`
     ImageRatio string `json:"image_ratio,omitempty"`
     ImageCapabilityKey string `json:"image_capability_key,omitempty"`
     ExecutionTarget string `json:"execution_target,omitempty"`
@@ -387,7 +431,7 @@ type AIEntrySubmitResult struct {
 }
 ```
 
-In the handler, trim the image fields, default omitted quantity to one, and reject values outside 1-5. Platform-specific ratio validation stays in `AIEntryService`/`TaskService`, where the selected project platform is available, keeping the Fiber handler thin.
+In the handler, trim the image fields and reject a non-nil quantity outside 1-5. Do not replace a nil quantity in the handler: the pointer is the presence bit that distinguishes omission from explicit JSON zero. In `AIEntryService.Submit`, normalize nil to one and independently reject non-nil values outside 1-5 so non-HTTP callers have the same invariant. Platform-specific ratio validation stays in `AIEntryService`/`TaskService`, where the selected project platform is available, keeping the Fiber handler thin.
 
 Build manual parameters with explicit precedence:
 
@@ -399,13 +443,41 @@ if imageRatio == "" {
 params := CreateManualParams{
     UserID: req.UserID, ProjectID: req.ProjectID,
     ExecutionProfile: req.ExecutionProfile, Prompt: prompt,
-    Quantity: req.Quantity, ImageRatio: imageRatio,
+    Quantity: normalizedQuantity, ImageRatio: imageRatio,
     ImageCapabilityKey: strings.TrimSpace(req.ImageCapabilityKey),
     InputAttachments: normalizeEntryAttachments(req.Attachments),
     ExecutionTarget: normalizeAIEntryExecutionTarget(req.ExecutionTarget),
     ProjectSnapshot: &projectSnapshot,
 }
 ```
+
+Move image capability enforcement to the shared task service boundary. Add typed sentinels in `image_capability_resolver.go` and wrap them from `resolveRoute`:
+
+```go
+var (
+    ErrImageCapabilityUnavailable = errors.New("image capability unavailable")
+    ErrImageCapabilityAccessDenied = errors.New("image capability access denied")
+)
+```
+
+Unknown and disabled keys wrap `ErrImageCapabilityUnavailable`; insufficient tier wraps `ErrImageCapabilityAccessDenied`. In `TaskService.CreateManual`, after ecommerce defaults are merged and before any task is built or persisted, call `ResolvePublicImageCapability` when the resolver is configured and `PreserveFrozenConfig` is false, then store the returned canonical key. Update the stale comment that currently says capability validation happens only upstream.
+
+Change `ValidateImageCapabilityKey` to wrap the same sentinels, then add one handler helper in `image_capability.go`:
+
+```go
+func respondImageCapabilitySelectionError(c fiber.Ctx, err error) (bool, error) {
+    switch {
+    case errors.Is(err, service.ErrImageCapabilityUnavailable), errors.Is(err, service.ErrDesignerCapabilityUnavailable):
+        return true, c.Status(fiber.StatusConflict).JSON(Response{Code: 46011, Msg: "image_capability_stale"})
+    case errors.Is(err, service.ErrImageCapabilityAccessDenied), errors.Is(err, service.ErrDesignerCapabilityAccessDenied):
+        return true, c.Status(fiber.StatusForbidden).JSON(Response{Code: 46012, Msg: "image_capability_access_denied"})
+    default:
+        return false, nil
+    }
+}
+```
+
+`AIEntryService.Submit` must return these typed errors to the handler instead of converting them into a successful HTTP envelope with `status: error`. AI Entry, task create/clone, plan create/update, and Designer quote/generate call the helper before their generic error mapping. The helper never returns resolver internals and gives all four Studio surfaces the same stable refetch signal.
 
 After `CreateManual`, attach the presented reference view to every returned task, return `Tasks: tasks`, and format `已创建 %d 个任务。` when count exceeds one. Do not retain the obsolete singular response field after Studio and iLink consumers are updated.
 
@@ -435,6 +507,33 @@ export interface AIEntrySubmitResult {
 
 In iLink, require `len(result.Tasks) > 0`, select the first task, and keep the request quantity omitted so it defaults to one.
 
+Create `studio/src/lib/api/ai-entry.test.ts` unconditionally with this transport contract:
+
+```ts
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { http } from '@/lib/http-client'
+import { aiEntryApi } from './ai-entry'
+
+describe('aiEntryApi', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('posts explicit composer parameters and unwraps plural tasks', async () => {
+    const payload = {
+      channel: 'studio', project_id: 'project-1', text: 'write', execution_profile: 'effective',
+      quantity: 2, image_ratio: '3:4', image_capability_key: 'professional',
+    } as const
+    const tasks = [{ id: 'task-1' }, { id: 'task-2' }]
+    const post = vi.spyOn(http, 'post').mockResolvedValue({
+      data: { code: 0, msg: 'success', data: { status: 'created', tasks } },
+    } as never)
+
+    await expect(aiEntryApi.submit(payload)).resolves.toMatchObject({ status: 'created', tasks })
+    expect(post).toHaveBeenCalledWith('/ai-entry/submit', payload)
+  })
+})
+```
+
 - [ ] **Step 6: Run targeted tests and verify GREEN**
 
 Run the Step 3 command plus:
@@ -443,12 +542,12 @@ Run the Step 3 command plus:
 cd studio && bun run test -- src/lib/api/ai-entry.test.ts
 ```
 
-Expected: PASS. If no dedicated API test exists, add one beside `ai-entry.ts` that asserts the exact POST payload and response unwrapping.
+Expected: PASS. The dedicated API test must exist and assert the exact POST payload and plural response unwrapping.
 
 - [ ] **Step 7: Commit the AI Entry contract**
 
 ```bash
-git add server/service/ai_entry.go server/service/ai_entry_test.go server/handler/ai_entry.go server/handler/ai_entry_test.go server/service/ilink_conversation.go server/service/ilink_conversation_test.go studio/src/lib/api/ai-entry.ts studio/src/lib/api/ai-entry.test.ts
+git add server/service/ai_entry.go server/service/ai_entry_test.go server/service/image_capability_resolver.go server/service/image_capability_resolver_test.go server/service/task.go server/service/task_capability_test.go server/handler/image_capability.go server/handler/image_capability_test.go server/handler/ai_entry.go server/handler/ai_entry_test.go server/handler/task.go server/handler/task_test.go server/handler/plan.go server/handler/plan_test.go server/handler/designer.go server/handler/designer_capability_test.go server/service/ilink_conversation.go server/service/ilink_conversation_test.go studio/src/lib/api/ai-entry.ts studio/src/lib/api/ai-entry.test.ts
 git commit -m "feat: accept explicit AI entry parameters"
 ```
 
@@ -464,7 +563,7 @@ Extend the existing successful submit test to assert the bottom toolbar order an
 
 ```tsx
 const composer = document.querySelector('[data-slot="agent-prompt-input"]')!
-const project = within(composer).getByRole('combobox', { name: '项目上下文' })
+const project = within(composer).getByRole('combobox', { name: /^项目：Morning Brief/ })
 const execution = within(composer).getByRole('button', { name: /^执行配置：/ })
 const image = within(composer).getByRole('button', { name: /^图像设置：/ })
 const quantity = within(composer).getByRole('button', { name: '任务数量：1' })
@@ -487,7 +586,7 @@ await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objec
 })))
 ```
 
-Add result routing cases: one returned task navigates to `/tasks/:id`; two tasks navigate to `/tasks` and show the server success message.
+Add result routing cases: one returned task navigates to `/tasks/:id`; two tasks navigate to `/tasks` and show the server success message. Add stale (`code: 46011`) and access-denied (`code: 46012`) rejection cases; assert `queryClient.invalidateQueries({ queryKey: queryKeys.imageCapabilities.all })` runs, the invalid selection is cleared, and Studio asks the user to select an image capability again. Resolve the refreshed capability query and assert the default is not automatically reselected and submit stays blocked until the user makes a new selection.
 
 - [ ] **Step 2: Run the homepage test and verify RED**
 
@@ -505,10 +604,11 @@ Use `useImageCapabilities`, platform configs, and `normalizeImageRatio`. Add sta
 const [quantity, setQuantity] = useState(1)
 const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
 const [imageCapabilityKey, setImageCapabilityKey] = useState('')
+const [imageCapabilityNeedsReselection, setImageCapabilityNeedsReselection] = useState(false)
 const taskQuantityMax = selectedProject && ['article', 'seednote', 'moments'].includes(selectedProject.platform) ? 5 : 1
 ```
 
-When project changes, set the semantic ratio from the project default, clamp quantity to `taskQuantityMax`, and choose the current catalog default capability without overwriting a still-valid selection.
+When project changes, clear `imageCapabilityNeedsReselection`, set the semantic ratio from the project default, clamp quantity to `taskQuantityMax`, and choose the current catalog default capability without overwriting a still-valid selection. Catalog-only refresh may choose a default only when `imageCapabilityNeedsReselection` is false. An explicit capability selection clears the latch.
 
 - [ ] **Step 4: Assemble the horizontal toolbar and submit explicit fields**
 
@@ -529,7 +629,7 @@ image_ratio: imageRatio,
 image_capability_key: imageCapabilityKey,
 ```
 
-Handle `result.tasks?.length` as specified by the tests.
+Handle `result.tasks?.length` as specified by the tests. In the mutation error handler, use `getApiErrorCode` to detect `46011` or `46012`, set `imageCapabilityNeedsReselection` before clearing `imageCapabilityKey`, invalidate the image-capability query, and show `图像能力已变化，请重新选择`; do not retry submission automatically. Disable submit while the latch is true or no capability is selected.
 
 - [ ] **Step 5: Verify homepage tests GREEN**
 
@@ -555,15 +655,21 @@ git commit -m "feat(studio): unify homepage composer parameters"
 Update `renders create mode with the shared operational controls` to assert:
 
 ```tsx
-const composer = within(dialog).getByTestId('agent-prompt-input')
-expect(within(composer).getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+const composer = dialog.querySelector('[data-slot="agent-prompt-input"]')!
+expect(within(composer).getByRole('combobox', { name: /^项目：Morning Brief/ })).toBeInTheDocument()
 expect(within(composer).getByRole('button', { name: /^执行配置：/ })).toBeInTheDocument()
 expect(within(composer).getByRole('button', { name: /^图像设置：/ })).toBeInTheDocument()
 expect(within(composer).getByRole('button', { name: '任务数量：1' })).toBeInTheDocument()
 expect(within(dialog).queryByText(/^数量$/)).not.toBeInTheDocument()
 ```
 
-If `AgentPromptInput` lacks a test id, query by `[data-slot="agent-prompt-input"]` and scope with `within`. Add a test that changes task quantity to two and verifies the existing `quantity: 2` request and cost total.
+`AgentPromptInput` already exposes `data-slot="agent-prompt-input"`. Query it with `dialog.querySelector('[data-slot="agent-prompt-input"]')!` and scope with `within`; do not add a second test-only selector. Add a test that changes task quantity to two and verifies the existing `quantity: 2` request and cost total.
+
+Switch the form to Montage and assert its `briefField` composer contains project
+and execution controls, contains no image/quantity control, and no separate
+project context bar or execution block remains. Add `46011` and `46012` submit
+rejection cases that resolve the refreshed catalog and prove capability remains
+empty and submit remains blocked until explicit reselection.
 
 - [ ] **Step 2: Run task-form tests and verify RED**
 
@@ -575,7 +681,9 @@ Expected: FAIL because project is in the top context bar, execution is a separat
 
 - [ ] **Step 3: Recompose normal task controls**
 
-For non-Montage, non-viral tasks, replace `contextBar={projectContextBar}` with `leadingTools` containing:
+For every non-viral `AgentPromptInput`, including the composer passed to
+`MontageCreationPanel.briefField`, remove `contextBar={projectContextBar}` and
+use `leadingTools` containing:
 
 ```tsx
 const taskQuantityMax = ['article', 'seednote', 'moments'].includes(watchedType) ? 5 : 1
@@ -583,14 +691,25 @@ const taskQuantityMax = ['article', 'seednote', 'moments'].includes(watchedType)
 <div data-slot="composer-settings" className="flex min-w-0 flex-wrap items-center gap-1">
   {projectContextControl}
   <ExecutionProfileToolbar profiles={executionProfilesQuery.data ?? []} value={watchedExecutionProfile} onChange={(value) => setFormValue('execution_profile', value)} loading={executionProfilesQuery.isLoading} catalog={billingCatalog} taskType={watchedType} />
-  <ImageGenerationToolbar {...imageToolbarProps} />
-  <ComposerQuantityControl label="任务数量" value={quantity} min={1} max={taskQuantityMax} onChange={(value) => setFormValue('quantity', value)} />
+  {!isMontageTask ? <ImageGenerationToolbar {...imageToolbarProps} /> : null}
+  {!isMontageTask ? <ComposerQuantityControl label="任务数量" value={quantity} min={1} max={taskQuantityMax} onChange={(value) => setFormValue('quantity', value)} /> : null}
 </div>
 ```
 
 Keep the attachment add button before these controls. Remove the separate execution `FormField` and standalone quantity section. Preserve the existing cost preview and footer submit label.
 
-For Montage, ecommerce, and viral analysis, keep quantity authoritative at one. Do not expose a stepper that the service will clamp. Viral analysis may keep its specialized textarea and place its compact project/execution controls immediately below that textarea because it is not an `AgentPromptInput` attachment surface.
+Montage uses project and execution only in its Prompt toolbar; its own source,
+pipeline, duration, subtitle, voiceover, style, music, and delivery inputs remain
+below through `MontageCreationPanel`. Ecommerce shows the shared static
+one-task state. Viral analysis keeps its specialized textarea and places its
+compact project/execution controls immediately below that textarea. All three
+keep quantity authoritative at one and expose no enabled stepper.
+
+Add `imageCapabilityNeedsReselection` to `TaskFormDialog`. On API code `46011`
+or `46012`, set the latch, clear the selected key, invalidate
+`queryKeys.imageCapabilities.all`, show the reselection message, and block
+submit. Catalog refresh cannot apply a default while latched; project change or
+an explicit capability selection clears the latch.
 
 - [ ] **Step 4: Verify task-form tests GREEN**
 
@@ -618,7 +737,7 @@ In the create-plan dialog test, assert the composer contains project, execution,
 ```tsx
 const dialog = await screen.findByRole('dialog', { name: '新建计划' })
 const composer = dialog.querySelector('[data-slot="agent-prompt-input"]')!
-expect(within(composer).getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+expect(within(composer).getByRole('combobox', { name: /^项目：Morning Brief/ })).toBeInTheDocument()
 expect(within(composer).getByRole('button', { name: /^执行配置：/ })).toBeInTheDocument()
 expect(within(composer).getByRole('button', { name: /^图像设置：/ })).toBeInTheDocument()
 expect(within(composer).queryByText(/任务数量|图片数量/)).not.toBeInTheDocument()
@@ -626,7 +745,10 @@ expect(within(dialog).getByText('排期设置')).toBeInTheDocument()
 expect(within(dialog).queryByLabelText('内容类型')).not.toBeInTheDocument()
 ```
 
-Add edit coverage for compact readonly project identity in the composer.
+Add edit coverage for compact readonly project identity in the composer. Add
+`46011` and `46012` create/update rejection cases that resolve the refreshed
+catalog and prove image capability remains empty and save stays blocked until
+explicit reselection.
 
 - [ ] **Step 2: Run plan tests and verify RED**
 
@@ -645,6 +767,11 @@ Move project selection callbacks into a compact `ProjectContextControl` passed t
 ```
 
 Place `ExecutionProfileToolbar` after project and `ImageGenerationToolbar` after execution. Remove the visible content-type `Select`; continue setting `form.type` from `project.platform` and submitting it unchanged. Keep `SchedulePicker` and `TaskTimePricingNotice` outside and above `promptComposer`. Keep plans quantity-free.
+
+Add `imageCapabilityNeedsReselection` to the plan dialog state and use the same
+code `46011`/`46012` recovery invariant as Dashboard: latch, clear, invalidate,
+message, and block save. Catalog refresh cannot restore a default while latched;
+project change or explicit selection clears it.
 
 - [ ] **Step 4: Verify plan tests GREEN**
 
@@ -684,6 +811,10 @@ Keep a component-only fixture with `maxBatch: 3` and assert the shared stepper c
 
 In the provider contract test, assert project is inside the Prompt bottom addon and no `contextBar` prop is supplied.
 
+Add quote/generate rejection cases for API codes `46011` and `46012`. Resolve
+the refreshed capability catalog and assert the invalid capability remains
+empty and Generate stays blocked until the user explicitly selects again.
+
 - [ ] **Step 2: Run Designer tests and verify RED**
 
 ```bash
@@ -713,6 +844,11 @@ In `DesignerPage`, remove `contextBar={contextBar}` and pass a flex `leadingTool
 <ProjectContextControl mode="select" compact {...projectProps} />
 <DesignerGenerationToolbar {...generationToolbarProps} />
 ```
+
+Add `imageCapabilityNeedsReselection` to `DesignerPage` and apply the same
+latch/clear/invalidate/message/block invariant. Catalog refresh cannot restore a
+default while latched; project change or explicit capability selection clears
+the latch.
 
 Do not raise canonical `max_batch`, remove the Server's `n == 1` check, or multiply billing in this task.
 
@@ -757,7 +893,7 @@ Expected: PASS with zero unhandled promise rejections or React warnings.
 - [ ] **Step 2: Run focused Go regression tests**
 
 ```bash
-go test ./server/billing ./server/handler ./server/service -run 'TestContentAddressedRetailCatalog|TestImageCapabilityTierPrices|TestBillingCatalog|TestAIEntry|TestIlinkConversation.*Create|TestDesigner.*Batch' -count=1
+go test ./server/billing ./server/handler ./server/service -run 'TestContentAddressedRetailCatalog|TestImageCapabilityTierPrices|TestBillingCatalog|TestAIEntry|TestIlinkConversation.*Create|Test.*ImageCapabilitySelection|TestDesigner.*Batch' -count=1
 ```
 
 Expected: PASS and retain explicit coverage that Designer rejects `n>1`.
@@ -807,12 +943,15 @@ Capture screenshots outside the repository for the four desktop surfaces and at 
 - [ ] **Step 6: Review the complete diff**
 
 ```bash
+git fetch origin main
 git diff --check
 git status --short
-git diff --stat HEAD~7..HEAD
+git diff origin/main --check
+git diff --stat origin/main
+git log --oneline origin/main..HEAD
 ```
 
-Expected: no whitespace errors; only planned source/tests/docs plus any pre-existing unrelated untracked files. Confirm no plugin manifest bump is needed because this plan does not modify `plugins/`.
+Expected: both whitespace checks are silent; the explicit `origin/main` diff includes every implementation commit plus any current worktree fixes, and contains only planned source/tests/docs. Pre-existing unrelated untracked files remain unstaged. Confirm no plugin manifest bump is needed because this plan does not modify `plugins/`.
 
 - [ ] **Step 7: Commit any verification-only fixes**
 
@@ -823,7 +962,13 @@ that actually changed and commit:
 git add \
   server/billing/products.yaml server/billing/catalog_contract_test.go \
   server/service/ai_entry.go server/service/ai_entry_test.go \
+  server/service/image_capability_resolver.go server/service/image_capability_resolver_test.go \
+  server/service/task.go server/service/task_capability_test.go \
+  server/handler/image_capability.go server/handler/image_capability_test.go \
   server/handler/ai_entry.go server/handler/ai_entry_test.go \
+  server/handler/task.go server/handler/task_test.go \
+  server/handler/plan.go server/handler/plan_test.go \
+  server/handler/designer.go server/handler/designer_capability_test.go \
   server/service/ilink_conversation.go server/service/ilink_conversation_test.go \
   studio/src/lib/api/ai-entry.ts studio/src/lib/api/ai-entry.test.ts \
   studio/src/components/agent-prompt/QuantityStepper.tsx \
@@ -832,6 +977,8 @@ git add \
   studio/src/components/agent-prompt/ComposerQuantityControl.test.tsx \
   studio/src/components/agent-prompt/ProjectContextControl.tsx \
   studio/src/components/agent-prompt/ProjectContextControl.test.tsx \
+  studio/src/components/agent-prompt/ProjectIdentity.tsx \
+  studio/src/components/agent-prompt/ProjectIdentity.test.tsx \
   studio/src/components/tasks/ExecutionProfileToolbar.tsx \
   studio/src/components/tasks/ExecutionProfileToolbar.test.tsx \
   studio/src/components/tasks/TaskFormDialog.tsx \
