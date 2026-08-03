@@ -12,7 +12,6 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import type { AgentExecutionProfileID, PlatformConfig, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
@@ -47,7 +46,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-import { ExecutionProfileToolbar } from '@/components/tasks/ExecutionProfileToolbar'
+import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
@@ -524,8 +523,10 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
-      image_capability_key: values.image_capability_key,
-      image_ratio: values.image_ratio,
+      ...(values.type === 'montage' ? {} : {
+        image_capability_key: values.image_capability_key,
+        image_ratio: values.image_ratio,
+      }),
       ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
       agent_input: values.agent_input,
       watermark: values.watermark || undefined,
@@ -603,28 +604,29 @@ export default function PlansPage() {
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
-          <ExecutionProfileToolbar
-            profiles={executionProfilesQuery.data ?? []}
-            value={watchedExecutionProfile}
-            onChange={(value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true })}
-            loading={executionProfilesQuery.isLoading}
-            disabled={isSubmitting || executionProfilesQuery.isError}
-            catalog={billingCatalog}
-            taskType={watchedType}
-            priceUnit="run"
+          <TaskComposerParameters
+            execution={{
+              profiles: executionProfilesQuery.data ?? [],
+              value: watchedExecutionProfile,
+              onChange: (value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true }),
+              loading: executionProfilesQuery.isLoading,
+              disabled: executionProfilesQuery.isError,
+              catalog: billingCatalog,
+              taskType: watchedType,
+              priceUnit: 'run',
+            }}
+            image={usesImageSettings ? {
+              ratios: businessImageRatios,
+              ratio: watchedImageRatio || 'auto',
+              onRatioChange: (value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true }),
+              capabilities: imageCapabilityOptions,
+              capabilityKey: effectiveImageCapabilityKey,
+              onCapabilityChange: (value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true }),
+              loading: imageCapabilitiesLoading,
+              disabled: imageCapabilitiesError,
+            } : undefined}
+            disabled={isSubmitting}
           />
-          {usesImageSettings ? (
-            <ImageGenerationToolbar
-              ratios={businessImageRatios}
-              ratio={watchedImageRatio || 'auto'}
-              onRatioChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true })}
-              capabilities={imageCapabilityOptions}
-              capabilityKey={effectiveImageCapabilityKey}
-              onCapabilityChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })}
-              loading={imageCapabilitiesLoading}
-              disabled={isSubmitting || imageCapabilitiesError}
-            />
-          ) : null}
         </div>
       )}
       />

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ImageIcon } from 'lucide-react'
+import { ChevronDownIcon, SlidersHorizontalIcon } from 'lucide-react'
 
 import { QuantityStepper } from '@/components/agent-prompt/QuantityStepper'
 import { Button } from '@/components/ui/button'
@@ -63,18 +63,19 @@ export function DesignerGenerationToolbar({
             variant="ghost"
             size="sm"
             disabled={disabled || !selectedCapability}
-            aria-label={`图像设置：${summary}`}
+            aria-label={`创作设置：${summary}`}
             className="max-w-full gap-1.5 px-2 text-muted-foreground"
           />
         )}
       >
-        <ImageIcon data-icon="inline-start" />
-        <span className="truncate">{summary}</span>
+        <SlidersHorizontalIcon data-icon="inline-start" />
+        <span>创作设置</span>
         <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="max-h-[var(--available-height)] w-[min(24rem,calc(100vw-2rem))] gap-4 overflow-y-auto p-4">
+      <PopoverContent align="start" className="max-h-[var(--available-height)] w-[min(30rem,calc(100vw-2rem))] gap-3 overflow-y-auto p-4">
+        <PopoverTitle className="sr-only">创作设置</PopoverTitle>
         <section className="flex flex-col gap-2">
-          <PopoverTitle>图像能力</PopoverTitle>
+          <h3 className="font-medium">图像能力</h3>
           <ToggleGroup
             aria-label="图像能力"
             value={capabilityKey ? [capabilityKey] : []}

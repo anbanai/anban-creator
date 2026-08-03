@@ -6,12 +6,10 @@ import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
-import { ComposerQuantityControl } from '@/components/agent-prompt/ComposerQuantityControl'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
-import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import QueryErrorState from '@/components/QueryErrorState'
-import { ExecutionProfileToolbar } from '@/components/tasks/ExecutionProfileToolbar'
+import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -319,33 +317,33 @@ export default function DashboardPage() {
                       : '项目：未选择'}
                   compact
                 />
-                <ExecutionProfileToolbar
-                  profiles={profilesQuery.data ?? []}
-                  value={executionProfile}
-                  onChange={setExecutionProfile}
-                  loading={profilesQuery.isLoading || billingCatalogQuery.isLoading}
-                  disabled={submitMutation.isPending || profilesQuery.isError || billingCatalogQuery.isError}
-                  catalog={billingCatalogQuery.data}
-                  taskType={selectedProject?.platform}
-                />
-                {usesImageSettings && (
-                  <ImageGenerationToolbar
-                    ratios={supportedImageRatios}
-                    ratio={imageRatio}
-                    onRatioChange={setImageRatio}
-                    capabilities={imageCapabilities}
-                    capabilityKey={effectiveImageCapabilityKey}
-                    onCapabilityChange={handleImageCapabilityChange}
-                    loading={imageCapabilitiesLoading}
-                    disabled={submitMutation.isPending || imageCapabilitiesError}
-                  />
-                )}
-                <ComposerQuantityControl
-                  label="任务数量"
-                  value={quantity}
-                  min={1}
-                  max={taskQuantityMax}
-                  onChange={setQuantity}
+                <TaskComposerParameters
+                  execution={{
+                    profiles: profilesQuery.data ?? [],
+                    value: executionProfile,
+                    onChange: setExecutionProfile,
+                    loading: profilesQuery.isLoading || billingCatalogQuery.isLoading,
+                    disabled: profilesQuery.isError || billingCatalogQuery.isError,
+                    catalog: billingCatalogQuery.data,
+                    taskType: selectedProject?.platform,
+                  }}
+                  image={usesImageSettings ? {
+                    ratios: supportedImageRatios,
+                    ratio: imageRatio,
+                    onRatioChange: setImageRatio,
+                    capabilities: imageCapabilities,
+                    capabilityKey: effectiveImageCapabilityKey,
+                    onCapabilityChange: handleImageCapabilityChange,
+                    loading: imageCapabilitiesLoading,
+                    disabled: imageCapabilitiesError,
+                  } : undefined}
+                  quantity={{
+                    label: '任务数量',
+                    value: quantity,
+                    min: 1,
+                    max: taskQuantityMax,
+                    onChange: setQuantity,
+                  }}
                   disabled={submitMutation.isPending}
                 />
               </div>

@@ -192,7 +192,21 @@ function renderDialog(props: Partial<TaskFormDialogProps> = {}) {
 }
 
 async function findImageSettings(dialog: HTMLElement, summary: string) {
-  return within(dialog).findByRole('button', { name: `图像设置：${summary}` })
+  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  for (const part of summary.split(' · ')) {
+    expect(trigger).toHaveAccessibleName(expect.stringContaining(part))
+  }
+  return trigger
+}
+
+async function openTaskParameters(dialog: HTMLElement) {
+  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  return waitFor(() => {
+    const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
+    expect(popover).toBeInTheDocument()
+    return popover!
+  })
 }
 
 async function closeOpenPopover() {
@@ -329,10 +343,10 @@ describe('TaskFormDialog', () => {
     expect(viralPrompt).toBeInTheDocument()
     const viralTextarea = within(viralPrompt!).getByRole('textbox', { name: '源笔记链接或分享文本' })
     const viralProject = within(viralPrompt!).getByRole('combobox', { name: '项目：种草项目' })
-    const viralExecution = within(viralPrompt!).getByRole('button', { name: /^执行配置：/ })
+    const viralParameters = within(viralPrompt!).getByRole('button', { name: /^创作设置：/ })
     expect(viralProject.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(viralTextarea.compareDocumentPosition(viralProject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(viralProject.compareDocumentPosition(viralExecution) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(viralProject.compareDocumentPosition(viralParameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     expect(within(dialog).queryByText('参考模板')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: /清透说明书/ })).not.toBeInTheDocument()
@@ -385,7 +399,7 @@ describe('TaskFormDialog', () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog')
 
-    const executionControl = await within(dialog).findByRole('button', { name: /^执行配置：性价比/ })
+    const executionControl = await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ })
     expect(within(dialog).getByText(/4,800 × 1 =/)).toBeInTheDocument()
     expect(within(dialog).queryByText('在本机运行')).not.toBeInTheDocument()
 
@@ -404,7 +418,7 @@ describe('TaskFormDialog', () => {
     renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'quality' } })
 
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByRole('button', { name: /^执行配置：极致效果/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*极致效果/ })).toBeInTheDocument()
     expect(within(dialog).getByText(/18,000 × 1 =/)).toBeInTheDocument()
   })
 
@@ -444,31 +458,26 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
+    const parametersControl = await within(composer!).findByRole('button', { name: /^创作设置：/ })
     const projectControl = await within(composer!).findByRole('combobox', { name: '项目：公众号项目' })
-    const executionControl = within(composer!).getByRole('button', { name: /^执行配置：/ })
-    const imageControl = await within(composer!).findByRole('button', { name: '图像设置：16:9 · 标准图像' })
-    const quantityControl = within(composer!).getByRole('button', { name: '任务数量：1' })
-    for (const [left, right] of [
-      [projectControl, executionControl],
-      [executionControl, imageControl],
-      [imageControl, quantityControl],
-    ]) {
-      expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    }
+    expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(composer!).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
+    expect(within(composer!).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+    expect(within(composer!).queryByRole('button', { name: '任务数量：1' })).not.toBeInTheDocument()
     expect(projectControl.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(composer!.querySelector('[data-slot="agent-prompt-context"]')).not.toBeInTheDocument()
     expect(screen.getByLabelText('选择附件文件')).toBeInTheDocument()
     expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('radio')).not.toBeInTheDocument()
-    fireEvent.click(imageControl)
-    const ratioGroup = await screen.findByRole('group', { name: '图片比例' })
+    const parameters = await openTaskParameters(dialog)
+    const ratioGroup = within(parameters).getByRole('group', { name: '图片比例' })
     expect(within(ratioGroup).getByRole('button', { name: '智能适配' })).toBeInTheDocument()
     expect(within(ratioGroup).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(ratioGroup).getByRole('button', { name: '4:3' })).toBeInTheDocument()
     expect(within(ratioGroup).getByRole('button', { name: '1:1' })).toBeInTheDocument()
     expect(within(ratioGroup).queryByRole('button', { name: '3:4' })).not.toBeInTheDocument()
-    expect(screen.getByRole('group', { name: '图像能力' })).toBeInTheDocument()
+    expect(within(parameters).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
     expect(within(dialog).queryByText('任务参考图')).not.toBeInTheDocument()
     expect(within(dialog).getByText('水印')).toBeInTheDocument()
     expect(within(dialog).getByText('仅在所选图像能力支持水印时生效')).toBeInTheDocument()
@@ -598,8 +607,8 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
     expect(await findImageSettings(dialog, '16:9 · 源图像')).toBeInTheDocument()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '任务数量：1' }))
-    const increment = await screen.findByRole('button', { name: '增加任务数量' })
+    const quantityParameters = await openTaskParameters(dialog)
+    const increment = within(quantityParameters).getByRole('button', { name: '增加任务数量' })
     fireEvent.click(increment)
     fireEvent.click(increment)
     await closeOpenPopover()
@@ -664,7 +673,10 @@ describe('TaskFormDialog', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    const failedParameters = await openTaskParameters(dialog)
+    for (const button of within(within(failedParameters).getByRole('group', { name: '图片比例' })).getAllByRole('button')) {
+      expect(button).toBeDisabled()
+    }
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
 
@@ -733,8 +745,8 @@ describe('TaskFormDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '创建一篇品牌文章' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: '任务数量：1' }))
-    fireEvent.click(await screen.findByRole('button', { name: '增加任务数量' }))
+    const createParameters = await openTaskParameters(dialog)
+    fireEvent.click(within(createParameters).getByRole('button', { name: '增加任务数量' }))
     await closeOpenPopover()
 
     expect(within(dialog).getByText('9,600').closest('p')).toHaveTextContent('固定任务价：4,800 × 2 = 9,600 积分')
@@ -758,8 +770,8 @@ describe('TaskFormDialog', () => {
       fireEvent.click(await screen.findByRole('option', { name }))
     }
 
-    fireEvent.click(await within(dialog).findByRole('button', { name: '任务数量：1' }))
-    const increment = await screen.findByRole('button', { name: '增加任务数量' })
+    const batchParameters = await openTaskParameters(dialog)
+    const increment = within(batchParameters).getByRole('button', { name: '增加任务数量' })
     fireEvent.click(increment)
     fireEvent.click(increment)
     fireEvent.click(increment)
@@ -768,17 +780,22 @@ describe('TaskFormDialog', () => {
     await closeOpenPopover()
 
     await selectProject(/种草项目/)
-    expect(await within(dialog).findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 5/ })).toBeInTheDocument()
     await selectProject(/朋友圈项目/)
-    expect(await within(dialog).findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 5/ })).toBeInTheDocument()
 
     await selectProject(/电商项目/)
-    expect(await within(dialog).findByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
-    expect(screen.queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 1/ })).toBeInTheDocument()
+    const ecommerceParameters = await openTaskParameters(dialog)
+    expect(within(ecommerceParameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    expect(within(ecommerceParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
+    await closeOpenPopover()
 
     await selectProject(/剪辑项目/)
-    expect(await within(dialog).findByLabelText('任务数量：1，当前能力上限')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 1/ })).toBeInTheDocument()
+    const montageParameters = await openTaskParameters(dialog)
+    expect(within(montageParameters).getByLabelText('任务数量：1，当前能力上限')).toBeInTheDocument()
+    expect(within(montageParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
   })
 
   it('applies destination project defaults when a clone changes project', async () => {

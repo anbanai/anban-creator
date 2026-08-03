@@ -117,6 +117,16 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
+async function openPlanParameters(dialog: HTMLElement) {
+  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  return waitFor(() => {
+    const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
+    expect(popover).toBeInTheDocument()
+    return popover!
+  })
+}
+
 describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -185,7 +195,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：性价比/ }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ }))
     expect(await screen.findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
@@ -230,7 +240,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
 
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：极致效果/ }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作设置：.*极致效果/ }))
     expect(await screen.findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
@@ -260,12 +270,12 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
+    const parametersControl = await within(composer!).findByRole('button', { name: /^创作设置：/ })
 
     const projectControl = await within(composer as HTMLElement).findByRole('combobox', { name: '项目：未选择' })
-    const executionControl = await within(composer as HTMLElement).findByRole('button', { name: /^执行配置：/ })
-    const imageControl = within(composer as HTMLElement).getByRole('button', { name: /^图像设置：/ })
-    expect(projectControl.compareDocumentPosition(executionControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(executionControl.compareDocumentPosition(imageControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(composer as HTMLElement).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
+    expect(within(composer as HTMLElement).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
 
     const scheduleLabel = within(dialog).getByText('排期设置', { selector: 'label' })
     expect(composer).not.toContainElement(scheduleLabel)
@@ -384,7 +394,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
-    await within(dialog).findByRole('button', { name: /^执行配置：性价比/ })
+    await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ })
     const createButton = within(dialog).getByRole('button', { name: '创建' })
     expect(createButton).toBeDisabled()
     fireEvent.click(createButton)
@@ -417,7 +427,10 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    const failedParameters = await openPlanParameters(dialog)
+    for (const button of within(within(failedParameters).getByRole('group', { name: '图片比例' })).getAllByRole('button')) {
+      expect(button).toBeDisabled()
+    }
     const createButton = within(dialog).getByRole('button', { name: '创建' })
     expect(createButton).toBeDisabled()
     fireEvent.click(createButton)
@@ -459,7 +472,7 @@ describe('PlansPage image capability contract', () => {
     expect(source).toContain('image_ratio: normalizeImageRatio(plan.image_ratio)')
     expect(source).toContain('image_ratio: values.image_ratio')
     expect(source).toContain('supported_image_ratios')
-    expect(source).toContain('<ImageGenerationToolbar')
+    expect(source).toContain('<TaskComposerParameters')
     expect(source).toContain('normalizeImageRatio(fullProject?.image_ratio)')
     expect(source).not.toContain('designer_features')
     expect(source).not.toContain('designerFeatures')
@@ -888,7 +901,8 @@ describe('PlansPage Montage input', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
-    expect(within(dialog).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+    const montageParameters = await openPlanParameters(dialog)
+    expect(within(montageParameters).queryByText('图片比例')).not.toBeInTheDocument()
 
     fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
       target: { value: '按项目平台创建' },
@@ -921,6 +935,10 @@ describe('PlansPage Montage input', () => {
       project_id: montageProject.id,
       type: 'montage',
     })))
+    const createCalls = vi.mocked(api.plans.create).mock.calls
+    const payload = createCalls[createCalls.length - 1]?.[0]
+    expect(payload).not.toHaveProperty('image_ratio')
+    expect(payload).not.toHaveProperty('image_capability_key')
     expect(api.imageCapabilities.list).not.toHaveBeenCalled()
   })
 

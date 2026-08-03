@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
+import { platformBgColor, platformIconColor } from '@/lib/PlatformIcon'
 import { platformLabels } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
@@ -48,7 +49,14 @@ export function ProjectIdentity({
             onError={() => setFailedAvatarUrl(project.avatar_url)}
           />
         ) : (
-          <AvatarFallback>{initial}</AvatarFallback>
+          <AvatarFallback
+            className={cn(
+              project.platform && platformBgColor[project.platform],
+              project.platform && platformIconColor[project.platform as keyof typeof platformIconColor],
+            )}
+          >
+            {initial}
+          </AvatarFallback>
         )}
       </Avatar>
       <span className={cn('flex min-w-0 flex-1', compact ? 'items-center' : 'flex-col gap-0.5')}>
@@ -58,12 +66,13 @@ export function ProjectIdentity({
             <Badge variant="secondary">{platformLabel}项目</Badge>
           ) : null}
         </span>
-        {!compact ? (
+        {!compact && project.description ? (
           <span
             data-slot="project-identity-description"
-            className="min-w-0 truncate text-xs text-muted-foreground"
+            title={project.description}
+            className="min-w-0 truncate text-xs leading-4 text-muted-foreground"
           >
-            {project.description || `${platformLabel}项目`}
+            {project.description}
           </span>
         ) : null}
       </span>

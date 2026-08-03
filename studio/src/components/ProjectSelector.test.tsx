@@ -78,7 +78,7 @@ describe('ProjectSelector', () => {
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
-    expect(option).toHaveTextContent('公众号项目')
+    expect(option).not.toHaveTextContent('公众号项目')
     expect(option.querySelector('img')).toHaveAttribute('src', 'https://example.com/morning.png')
   })
 

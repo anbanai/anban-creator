@@ -495,8 +495,8 @@ describe('task form mapping', () => {
       type,
       prompt: `${type} prompt`,
       quantity: 1,
-      image_ratio: '16:9',
-      image_capability_key: `${type}-model`,
+      image_ratio: type === 'montage' ? 'auto' : '16:9',
+      image_capability_key: type === 'montage' ? '' : `${type}-model`,
       skip_reference_image: false,
       execution_profile: 'effective',
       watermark: false,
@@ -565,6 +565,8 @@ describe('task form mapping', () => {
   it('serializes active Montage fields without mutating form values', () => {
     const values = cloneTaskFormDefaults(task({
       type: 'montage',
+      image_ratio: '16:9',
+      image_capability_key: 'retired-capability',
       watermark: false,
       goal_mode: false,
       has_content_image: false,
@@ -574,6 +576,8 @@ describe('task form mapping', () => {
       ecommerce: { selected_modules: { hero: 1 }, product_photos: ['oss://product.png'] },
       montage_input: { advanced: { render: { fps: 30 } } },
     }))
+    expect(values.image_ratio).toBe('auto')
+    expect(values.image_capability_key).toBe('')
     values.quantity = 3
 
     const request = taskFormValuesToRequest(values)
@@ -592,6 +596,8 @@ describe('task form mapping', () => {
     expect(request).not.toHaveProperty('product_photos')
     expect(request).not.toHaveProperty('has_content_image')
     expect(request).not.toHaveProperty('article_with_cover')
+    expect(request).not.toHaveProperty('image_ratio')
+    expect(request).not.toHaveProperty('image_capability_key')
   })
 
   it.each([
@@ -706,7 +712,7 @@ describe('task form mapping', () => {
           delivery_targets: ['douyin'],
         },
       },
-      omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'execution_target'],
+      omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'execution_target', 'image_ratio', 'image_capability_key'],
     },
   ])('$name', ({ values, expected, omitted }) => {
     const formValues: TaskFormDefaults = {
@@ -730,7 +736,8 @@ describe('task form mapping', () => {
       skip_reference_image: false,
       ...expected,
     })
-    expect(request.image_ratio).toBe('auto')
+    if (values.type === 'montage') expect(request).not.toHaveProperty('image_ratio')
+    else expect(request.image_ratio).toBe('auto')
     expect(request.image_capability_key).toBeUndefined()
     expect(request.reference_image).toBeUndefined()
     for (const key of omitted) expect(request).not.toHaveProperty(key)

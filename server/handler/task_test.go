@@ -1202,6 +1202,75 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	}
 }
 
+func TestCloneMontageTaskIgnoresLegacyUnavailableImageSettings(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "montageclone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformMontage, Name: "Montage", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
+		ExecutionProfile: "effective", Status: model.TaskStatusFailed,
+		ImageRatio: "16:9", ImageCapabilityKey: "retired-capability",
+	}
+	source.SetMontageInput(model.MontageInput{Brief: "历史短片", PipelineKey: "default"})
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{Capabilities: map[string]config.ImageGenerationRouteConfig{
+		"standard": {Enabled: true, MinTier: "free"},
+	}})
+	app := fiber.New()
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
+	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
+
+	exact := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"execution_profile":"effective"}`)
+	defer exact.Body.Close()
+	if exact.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(exact.Body)
+		t.Fatalf("exact clone status = %d, want 200 body=%s", exact.StatusCode, body)
+	}
+	bulk := postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+source.ID+`"],"execution_profile":"effective"}`)
+	defer bulk.Body.Close()
+	if bulk.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(bulk.Body)
+		t.Fatalf("bulk clone status = %d, want 200 body=%s", bulk.StatusCode, body)
+	}
+	var result struct {
+		Data bulkTasksResponse `json:"data"`
+	}
+	if err := json.NewDecoder(bulk.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Data.Succeeded != 1 {
+		t.Fatalf("bulk clone result = %#v, want one success", result.Data)
+	}
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("task count = %d, want source plus two clones", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.ID != source.ID && (task.ImageRatio != "" || task.ImageCapabilityKey != "") {
+			t.Fatalf("cloned Montage image settings = ratio %q, capability %q; want empty", task.ImageRatio, task.ImageCapabilityKey)
+		}
+	}
+}
+
 func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

@@ -50,8 +50,9 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
+    expect(screen.getByRole('dialog', { name: '创作设置' })).toBeInTheDocument()
     expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.textContent)).toEqual([
       '1:1 · 2K', '3:4 · 2K', '4:3 · 2K',
     ])
@@ -73,7 +74,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '3:4 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '高' }))
     fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WEBP' }))
@@ -100,7 +101,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
     expect(screen.getByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
@@ -118,7 +119,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
     expect(screen.getByRole('dialog')).toHaveClass('max-h-[var(--available-height)]', 'overflow-y-auto')
   })

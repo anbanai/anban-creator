@@ -68,6 +68,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
+		agentPacks: {
+			...actual.api.agentPacks,
+			list: vi.fn().mockResolvedValue({ packs: [] }),
+		},
     },
   }
 })
@@ -91,6 +95,7 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.update).mockReset()
     vi.mocked(api.projects.delete).mockReset()
+		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     uploadToOSSMock.mockResolvedValue({
       uploadSessionId: '11111111-1111-4111-8111-111111111111',
       uploadId: 'upload-project-reference',
@@ -114,6 +119,15 @@ describe('ProjectsPage deletion feedback', () => {
     expect(source).toContain('submittedImageCapability.price_available !== true')
     expect(source).toContain('submittedImageCapability.enabled !== true')
   })
+
+	it('keeps the project composer usable when the optional Agent Pack catalog is partial', async () => {
+		vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
+		window.history.pushState({}, '', '/projects?create=true&type=article&intent=new')
+
+		render(<ProjectsPage />)
+
+		expect(await screen.findByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
+	})
 
   it('shows the catalog default capability for a new ecommerce project', async () => {
     vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({

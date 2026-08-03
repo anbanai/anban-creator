@@ -120,7 +120,7 @@ describe('Designer provider contract', () => {
   it('uses the configured capability default size when generating', async () => {
     render(createElement(DesignerPage))
 
-    expect(await screen.findByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })).toBeInTheDocument()
     const prompt = await screen.findByPlaceholderText('描述你想要生成的图片...')
     fireEvent.change(prompt, {
       target: { value: '给下周奶做一张竖版海报' },
@@ -166,7 +166,7 @@ describe('Designer provider contract', () => {
 
     render(createElement(DesignerPage))
 
-    const imageSettings = await screen.findByRole('button', { name: '图像设置：标准图像 · 1:1 · 2K · PNG · 1 张' })
+    const imageSettings = await screen.findByRole('button', { name: '创作设置：标准图像 · 1:1 · 2K · PNG · 1 张' })
     fireEvent.click(imageSettings)
     expect(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '16:9 · 2K' })).toBeInTheDocument()
     expect(screen.queryByText('分辨率')).not.toBeInTheDocument()
@@ -183,7 +183,7 @@ describe('Designer provider contract', () => {
     })
     render(createElement(DesignerPage))
 
-    await screen.findByRole('button', { name: '图像设置：标准图像 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await screen.findByRole('button', { name: '创作设置：标准图像 · 1:1 · 2K · 自动 · PNG · 1 张' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), { target: { value: '生成海报' } })
     await waitFor(() => expect(screen.getByRole('button', { name: '生成' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '生成' }))

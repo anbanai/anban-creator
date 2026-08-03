@@ -9,11 +9,9 @@ import { toast } from 'sonner'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
-import { ComposerQuantityControl } from '@/components/agent-prompt/ComposerQuantityControl'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { Button } from '@/components/common/button'
-import { ImageGenerationToolbar } from '@/components/ImageGenerationToolbar'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -38,7 +36,7 @@ import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
-import { ExecutionProfileToolbar } from './ExecutionProfileToolbar'
+import { TaskComposerParameters } from './TaskComposerParameters'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 
@@ -408,16 +406,36 @@ export function TaskFormDialog({
     />
   )
 
-  const executionProfileControl = (
-    <ExecutionProfileToolbar
-      profiles={executionProfilesQuery.data ?? []}
-      value={watchedExecutionProfile}
-      onChange={(value) => setFormValue('execution_profile', value)}
-      loading={executionProfilesQuery.isLoading}
-      disabled={isSubmitting || executionProfilesQuery.isError}
-      catalog={billingCatalog}
-      taskType={watchedType}
-      priceUnit="task"
+  const taskParametersControl = (
+    <TaskComposerParameters
+      execution={{
+        profiles: executionProfilesQuery.data ?? [],
+        value: watchedExecutionProfile,
+        onChange: (value) => setFormValue('execution_profile', value),
+        loading: executionProfilesQuery.isLoading,
+        disabled: executionProfilesQuery.isError,
+        catalog: billingCatalog,
+        taskType: watchedType,
+        priceUnit: 'task',
+      }}
+      image={usesImageSettings ? {
+        ratios: businessImageRatios,
+        ratio: watchedImageRatio || 'auto',
+        onRatioChange: (value) => setFormValue('image_ratio', value),
+        capabilities: imageCapabilityOptionsForValue,
+        capabilityKey: effectiveImageCapabilityKey,
+        onCapabilityChange: (value) => setFormValue('image_capability_key', value),
+        loading: imageCapabilitiesLoading,
+        disabled: imageCapabilitiesError,
+      } : undefined}
+      quantity={{
+        label: '任务数量',
+        value: quantity,
+        min: 1,
+        max: taskQuantityMax,
+        onChange: (value) => setFormValue('quantity', value),
+      }}
+      disabled={isSubmitting}
     />
   )
 
@@ -432,7 +450,7 @@ export function TaskFormDialog({
       />
       <div className="flex min-w-0 flex-wrap items-center gap-1">
         {projectControl}
-        {executionProfileControl}
+        {taskParametersControl}
       </div>
     </div>
   ) : (
@@ -455,27 +473,7 @@ export function TaskFormDialog({
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
-          {executionProfileControl}
-          {usesImageSettings ? (
-            <ImageGenerationToolbar
-              ratios={businessImageRatios}
-              ratio={watchedImageRatio || 'auto'}
-              onRatioChange={(value) => setFormValue('image_ratio', value)}
-              capabilities={imageCapabilityOptionsForValue}
-              capabilityKey={effectiveImageCapabilityKey}
-              onCapabilityChange={(value) => setFormValue('image_capability_key', value)}
-              loading={imageCapabilitiesLoading}
-              disabled={isSubmitting || imageCapabilitiesError}
-            />
-          ) : null}
-          <ComposerQuantityControl
-            label="任务数量"
-            value={quantity}
-            min={1}
-            max={taskQuantityMax}
-            onChange={(value) => setFormValue('quantity', value)}
-            disabled={isSubmitting}
-          />
+          {taskParametersControl}
         </div>
       )}
     />

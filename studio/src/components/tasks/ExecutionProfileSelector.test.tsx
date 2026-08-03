@@ -28,6 +28,10 @@ describe('ExecutionProfileSelector', () => {
     expect(screen.getByText('需要企业版')).toBeInTheDocument()
     expect(screen.queryByText('requires_enterprise')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /极致效果/ })).toBeDisabled()
+    expect(screen.getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-1')
+    expect(screen.getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('sm:grid-cols-3')
+    expect(screen.getByRole('button', { name: /^性价比，/ })).toHaveClass('min-h-16')
+    expect(screen.getByRole('button', { name: /^性价比，/ })).not.toHaveClass('min-h-24')
   })
 
   it('reports an available profile selection without clearing the current value', () => {

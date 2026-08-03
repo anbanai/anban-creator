@@ -37,16 +37,24 @@ describe('ProjectContextControl', () => {
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
-    expect(trigger).toHaveTextContent('公众号项目')
+    expect(trigger).not.toHaveTextContent('公众号项目')
     expect(trigger.querySelector('img')).toHaveAttribute('src', 'https://example.com/morning.png')
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
-    expect(await screen.findByText('公众号')).toBeInTheDocument()
+    const popup = screen.getByPlaceholderText('搜索项目...').closest('[data-slot="combobox-content"]')
+    expect(popup).toHaveClass('w-[min(36rem,calc(100vw-2rem))]')
+    expect(popup?.querySelector('[data-slot="combobox-list"]')).toHaveClass('sm:grid-cols-2')
+    const articleGroup = (await screen.findByText('公众号')).closest('[data-platform]')
+    expect(articleGroup).toHaveAttribute('data-platform', 'article')
+    expect(articleGroup?.closest('[data-slot="combobox-label"]')).toHaveClass('py-0.5')
+    expect(articleGroup?.closest('[data-slot="combobox-label"]')).not.toHaveTextContent('1 个')
     expect(screen.getByText('种草笔记')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveTextContent('Daily editorial briefing')
-    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveTextContent('公众号项目')
-    expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
+    const selectedOption = screen.getByRole('option', { name: /Morning Brief/ })
+    expect(selectedOption).toHaveTextContent('Daily editorial briefing')
+    expect(selectedOption).not.toHaveTextContent('公众号项目')
+    expect(selectedOption).toHaveAttribute('aria-selected', 'true')
+    expect(selectedOption).toHaveClass('min-h-10')
 
     const search = screen.getByPlaceholderText('搜索项目...')
     fireEvent.change(search, { target: { value: 'Seasonal planting' } })
@@ -135,7 +143,7 @@ describe('ProjectContextControl', () => {
     )
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
-    expect(screen.getByText('公众号项目')).toBeInTheDocument()
+    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Morning Brief' })).toHaveAttribute(
       'src',
       'https://example.com/morning.png',
@@ -158,7 +166,7 @@ describe('ProjectContextControl', () => {
     )
 
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
-    expect(screen.getByText('公众号项目')).toBeInTheDocument()
+    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
       'data-compact',
@@ -180,7 +188,7 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
-    expect(trigger).toHaveTextContent('公众号项目')
+    expect(trigger).not.toHaveTextContent('公众号项目')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
       'data-compact',
@@ -190,7 +198,7 @@ describe('ProjectContextControl', () => {
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
-    expect(option).toHaveTextContent('公众号项目')
+    expect(option).not.toHaveTextContent('公众号项目')
   })
 
   it('renders nothing in hidden mode', () => {

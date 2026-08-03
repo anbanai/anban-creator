@@ -27,22 +27,18 @@ describe('ProjectIdentity', () => {
     expect(screen.getByText('公众号项目')).toBeInTheDocument()
   })
 
-  it('uses the project initial and deterministic localized fallback without optional metadata', () => {
+  it('uses the project initial without inventing a repeated type description', () => {
     const { rerender } = render(
       <ProjectIdentity
         project={{ id: 'seednote-1', name: '  Garden Notes  ', platform: 'seednote' }}
       />,
     )
 
-    expect(screen.getByText('G')).toBeInTheDocument()
+    expect(screen.getByText('G')).toHaveClass('bg-[#FF2442]/10', 'text-[#FF2442]')
     expect(
       screen.getByText('种草笔记项目', { selector: '[data-slot="badge"]' }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText('种草笔记项目', {
-        selector: '[data-slot="project-identity-description"]',
-      }),
-    ).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="project-identity-description"]')).not.toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
 
     rerender(

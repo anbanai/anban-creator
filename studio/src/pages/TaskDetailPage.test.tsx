@@ -1188,8 +1188,9 @@ describe('TaskDetailPage', () => {
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
     expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始任务要求')
     expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '任务数量：1' })).toBeInTheDocument()
-    expect(await within(dialog).findByRole('button', { name: '图像设置：16:9 · 源图像' })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', {
+      name: /^创作设置：.*16:9 源图像.*任务数量 1/,
+    })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))

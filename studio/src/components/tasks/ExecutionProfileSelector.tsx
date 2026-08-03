@@ -47,8 +47,8 @@ export function ExecutionProfileSelector({
 }: ExecutionProfileSelectorProps) {
   if (loading) {
     return (
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" aria-label="正在加载执行配置">
-        {[0, 1, 2].map((index) => <Skeleton key={index} className="h-24 w-full" />)}
+      <div className="grid grid-cols-1 gap-2" aria-label="正在加载执行配置">
+        {[0, 1, 2].map((index) => <Skeleton key={index} className="h-16 w-full" />)}
       </div>
     )
   }
@@ -56,7 +56,7 @@ export function ExecutionProfileSelector({
   return (
     <ToggleGroup
       aria-label="Agent 执行配置"
-      className="grid w-full grid-cols-1 items-stretch gap-2 sm:grid-cols-3"
+      className="grid w-full grid-cols-1 items-stretch gap-2"
       value={value ? [value] : []}
       onValueChange={(next) => {
         const selected = next[0] as AgentExecutionProfileID | undefined
@@ -74,7 +74,7 @@ export function ExecutionProfileSelector({
             value={profile.id}
             disabled={!profile.available}
             aria-label={`${profile.display_name}，${minimumTierLabel[profile.min_tier]}${profile.available ? '' : `，不可用：${reason}`}`}
-            className="h-auto min-h-24 w-full min-w-0 flex-col items-start justify-start gap-1 whitespace-normal px-3 py-2 text-left"
+            className="h-auto min-h-16 w-full min-w-0 flex-col items-start justify-center gap-1 whitespace-normal px-3 py-2 text-left"
           >
             <span className="flex w-full items-center justify-between gap-2">
               <span className="font-medium">{profile.display_name}</span>
@@ -83,10 +83,16 @@ export function ExecutionProfileSelector({
                 {!profile.available ? <Badge variant="secondary">不可用</Badge> : null}
               </span>
             </span>
-            <span className="text-xs text-muted-foreground">
-              {profile.available ? profile.description : reason}
+            <span className="flex w-full min-w-0 items-center justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate text-muted-foreground">
+                {profile.available ? profile.description : reason}
+              </span>
+              {pricing ? (
+                <span className="shrink-0 font-medium text-foreground">
+                  {pricing.price === undefined ? '价格暂不可用' : `${pricing.price.toLocaleString()} 积分 · ${pricing.multiplier === undefined ? '倍率暂不可用' : `${pricing.multiplier.toFixed(2).replace(/\.00$/, '')}x`}`}
+                </span>
+              ) : null}
             </span>
-            {pricing ? <span className="text-xs font-medium text-foreground">{pricing.price === undefined ? '价格暂不可用' : `${pricing.price.toLocaleString()} 积分 · ${pricing.multiplier === undefined ? '倍率暂不可用' : `${pricing.multiplier.toFixed(2).replace(/\.00$/, '')}x`}`}</span> : null}
           </ToggleGroupItem>
         )
       })}

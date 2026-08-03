@@ -347,9 +347,11 @@ func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  "0 10 * * *",
+		UserID:             userID,
+		ProjectID:          projectID,
+		CronExpr:           "0 10 * * *",
+		ImageRatio:         "16:9",
+		ImageCapabilityKey: "retired-capability",
 		MontageInput: &model.MontageInput{
 			Brief:       "每日生成新品短片",
 			PipelineKey: "default",
@@ -364,6 +366,9 @@ func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	}
 	if plan.Type != model.PlatformMontage {
 		t.Fatalf("plan type = %q, want montage", plan.Type)
+	}
+	if plan.ImageRatio != "" || plan.ImageCapabilityKey != "" {
+		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want empty", plan.ImageRatio, plan.ImageCapabilityKey)
 	}
 	got := plan.MontageInput.Data()
 	if got.Brief != "每日生成新品短片" || got.PipelineKey != "default" {
@@ -392,9 +397,18 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create montage plan: %v", err)
 	}
+	plan.ImageRatio = "16:9"
+	plan.ImageCapabilityKey = "retired-capability"
+	if err := repo.Plans().UpdateEditable(ctx, plan, false); err != nil {
+		t.Fatalf("seed legacy Montage image settings: %v", err)
+	}
+	nextRatio := "auto"
+	nextCapability := "professional"
 
 	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "effective",
-		ID: plan.ID,
+		ID:                 plan.ID,
+		ImageRatio:         &nextRatio,
+		ImageCapabilityKey: &nextCapability,
 		MontageInput: &model.MontageInput{
 			Brief:       "更新后的短片",
 			PipelineKey: "social-short",
@@ -406,6 +420,16 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Update montage plan: %v", err)
+	}
+	if updated.ImageRatio != "" || updated.ImageCapabilityKey != "" {
+		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want empty", updated.ImageRatio, updated.ImageCapabilityKey)
+	}
+	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if persisted.ImageRatio != "" || persisted.ImageCapabilityKey != "" {
+		t.Fatalf("persisted Montage plan image settings = ratio %q, capability %q; want empty", persisted.ImageRatio, persisted.ImageCapabilityKey)
 	}
 	got := updated.MontageInput.Data()
 	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {

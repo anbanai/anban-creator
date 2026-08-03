@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ImageGenerationToolbar } from './ImageGenerationToolbar'
+import { ImageGenerationSettings } from './ImageGenerationToolbar'
 
 const capabilities = [
   {
@@ -14,10 +14,10 @@ const capabilities = [
   },
 ]
 
-describe('ImageGenerationToolbar', () => {
-  it('shows a compact summary and only the current business ratios', () => {
+describe('ImageGenerationSettings', () => {
+  it('shows only the current business ratios and capability details', () => {
     render(
-      <ImageGenerationToolbar
+      <ImageGenerationSettings
         ratios={['3:4', '1:1', '4:3']}
         ratio="3:4"
         onRatioChange={vi.fn()}
@@ -27,7 +27,6 @@ describe('ImageGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：3:4 · 专业增强' }))
     expect(screen.getByText('智能适配')).toBeInTheDocument()
     expect(screen.getByText('3:4')).toBeInTheDocument()
     expect(screen.getByText('1:1')).toBeInTheDocument()
@@ -41,7 +40,7 @@ describe('ImageGenerationToolbar', () => {
     const onRatioChange = vi.fn()
     const onCapabilityChange = vi.fn()
     render(
-      <ImageGenerationToolbar
+      <ImageGenerationSettings
         ratios={['16:9', '4:3', '1:1']}
         ratio="16:9"
         onRatioChange={onRatioChange}
@@ -51,7 +50,6 @@ describe('ImageGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：16:9 · 标准图像' }))
     fireEvent.click(screen.getByText('智能适配'))
     fireEvent.click(screen.getByText('专业增强'))
     expect(onRatioChange).toHaveBeenCalledWith('auto')

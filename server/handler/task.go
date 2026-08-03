@@ -485,6 +485,10 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		return nil, Error(c, fiber.StatusBadRequest, "type must match project platform")
 	}
 	projectSnapshot := model.SnapshotProject(project)
+	if model.IsMontagePlatform(project.Platform) {
+		req.ImageRatio = ""
+		req.ImageCapabilityKey = ""
+	}
 
 	var referenceAssetID string
 	var referenceView *model.AssetView
@@ -1023,8 +1027,10 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 
 	// Exact clones continue to use the source's frozen configuration. Re-check
 	// its image-model entitlement because the user's tier may have changed.
-	if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
-		return Error(c, fiber.StatusForbidden, err.Error())
+	if !model.IsMontagePlatform(task.Type) {
+		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
+			return Error(c, fiber.StatusForbidden, err.Error())
+		}
 	}
 	params := service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile}
 	if req.Prompt != nil {
@@ -1387,9 +1393,11 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			continue
 		}
 		// Re-validate the image capability against the caller's current tier.
-		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
-			results = append(results, bulkTaskResult{ID: id, Reason: "image_capability_unavailable"})
-			continue
+		if !model.IsMontagePlatform(task.Type) {
+			if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
+				results = append(results, bulkTaskResult{ID: id, Reason: "image_capability_unavailable"})
+				continue
+			}
 		}
 		if _, err := h.presentCloneTaskReference(c.Context(), userID, task); err != nil {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})

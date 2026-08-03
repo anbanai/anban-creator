@@ -257,6 +257,35 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
+async function getParametersTrigger(container: HTMLElement = document.body) {
+  return within(container).findByRole('button', { name: /^创作设置：/ })
+}
+
+async function openParameters(container: HTMLElement = document.body) {
+  const trigger = await getParametersTrigger(container)
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  return waitFor(() => {
+    const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
+    expect(popover).toBeInTheDocument()
+    return popover!
+  })
+}
+
+async function closeParameters() {
+  const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
+  if (!popover) return
+  fireEvent.keyDown(popover, { key: 'Escape' })
+  await waitFor(() => expect(document.querySelector('[data-slot="popover-content"][data-open]')).not.toBeInTheDocument())
+}
+
+async function expectParameterSummary(...parts: string[]) {
+  const trigger = await getParametersTrigger()
+  await waitFor(() => {
+    for (const part of parts) expect(trigger).toHaveAccessibleName(expect.stringContaining(part))
+  })
+  return trigger
+}
+
 describe('DashboardPage AI entry', () => {
   beforeEach(() => {
     navigateMock.mockClear()
@@ -294,36 +323,23 @@ describe('DashboardPage AI entry', () => {
 
     const composer = document.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
+    const parametersControl = await getParametersTrigger(composer!)
     const projectControl = await within(composer!).findByRole('combobox', { name: '项目：公众号项目' })
-    const executionControl = await within(composer!).findByRole('button', { name: /^执行配置：/ })
-    const imageControl = await within(composer!).findByRole('button', { name: /^图像设置：/ })
-    const quantityControl = within(composer!).getByRole('button', { name: '任务数量：1' })
-
-    for (const [left, right] of [
-      [projectControl, executionControl],
-      [executionControl, imageControl],
-      [imageControl, quantityControl],
-    ]) {
-      expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    }
-    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(composer!).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
+    expect(within(composer!).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+    expect(within(composer!).queryByRole('button', { name: '任务数量：1' })).not.toBeInTheDocument()
     expect(projectControl.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
     expect(screen.queryByText('执行配置')).not.toBeInTheDocument()
     expect(screen.queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
 
-    fireEvent.click(executionControl)
-    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，Pro 版及以上/ }))
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    fireEvent.click(quantityControl)
-    fireEvent.click(await screen.findByRole('button', { name: '增加任务数量' }))
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    fireEvent.click(screen.getByRole('button', { name: /^图像设置：/ }))
-    fireEvent.click(await screen.findByText('3:4'))
-    fireEvent.click(screen.getByText('Professional'))
-    fireEvent.keyDown(document, { key: 'Escape' })
+    const parameters = await openParameters(composer!)
+    fireEvent.click(within(parameters).getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
+    fireEvent.click(within(parameters).getByRole('button', { name: '增加任务数量' }))
+    fireEvent.click(within(parameters).getByRole('button', { name: '3:4' }))
+    fireEvent.click(within(parameters).getByText('Professional'))
+    await closeParameters()
 
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
@@ -348,8 +364,10 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('combobox', { name: '项目：短片项目' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
-    expect(screen.getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    const parameters = await openParameters()
+    expect(within(parameters).queryByText('图片比例')).not.toBeInTheDocument()
+    expect(within(parameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    await closeParameters()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '做一条新品发布短片' },
     })
@@ -402,11 +420,11 @@ describe('DashboardPage AI entry', () => {
 
     await waitFor(() => expect(projectControl).toBeEnabled())
     expect(projectControl).toHaveTextContent('公众号项目')
-    expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+    await expectParameterSummary('16:9', 'Standard')
 
     fireEvent.click(projectControl)
     fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
-    expect(screen.getByRole('button', { name: '图像设置：3:4 · Standard' })).toBeInTheDocument()
+    await expectParameterSummary('3:4', 'Standard')
     fireEvent.click(submit)
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
@@ -438,7 +456,7 @@ describe('DashboardPage AI entry', () => {
     await waitFor(() => expect(api.projects.platformConfigs).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(projectControl).toBeEnabled())
     expect(projectControl).toHaveTextContent('公众号项目')
-    expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
+    await expectParameterSummary('16:9', 'Standard')
   })
 
   it('waits for API-key readiness before enabling submission', async () => {
@@ -448,8 +466,7 @@ describe('DashboardPage AI entry', () => {
     }))
     render(<DashboardPage />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /^执行配置：/ })).toBeEnabled())
-    await waitFor(() => expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeEnabled())
+    await waitFor(async () => expect(await getParametersTrigger()).toBeEnabled())
     const submit = screen.getByRole('button', { name: '发送创建任务' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '等待 API Key 状态' },
@@ -500,14 +517,12 @@ describe('DashboardPage AI entry', () => {
 
       expect(await screen.findByText('加载失败')).toBeInTheDocument()
       const submit = screen.getByRole('button', { name: '发送创建任务' })
-      const affectedControl = failedQuery === 'image-capabilities'
-        ? screen.getByRole('button', { name: /^图像设置：/ })
-        : screen.getByRole('button', { name: /^执行配置：/ })
+      const affectedControl = await getParametersTrigger()
       fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
         target: { value: '恢复后创建任务' },
       })
 
-      expect(affectedControl).toBeDisabled()
+      expect(affectedControl).toBeEnabled()
       expect(submit).toBeDisabled()
       expect(api.aiEntry.submit).not.toHaveBeenCalled()
 
@@ -546,14 +561,14 @@ describe('DashboardPage AI entry', () => {
 
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(api.billing.catalog).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    expect(await getParametersTrigger()).toBeEnabled()
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
     expect(screen.getByText('加载失败')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(3))
-    await waitFor(() => expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeEnabled())
+    await waitFor(async () => expect(await getParametersTrigger()).toBeEnabled())
     await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
   })
 
@@ -603,9 +618,9 @@ describe('DashboardPage AI entry', () => {
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
     expect(await screen.findByText(file.name)).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' }))
-    fireEvent.click(await screen.findByText('Professional'))
-    fireEvent.keyDown(document, { key: 'Escape' })
+    const parameters = await openParameters()
+    fireEvent.click(within(parameters).getByText('Professional'))
+    await closeParameters()
     fireEvent.change(prompt, { target: { value: '保留这段 Prompt 和附件' } })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
@@ -614,11 +629,11 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByText(file.name)).toBeInTheDocument()
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '图像设置：16:9 · 图像能力' })).toBeInTheDocument()
+    await expectParameterSummary('16:9')
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：16:9 · 图像能力' }))
-    fireEvent.click(await screen.findByText('Standard'))
-    fireEvent.keyDown(document, { key: 'Escape' })
+    const recoveredParameters = await openParameters()
+    fireEvent.click(within(recoveredParameters).getByText('Standard'))
+    await closeParameters()
 
     await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
     expect(api.aiEntry.submit).toHaveBeenCalledTimes(1)
@@ -633,16 +648,16 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    fireEvent.click(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' }))
-    fireEvent.click(await screen.findByText('Professional'))
-    fireEvent.keyDown(document, { key: 'Escape' })
+    const retryParameters = await openParameters()
+    fireEvent.click(within(retryParameters).getByText('Professional'))
+    await closeParameters()
     fireEvent.change(prompt, { target: { value: '服务恢复后直接重试' } })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     expect(await screen.findByText(message)).toBeInTheDocument()
     expect(screen.queryByText(/请重新选择图片能力/)).not.toBeInTheDocument()
     expect(prompt).toHaveValue('服务恢复后直接重试')
-    expect(screen.getByRole('button', { name: '图像设置：16:9 · Professional' })).toBeInTheDocument()
+    await expectParameterSummary('16:9', 'Professional')
     expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled()
   })
@@ -675,8 +690,9 @@ describe('DashboardPage AI entry', () => {
     })
     render(<DashboardPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /^执行配置：/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，Pro 版及以上/ }))
+    const executionParameters = await openParameters()
+    fireEvent.click(within(executionParameters).getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
+    await closeParameters()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })
@@ -792,32 +808,28 @@ describe('DashboardPage AI entry', () => {
       fireEvent.click(await screen.findByRole('option', { name }))
     }
 
-    expect(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：16:9 · Standard' }))
-    fireEvent.click(await screen.findByText('Professional'))
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    fireEvent.click(screen.getByRole('button', { name: '任务数量：1' }))
-    const increment = await screen.findByRole('button', { name: '增加任务数量' })
+    await expectParameterSummary('16:9', 'Standard')
+    const quantityParameters = await openParameters()
+    fireEvent.click(within(quantityParameters).getByText('Professional'))
+    const increment = within(quantityParameters).getByRole('button', { name: '增加任务数量' })
     fireEvent.click(increment)
     fireEvent.click(increment)
     fireEvent.click(increment)
     fireEvent.click(increment)
     expect(increment).toBeDisabled()
-    fireEvent.keyDown(document, { key: 'Escape' })
+    await closeParameters()
 
     await selectProject(/种草项目/)
-    expect(await screen.findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '图像设置：3:4 · Professional' })).toBeInTheDocument()
+    await expectParameterSummary('任务数量 5', '3:4', 'Professional')
 
     await selectProject(/朋友圈项目/)
-    expect(await screen.findByRole('button', { name: '任务数量：5' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '图像设置：1:1 · Professional' })).toBeInTheDocument()
+    await expectParameterSummary('任务数量 5', '1:1', 'Professional')
 
     await selectProject(/电商项目/)
-    expect(await screen.findByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
-    expect(screen.queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '图像设置：4:3 · Professional' })).toBeInTheDocument()
+    await expectParameterSummary('任务数量 1', '4:3', 'Professional')
+    const ecommerceParameters = await openParameters()
+    expect(within(ecommerceParameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    expect(within(ecommerceParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
   })
 
   it('routes multiple created tasks to the task list and shows the server message', async () => {
