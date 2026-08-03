@@ -4,10 +4,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardPage from './DashboardPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
+import type { APIKey } from '@/types'
 
 const navigateMock = vi.fn()
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 const toastSuccessMock = vi.hoisted(() => vi.fn())
+
+const apiKey: APIKey = {
+  id: 'key-1',
+  user_id: 'user-1',
+  name: '测试密钥',
+  key_prefix: 'anban_test',
+  last_used_at: null,
+  created_at: '2026-08-03T00:00:00Z',
+}
 
 const {
   articleProject,
@@ -251,6 +261,7 @@ describe('DashboardPage AI entry', () => {
       ...imageCapabilities,
       items: [...imageCapabilities.items],
     })
+    vi.mocked(api.apiKeys.list).mockReset().mockResolvedValue({ items: [{ ...apiKey }] })
     uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
       uploadId: `upload-${file.name}`,
       key: `uploads/pending/user/${file.name}`,
@@ -386,6 +397,51 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByRole('button', { name: '图像设置：16:9 · Standard' })).toBeInTheDocument()
   })
 
+  it('waits for API-key readiness before enabling submission', async () => {
+    let resolveApiKeys!: (value: { items: APIKey[] }) => void
+    vi.mocked(api.apiKeys.list).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveApiKeys = resolve
+    }))
+    render(<DashboardPage />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^执行配置：/ })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^图像设置：/ })).toBeEnabled())
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '等待 API Key 状态' },
+    })
+
+    expect(submit).toBeDisabled()
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveApiKeys({ items: [{ ...apiKey }] })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(submit).toBeEnabled())
+  })
+
+  it('blocks and retries when API-key readiness fails to load', async () => {
+    vi.mocked(api.apiKeys.list).mockRejectedValueOnce(new Error('API keys unavailable'))
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('加载失败')).toBeInTheDocument()
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '恢复 API Key 后创建' },
+    })
+
+    expect(submit).toBeDisabled()
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.apiKeys.list).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(submit).toBeEnabled())
+    expect(screen.queryByText('加载失败')).not.toBeInTheDocument()
+  })
+
   it.each(['image-capabilities', 'execution-profiles', 'billing-catalog'] as const)(
     'recovers all required composer queries after %s initially fails',
     async (failedQuery) => {
@@ -457,11 +513,46 @@ describe('DashboardPage AI entry', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
   })
 
-  it('retains composer input and requires reselection after an image capability rejection', async () => {
+  it('blocks cached projects after their recovery refetch fails', async () => {
+    vi.mocked(api.projects.list)
+      .mockReset()
+      .mockResolvedValueOnce([{ ...articleProject }])
+      .mockRejectedValueOnce(new Error('cached projects are stale'))
+      .mockResolvedValue([{ ...articleProject }])
+    vi.mocked(api.billing.catalog)
+      .mockReset()
+      .mockRejectedValueOnce(new Error('billing catalog unavailable'))
+      .mockResolvedValue({ ...billingCatalog, skus: [...billingCatalog.skus] })
+    render(<DashboardPage />)
+
+    expect(await screen.findByText('加载失败')).toBeInTheDocument()
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '项目缓存失效时不可提交' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.billing.catalog).toHaveBeenCalledTimes(2))
+    expect(submit).toBeDisabled()
+    expect(screen.getByText('加载失败')).toBeInTheDocument()
+    expect(api.aiEntry.submit).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(submit).toBeEnabled())
+  })
+
+  it.each([
+    '创建任务失败：image capability "professional" requires enterprise tier',
+    '创建任务失败：unknown image capability key "professional"',
+    '创建任务失败：图片能力 “professional” 未授权。',
+  ])('retains composer input and requires reselection after an image capability rejection: %s', async (message) => {
     const file = new File(['reference'], 'keep-reference.png', { type: 'image/png' })
     vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
       status: 'error',
-      message: '创建任务失败：image capability "professional" requires enterprise tier',
+      message,
     })
     render(<DashboardPage />)
 
@@ -487,6 +578,29 @@ describe('DashboardPage AI entry', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
     expect(api.aiEntry.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    '创建任务失败：图片能力服务暂不可用。',
+    '创建任务失败：image capability provider is disabled',
+    '创建任务失败：image capability runtime is unauthorized',
+  ])('keeps the selected capability retryable for an operational failure: %s', async (message) => {
+    vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({ status: 'error', message })
+    render(<DashboardPage />)
+
+    const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
+    fireEvent.click(await screen.findByRole('button', { name: '图像设置：16:9 · Standard' }))
+    fireEvent.click(await screen.findByText('Professional'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.change(prompt, { target: { value: '服务恢复后直接重试' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(screen.queryByText(/请重新选择图片能力/)).not.toBeInTheDocument()
+    expect(prompt).toHaveValue('服务恢复后直接重试')
+    expect(screen.getByRole('button', { name: '图像设置：16:9 · Professional' })).toBeInTheDocument()
+    expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled()
   })
 
   it('does not force image capability reselection for unrelated AI Entry errors', async () => {

@@ -29,7 +29,16 @@ interface EntryError {
   actionUrl?: string
 }
 
-const IMAGE_CAPABILITY_REJECTION_PATTERN = /(image capability|图片能力|图像能力)/i
+const IMAGE_CAPABILITY_RESELECTION_PATTERNS = [
+  /\bunknown image capability key\b/i,
+  /\bimage capability\s+(?!(?:service|provider|runtime)\b)(?:"[^"]+"|'[^']+'|[a-z0-9._-]+)\s+(?:is\s+)?(?:unknown|disabled|unauthori[sz]ed|not\s+authorized)\b/i,
+  /\bimage capability\s+(?!(?:service|provider|runtime)\b)(?:"[^"]+"|'[^']+'|[a-z0-9._-]+)\s+requires?\s+.+\s+tier\b/i,
+  /(?:图片|图像)能力\s*(?!(?:service|provider|runtime)\b)(?:["'“][^"'”]+["'”]|[「『][^」』]+[」』]|[a-z0-9._-]+)\s*(?:不存在|已禁用|被禁用|未授权|无权限|需要.{0,20}(?:等级|套餐|层级))/i,
+]
+
+function requiresImageCapabilityReselection(message: string) {
+  return IMAGE_CAPABILITY_RESELECTION_PATTERNS.some((pattern) => pattern.test(message))
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -57,7 +66,12 @@ export default function DashboardPage() {
     staleTime: 60_000,
   })
 
-  const { data: apiKeysResponse } = useQuery({
+  const {
+    data: apiKeysResponse,
+    isLoading: apiKeysLoading,
+    isError: apiKeysError,
+    refetch: refetchApiKeys,
+  } = useQuery({
     queryKey: queryKeys.apiKeys.all,
     queryFn: () => api.apiKeys.list(),
     staleTime: 60_000,
@@ -119,7 +133,8 @@ export default function DashboardPage() {
     && selectedExecutionProfile?.available
     && executionProfilePrice !== undefined,
   )
-  const requiredComposerQueryError = imageCapabilitiesError
+  const requiredComposerQueryError = apiKeysError
+    || imageCapabilitiesError
     || profilesQuery.isError
     || billingCatalogQuery.isError
 
@@ -170,7 +185,7 @@ export default function DashboardPage() {
         return
       }
       const message = result.message || 'AI 入口暂不可用，请稍后重试。'
-      if (result.status === 'error' && IMAGE_CAPABILITY_REJECTION_PATTERN.test(message)) {
+      if (result.status === 'error' && requiresImageCapabilityReselection(message)) {
         setImageCapabilityReselectionRequired(true)
         setImageCapabilityKey('')
         setEntryError({ message: `${message} 请重新选择图片能力。` })
@@ -195,6 +210,8 @@ export default function DashboardPage() {
   const canSubmit = Boolean(selectedProjectId && selectedProject)
     && executionProfileReady
     && Boolean(effectiveImageCapabilityKey)
+    && !projectsError
+    && !apiKeysLoading
     && !platformConfigsQuery.isLoading
     && !platformConfigsQuery.isError
     && !requiredComposerQueryError
@@ -364,6 +381,7 @@ export default function DashboardPage() {
       {hasError ? (
         <QueryErrorState onRetry={() => {
           void refetchProjects()
+          void refetchApiKeys()
           void platformConfigsQuery.refetch()
           void queryClient.refetchQueries({ queryKey: queryKeys.imageCapabilities.all, exact: true })
           void profilesQuery.refetch()
