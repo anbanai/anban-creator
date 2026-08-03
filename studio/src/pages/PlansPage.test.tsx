@@ -819,6 +819,30 @@ describe('PlansPage Montage input', () => {
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
   })
 
+  it('uses the preselected project platform when the URL type conflicts', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+    expect(within(dialog).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '按项目平台创建' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: montageProject.id,
+      type: 'montage',
+      montage_input: expect.objectContaining({
+        brief: '按项目平台创建',
+        pipeline_key: 'project-pipeline',
+      }),
+    })))
+  })
+
   it('inherits project defaults and creates a plan with complete Montage input', async () => {
     window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
     render(<PlansPage />)

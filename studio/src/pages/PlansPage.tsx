@@ -358,6 +358,9 @@ export default function PlansPage() {
       ? createIntent.type
       : 'seednote'
     const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
+    const initialType: PlanType = selectedIntentProject
+      ? selectedIntentProject.platform as PlanType
+      : requestedType
     setEditingPlan(null)
     scheduleManuallyChangedRef.current = false
     setRecommendationUnavailable(false)
@@ -370,7 +373,7 @@ export default function PlansPage() {
     form.reset({
       project_id: createIntent.projectId ?? '',
       execution_profile: '',
-      type: requestedType,
+      type: initialType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_capability_key: '',
@@ -382,7 +385,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      montage_input: requestedType === 'montage'
+      montage_input: initialType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
         : undefined,
     })
