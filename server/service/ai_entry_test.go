@@ -151,6 +151,62 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 }
 
+func TestAIEntryServiceSubmitCreatesMontageTaskWithoutImageCapability(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	taskSvc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.SetMontageDefaults(model.MontageDefaults{
+		DefaultPipeline: "social-short",
+		Preferences: model.MontagePreferences{
+			AspectRatio:     "16:9",
+			DurationSeconds: 45,
+		},
+		DeliveryTargets: []string{"final_video"},
+	})
+	project.MontageDefaultsSet = true
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"做一条新品发布短片"}`}}, nil, AIEntryModelConfig{}, &logger)
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:             userID,
+		ProjectID:          projectID,
+		ExecutionProfile:   "effective",
+		Text:               "做一条新品发布短片",
+		Quantity:           5,
+		ImageRatio:         "invalid-for-montage",
+		ImageCapabilityKey: "unavailable-capability",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
+		t.Fatalf("result = %#v, want one created Montage task", result)
+	}
+	task := result.Tasks[0]
+	if task.Type != model.PlatformMontage || task.ImageCapabilityKey != "" || task.ImageRatio != "" {
+		t.Fatalf("task identity/image settings = type %q, capability %q, ratio %q", task.Type, task.ImageCapabilityKey, task.ImageRatio)
+	}
+	input := task.MontageInput.Data()
+	if input.Brief != "做一条新品发布短片" || input.PipelineKey != "social-short" {
+		t.Fatalf("montage input = %#v", input)
+	}
+	if input.Preferences.AspectRatio != "16:9" || input.Preferences.DurationSeconds != 45 {
+		t.Fatalf("montage preferences = %#v", input.Preferences)
+	}
+	if len(input.DeliveryTargets) != 1 || input.DeliveryTargets[0] != "final_video" {
+		t.Fatalf("delivery targets = %#v", input.DeliveryTargets)
+	}
+}
+
 func TestAIEntryServiceSubmitPropagatesProfileAndSKUErrorsFromTaskCreation(t *testing.T) {
 	sentinels := []error{
 		ErrAgentProfileNotFound,

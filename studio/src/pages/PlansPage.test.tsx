@@ -90,6 +90,10 @@ vi.mock('@/lib/api', async () => {
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
+      agentPacks: {
+        ...actual.api.agentPacks,
+        list: vi.fn().mockResolvedValue({ packs: [] }),
+      },
       imageCapabilities: {
         ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({
@@ -163,6 +167,16 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       updated_at: '2025-01-01T00:00:00Z',
     }])
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 })
+    vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
+  })
+
+  it('keeps the plan composer usable when the optional Agent Pack catalog is partial', async () => {
+    vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+
+    render(<PlansPage />)
+
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
   })
 
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {

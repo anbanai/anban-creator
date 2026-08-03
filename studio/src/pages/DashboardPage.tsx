@@ -65,6 +65,9 @@ export default function DashboardPage() {
     queryFn: () => api.projects.list({ status: 'active' }),
     staleTime: 60_000,
   })
+  const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
+  const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
+  const usesImageSettings = Boolean(selectedProject) && selectedProject.platform !== 'montage'
 
   const {
     data: apiKeysResponse,
@@ -95,8 +98,6 @@ export default function DashboardPage() {
     staleTime: Infinity,
   })
 
-  const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
-  const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
   const platformConfigMap = useMemo(
     () => new Map((platformConfigsQuery.data ?? []).map((config) => [config.id, config])),
     [platformConfigsQuery.data],
@@ -134,7 +135,7 @@ export default function DashboardPage() {
     && executionProfilePrice !== undefined,
   )
   const requiredComposerQueryError = apiKeysError
-    || imageCapabilitiesError
+    || (usesImageSettings && imageCapabilitiesError)
     || profilesQuery.isError
     || billingCatalogQuery.isError
 
@@ -209,7 +210,7 @@ export default function DashboardPage() {
   })
   const canSubmit = Boolean(selectedProjectId && selectedProject)
     && executionProfileReady
-    && Boolean(effectiveImageCapabilityKey)
+    && (!usesImageSettings || Boolean(effectiveImageCapabilityKey))
     && !projectsError
     && !apiKeysLoading
     && !platformConfigsQuery.isLoading
@@ -234,7 +235,7 @@ export default function DashboardPage() {
       setEntryError({ message: '所选执行配置当前不可用，请重新选择。' })
       return
     }
-    if (!effectiveImageCapabilityKey) {
+    if (usesImageSettings && !effectiveImageCapabilityKey) {
       setEntryError({ message: '当前图像能力不可用，请稍后重试。' })
       return
     }
@@ -245,9 +246,11 @@ export default function DashboardPage() {
       text,
       execution_profile: executionProfile as AgentExecutionProfileID,
       quantity,
-      image_ratio: imageRatio,
-      image_capability_key: effectiveImageCapabilityKey,
       attachments: attachmentController.toInputAttachments(),
+      ...(usesImageSettings ? {
+        image_ratio: imageRatio,
+        image_capability_key: effectiveImageCapabilityKey,
+      } : {}),
     })
   }
 
@@ -325,16 +328,18 @@ export default function DashboardPage() {
                   catalog={billingCatalogQuery.data}
                   taskType={selectedProject?.platform}
                 />
-                <ImageGenerationToolbar
-                  ratios={supportedImageRatios}
-                  ratio={imageRatio}
-                  onRatioChange={setImageRatio}
-                  capabilities={imageCapabilities}
-                  capabilityKey={effectiveImageCapabilityKey}
-                  onCapabilityChange={handleImageCapabilityChange}
-                  loading={imageCapabilitiesLoading}
-                  disabled={submitMutation.isPending || imageCapabilitiesError}
-                />
+                {usesImageSettings && (
+                  <ImageGenerationToolbar
+                    ratios={supportedImageRatios}
+                    ratio={imageRatio}
+                    onRatioChange={setImageRatio}
+                    capabilities={imageCapabilities}
+                    capabilityKey={effectiveImageCapabilityKey}
+                    onCapabilityChange={handleImageCapabilityChange}
+                    loading={imageCapabilitiesLoading}
+                    disabled={submitMutation.isPending || imageCapabilitiesError}
+                  />
+                )}
                 <ComposerQuantityControl
                   label="任务数量"
                   value={quantity}

@@ -126,6 +126,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
+	usesImageSettings := !model.IsMontagePlatform(project.Platform)
 	quantity := req.Quantity
 	if quantity == 0 {
 		quantity = 1
@@ -134,11 +135,11 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		return aiEntryError("创建任务失败：quantity must be between 1 and 5"), nil
 	}
 	imageRatio := strings.TrimSpace(req.ImageRatio)
-	if imageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, imageRatio) {
+	if usesImageSettings && imageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, imageRatio) {
 		return aiEntryError(fmt.Sprintf("创建任务失败：%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, imageRatio)), nil
 	}
 	imageCapabilityKey := strings.TrimSpace(req.ImageCapabilityKey)
-	if imageCapabilityKey != "" {
+	if usesImageSettings && imageCapabilityKey != "" {
 		if s.taskSvc.imageCapabilities == nil {
 			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
 		}
@@ -150,6 +151,10 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			return aiEntryError("创建任务失败：图片能力服务暂不可用。"), nil
 		}
 		imageCapabilityKey = resolved.Key
+	}
+	if !usesImageSettings {
+		imageRatio = ""
+		imageCapabilityKey = ""
 	}
 	if s.llm == nil {
 		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用，请联系管理员。", ""), nil
@@ -166,7 +171,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
-	if imageRatio == "" {
+	if usesImageSettings && imageRatio == "" {
 		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
 	}
 
@@ -222,6 +227,8 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			SellingPoints:   firstNonEmptyString(intent.SellingPoints, req.Text),
 			Language:        intent.Language,
 		}
+	case model.PlatformMontage:
+		params.MontageInput = aiEntryMontageInput(project, prompt)
 	default:
 		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
 	}
@@ -260,6 +267,26 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		Tasks:   tasks,
 		Message: message,
 	}, nil
+}
+
+func aiEntryMontageInput(project *model.Project, brief string) *model.MontageInput {
+	defaults := model.MontageDefaults{}
+	if project != nil {
+		defaults = project.MontageDefaults.Data()
+	}
+	preferences := defaults.Preferences
+	if strings.TrimSpace(preferences.AspectRatio) == "" {
+		preferences.AspectRatio = "9:16"
+	}
+	if preferences.DurationSeconds == 0 {
+		preferences.DurationSeconds = 30
+	}
+	return &model.MontageInput{
+		Brief:           strings.TrimSpace(brief),
+		PipelineKey:     strings.TrimSpace(defaults.DefaultPipeline),
+		Preferences:     preferences,
+		DeliveryTargets: append([]string(nil), defaults.DeliveryTargets...),
+	}
 }
 
 func isAIEntryTaskCreationProfileError(err error) bool {

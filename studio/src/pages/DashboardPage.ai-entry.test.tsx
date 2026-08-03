@@ -24,6 +24,7 @@ const {
   seednoteProject,
   momentsProject,
   ecommerceProject,
+  montageProject,
   executionProfiles,
   billingCatalog,
   platformConfigs,
@@ -81,6 +82,20 @@ const {
       image_ratio: '4:3',
       config: {},
     } as const,
+    montageProject: {
+      ...articleProject,
+      id: 'project-5',
+      platform: 'montage',
+      name: '短片项目',
+      description: 'Montage 短片内容',
+      image_ratio: '',
+      config: {},
+      montage_defaults: {
+        default_pipeline: 'social-short',
+        preferences: { aspect_ratio: '9:16', duration_seconds: 30 },
+        delivery_targets: ['final_video'] as string[],
+      },
+    } as const,
     executionProfiles: [
       {
         id: 'effective',
@@ -109,6 +124,8 @@ const {
         { id: 'task.article.balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
         { id: 'task.seednote.effective', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 3200, execution_profile: 'effective', delivery: 'task' },
         { id: 'task.seednote.balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
+        { id: 'task.montage.effective', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 1600, execution_profile: 'effective', delivery: 'task' },
+        { id: 'task.montage.balanced', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 2000, execution_profile: 'balanced', delivery: 'task' },
       ],
     } as const,
     platformConfigs: [
@@ -116,6 +133,7 @@ const {
       { id: 'seednote', label: '种草笔记', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
       { id: 'moments', label: '朋友圈', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4'], fields: [] },
       { id: 'ecommerce', label: '电商图', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
+      { id: 'montage', label: '智能剪辑', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '', supported_image_ratios: [], fields: [] },
     ] as const,
     imageCapabilities: {
       tier: 'pro',
@@ -322,6 +340,32 @@ describe('DashboardPage AI entry', () => {
       image_ratio: '3:4',
       image_capability_key: 'professional',
     }))
+  })
+
+  it('creates a Montage task without image capabilities or image settings', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...montageProject }])
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
+    render(<DashboardPage />)
+
+    expect(await screen.findByRole('combobox', { name: '项目：短片项目' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
+      target: { value: '做一条新品发布短片' },
+    })
+    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    await waitFor(() => expect(submit).toBeEnabled())
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
+      channel: 'studio',
+      project_id: 'project-5',
+      text: '做一条新品发布短片',
+      execution_profile: 'effective',
+      attachments: [],
+      quantity: 1,
+    }))
+    expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
   })
 
   it('waits for platform defaults before enabling project choice or submission', async () => {

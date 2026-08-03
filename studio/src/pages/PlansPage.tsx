@@ -208,7 +208,7 @@ export default function PlansPage() {
 					? '当前图像能力不可用，请重新选择。'
 					: null
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
 
