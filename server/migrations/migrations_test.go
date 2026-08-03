@@ -352,16 +352,25 @@ func TestSeednoteTemplatesContractMigrationUsesSingleStatementSteps(t *testing.T
 	}
 	sql := string(raw)
 	for _, required := range []string{
-		"Step 1/6",
-		"Step 2/6",
-		"Step 3/6",
-		"Step 4/6",
-		"Step 5/6",
-		"Step 6/6",
+		"Step 1: inspect the live schema",
+		"AS `has_style_prompt`",
+		"AS `has_template_id`",
+		"0,0: stop after Step 1",
+		"1,0: run T1 and T2, then run T3 only when T2 returned 0",
+		"0,1: run P1 and P2, then run P3 only when P2 returned 0",
+		"1,1: run T1, P1, T2, and P2, then run no DROP unless T2 and P2 both returned 0",
+		"Step T1",
+		"Step T2",
+		"Step P1",
+		"Step P2",
+		"Step T3: run only after every selected validation step returned 0",
+		"Step P3: run only after every selected validation step returned 0",
+		"Step P3",
 		"AS `template_prompt_incomplete`",
 		"AS `project_style_incomplete`",
 		"DROP COLUMN `style_prompt`",
 		"DROP COLUMN `template_id`",
+		"information_schema.COLUMNS",
 		"TRIM(COALESCE(`prompt`, '')) = ''",
 		"TRIM(COALESCE(p.`style`, '')) = ''",
 		"UPDATE `templates` SET `prompt` = `style_prompt`",
@@ -383,8 +392,70 @@ func TestSeednoteTemplatesContractMigrationUsesSingleStatementSteps(t *testing.T
 			t.Fatalf("template contract migration contains unsupported multi-statement construct %q", forbidden)
 		}
 	}
-	if got := strings.Count(sql, ";"); got != 6 {
-		t.Fatalf("template contract migration has %d SQL statements, want 6 single-statement steps", got)
+	if got := strings.Count(sql, ";"); got != 7 {
+		t.Fatalf("template contract migration has %d SQL statements, want 1 preflight plus 6 branch statements", got)
+	}
+	stepMarkers := []string{
+		"-- Step 1:",
+		"-- Step T1:",
+		"-- Step P1:",
+		"-- Step T2:",
+		"-- Step P2:",
+		"-- Step T3:",
+		"-- Step P3:",
+	}
+	stepSQLFragments := []string{
+		"SELECT EXISTS (SELECT 1 FROM information_schema.COLUMNS",
+		"UPDATE `templates` SET `prompt` = `style_prompt`",
+		"UPDATE `projects` p JOIN `templates` t ON t.`id` = p.`template_id` SET p.`style` = t.`prompt`",
+		"SELECT COUNT(*) AS `template_prompt_incomplete`",
+		"SELECT COUNT(*) AS `project_style_incomplete`",
+		"ALTER TABLE `templates` DROP COLUMN `style_prompt`",
+		"ALTER TABLE `projects` DROP COLUMN `template_id`",
+	}
+	stepIndexes := make([]int, len(stepMarkers))
+	for i, marker := range stepMarkers {
+		stepIndexes[i] = strings.Index(sql, marker)
+		if stepIndexes[i] < 0 {
+			t.Fatalf("template contract migration missing step marker %q", marker)
+		}
+		if i > 0 && stepIndexes[i] <= stepIndexes[i-1] {
+			t.Fatalf("template contract migration step %q is out of order", marker)
+		}
+	}
+	for i, marker := range stepMarkers {
+		end := len(sql)
+		if i+1 < len(stepIndexes) {
+			end = stepIndexes[i+1]
+		}
+		if got := strings.Count(sql[stepIndexes[i]:end], ";"); got != 1 {
+			t.Fatalf("template contract migration step %q has %d statements, want 1", marker, got)
+		}
+		if !strings.Contains(sql[stepIndexes[i]:end], stepSQLFragments[i]) {
+			t.Fatalf("template contract migration step %q does not contain its expected SQL %q", marker, stepSQLFragments[i])
+		}
+	}
+	preflight := sql[stepIndexes[0]:stepIndexes[1]]
+	for _, required := range []string{"information_schema.COLUMNS", "AS `has_style_prompt`", "AS `has_template_id`"} {
+		if !strings.Contains(preflight, required) {
+			t.Fatalf("template contract migration first statement is not schema preflight: missing %q", required)
+		}
+	}
+	preflightSQLLines := make([]string, 0)
+	for _, line := range strings.Split(preflight, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "--") {
+			preflightSQLLines = append(preflightSQLLines, trimmed)
+		}
+	}
+	preflightSQL := strings.Join(preflightSQLLines, " ")
+	if !strings.HasPrefix(strings.ToUpper(preflightSQL), "SELECT ") {
+		t.Fatalf("template contract migration preflight is not a pure SELECT: %q", preflightSQL)
+	}
+	for _, forbidden := range []string{"UPDATE ", "INSERT ", "DELETE ", "ALTER ", "DROP ", "CREATE ", "TRUNCATE ", "REPLACE "} {
+		if strings.Contains(strings.ToUpper(preflightSQL), forbidden) {
+			t.Fatalf("template contract migration first statement touches optional legacy schema with %q", forbidden)
+		}
 	}
 	if strings.Index(sql, "UPDATE `templates` SET `prompt` = `style_prompt`") > strings.Index(sql, "AS `template_prompt_incomplete`") {
 		t.Fatal("template contract migration validates before the final post-rollout prompt backfill")
