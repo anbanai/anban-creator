@@ -60,20 +60,20 @@ describe('DesignerGenerationToolbar', () => {
     expect(screen.queryByText('1:1')).not.toBeInTheDocument()
   })
 
-  it('reports capability_key, size, quality, output_format, and bounded n changes', () => {
+  it('reports capability_key, size, quality, output_format, and capability-driven n changes', () => {
     const onCapabilityChange = vi.fn()
     const onSettingsChange = vi.fn()
     render(
       <DesignerGenerationToolbar
         capabilities={capabilities}
         capabilityKey="professional"
-        settings={{ ...settings, n: 3 }}
+        settings={settings}
         onCapabilityChange={onCapabilityChange}
         onSettingsChange={onSettingsChange}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 3 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '3:4 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '高' }))
     fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WEBP' }))
@@ -81,7 +81,30 @@ describe('DesignerGenerationToolbar', () => {
     expect(onSettingsChange).toHaveBeenCalledWith({ size: '3:4:2K' })
     expect(onSettingsChange).toHaveBeenCalledWith({ quality: 'high' })
     expect(onSettingsChange).toHaveBeenCalledWith({ outputFormat: 'webp' })
-    expect(screen.getByRole('button', { name: '增加数量' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '增加图片数量' }))
+    expect(onSettingsChange).toHaveBeenCalledWith({ n: 2 })
+  })
+
+  it('shows a static image quantity when the current capability only supports one image', () => {
+    const singleImageCapabilities = [{
+      ...capabilities[0],
+      designerFeatures: { ...capabilities[0].designerFeatures, maxBatch: 1 },
+    }]
+    render(
+      <DesignerGenerationToolbar
+        capabilities={singleImageCapabilities}
+        capabilityKey="professional"
+        settings={settings}
+        onCapabilityChange={vi.fn()}
+        onSettingsChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+
+    expect(screen.getByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '减少图片数量' })).not.toBeInTheDocument()
   })
 
   it('constrains the fixed-specification popover to the available viewport height', () => {

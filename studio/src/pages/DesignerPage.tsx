@@ -510,7 +510,8 @@ export default function DesignerPage() {
     }
   }
 
-  const contextBar = (
+  const selectedProject = projects.find((project) => project.id === selectedProjectId)
+  const projectControl = (
     <ProjectContextControl
       mode="select"
       projects={projects}
@@ -521,6 +522,12 @@ export default function DesignerPage() {
       loading={projectsLoading}
       disabled={isGenerating}
       placeholder="选择项目"
+      ariaLabel={selectedProject
+        ? `项目：${selectedProject.name}`
+        : projectsLoading
+          ? '项目：加载中'
+          : '项目：未选择'}
+      compact
     />
   )
 
@@ -563,19 +570,23 @@ export default function DesignerPage() {
                 onSubmit={editingImage ? handleEditSubmit : handleGenerate}
                 attachmentController={attachmentController}
                 attachmentPolicy={attachmentPolicy}
-                contextBar={contextBar}
-                leadingTools={!editingImage ? (
-                  effectiveCapability ? (
-                    <DesignerGenerationToolbar
-                      capabilities={capabilityList}
-                      capabilityKey={effectiveCapability.id}
-                      settings={settings}
-                      onCapabilityChange={handleCapabilityChange}
-                      onSettingsChange={updateSettings}
-                      disabled={isGenerating}
-                    />
-                  ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
-                ) : undefined}
+                leadingTools={(
+                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                    {projectControl}
+                    {!editingImage ? (
+                      effectiveCapability ? (
+                        <DesignerGenerationToolbar
+                          capabilities={capabilityList}
+                          capabilityKey={effectiveCapability.id}
+                          settings={settings}
+                          onCapabilityChange={handleCapabilityChange}
+                          onSettingsChange={updateSettings}
+                          disabled={isGenerating}
+                        />
+                      ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
+                    ) : null}
+                  </div>
+                )}
                 placeholder={editingImage ? '描述你想修改的区域...' : '描述你想要生成的图片...'}
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}

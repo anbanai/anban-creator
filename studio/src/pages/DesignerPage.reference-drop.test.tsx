@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
-import { act, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from 'next-themes'
@@ -258,10 +258,18 @@ describe('Designer shared prompt composer', () => {
 
   it('uses selected project for generation and explicit project IDs for history', async () => {
     render(<DesignerPage />)
-    const projectControl = await screen.findByRole('combobox', { name: '项目上下文' })
+    const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })
     await waitFor(() => expect(projectControl).not.toBeDisabled())
+    const promptAddon = projectControl.closest('[data-slot="input-group-addon"]')
+    expect(promptAddon).not.toBeNull()
+    const imageSettings = within(promptAddon as HTMLElement).getByRole('button', {
+      name: '图像设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+    })
+    expect(projectControl.compareDocumentPosition(imageSettings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
     fireEvent.click(projectControl)
     fireEvent.click(await screen.findByRole('option', { name: /品牌项目/ }))
+    expect(screen.getByRole('combobox', { name: '项目：品牌项目' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '品牌图' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(

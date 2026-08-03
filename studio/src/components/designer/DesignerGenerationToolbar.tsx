@@ -1,5 +1,6 @@
-import { ChevronDownIcon, ImageIcon, MinusIcon, PlusIcon } from 'lucide-react'
+import { ChevronDownIcon, ImageIcon } from 'lucide-react'
 
+import { QuantityStepper } from '@/components/agent-prompt/QuantityStepper'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -155,31 +156,15 @@ export function DesignerGenerationToolbar({
           </ToggleGroup>
         </section>
 
-        <section className="flex items-center justify-between gap-3">
-          <h3 className="font-medium">数量</h3>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              aria-label="减少数量"
-              disabled={settings.n <= 1}
-              onClick={() => onSettingsChange({ n: Math.max(1, settings.n - 1) })}
-            >
-              <MinusIcon />
-            </Button>
-            <span className="w-8 text-center text-sm font-medium tabular-nums">{settings.n}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              aria-label="增加数量"
-              disabled={settings.n >= maxBatch}
-              onClick={() => onSettingsChange({ n: Math.min(maxBatch, settings.n + 1) })}
-            >
-              <PlusIcon />
-            </Button>
-          </div>
+        <section className="flex justify-end">
+          <QuantityStepper
+            label="图片数量"
+            value={settings.n}
+            min={1}
+            max={maxBatch}
+            onChange={(n) => onSettingsChange({ n })}
+            disabled={disabled}
+          />
         </section>
       </PopoverContent>
     </Popover>
