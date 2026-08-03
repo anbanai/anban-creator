@@ -124,7 +124,7 @@ skus:
   - id: "image.standard"
     operation: "image.generate"
     charge_policy: "image_operation"
-    price_credits: 500
+    price_credits: 300
     route: "image_generation.capabilities.standard"
     delivery: "persisted_image"
   - id: "image.professional"
