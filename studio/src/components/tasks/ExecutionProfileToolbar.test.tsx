@@ -24,6 +24,16 @@ const profiles: AgentExecutionProfileCapability[] = [
     min_tier: 'pro',
     available: true,
   },
+  {
+    id: 'quality',
+    display_name: '极致效果',
+    provider: 'moonshot',
+    model_name: 'kimi-k3[1m]',
+    description: '复杂高质量创作',
+    min_tier: 'enterprise',
+    available: false,
+    unavailable_reason: 'requires_enterprise',
+  },
 ]
 
 const catalog: BillingCatalog = {
@@ -70,5 +80,82 @@ describe('ExecutionProfileToolbar', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^平衡型，/ }))
 
     expect(onChange).toHaveBeenCalledWith('balanced')
+  })
+
+  it('summarizes loading and honors the disabled state', () => {
+    render(
+      <ExecutionProfileToolbar
+        profiles={[]}
+        value=""
+        onChange={vi.fn()}
+        loading
+        disabled
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: '执行配置：加载中' })
+    expect(trigger).toHaveTextContent('加载中')
+    expect(trigger).toBeDisabled()
+  })
+
+  it('omits a price when the catalog cannot resolve one', () => {
+    render(
+      <ExecutionProfileToolbar
+        profiles={profiles}
+        value="effective"
+        onChange={vi.fn()}
+        taskType="article"
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: '执行配置：性价比' })
+    expect(trigger).toHaveTextContent('性价比')
+    expect(trigger).not.toHaveTextContent('积分')
+  })
+
+  it('keeps unavailable profiles visible but unselectable in the full selector', async () => {
+    render(
+      <ExecutionProfileToolbar
+        profiles={profiles}
+        value="effective"
+        onChange={vi.fn()}
+        catalog={catalog}
+        taskType="article"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /执行配置：性价比/ }))
+    const unavailable = await screen.findByRole('button', { name: /^极致效果，/ })
+    expect(unavailable).toHaveTextContent('需要企业版')
+    expect(unavailable).toBeDisabled()
+  })
+
+  it('updates the summary only after its controlled value changes', async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <ExecutionProfileToolbar
+        profiles={profiles}
+        value="effective"
+        onChange={onChange}
+        catalog={catalog}
+        taskType="article"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /执行配置：性价比/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^平衡型，/ }))
+    expect(onChange).toHaveBeenCalledWith('balanced')
+    expect(screen.getByRole('button', { name: /执行配置：性价比/ })).toBeInTheDocument()
+
+    rerender(
+      <ExecutionProfileToolbar
+        profiles={profiles}
+        value="balanced"
+        onChange={onChange}
+        catalog={catalog}
+        taskType="article"
+      />,
+    )
+    expect(screen.getByRole('button', { name: /执行配置：平衡型/ })).toHaveTextContent('7,200')
   })
 })
