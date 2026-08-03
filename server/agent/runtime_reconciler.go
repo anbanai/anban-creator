@@ -13,6 +13,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const runtimeCompletionReportFailedExitCode int32 = 2
+
 type RuntimeReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
 	RecordExecutionInstance(context.Context, string, string) error
@@ -264,6 +266,8 @@ func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 		return "deadline_exceeded", model.TaskExecutionTimedOut
 	case reason == "oomkilled" || (state.ExitCode != nil && *state.ExitCode == 137):
 		return "oom_killed", model.TaskExecutionFailed
+	case state.ExitCode != nil && *state.ExitCode == runtimeCompletionReportFailedExitCode:
+		return "completion_report_failed", model.TaskExecutionFailed
 	default:
 		return "runtime_failed", model.TaskExecutionFailed
 	}

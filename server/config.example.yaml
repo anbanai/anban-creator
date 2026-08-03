@@ -346,10 +346,11 @@ claude:
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
     project_memory_size: "${ANBAN_AGENT_PROJECT_MEMORY_SIZE:-1Gi}"
     task_workspace_size: "${ANBAN_AGENT_TASK_WORKSPACE_SIZE:-10Gi}"
-    # Job 执行截止时间与 agent 上报完成后的退出宽限期，单位秒。
+    # Job 执行截止时间，单位秒。
     active_deadline_seconds: 3600
     # Agent 每 30 秒上报心跳；连续 3 分钟不可达后由 Kubernetes Reconciler 终止。
     heartbeat_timeout_seconds: 180
+    # Pod 收到终止信号后的退出宽限期，也是 workload 成功后等待 Agent 完成回调的调和宽限；不控制 Agent 内部终态阶段时限。
     completion_grace_seconds: 30
     # 已完成 Job 的自动清理时间，单位秒。
     ttl_seconds_after_finished: 600

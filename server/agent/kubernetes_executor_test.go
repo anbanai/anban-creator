@@ -152,6 +152,9 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if spec.SecurityContext.RunAsUser == nil || *spec.SecurityContext.RunAsUser != kubernetesAgentUID || spec.SecurityContext.RunAsGroup == nil || *spec.SecurityContext.RunAsGroup != kubernetesAgentGID {
 		t.Fatalf("pod identity = %#v, want %d:%d", spec.SecurityContext, kubernetesAgentUID, kubernetesAgentGID)
 	}
+	if spec.TerminationGracePeriodSeconds == nil || *spec.TerminationGracePeriodSeconds != 30 {
+		t.Fatalf("termination grace = %#v, want 30 seconds", spec.TerminationGracePeriodSeconds)
+	}
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", spec.ImagePullSecrets)
 	}
@@ -164,12 +167,11 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 4 ||
+	if len(c.Env) != 3 ||
 		c.Env[0].Name != "HOME" || c.Env[0].Value != kubernetesRuntimeHomePath ||
 		c.Env[1].Name != "SSL_CERT_FILE" || c.Env[1].Value != kubernetesServerCAFile ||
-		c.Env[2].Name != "NODE_EXTRA_CA_CERTS" || c.Env[2].Value != kubernetesServerCAFile ||
-		c.Env[3].Name != "ANBAN_JOB_FINALIZATION_TIMEOUT" || c.Env[3].Value != "25s" {
-		t.Fatalf("environment = %#v, want HOME, Go and Node server CA trust, and grace-aligned finalization timeout", c.Env)
+		c.Env[2].Name != "NODE_EXTRA_CA_CERTS" || c.Env[2].Value != kubernetesServerCAFile {
+		t.Fatalf("environment = %#v, want only HOME and Go/Node server CA trust", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)
@@ -473,25 +475,6 @@ func TestKubernetesDispatcherValidatesPersistedRuntimeIdentity(t *testing.T) {
 func TestKubernetesDispatcherScope(t *testing.T) {
 	if got := testDispatcher(fake.NewSimpleClientset()).Scope(); got != "kubernetes" {
 		t.Fatalf("Scope() = %q, want kubernetes", got)
-	}
-}
-
-func TestKubernetesFinalizationTimeoutIsBoundedByGraceAndDeadline(t *testing.T) {
-	tests := []struct {
-		grace    int
-		deadline int64
-		want     int64
-	}{
-		{grace: 30, deadline: 900, want: 25},
-		{grace: 4, deadline: 900, want: 4},
-		{grace: 600, deadline: 900, want: 300},
-		{grace: 600, deadline: 20, want: 15},
-		{grace: 0, deadline: 20, want: 15},
-	}
-	for _, tc := range tests {
-		if got := kubernetesFinalizationTimeoutSeconds(tc.grace, tc.deadline); got != tc.want {
-			t.Fatalf("timeout(%d,%d)=%d want %d", tc.grace, tc.deadline, got, tc.want)
-		}
 	}
 }
 

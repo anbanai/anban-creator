@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -33,7 +32,6 @@ const (
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
 	kubernetesTokenAudience                    = "anban-server"
 	kubernetesObjectConfigHashLabel            = "anban.ai/config-hash"
-	kubernetesFinalizationTimeoutEnv           = "ANBAN_JOB_FINALIZATION_TIMEOUT"
 )
 
 type kubernetesJobConfig struct {
@@ -123,7 +121,6 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 							{Name: "HOME", Value: kubernetesRuntimeHomePath},
 							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
 							{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
-							{Name: kubernetesFinalizationTimeoutEnv, Value: strconv.FormatInt(kubernetesFinalizationTimeoutSeconds(cfg.CompletionGraceSeconds, cfg.ActiveDeadlineSeconds), 10) + "s"},
 						},
 						Command: []string{"anban"},
 						Args: []string{
@@ -234,23 +231,6 @@ func kubernetesResourceList(values map[string]string) corev1.ResourceList {
 		}
 	}
 	return out
-}
-
-func kubernetesFinalizationTimeoutSeconds(grace int, activeDeadline int64) int64 {
-	seconds := int64(grace)
-	if seconds <= 0 || activeDeadline > 0 && activeDeadline < seconds {
-		seconds = activeDeadline
-	}
-	if seconds <= 0 {
-		return 1
-	}
-	if seconds > 5 {
-		seconds -= 5
-	}
-	if seconds > 300 {
-		return 300
-	}
-	return seconds
 }
 
 func buildProjectMemoryPVC(cfg kubernetesJobConfig, projectID string) *corev1.PersistentVolumeClaim {

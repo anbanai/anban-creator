@@ -175,6 +175,7 @@ func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, 
 }
 
 func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
+	exit2 := int32(2)
 	exit137 := int32(137)
 	tests := []struct {
 		name, phase, reason, wantReason, wantStatus string
@@ -184,6 +185,7 @@ func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 		{"runtime deadline", RuntimePhaseFailed, "runtime deadline exceeded", "deadline_exceeded", model.TaskExecutionTimedOut, nil},
 		{"oom reason", RuntimePhaseFailed, "OOMKilled", "oom_killed", model.TaskExecutionFailed, nil},
 		{"oom exit code", RuntimePhaseFailed, "Failed", "oom_killed", model.TaskExecutionFailed, &exit137},
+		{"completion report", RuntimePhaseFailed, "Failed", "completion_report_failed", model.TaskExecutionFailed, &exit2},
 		{"scheduling", RuntimePhaseFailed, "FailedScheduling", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"mount", RuntimePhaseFailed, "FailedMount", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"attach volume", RuntimePhaseFailed, "FailedAttachVolume", "runtime_failed", model.TaskExecutionFailed, nil},
