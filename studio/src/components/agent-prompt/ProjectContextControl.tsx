@@ -44,6 +44,7 @@ interface ProjectContextReadonlyProps {
   mode: 'readonly'
   project: ProjectContextProject | null
   noProjectLabel?: string
+  compact?: boolean
 }
 
 interface ProjectContextHiddenProps {
@@ -132,6 +133,7 @@ function SelectProjectContext({
     <div
       data-slot="project-context-control"
       data-mode="select"
+      data-compact={compact}
       aria-busy={loading}
       className="min-w-0"
     >
@@ -229,10 +231,11 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
       <div
         data-slot="project-context-control"
         data-mode="readonly"
+        data-compact={props.compact}
         className="min-w-0"
       >
         {props.project ? (
-          <ProjectIdentity project={props.project} />
+          <ProjectIdentity project={props.project} compact={props.compact} />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>
     )

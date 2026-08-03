@@ -54,6 +54,9 @@ describe('ProjectIdentity', () => {
     expect(
       document.querySelector('[data-slot="project-identity-description"]'),
     ).not.toBeInTheDocument()
+    expect(
+      screen.getByText('种草笔记项目', { selector: '[data-slot="badge"]' }),
+    ).toBeInTheDocument()
   })
 
   it('shows the initial when the project avatar fails to load', () => {

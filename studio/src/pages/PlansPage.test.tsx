@@ -90,6 +90,10 @@ vi.mock('@/lib/api', async () => {
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
+      agentPacks: {
+        ...actual.api.agentPacks,
+        list: vi.fn().mockResolvedValue({ packs: [] }),
+      },
       imageCapabilities: {
         ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({
@@ -163,6 +167,16 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       updated_at: '2025-01-01T00:00:00Z',
     }])
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 })
+    vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
+  })
+
+  it('keeps the plan composer usable when the optional Agent Pack catalog is partial', async () => {
+    vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+
+    render(<PlansPage />)
+
+    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
   })
 
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {
@@ -171,12 +185,15 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：性价比/ }))
+    expect(await screen.findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: /^平衡型，/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: 'ch-1',
+      type: 'article',
       execution_profile: 'balanced',
     })))
   })
@@ -213,7 +230,8 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
 
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await within(dialog).findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^执行配置：极致效果/ }))
+    expect(await screen.findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
@@ -236,13 +254,39 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(api.plans.update).not.toHaveBeenCalled()
   })
 
-  it('renders the shared composer with project context in the create dialog', async () => {
+  it('keeps schedule above the create composer and orders its project, execution, and image controls', async () => {
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    await screen.findByRole('dialog')
-    expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
+    expect(composer).toBeInTheDocument()
+
+    const projectControl = await within(composer as HTMLElement).findByRole('combobox', { name: '项目：未选择' })
+    const executionControl = await within(composer as HTMLElement).findByRole('button', { name: /^执行配置：/ })
+    const imageControl = within(composer as HTMLElement).getByRole('button', { name: /^图像设置：/ })
+    expect(projectControl.compareDocumentPosition(executionControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(executionControl.compareDocumentPosition(imageControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const scheduleLabel = within(dialog).getByText('排期设置', { selector: 'label' })
+    expect(composer).not.toContainElement(scheduleLabel)
+    expect(scheduleLabel.compareDocumentPosition(composer as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
+    expect(within(composer as HTMLElement).queryByText(/(?:任务|图片)数量/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
     expect(document.querySelectorAll('form form')).toHaveLength(0)
+  })
+
+  it('renders the edited plan project as a compact readonly identity inside the composer', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
+    const projectControl = composer?.querySelector<HTMLElement>('[data-slot="project-context-control"]')
+    expect(projectControl).toHaveAttribute('data-mode', 'readonly')
+    expect(projectControl).toHaveAttribute('data-compact', 'true')
+    expect(projectControl).toHaveTextContent('测试项目')
+    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
   })
 
   it('在计划创建和编辑时用模板覆盖非空 Prompt', async () => {
@@ -264,7 +308,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
     const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目：未选择' }))
     fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
     const createPrompt = within(createDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
     fireEvent.change(createPrompt, { target: { value: '已有创建 Prompt' } })
@@ -280,17 +324,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(editPrompt).toHaveValue('已有计划 Prompt')
     fireEvent.click(await within(editDialog).findByRole('button', { name: /知识卡片/ }))
     expect(editPrompt).toHaveValue('模板视觉 Prompt')
-  })
-
-  it('puts the single project field before content type', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-
-    const projectLabel = within(dialog).getByText('项目', { selector: 'label' })
-    const typeLabel = within(dialog).getByText('内容类型', { selector: 'label' })
-    expect(projectLabel.compareDocumentPosition(typeLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(dialog).getAllByRole('combobox', { name: '项目上下文' })).toHaveLength(1)
   })
 
   it('blocks submission when a weekly schedule has no selected day', async () => {
@@ -326,20 +359,6 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     })
   })
 
-  it('does not offer e-commerce as a plan content type', async () => {
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const typeField = within(dialog).getByText('内容类型', { selector: 'label' }).parentElement
-    const typeSelect = within(typeField as HTMLElement).getByRole('combobox')
-    fireEvent.click(typeSelect)
-
-    expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
-  })
-
   it('highlights a plan addressed by the timeline highlight parameter', async () => {
     window.history.pushState({}, '', '/plans?highlight=plan-1')
 
@@ -357,6 +376,52 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(dialog).toBeInTheDocument()
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
+  })
+
+  it('rejects a stale project from the URL intent', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=missing-project&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
+    await within(dialog).findByRole('button', { name: /^执行配置：性价比/ })
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unsupported project platform from the URL intent', async () => {
+    const momentsProject = {
+      id: 'moments-project', user_id: '1', platform: 'moments', name: '朋友圈项目', avatar_url: '',
+      profile_url: '', instructions: '', keywords: '', visual_style: '', writer: '', theme: '', author: '',
+      image_ratio: '1:1', max_concurrent_tasks: 2, config: {}, status: 'active',
+      created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
+    } as Project
+    vi.mocked(api.projects.list).mockResolvedValueOnce([momentsProject])
+    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${momentsProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
+  it('shows and blocks an image capability query failure for an article plan', async () => {
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /^图像设置：/ })).toBeDisabled()
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(api.plans.create).not.toHaveBeenCalled()
   })
 
   it('uses the cheapest available profile price for article plan runs', async () => {
@@ -511,7 +576,9 @@ describe('PlansPage Seednote reference snapshots', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
     expect(await screen.findByRole('button', { name: '预览 plan-reference.png' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    const updateButton = screen.getByRole('button', { name: '更新' })
+    await waitFor(() => expect(updateButton).toBeEnabled())
+    fireEvent.click(updateButton)
 
     await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
     const payload = vi.mocked(api.plans.update).mock.calls[0][1]
@@ -812,6 +879,49 @@ describe('PlansPage Montage input', () => {
     vi.mocked(api.plans.create).mockResolvedValue(savedMontagePlan)
     vi.mocked(api.plans.update).mockResolvedValue(savedMontagePlan)
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
+  })
+
+  it('uses the preselected project platform when the URL type conflicts', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
+    expect(within(dialog).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '按项目平台创建' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: montageProject.id,
+      type: 'montage',
+      montage_input: expect.objectContaining({
+        brief: '按项目平台创建',
+        pipeline_key: 'project-pipeline',
+      }),
+    })))
+  })
+
+  it('creates a Montage plan without querying image capabilities', async () => {
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
+    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
+      target: { value: '无需图片能力的 Montage' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: montageProject.id,
+      type: 'montage',
+    })))
+    expect(api.imageCapabilities.list).not.toHaveBeenCalled()
   })
 
   it('inherits project defaults and creates a plan with complete Montage input', async () => {

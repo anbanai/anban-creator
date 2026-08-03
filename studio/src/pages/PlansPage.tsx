@@ -22,7 +22,6 @@ import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
@@ -48,16 +47,14 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
 import type { PromptAttachment } from '@/types/input-attachment'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
+import { ExecutionProfileToolbar } from '@/components/tasks/ExecutionProfileToolbar'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
-const planTypeOptions: { value: PlanType; label: string }[] = [
-  { value: 'seednote', label: '种草笔记' },
-  { value: 'article', label: '公众号文章' },
-  { value: 'montage', label: 'Montage' },
-]
+function isPlanType(value: string | undefined): value is PlanType {
+  return value === 'seednote' || value === 'article' || value === 'montage'
+}
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
@@ -116,11 +113,6 @@ export default function PlansPage() {
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const [scheduleValid, setScheduleValid] = useState(true)
   const { submit } = useSubmitLock()
-  const {
-    items: imageCapabilityOptions,
-    defaultCapability: defaultImageCapability,
-    isLoading: imageCapabilitiesLoading,
-  } = useImageCapabilities()
   const highlightedPlanId = searchParams.get('highlight') || ''
   const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const attachmentsTouchedRef = useRef(false)
@@ -189,8 +181,34 @@ export default function PlansPage() {
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
 	const isMontagePlan = watchedType === 'montage'
+	const usesImageSettings = !isMontagePlan
+	const {
+		items: imageCapabilityOptions,
+		defaultCapability: defaultImageCapability,
+		isLoading: imageCapabilitiesLoading,
+		isError: imageCapabilitiesError,
+	} = useImageCapabilities(modalOpen && usesImageSettings)
+	const effectiveImageCapabilityKey = watchedImageCapabilityKey || defaultImageCapability
+	const selectedImageCapability = imageCapabilityOptions.find((option) => option.key === effectiveImageCapabilityKey)
+	const imageCapabilityUnavailable = usesImageSettings
+		&& !imageCapabilitiesLoading
+		&& !imageCapabilitiesError
+		&& (
+			!selectedImageCapability
+			|| selectedImageCapability.enabled !== true
+			|| selectedImageCapability.price_available !== true
+		)
+	const imageCapabilityBlocker = !usesImageSettings
+		? null
+		: imageCapabilitiesError
+			? '图像能力暂时无法加载，请稍后重试。'
+			: imageCapabilitiesLoading
+				? '正在加载图像能力，请稍候。'
+				: imageCapabilityUnavailable
+					? '当前图像能力不可用，请重新选择。'
+					: null
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
 
@@ -253,7 +271,7 @@ export default function PlansPage() {
     return map
   }, [allProjects])
   const planContextProjects = useMemo(
-    () => (allProjects ?? []).filter((project) => planTypeOptions.some((option) => option.value === project.platform)),
+    () => (allProjects ?? []).filter((project) => isPlanType(project.platform)),
     [allProjects],
   )
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
@@ -358,7 +376,12 @@ export default function PlansPage() {
     const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage'
       ? createIntent.type
       : 'seednote'
-    const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
+    const intentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
+    const intentProjectType = isPlanType(intentProject?.platform) ? intentProject.platform : undefined
+    const selectedIntentProject = intentProject && intentProjectType
+      ? intentProject
+      : undefined
+    const initialType = intentProjectType ?? requestedType
     setEditingPlan(null)
     scheduleManuallyChangedRef.current = false
     setRecommendationUnavailable(false)
@@ -369,9 +392,9 @@ export default function PlansPage() {
     attachmentController.clear()
     attachmentHydratingRef.current = false
     form.reset({
-      project_id: createIntent.projectId ?? '',
+      project_id: selectedIntentProject?.id ?? '',
       execution_profile: '',
-      type: requestedType,
+      type: initialType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_capability_key: '',
@@ -383,7 +406,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      montage_input: requestedType === 'montage'
+      montage_input: initialType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
         : undefined,
     })
@@ -465,16 +488,18 @@ export default function PlansPage() {
       ?.find((profile) => profile.id === values.execution_profile)
       ?.available === true
     if (!submittedProfileAvailable) return
-    const submittedImageCapability = imageCapabilityOptions.find(
-      (option) => option.key === (values.image_capability_key || defaultImageCapability),
-    )
-    if (
-      !submittedImageCapability
-      || submittedImageCapability.enabled !== true
-      || submittedImageCapability.price_available !== true
-    ) {
-      toast.error('该图像能力已停用，请重新选择')
-      return
+    if (values.type !== 'montage') {
+      const submittedImageCapability = imageCapabilityOptions.find(
+        (option) => option.key === (values.image_capability_key || defaultImageCapability),
+      )
+      if (
+        !submittedImageCapability
+        || submittedImageCapability.enabled !== true
+        || submittedImageCapability.price_available !== true
+      ) {
+        toast.error('该图像能力已停用，请重新选择')
+        return
+      }
     }
     // For edit (PUT), image_capability_key is a *string on the backend: nil = leave
     // unchanged, "" = clear to system default. Always send it so explicit
@@ -522,7 +547,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (!scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
+    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -530,6 +555,31 @@ export default function PlansPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const projectControl = editingPlan ? (
+    <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact />
+  ) : (
+    <ProjectContextControl
+      mode="select"
+      projects={planContextProjects}
+      value={watchedProjectId || null}
+      allowNoProject={false}
+      placeholder="选择项目"
+      disabled={isSubmitting}
+      onValueChange={(id, project) => {
+        setMontageUploading(false)
+        form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+        if (!id || !isPlanType(project?.platform)) return
+        const nextType = project.platform
+        const fullProject = projectMap[id]
+        form.setValue('type', nextType, { shouldDirty: true })
+        form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
+        form.setValue('agent_input', {}, { shouldDirty: true })
+        form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
+      }}
+      ariaLabel={selectedProject ? `项目：${selectedProject.name}` : '项目：未选择'}
+      compact
+    />
+  )
   const promptComposer = (
     <>
       <AgentPromptInput
@@ -548,19 +598,35 @@ export default function PlansPage() {
       placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
-      submitDisabled={!watchedProjectId}
+      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker)}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
-      leadingTools={!isMontagePlan ? (
-        <ImageGenerationToolbar
-          ratios={businessImageRatios}
-          ratio={watchedImageRatio || 'auto'}
-          onRatioChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true })}
-          capabilities={imageCapabilityOptions}
-          capabilityKey={watchedImageCapabilityKey || defaultImageCapability}
-          onCapabilityChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })}
-          loading={imageCapabilitiesLoading}
-        />
-      ) : undefined}
+      leadingTools={(
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {projectControl}
+          <ExecutionProfileToolbar
+            profiles={executionProfilesQuery.data ?? []}
+            value={watchedExecutionProfile}
+            onChange={(value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true })}
+            loading={executionProfilesQuery.isLoading}
+            disabled={isSubmitting || executionProfilesQuery.isError}
+            catalog={billingCatalog}
+            taskType={watchedType}
+            priceUnit="run"
+          />
+          {usesImageSettings ? (
+            <ImageGenerationToolbar
+              ratios={businessImageRatios}
+              ratio={watchedImageRatio || 'auto'}
+              onRatioChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true })}
+              capabilities={imageCapabilityOptions}
+              capabilityKey={effectiveImageCapabilityKey}
+              onCapabilityChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })}
+              loading={imageCapabilitiesLoading}
+              disabled={isSubmitting || imageCapabilitiesError}
+            />
+          ) : null}
+        </div>
+      )}
       />
       {attachmentSubmitError ? (
         <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
@@ -717,90 +783,12 @@ export default function PlansPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="plan-form" onSubmit={handlePlanSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="project_id" render={() => (
-                <FormItem>
-                  <FormLabel>项目</FormLabel>
-                  <FormControl>
-                    {editingPlan ? (
-                      <ProjectContextControl mode="readonly" project={selectedProject ?? null} />
-                    ) : (
-                      <ProjectContextControl
-                        mode="select"
-                        projects={planContextProjects}
-                        value={watchedProjectId || null}
-                        allowNoProject={false}
-                        placeholder="选择项目"
-                        onValueChange={(id, project) => {
-                          setMontageUploading(false)
-                          form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-                          if (!id || !project?.platform) return
-                          const nextType = project.platform as PlanType
-                          const fullProject = projectMap[id]
-                          form.setValue('type', nextType, { shouldDirty: true })
-                          form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
-                          form.setValue('agent_input', {}, { shouldDirty: true })
-                          form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
-                        }}
-                      />
-                    )}
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               <SeednoteTemplateGallery
                 platform={selectedProject?.platform}
                 onApply={(templatePrompt) => {
                   form.setValue('prompt', templatePrompt, { shouldDirty: true, shouldValidate: true })
                 }}
               />
-
-              <FormField control={form.control} name="type" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>内容类型</FormLabel>
-                  <FormControl>
-                    <Select
-                      value={field.value}
-                      onValueChange={(v) => {
-                        const nextType = v as PlanType
-                        field.onChange(nextType)
-                        form.setValue('agent_input', {}, { shouldDirty: true })
-                        setMontageUploading(false)
-                        form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '') : undefined, { shouldDirty: true })
-                      }}
-                      disabled={!!editingPlan || !!form.watch('project_id')}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择类型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {planTypeOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <FormField control={form.control} name="execution_profile" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>执行配置</FormLabel>
-                  <FormControl>
-                    <ExecutionProfileSelector
-                      profiles={executionProfilesQuery.data ?? []}
-                      value={field.value}
-                      onChange={field.onChange}
-                      loading={executionProfilesQuery.isLoading}
-                      catalog={billingCatalog}
-                      taskType={form.watch('type')}
-                      priceUnit="run"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
 
               <FormField control={form.control} name="cron_expr" render={({ field }) => (
                 <FormItem>
@@ -1033,6 +1021,9 @@ export default function PlansPage() {
                     {((billingWallet?.debt ?? 0) > 0 || (remaining !== undefined && remaining < 0)) && (
                       <p className="text-sm font-medium text-red-500">当前钱包无法准入新一次执行，请先充值。</p>
                     )}
+                    {imageCapabilityBlocker ? (
+                      <p role="alert" className="text-sm font-medium text-red-500">{imageCapabilityBlocker}</p>
+                    ) : null}
                   </div>
                 )
               })()}
@@ -1045,9 +1036,11 @@ export default function PlansPage() {
               form="plan-form"
               loading={isSubmitting}
               disabled={
-                !watchedExecutionProfile
+                !watchedProjectId
+                || !watchedExecutionProfile
                 || executionProfilesQuery.isError
                 || !selectedExecutionProfileAvailable
+                || Boolean(imageCapabilityBlocker)
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures

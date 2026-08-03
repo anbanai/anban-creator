@@ -146,6 +146,11 @@ export default function DesignerPage() {
     !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits,
   )
   const effectiveDesignerFeatures = effectiveCapability?.designerFeatures
+  const effectiveMaxBatch = Math.max(1, effectiveDesignerFeatures?.maxBatch ?? 1)
+  const effectiveQuantity = Math.min(effectiveMaxBatch, Math.max(1, settings.n))
+  const effectiveSettings = settings.n === effectiveQuantity
+    ? settings
+    : { ...settings, n: effectiveQuantity }
   const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = Math.min(maxReferenceImages, GENERAL_AGENT_ATTACHMENT_POLICY.maxCount)
   const projectID = selectedProjectId ?? 'default'
@@ -218,6 +223,13 @@ export default function DesignerPage() {
       toast.warning(`当前输入最多支持 ${referenceCapacity} 张参考图，已移除 ${overflow.length} 张`)
     }
   }, [attachmentController, effectiveCapability, imageCapabilityCatalog, referenceCapacity, resetSettingsForCapability, selectedCapabilityKey])
+
+  useEffect(() => {
+    setSettings((current) => {
+      const n = Math.min(effectiveMaxBatch, Math.max(1, current.n))
+      return current.n === n ? current : { ...current, n }
+    })
+  }, [effectiveMaxBatch])
 
   useEffect(() => () => {
     generationAttemptRef.current += 1
@@ -394,7 +406,7 @@ export default function DesignerPage() {
           capability_key: effectiveCapability.id,
           quality: settings.quality,
           size: settings.size,
-          n: settings.n,
+          n: effectiveQuantity,
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
@@ -411,7 +423,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, effectiveDesignerFeatures, effectiveCapability, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, effectiveDesignerFeatures, effectiveCapability, effectiveQuantity, isGenerationAttemptActive, projectID, referenceCapacity, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleEditSubmit = useCallback(async (value: AgentPromptValue) => {
     if (!effectiveCapability || !editingImage) return
@@ -459,7 +471,7 @@ export default function DesignerPage() {
           capability_key: effectiveCapability.id,
           quality: settings.quality,
           size: settings.size,
-          n: settings.n,
+          n: effectiveQuantity,
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
@@ -477,7 +489,7 @@ export default function DesignerPage() {
       setIsGenerating(false)
       showGenerationError(error)
     }
-  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, effectiveDesignerFeatures, isGenerationAttemptActive, projectID, settings, showGenerationError, startGenerationAttempt, stopPolling])
+  }, [beginGeneration, clearSubmittedPrompt, editingImage, effectiveCapability, effectiveDesignerFeatures, effectiveQuantity, isGenerationAttemptActive, projectID, settings, showGenerationError, startGenerationAttempt, stopPolling])
 
   const handleCancel = useCallback(() => {
     generationAttemptRef.current += 1
@@ -510,7 +522,8 @@ export default function DesignerPage() {
     }
   }
 
-  const contextBar = (
+  const selectedProject = projects.find((project) => project.id === selectedProjectId)
+  const projectControl = (
     <ProjectContextControl
       mode="select"
       projects={projects}
@@ -521,6 +534,12 @@ export default function DesignerPage() {
       loading={projectsLoading}
       disabled={isGenerating}
       placeholder="选择项目"
+      ariaLabel={selectedProject
+        ? `项目：${selectedProject.name}`
+        : projectsLoading
+          ? '项目：加载中'
+          : '项目：未选择'}
+      compact
     />
   )
 
@@ -563,19 +582,23 @@ export default function DesignerPage() {
                 onSubmit={editingImage ? handleEditSubmit : handleGenerate}
                 attachmentController={attachmentController}
                 attachmentPolicy={attachmentPolicy}
-                contextBar={contextBar}
-                leadingTools={!editingImage ? (
-                  effectiveCapability ? (
-                    <DesignerGenerationToolbar
-                      capabilities={capabilityList}
-                      capabilityKey={effectiveCapability.id}
-                      settings={settings}
-                      onCapabilityChange={handleCapabilityChange}
-                      onSettingsChange={updateSettings}
-                      disabled={isGenerating}
-                    />
-                  ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
-                ) : undefined}
+                leadingTools={(
+                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                    {projectControl}
+                    {!editingImage ? (
+                      effectiveCapability ? (
+                        <DesignerGenerationToolbar
+                          capabilities={capabilityList}
+                          capabilityKey={effectiveCapability.id}
+                          settings={effectiveSettings}
+                          onCapabilityChange={handleCapabilityChange}
+                          onSettingsChange={updateSettings}
+                          disabled={isGenerating}
+                        />
+                      ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
+                    ) : null}
+                  </div>
+                )}
                 placeholder={editingImage ? '描述你想修改的区域...' : '描述你想要生成的图片...'}
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}

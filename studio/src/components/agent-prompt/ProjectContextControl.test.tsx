@@ -152,6 +152,20 @@ describe('ProjectContextControl', () => {
     expect(screen.getByText('Independent task')).toBeInTheDocument()
   })
 
+  it('renders a compact readonly project without its description', () => {
+    render(
+      <ProjectContextControl mode="readonly" project={projects[0]} compact />,
+    )
+
+    expect(screen.getByText('Morning Brief')).toBeInTheDocument()
+    expect(screen.getByText('公众号项目')).toBeInTheDocument()
+    expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
+      'data-compact',
+      'true',
+    )
+  })
+
   it('compacts only the trigger while keeping popup options complete', async () => {
     render(
       <ProjectContextControl
@@ -166,7 +180,12 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
+    expect(trigger).toHaveTextContent('公众号项目')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
+    expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
+      'data-compact',
+      'true',
+    )
 
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief/ })

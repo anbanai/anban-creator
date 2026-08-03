@@ -544,15 +544,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
-	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
-	if effectiveImageRatio == "" {
-		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
-	}
-	if effectiveImageRatio == "" {
-		effectiveImageRatio = model.DefaultImageRatio(project.Platform)
-	}
-	if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	isMontageTask := model.IsMontagePlatform(taskType)
+	effectiveImageRatio := ""
+	if !isMontageTask {
+		effectiveImageRatio = strings.TrimSpace(p.ImageRatio)
+		if effectiveImageRatio == "" {
+			effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		}
+		if effectiveImageRatio == "" {
+			effectiveImageRatio = model.DefaultImageRatio(project.Platform)
+		}
+		if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
+			return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+		}
 	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
@@ -567,7 +571,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	// with task-level explicit values winning. Product photos and selling points
 	// stay per-task. Done before validation so selected modules are available to
 	// the agent; modules shape later MCP usage, not the creation-time base fee.
-	effectiveImageCapabilityKey := p.ImageCapabilityKey
+	effectiveImageCapabilityKey := ""
+	if !isMontageTask {
+		effectiveImageCapabilityKey = p.ImageCapabilityKey
+	}
 	if taskType == model.PlatformEcommerce && !p.PreserveFrozenConfig {
 		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
@@ -586,7 +593,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageCapabilityKey = projEc.ImageCapabilityKey
 		}
 	}
-	if model.IsMontagePlatform(taskType) {
+	if isMontageTask {
 		quantity = 1
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
@@ -704,7 +711,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if agentInput != nil {
 			task.SetAgentInput(agentInput)
 		}
-		if model.IsMontagePlatform(taskType) && p.MontageInput != nil {
+		if isMontageTask && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
 		}
 
@@ -893,30 +900,37 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
-	effectiveImageRatio := strings.TrimSpace(plan.ImageRatio)
-	if effectiveImageRatio == "" && project != nil {
-		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
-	}
-	if effectiveImageRatio == "" {
-		effectiveImageRatio = model.DefaultImageRatio(taskType)
-	}
-	if project != nil && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	isMontageTask := model.IsMontagePlatform(taskType)
+	effectiveImageRatio := ""
+	if !isMontageTask {
+		effectiveImageRatio = strings.TrimSpace(plan.ImageRatio)
+		if effectiveImageRatio == "" && project != nil {
+			effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		}
+		if effectiveImageRatio == "" {
+			effectiveImageRatio = model.DefaultImageRatio(taskType)
+		}
+		if project != nil && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
+			return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+		}
 	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil, false); err != nil {
 		return nil, err
 	}
-	effectiveImageCapabilityKey := strings.TrimSpace(plan.ImageCapabilityKey)
-	if s.imageCapabilities != nil {
-		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
-		if err != nil {
-			return nil, fmt.Errorf("resolve plan image capability: %w", err)
+	effectiveImageCapabilityKey := ""
+	if !isMontageTask {
+		effectiveImageCapabilityKey = strings.TrimSpace(plan.ImageCapabilityKey)
+		if s.imageCapabilities != nil {
+			resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
+			if err != nil {
+				return nil, fmt.Errorf("resolve plan image capability: %w", err)
+			}
+			effectiveImageCapabilityKey = resolved.Key
 		}
-		effectiveImageCapabilityKey = resolved.Key
 	}
 	var planMontageInput *model.MontageInput
 	montageExecutionTarget := model.ExecutionTargetCloud
-	if model.IsMontagePlatform(taskType) {
+	if isMontageTask {
 		input := plan.MontageInput.Data()
 		planMontageInput = &input
 		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{

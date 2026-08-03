@@ -947,9 +947,11 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		Quantity:  3,
+		UserID:             userID,
+		ProjectID:          projectID,
+		Quantity:           3,
+		ImageRatio:         "16:9",
+		ImageCapabilityKey: "standard",
 		MontageInput: &model.MontageInput{
 			Brief:       "做一条新品发布短片",
 			PipelineKey: "default",
@@ -964,6 +966,9 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 	}
 	if len(tasks) != 1 {
 		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
+	}
+	if tasks[0].ImageRatio != "" || tasks[0].ImageCapabilityKey != "" {
+		t.Fatalf("Montage image settings = ratio %q, capability %q", tasks[0].ImageRatio, tasks[0].ImageCapabilityKey)
 	}
 	got := tasks[0].MontageInput.Data()
 	if got.Brief != "做一条新品发布短片" || got.PipelineKey != "default" {
@@ -1000,12 +1005,14 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformMontage,
-		Status:    model.PlanStatusActive,
-		Prompt:    "计划提示",
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          projectID,
+		Type:               model.PlatformMontage,
+		Status:             model.PlanStatusActive,
+		Prompt:             "计划提示",
+		ImageRatio:         "16:9",
+		ImageCapabilityKey: "standard",
 	}
 	plan.SetMontageInput(model.MontageInput{
 		Brief:       "从计划生成发布会短片",
@@ -1019,6 +1026,9 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	task, err := svc.CreateFromPlan(ctx, plan)
 	if err != nil {
 		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	if task.ImageRatio != "" || task.ImageCapabilityKey != "" {
+		t.Fatalf("Montage image settings = ratio %q, capability %q", task.ImageRatio, task.ImageCapabilityKey)
 	}
 	got := task.MontageInput.Data()
 	if got.Brief != "从计划生成发布会短片" || got.PipelineKey != "default" {

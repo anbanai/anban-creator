@@ -7,10 +7,23 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type aiEntrySubmitBody struct {
+	Channel            string                  `json:"channel"`
+	ProjectID          string                  `json:"project_id"`
+	ExecutionProfile   string                  `json:"execution_profile"`
+	Text               string                  `json:"text"`
+	Attachments        []model.EntryAttachment `json:"attachments,omitempty"`
+	Quantity           *int                    `json:"quantity,omitempty"`
+	ImageRatio         string                  `json:"image_ratio,omitempty"`
+	ImageCapabilityKey string                  `json:"image_capability_key,omitempty"`
+	ExecutionTarget    string                  `json:"execution_target,omitempty"`
+}
 
 type AIEntryHandler struct {
 	submitter service.AIEntrySubmitter
@@ -32,18 +45,32 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	var req service.AIEntrySubmitRequest
-	if err := c.Bind().Body(&req); err != nil {
+	var body aiEntrySubmitBody
+	if err := c.Bind().Body(&body); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	req.UserID = userID
-	req.Channel = strings.TrimSpace(req.Channel)
+	quantity := 1
+	if body.Quantity != nil {
+		if *body.Quantity < 1 || *body.Quantity > 5 {
+			return Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
+		}
+		quantity = *body.Quantity
+	}
+	req := service.AIEntrySubmitRequest{
+		UserID:             userID,
+		Channel:            strings.TrimSpace(body.Channel),
+		ProjectID:          strings.TrimSpace(body.ProjectID),
+		ExecutionProfile:   strings.TrimSpace(body.ExecutionProfile),
+		Text:               strings.TrimSpace(body.Text),
+		Attachments:        body.Attachments,
+		Quantity:           quantity,
+		ImageRatio:         strings.TrimSpace(body.ImageRatio),
+		ImageCapabilityKey: strings.TrimSpace(body.ImageCapabilityKey),
+		ExecutionTarget:    body.ExecutionTarget,
+	}
 	if req.Channel == "" {
 		req.Channel = "studio"
 	}
-	req.ProjectID = strings.TrimSpace(req.ProjectID)
-	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
-	req.Text = strings.TrimSpace(req.Text)
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}

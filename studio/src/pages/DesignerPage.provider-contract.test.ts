@@ -94,6 +94,15 @@ describe('Designer provider contract', () => {
     expect(page).toContain('md:pb-56')
   })
 
+  it('places project selection before image settings in the prompt bottom toolbar', () => {
+    const page = read('src/pages/DesignerPage.tsx')
+
+    expect(page).not.toContain('contextBar=')
+    expect(page).toMatch(
+      /leadingTools=\{\(\s*<div[^>]*>\s*\{projectControl\}[\s\S]*?<DesignerGenerationToolbar/,
+    )
+  })
+
   it('caps provider reference capacity at the shared five-file limit', () => {
     const page = read('src/pages/DesignerPage.tsx')
 

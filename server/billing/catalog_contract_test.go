@@ -45,6 +45,45 @@ func TestContentAddressedRetailCatalog(t *testing.T) {
 	}
 }
 
+func TestImageCapabilityTierPricesRemainDistinct(t *testing.T) {
+	catalog := loadProductionBundle(t).Products
+	skus := make(map[string]SKUConfig, len(catalog.SKUs))
+	for _, sku := range catalog.SKUs {
+		skus[sku.ID] = sku
+	}
+
+	standard, ok := skus["image.standard"]
+	if !ok {
+		t.Fatal("missing image.standard SKU")
+	}
+	professional, ok := skus["image.professional"]
+	if !ok {
+		t.Fatal("missing image.professional SKU")
+	}
+
+	tests := []struct {
+		tier              string
+		standardPrice     int64
+		professionalPrice int64
+	}{
+		{tier: "free", standardPrice: 300, professionalPrice: 500},
+		{tier: "pro", standardPrice: 270, professionalPrice: 450},
+		{tier: "enterprise", standardPrice: 240, professionalPrice: 400},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tier, func(t *testing.T) {
+			gotStandard, ok := catalog.PriceForTier(standard.PriceCredits, tt.tier)
+			if !ok || gotStandard != tt.standardPrice {
+				t.Fatalf("Standard PriceForTier(%q) = %d, %v; want %d, true", tt.tier, gotStandard, ok, tt.standardPrice)
+			}
+			gotProfessional, ok := catalog.PriceForTier(professional.PriceCredits, tt.tier)
+			if !ok || gotProfessional != tt.professionalPrice {
+				t.Fatalf("Professional PriceForTier(%q) = %d, %v; want %d, true", tt.tier, gotProfessional, ok, tt.professionalPrice)
+			}
+		})
+	}
+}
+
 func TestProviderCostCatalogV4(t *testing.T) {
 	type expectedCost struct {
 		pricingType string
@@ -367,7 +406,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		priceCredits     int64
 	}
 	want := map[string]skuSnapshot{
-		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
+		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 300, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
 		"image.professional": {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.professional", delivery: "persisted_image"},
 	}
 	taskTypes := []struct {

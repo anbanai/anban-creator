@@ -54,7 +54,7 @@ export function ProjectIdentity({
       <span className={cn('flex min-w-0 flex-1', compact ? 'items-center' : 'flex-col gap-0.5')}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-          {!compact && showType ? (
+          {showType ? (
             <Badge variant="secondary">{platformLabel}项目</Badge>
           ) : null}
         </span>

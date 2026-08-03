@@ -494,7 +494,7 @@ describe('TaskDetailPage', () => {
     const invalidateQueries = vi.spyOn(view.queryClient, 'invalidateQueries')
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
@@ -521,7 +521,7 @@ describe('TaskDetailPage', () => {
     const view = renderWithCachedTasks(taskA, taskB)
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
@@ -1185,10 +1185,10 @@ describe('TaskDetailPage', () => {
 
     const dialog = await openCloneDialog()
     expect(api.tasks.clone).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目上下文' })).toHaveTextContent('测试项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
     expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始任务要求')
-    expect(within(dialog).getByText('数量')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '1' })).toBeInTheDocument()
+    expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '任务数量：1' })).toBeInTheDocument()
     expect(await within(dialog).findByRole('button', { name: '图像设置：16:9 · 源图像' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
 

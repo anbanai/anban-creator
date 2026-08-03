@@ -38,7 +38,7 @@ func TestIlinkConversationNaturalLanguageCreateUsesAIEntryService(t *testing.T) 
 	created := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "夏日防晒指南"}
 	entry := &fakeIlinkAIEntry{res: AIEntrySubmitResult{
 		Status:  AIEntryStatusCreated,
-		Task:    created,
+		Tasks:   []*model.Task{created},
 		Message: "已创建任务",
 	}}
 	svc := NewIlinkConversationService(nil, sender, &logger)
@@ -65,8 +65,44 @@ func TestIlinkConversationNaturalLanguageCreateUsesAIEntryService(t *testing.T) 
 	if entry.req.Text != "帮我写一篇夏日防晒指南" {
 		t.Fatalf("entry text = %q", entry.req.Text)
 	}
+	if entry.req.Quantity != 0 {
+		t.Fatalf("iLink should omit quantity and rely on the one-task default, got %d", entry.req.Quantity)
+	}
 	if len(sender.texts) != 1 || !strings.Contains(sender.texts[0], created.ID) {
 		t.Fatalf("texts = %#v, want task id", sender.texts)
+	}
+}
+
+func TestIlinkConversationNaturalLanguageCreateRejectsMissingTask(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		tasks []*model.Task
+	}{
+		{name: "empty collection"},
+		{name: "nil first task", tasks: []*model.Task{nil}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			sender := &fakeIlinkConversationSender{}
+			entry := &fakeIlinkAIEntry{res: AIEntrySubmitResult{Status: AIEntryStatusCreated, Tasks: tt.tasks}}
+			svc := NewIlinkConversationService(nil, sender, &logger)
+			svc.SetAIEntryService(entry)
+			binding := &model.IlinkBinding{
+				UserID:            "user-1",
+				DefaultProjectID:  "project-1",
+				PlatformAccountID: stringPtr("assistant"),
+				ExternalUserID:    stringPtr("wx-user"),
+				Status:            model.IlinkBindingStatusActive,
+			}
+
+			svc.Handle(context.Background(), binding, wcf.Event{
+				Direction: "inbound", EventType: "text", BodyText: "帮我写一篇文章",
+			})
+
+			if len(sender.texts) != 1 || sender.texts[0] != "创建任务失败：未生成任务。" {
+				t.Fatalf("texts = %#v", sender.texts)
+			}
+		})
 	}
 }
 

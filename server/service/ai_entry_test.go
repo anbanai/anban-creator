@@ -129,10 +129,10 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -148,6 +148,62 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 	if len(llm.calls) != 1 || !strings.Contains(llm.calls[0].user, "帮我写一篇新品发布公众号文章") {
 		t.Fatalf("llm calls = %#v", llm.calls)
+	}
+}
+
+func TestAIEntryServiceSubmitCreatesMontageTaskWithoutImageCapability(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	taskSvc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.SetMontageDefaults(model.MontageDefaults{
+		DefaultPipeline: "social-short",
+		Preferences: model.MontagePreferences{
+			AspectRatio:     "16:9",
+			DurationSeconds: 45,
+		},
+		DeliveryTargets: []string{"final_video"},
+	})
+	project.MontageDefaultsSet = true
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"做一条新品发布短片"}`}}, nil, AIEntryModelConfig{}, &logger)
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID:             userID,
+		ProjectID:          projectID,
+		ExecutionProfile:   "effective",
+		Text:               "做一条新品发布短片",
+		Quantity:           5,
+		ImageRatio:         "invalid-for-montage",
+		ImageCapabilityKey: "unavailable-capability",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
+		t.Fatalf("result = %#v, want one created Montage task", result)
+	}
+	task := result.Tasks[0]
+	if task.Type != model.PlatformMontage || task.ImageCapabilityKey != "" || task.ImageRatio != "" {
+		t.Fatalf("task identity/image settings = type %q, capability %q, ratio %q", task.Type, task.ImageCapabilityKey, task.ImageRatio)
+	}
+	input := task.MontageInput.Data()
+	if input.Brief != "做一条新品发布短片" || input.PipelineKey != "social-short" {
+		t.Fatalf("montage input = %#v", input)
+	}
+	if input.Preferences.AspectRatio != "16:9" || input.Preferences.DurationSeconds != 45 {
+		t.Fatalf("montage preferences = %#v", input.Preferences)
+	}
+	if len(input.DeliveryTargets) != 1 || input.DeliveryTargets[0] != "final_video" {
+		t.Fatalf("delivery targets = %#v", input.DeliveryTargets)
 	}
 }
 
@@ -255,23 +311,26 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 
 			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
 				UserID: userID, ProjectID: projectID, Text: "write content",
+				Quantity:    2,
 				Attachments: []model.EntryAttachment{{Type: "image", UploadID: asset.ID, URL: "https://staging.example.com/ref.png", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}},
 			})
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil {
+			if result.Status != AIEntryStatusCreated || len(result.Tasks) != 2 {
 				t.Fatalf("result = %#v", result)
 			}
-			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
-			if err != nil {
-				t.Fatalf("find task: %v", err)
-			}
-			if found.ReferenceImageAssetID != asset.ID {
-				t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
-			}
-			if result.Task.ReferenceImage.AssetID != asset.ID {
-				t.Fatalf("reference asset view = %#v", result.Task.ReferenceImage)
+			for _, task := range result.Tasks {
+				found, err := repo.Tasks().FindByID(ctx, task.ID)
+				if err != nil {
+					t.Fatalf("find task: %v", err)
+				}
+				if found.ReferenceImageAssetID != asset.ID {
+					t.Fatalf("reference asset = %q", found.ReferenceImageAssetID)
+				}
+				if task.ReferenceImage == nil || task.ReferenceImage.AssetID != asset.ID {
+					t.Fatalf("reference asset view = %#v", task.ReferenceImage)
+				}
 			}
 			if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 				t.Fatalf("signed keys = %#v, want direct attachment only", store.signedKeys)
@@ -306,10 +365,10 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 || result.Tasks[0].ReferenceImage == nil || result.Tasks[0].ReferenceImage.AssetID != asset.ID {
 		t.Fatalf("result = %#v", result)
 	}
-	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	persisted, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,10 +407,10 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil || result.Task.ReferenceImage == nil || result.Task.ReferenceImage.AssetID != asset.ID {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 || result.Tasks[0].ReferenceImage == nil || result.Tasks[0].ReferenceImage.AssetID != asset.ID {
 		t.Fatalf("result = %#v", result)
 	}
-	persisted, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	persisted, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,10 +566,10 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -519,6 +578,164 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	}
 	if found.ImageCapabilityKey != "" {
 		t.Fatalf("image_capability_key = %q, want LLM model key ignored", found.ImageCapabilityKey)
+	}
+}
+
+func TestAIEntryServiceSubmitUsesExplicitImageParametersForEveryTask(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Tier = model.TierEnterprise
+	if err := repo.Users().Update(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, &srvconfig.Config{
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+				"standard":     {Enabled: true, MinTier: "free"},
+				"professional": {Enabled: true, MinTier: "enterprise"},
+			},
+		}},
+	}))
+	llm := &fakeAIEntryLLM{responses: []string{
+		`{"prompt":"写新品文章","image_ratio":"3:4","image_capability_key":"untrusted"}`,
+	}}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "写新品文章",
+		Quantity: 2, ImageRatio: " 16:9 ", ImageCapabilityKey: " professional ",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 2 {
+		t.Fatalf("result = %#v, want two created tasks", result)
+	}
+	if result.Message != "已创建 2 个任务。" {
+		t.Fatalf("message = %q", result.Message)
+	}
+	for _, task := range result.Tasks {
+		if task.ImageRatio != "16:9" || task.ImageCapabilityKey != "professional" {
+			t.Fatalf("task image parameters = ratio %q, capability %q", task.ImageRatio, task.ImageCapabilityKey)
+		}
+	}
+}
+
+func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	taskSvc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, &srvconfig.Config{
+		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+				"standard":     {Enabled: true, MinTier: "free"},
+				"professional": {Enabled: true, MinTier: "enterprise"},
+			},
+		}},
+	}))
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
+	costs := &fakeProviderTokenCostRecorder{}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
+		ImageCapabilityKey: "professional",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusError || !strings.Contains(result.Message, "requires enterprise tier") {
+		t.Fatalf("result = %#v, want tier authorization failure", result)
+	}
+	if len(llm.calls) != 0 || len(costs.reconciled) != 0 || len(costs.unreconciled) != 0 {
+		t.Fatalf("LLM/cost side effects = calls %d, reconciled %d, unreconciled %d; want all zero", len(llm.calls), len(costs.reconciled), len(costs.unreconciled))
+	}
+	tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if findErr != nil || len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
+	}
+}
+
+func TestAIEntryServiceSubmitFailsClosedWhenExplicitImageCapabilityResolverIsUnavailable(t *testing.T) {
+	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
+	costs := &fakeProviderTokenCostRecorder{}
+	logger := zerolog.New(io.Discard)
+	entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
+		ImageCapabilityKey: "professional",
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if result.Status != AIEntryStatusError || !strings.Contains(result.Message, "图片能力服务暂不可用") {
+		t.Fatalf("result = %#v, want unavailable capability resolver error", result)
+	}
+	if len(llm.calls) != 0 || len(costs.reconciled) != 0 || len(costs.unreconciled) != 0 {
+		t.Fatalf("LLM/cost side effects = calls %d, reconciled %d, unreconciled %d; want all zero", len(llm.calls), len(costs.reconciled), len(costs.unreconciled))
+	}
+	tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+	if findErr != nil || len(tasks) != 0 {
+		t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
+	}
+}
+
+func TestAIEntryServiceSubmitRejectsInvalidExplicitParametersBeforeIntentParsing(t *testing.T) {
+	tests := []struct {
+		name        string
+		quantity    int
+		imageRatio  string
+		wantMessage string
+	}{
+		{name: "negative quantity", quantity: -1, wantMessage: "quantity must be between 1 and 5"},
+		{name: "quantity above maximum", quantity: 6, wantMessage: "quantity must be between 1 and 5"},
+		{name: "ratio unsupported by article project", imageRatio: "9:16", wantMessage: model.ValidImageRatioHint},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
+			costs := &fakeProviderTokenCostRecorder{}
+			logger := zerolog.New(io.Discard)
+			entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
+
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+				UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
+				Quantity: tt.quantity, ImageRatio: tt.imageRatio,
+			})
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if result.Status != AIEntryStatusError || !strings.Contains(result.Message, tt.wantMessage) {
+				t.Fatalf("result = %#v, want error containing %q", result, tt.wantMessage)
+			}
+			if len(llm.calls) != 0 || len(costs.reconciled) != 0 || len(costs.unreconciled) != 0 {
+				t.Fatalf("LLM/cost side effects = calls %d, reconciled %d, unreconciled %d; want all zero", len(llm.calls), len(costs.reconciled), len(costs.unreconciled))
+			}
+			tasks, findErr := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
+			if findErr != nil || len(tasks) != 0 {
+				t.Fatalf("tasks = %#v, err=%v; want none", tasks, findErr)
+			}
+		})
 	}
 }
 
@@ -578,10 +795,10 @@ func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -622,10 +839,10 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
-		if result.Status != AIEntryStatusCreated || result.Task == nil {
+		if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 			t.Fatalf("result = %#v, want created task", result)
 		}
-		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 		if err != nil {
 			t.Fatalf("find task: %v", err)
 		}
@@ -662,10 +879,10 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
-		if result.Status != AIEntryStatusCreated || result.Task == nil {
+		if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 			t.Fatalf("result = %#v, want created task", result)
 		}
-		found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+		found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 		if err != nil {
 			t.Fatalf("find task: %v", err)
 		}
@@ -837,10 +1054,10 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if result.Status != AIEntryStatusCreated || result.Task == nil {
+	if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 		t.Fatalf("result = %#v, want created task", result)
 	}
-	found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
@@ -882,10 +1099,10 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if result.Status != AIEntryStatusCreated || result.Task == nil {
+			if result.Status != AIEntryStatusCreated || len(result.Tasks) != 1 {
 				t.Fatalf("result = %#v, want created task", result)
 			}
-			found, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+			found, err := repo.Tasks().FindByID(ctx, result.Tasks[0].ID)
 			if err != nil {
 				t.Fatalf("find task: %v", err)
 			}
