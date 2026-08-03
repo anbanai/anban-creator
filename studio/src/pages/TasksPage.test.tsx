@@ -726,4 +726,23 @@ describe('TasksPage Montage creation', () => {
 
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
   })
+
+  it('submits Montage creation when image capabilities are unavailable', async () => {
+    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
+    renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '不依赖图像能力的 Montage 视频' },
+    })
+
+    const createButton = screen.getByRole('button', { name: '创建' })
+    await waitFor(() => expect(createButton).toBeEnabled())
+    fireEvent.click(createButton)
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'montage',
+      prompt: '不依赖图像能力的 Montage 视频',
+    })))
+  })
 })

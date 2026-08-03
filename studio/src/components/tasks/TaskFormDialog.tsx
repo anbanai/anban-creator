@@ -115,7 +115,6 @@ export function TaskFormDialog({
 	})
 	const executionProfilesQuery = useAgentExecutionProfiles()
 	const agentPacksQuery = useAgentPacks()
-	const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities()
 	const { data: platformConfigs = [] } = useQuery({
 		queryKey: ['platform-configs'],
 		queryFn: () => api.projects.platformConfigs(),
@@ -177,6 +176,8 @@ export function TaskFormDialog({
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
+  const usesImageSettings = !isViralAnalysisTask && !isMontageTask
+  const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
@@ -204,7 +205,7 @@ export function TaskFormDialog({
   }, [imageCapabilityOptions, watchedImageCapabilityKey])
   const effectiveImageCapabilityKey = watchedImageCapabilityKey || defaultCapability
   const selectedImageCapability = imageCapabilityOptions.find((option) => option.key === effectiveImageCapabilityKey)
-  const imageCapabilityUnavailable = !isViralAnalysisTask && Boolean(effectiveImageCapabilityKey)
+  const imageCapabilityUnavailable = usesImageSettings && Boolean(effectiveImageCapabilityKey)
     && !imageCapabilitiesLoading
     && !imageCapabilitiesError
     && (
@@ -365,9 +366,9 @@ export function TaskFormDialog({
       ? { message: '请选择可用的执行配置。', href: '' }
       : selectedExecutionProfileUnavailable
         ? { message: '当前执行配置不可用，请重新选择。', href: '' }
-      : !isViralAnalysisTask && imageCapabilitiesError
+      : usesImageSettings && imageCapabilitiesError
         ? { message: '图像能力暂时无法加载，请稍后重试。', href: '' }
-      : !isViralAnalysisTask && imageCapabilitiesLoading
+      : usesImageSettings && imageCapabilitiesLoading
         ? { message: '正在加载图像能力，请稍候。', href: '' }
       : !costPreview.priceAvailable
     ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
@@ -455,7 +456,7 @@ export function TaskFormDialog({
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
           {executionProfileControl}
-          {!isMontageTask ? (
+          {usesImageSettings ? (
             <ImageGenerationToolbar
               ratios={businessImageRatios}
               ratio={watchedImageRatio || 'auto'}
