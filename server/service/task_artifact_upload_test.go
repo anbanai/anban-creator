@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ type fakeTaskArtifactStorage struct {
 	name               string
 	uploadKey          string
 	uploadContentType  string
+	uploadMetadata     map[string]string
 	uploadCalls        int
 	uploadURLCalls     int
 	stats              map[string]*storage.ObjectInfo
@@ -146,6 +148,14 @@ func (f *fakeTaskArtifactStorage) UploadURL(_ context.Context, key string, conte
 	f.uploadURLCalls++
 	f.uploadKey = key
 	f.uploadContentType = contentType
+	return "https://upload.example.com/" + key, nil
+}
+
+func (f *fakeTaskArtifactStorage) UploadURLWithMetadata(_ context.Context, key string, contentType string, metadata map[string]string, _ int) (string, error) {
+	f.uploadURLCalls++
+	f.uploadKey = key
+	f.uploadContentType = contentType
+	f.uploadMetadata = maps.Clone(metadata)
 	return "https://upload.example.com/" + key, nil
 }
 
@@ -1219,6 +1229,9 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	assertTaskArtifactStagingKey(t, task, "", taskArtifactTestSHA256, "output/article.md", result.Key)
 	if store.uploadKey != result.Key || store.uploadContentType != "text/markdown" {
 		t.Fatalf("signed upload = key %q content-type %q, want %q text/markdown", store.uploadKey, store.uploadContentType, result.Key)
+	}
+	if store.uploadMetadata[storage.ObjectMetadataSHA256] != taskArtifactTestSHA256 {
+		t.Fatalf("signed upload metadata = %#v, want sha256 %q", store.uploadMetadata, taskArtifactTestSHA256)
 	}
 	if result.STSAccessKeyID != "sts-ak" || result.STSSecurityToken != "sts-token" {
 		t.Fatalf("sts fields = %#v", result)

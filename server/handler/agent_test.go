@@ -619,6 +619,7 @@ func ptrTime(t time.Time) *time.Time { return &t }
 type fakeAgentArtifactStorage struct {
 	uploadKey         string
 	uploadContentType string
+	uploadMetadata    map[string]string
 	uploadedKey       string
 	uploadedBody      []byte
 	stats             map[string]*storage.ObjectInfo
@@ -635,6 +636,12 @@ func (f *fakeAgentArtifactStorage) UploadFile(context.Context, string, string, s
 func (f *fakeAgentArtifactStorage) UploadURL(_ context.Context, key string, contentType string, _ int) (string, error) {
 	f.uploadKey = key
 	f.uploadContentType = contentType
+	return "https://upload.example.com/" + key, nil
+}
+func (f *fakeAgentArtifactStorage) UploadURLWithMetadata(_ context.Context, key, contentType string, metadata map[string]string, _ int) (string, error) {
+	f.uploadKey = key
+	f.uploadContentType = contentType
+	f.uploadMetadata = metadata
 	return "https://upload.example.com/" + key, nil
 }
 func (f *fakeAgentArtifactStorage) GetURL(key string) string { return "https://cdn.example.com/" + key }
@@ -808,6 +815,9 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 	stagingPrefix := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/staging/sha256/" + hash + "/"
 	if !strings.HasPrefix(stagingKey, stagingPrefix) || !strings.HasSuffix(stagingKey, "/output/article.md") || store.uploadKey != stagingKey || store.uploadContentType != "text/markdown" {
 		t.Fatalf("prepared key/store = %q/%q/%q, want scoped staging key with prefix %q", stagingKey, store.uploadKey, store.uploadContentType, stagingPrefix)
+	}
+	if store.uploadMetadata[storage.ObjectMetadataSHA256] != hash {
+		t.Fatalf("signed upload metadata = %#v, want sha256 %q", store.uploadMetadata, hash)
 	}
 	if env.Data.STSAccessKeyID != "sts-ak" || env.Data.STSSecurityToken != "sts-token" || env.Data.STSAccessKeySecret == "" {
 		t.Fatalf("missing sts credentials: %#v", env.Data)

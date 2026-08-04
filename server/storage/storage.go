@@ -54,6 +54,12 @@ type ConditionalObjectPromoter interface {
 	PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*ObjectInfo, error)
 }
 
+// MetadataUploadURLProvider signs direct uploads whose object metadata must
+// match the headers sent by the uploader.
+type MetadataUploadURLProvider interface {
+	UploadURLWithMetadata(ctx context.Context, key, contentType string, metadata map[string]string, expirySeconds int) (string, error)
+}
+
 // ReadObject requires an explicitly bounded reader. Security-sensitive callers
 // must not fall back to Provider.Read because some remote implementations buffer
 // the entire object before returning.

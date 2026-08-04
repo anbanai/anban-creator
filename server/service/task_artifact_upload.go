@@ -144,7 +144,13 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		expiresSeconds = defaultDirectUploadTTLSeconds
 	}
 	expiresAt := now().Add(time.Duration(expiresSeconds) * time.Second)
-	uploadURL, err := s.store.UploadURL(ctx, stagingKey, contentType, expiresSeconds)
+	uploadStore, ok := s.store.(storage.MetadataUploadURLProvider)
+	if !ok {
+		return nil, fmt.Errorf("%w: storage provider does not support metadata-bound upload URLs", ErrTaskArtifactUnavailable)
+	}
+	uploadURL, err := uploadStore.UploadURLWithMetadata(ctx, stagingKey, contentType, map[string]string{
+		storage.ObjectMetadataSHA256: req.SHA256,
+	}, expiresSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("%w: create signed upload URL: %v", ErrTaskArtifactUnavailable, err)
 	}

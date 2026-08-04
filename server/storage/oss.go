@@ -131,9 +131,24 @@ func (p *OSSProvider) UploadFile(_ context.Context, key string, filePath string,
 
 // UploadURL generates a time-limited signed PUT URL for direct client uploads.
 func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType string, expirySeconds int) (string, error) {
+	return p.uploadURL(key, contentType, nil, expirySeconds)
+}
+
+// UploadURLWithMetadata generates a signed PUT URL that binds OSS object
+// metadata to the signature.
+func (p *OSSProvider) UploadURLWithMetadata(_ context.Context, key, contentType string, metadata map[string]string, expirySeconds int) (string, error) {
+	return p.uploadURL(key, contentType, metadata, expirySeconds)
+}
+
+func (p *OSSProvider) uploadURL(key, contentType string, metadata map[string]string, expirySeconds int) (string, error) {
 	options := []oss.Option{}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
+	}
+	for name, value := range metadata {
+		if strings.TrimSpace(name) != "" {
+			options = append(options, oss.Meta(name, value))
+		}
 	}
 	signedURL, err := p.bucket.SignURL(key, oss.HTTPPut, int64(expirySeconds), options...)
 	if err != nil {
