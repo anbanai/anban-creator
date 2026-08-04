@@ -113,7 +113,9 @@ describe('DesignerGenerationToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
-    expect(screen.getByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
+    const fixedQuantity = screen.getByText('图片数量 1 · 当前能力上限')
+    expect(fixedQuantity).toBeInTheDocument()
+    expect(fixedQuantity.parentElement).toHaveClass('col-span-2')
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '减少图片数量' })).not.toBeInTheDocument()
   })

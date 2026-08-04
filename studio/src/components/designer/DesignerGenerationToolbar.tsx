@@ -160,7 +160,7 @@ export function DesignerGenerationToolbar({
 
         <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
           <h3 className={maxBatch === 1 ? 'sr-only' : 'font-medium'}>图片数量</h3>
-          <div className="flex min-w-0 justify-end">
+          <div className={`flex min-w-0 justify-end ${maxBatch === 1 ? 'col-span-2' : ''}`}>
             <QuantityStepper
               label="图片数量"
               value={quantity}

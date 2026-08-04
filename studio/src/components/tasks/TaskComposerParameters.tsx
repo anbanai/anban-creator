@@ -102,7 +102,7 @@ export function TaskComposerParameters({
               <h3 className={quantity.min === quantity.max ? 'sr-only' : 'font-medium'}>
                 {quantity.label}
               </h3>
-              <div className="flex min-w-0 justify-end">
+              <div className={`flex min-w-0 justify-end ${quantity.min === quantity.max ? 'col-span-2' : ''}`}>
                 <QuantityStepper {...quantity} />
               </div>
             </section>

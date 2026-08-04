@@ -119,4 +119,23 @@ describe('TaskComposerParameters', () => {
     expect(within(popover).queryByText('图片比例')).not.toBeInTheDocument()
     expect(within(popover).queryByText('任务数量')).not.toBeInTheDocument()
   })
+
+  it('lets a fixed task quantity use the full compact row', () => {
+    render(
+      <TaskComposerParameters
+        execution={{ profiles, value: 'effective', onChange: vi.fn() }}
+        quantity={{
+          label: '任务数量',
+          value: 1,
+          min: 1,
+          max: 1,
+          onChange: vi.fn(),
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /创作参数：/ }))
+    const fixedQuantity = screen.getByText('任务数量 1 · 当前能力上限')
+    expect(fixedQuantity.parentElement).toHaveClass('col-span-2')
+  })
 })
