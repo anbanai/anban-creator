@@ -40,7 +40,7 @@ const catalog: BillingCatalog = {
 }
 
 describe('TaskComposerParameters', () => {
-  it('combines execution, image, and finite task quantity settings behind one vertical popover', () => {
+  it('combines execution, image, and finite task quantity settings in a wide compact popover', () => {
     const onExecutionProfileChange = vi.fn()
     const onRatioChange = vi.fn()
     const onCapabilityChange = vi.fn()
@@ -89,8 +89,9 @@ describe('TaskComposerParameters', () => {
     fireEvent.click(trigger)
     const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
-    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-1')
-    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('sm:grid-cols-3')
+    expect(popover).toHaveClass('w-[min(48rem,calc(100vw-1rem))]', 'gap-1.5', 'p-2')
+    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-3')
+    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('grid-cols-1')
     expect(within(popover).getByRole('group', { name: '图片比例' })).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
     expect(within(popover).getByLabelText('任务数量：1')).toBeInTheDocument()

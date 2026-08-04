@@ -37,6 +37,8 @@ describe('ImageGenerationSettings', () => {
     expect(screen.getByText('图片比例').closest('section')).toHaveClass(
       'grid-cols-[4.5rem_minmax(0,1fr)]',
     )
+    expect(screen.getByRole('group', { name: '图片比例' })).toHaveClass('flex-nowrap')
+    expect(screen.getByRole('group', { name: '图片比例' })).toHaveStyle({ '--gap': '1' })
   })
 
   it('reports explicit auto and capability selections', () => {

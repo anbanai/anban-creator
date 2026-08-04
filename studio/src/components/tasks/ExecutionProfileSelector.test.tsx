@@ -48,4 +48,23 @@ describe('ExecutionProfileSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /^性价比，/ }))
     expect(onChange).toHaveBeenLastCalledWith('effective')
   })
+
+  it('supports a compact horizontal layout for composer popovers', () => {
+    render(
+      <ExecutionProfileSelector
+        profiles={profiles}
+        value="effective"
+        onChange={() => {}}
+        layout="horizontal"
+      />,
+    )
+
+    const group = screen.getByRole('group', { name: 'Agent 执行配置' })
+    expect(group).toHaveClass('grid-cols-3')
+    expect(group).not.toHaveClass('grid-cols-1')
+    expect(screen.getByText('日常创作')).toHaveClass('max-sm:hidden')
+    expect(screen.getByText('需要企业版')).not.toHaveClass('max-sm:hidden')
+    expect(screen.getByText('性价比').parentElement).toHaveClass('sm:flex-row', 'sm:justify-between')
+    expect(screen.getByText('日常创作').parentElement).toHaveClass('sm:flex-row', 'sm:justify-between')
+  })
 })

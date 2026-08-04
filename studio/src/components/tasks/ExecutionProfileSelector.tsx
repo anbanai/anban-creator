@@ -3,6 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { AgentExecutionProfileCapability, AgentExecutionProfileID } from '@/types'
 import type { BillingCatalog } from '@/types'
+import { cn } from '@/lib/utils'
 import { executionProfilePriceInfo } from '@/lib/pricing'
 
 const minimumTierLabel = {
@@ -33,6 +34,7 @@ export interface ExecutionProfileSelectorProps {
   catalog?: BillingCatalog
   taskType?: string
   priceUnit?: 'task' | 'run'
+  layout?: 'vertical' | 'horizontal'
 }
 
 export function ExecutionProfileSelector({
@@ -44,10 +46,14 @@ export function ExecutionProfileSelector({
   catalog,
   taskType,
   priceUnit = 'task',
+  layout = 'vertical',
 }: ExecutionProfileSelectorProps) {
   if (loading) {
     return (
-      <div className="grid grid-cols-1 gap-2" aria-label="正在加载执行配置">
+      <div
+        className={cn('grid gap-2', layout === 'horizontal' ? 'grid-cols-3' : 'grid-cols-1')}
+        aria-label="正在加载执行配置"
+      >
         {[0, 1, 2].map((index) => <Skeleton key={index} className="h-16 w-full" />)}
       </div>
     )
@@ -56,7 +62,10 @@ export function ExecutionProfileSelector({
   return (
     <ToggleGroup
       aria-label="Agent 执行配置"
-      className="grid w-full grid-cols-1 items-stretch gap-2"
+      className={cn(
+        'grid w-full items-stretch gap-2',
+        layout === 'horizontal' ? 'grid-cols-3' : 'grid-cols-1',
+      )}
       value={value ? [value] : []}
       onValueChange={(next) => {
         const selected = next[0] as AgentExecutionProfileID | undefined
@@ -74,17 +83,33 @@ export function ExecutionProfileSelector({
             value={profile.id}
             disabled={!profile.available}
             aria-label={`${profile.display_name}，${minimumTierLabel[profile.min_tier]}${profile.available ? '' : `，不可用：${reason}`}`}
-            className="h-auto min-h-16 w-full min-w-0 flex-col items-start justify-center gap-1 whitespace-normal px-3 py-2 text-left"
+            className={cn(
+              'h-auto min-h-16 w-full min-w-0 flex-col items-start justify-center gap-1 whitespace-normal py-2 text-left',
+              layout === 'horizontal' ? 'px-2' : 'px-3',
+            )}
           >
-            <span className="flex w-full items-center justify-between gap-2">
+            <span className={cn(
+              'flex w-full gap-2',
+              layout === 'horizontal'
+                ? 'flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2'
+                : 'items-center justify-between',
+            )}>
               <span className="font-medium">{profile.display_name}</span>
-              <span className="flex shrink-0 items-center gap-1">
+              <span className="flex shrink-0 flex-wrap items-center gap-1">
                 <Badge variant="outline">{minimumTierLabel[profile.min_tier]}</Badge>
-                {!profile.available ? <Badge variant="secondary">不可用</Badge> : null}
+                {!profile.available && layout === 'vertical' ? <Badge variant="secondary">不可用</Badge> : null}
               </span>
             </span>
-            <span className="flex w-full min-w-0 items-center justify-between gap-3 text-xs">
-              <span className="min-w-0 truncate text-muted-foreground">
+            <span className={cn(
+              'flex w-full min-w-0 text-xs',
+              layout === 'horizontal'
+                ? 'flex-col items-start gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3'
+                : 'items-center justify-between gap-3',
+            )}>
+              <span className={cn(
+                'min-w-0 truncate text-muted-foreground',
+                layout === 'horizontal' && profile.available ? 'max-sm:hidden' : '',
+              )}>
                 {profile.available ? profile.description : reason}
               </span>
               {pricing ? (

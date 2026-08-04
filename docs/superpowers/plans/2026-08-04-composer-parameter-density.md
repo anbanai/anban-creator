@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rename the composer control to `创作参数` and arrange short parameter choices in compact horizontal rows while keeping long-form selectors vertical.
+**Goal:** Rename the composer control to `创作参数`, keep the common catalog fully visible without internal scrolling, and arrange execution profiles plus short parameter choices horizontally.
 
-**Architecture:** Keep `TaskComposerParameters` and `DesignerGenerationToolbar` as the two popover owners. Apply a consistent fixed-label/minmax-controls grid to compact sections, while leaving `ExecutionProfileSelector` and image capability groups unchanged and vertical.
+**Architecture:** Keep `TaskComposerParameters` and `DesignerGenerationToolbar` as the two popover owners. `ExecutionProfileSelector` remains vertical by default for non-composer consumers, while `TaskComposerParameters` requests a compact horizontal mode. Image capability groups remain vertical and short controls use fixed-label/minmax-control rows.
 
 **Tech Stack:** React 19, TypeScript, Tailwind CSS v4, Base UI/shadcn, Vitest, Testing Library, Vite.
 
@@ -20,13 +20,13 @@
 
 - [x] **Step 1: Write failing accessible-name and layout assertions**
 
-Update the shared parameter test to look up the trigger and dialog by `创作参数`, keep the execution group vertical, and assert the ratio and quantity sections use compact label-and-controls grids:
+Update the shared parameter test to look up the trigger and dialog by `创作参数`, assert the composer execution group is horizontal, and assert the ratio and quantity sections use compact label-and-controls grids:
 
 ```tsx
 const trigger = screen.getByRole('button', { name: /创作参数：/ })
 fireEvent.click(trigger)
 const popover = screen.getByRole('dialog', { name: '创作参数' })
-expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-1')
+expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-3')
 expect(within(popover).getByText('任务数量').closest('section')).toHaveClass(
   'grid-cols-[4.5rem_minmax(0,1fr)]',
 )
@@ -72,10 +72,10 @@ In `ImageGenerationToolbar.tsx`, make only the short ratio section horizontal:
 ```tsx
 <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
   <h3 className="pt-1 font-medium">图片比例</h3>
-  <ToggleGroup className="flex min-w-0 flex-wrap justify-start" ...>
+  <ToggleGroup spacing={1} className="flex min-w-0 flex-nowrap justify-start" ...>
 ```
 
-Keep the image-capability section and `ExecutionProfileSelector` vertical.
+Keep the image-capability section vertical. Keep `ExecutionProfileSelector` vertical by default, but pass `layout="horizontal"` from `TaskComposerParameters`.
 
 - [x] **Step 4: Run targeted tests and verify GREEN**
 
@@ -225,9 +225,9 @@ Expected: no whitespace errors; only the two unrelated July plan drafts remain o
 At `http://localhost:58442/` with a 1440x768 viewport:
 
 - Open `创作参数`.
-- Confirm execution profiles and image capabilities remain vertical.
-- Confirm image ratio and task quantity render as compact horizontal rows.
-- Confirm the common parameter set fits without internal scrolling.
+- Confirm execution profiles render in one horizontal row while image capabilities remain vertical.
+- Confirm image ratio stays on one line and task quantity renders as a compact horizontal row.
+- Confirm the 48rem popover matches the 48rem prompt input and fits without internal scrolling.
 
 - [x] **Step 4: Verify Designer and mobile rendering**
 
@@ -242,3 +242,39 @@ At `/designer` with 1440x768 and 390x844 viewports:
 - [x] **Step 5: Review and hand off**
 
 Review the complete range against `docs/superpowers/specs/2026-08-04-composer-parameter-density-design.md`, report any remaining browser or provider E2E gap, and leave unrelated drafts untouched.
+
+### Task 5: Remove Shared Composer Scrolling
+
+**Files:**
+- Modify: `studio/src/components/tasks/ExecutionProfileSelector.test.tsx`
+- Modify: `studio/src/components/tasks/ExecutionProfileSelector.tsx`
+- Modify: `studio/src/components/tasks/TaskComposerParameters.test.tsx`
+- Modify: `studio/src/components/tasks/TaskComposerParameters.tsx`
+- Modify: `studio/src/components/ImageGenerationToolbar.test.tsx`
+- Modify: `studio/src/components/ImageGenerationToolbar.tsx`
+
+- [x] **Step 1: Write failing compact-layout assertions**
+
+Assert that the composer popover uses `w-[min(48rem,calc(100vw-1rem))]`, passes `layout="horizontal"` to the execution selector, and keeps the image-ratio group on one line with spacing `1`.
+
+- [x] **Step 2: Verify RED**
+
+Run:
+
+```bash
+cd studio && PATH=/Users/medivh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH bun run test -- src/components/tasks/ExecutionProfileSelector.test.tsx src/components/tasks/TaskComposerParameters.test.tsx src/components/ImageGenerationToolbar.test.tsx
+```
+
+Expected: fail on the old single-column execution layout, 36rem popover, and wrapping ratio group.
+
+- [x] **Step 3: Implement the composer-only horizontal mode**
+
+Add `layout?: 'vertical' | 'horizontal'` to `ExecutionProfileSelector`, retain `vertical` as the default, and use three columns only when `TaskComposerParameters` requests `horizontal`. Keep mobile tier, price, multiplier, and disabled reason visible while hiding only available-profile descriptions below `sm`.
+
+- [x] **Step 4: Verify targeted tests and browser metrics**
+
+At 1440x768, the default 1280x720 window, and 390x844, require `scrollHeight === clientHeight` and `scrollWidth === clientWidth`. Repeat the measurement in homepage, task-create, and plan-create parameter popovers.
+
+- [x] **Step 5: Run full verification, review, commit, and publish main**
+
+Run the full Studio test suite and production build, audit the complete diff, commit only the intended files, push `main`, and verify the remote SHA.
