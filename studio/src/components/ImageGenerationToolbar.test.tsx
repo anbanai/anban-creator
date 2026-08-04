@@ -34,6 +34,9 @@ describe('ImageGenerationSettings', () => {
     expect(screen.queryByText('16:9')).not.toBeInTheDocument()
     expect(screen.getByText('适合复杂构图')).toBeInTheDocument()
     expect(screen.getByText('每张 800 积分')).toBeInTheDocument()
+    expect(screen.getByText('图片比例').closest('section')).toHaveClass(
+      'grid-cols-[4.5rem_minmax(0,1fr)]',
+    )
   })
 
   it('reports explicit auto and capability selections', () => {

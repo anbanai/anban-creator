@@ -24,8 +24,8 @@ export function ImageGenerationSettings({
 }: ImageGenerationSettingsProps) {
   return (
     <>
-      <section className="flex flex-col gap-2">
-        <h3 className="font-medium">图片比例</h3>
+      <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
+        <h3 className="pt-1 font-medium">图片比例</h3>
         <ToggleGroup
           aria-label="图片比例"
           value={[ratio || 'auto']}
@@ -36,7 +36,7 @@ export function ImageGenerationSettings({
           variant="outline"
           size="sm"
           disabled={disabled}
-          className="flex w-full flex-wrap justify-start"
+          className="flex min-w-0 flex-wrap justify-start"
         >
           <ToggleGroupItem value="auto">智能适配</ToggleGroupItem>
           {ratios.map((item) => (

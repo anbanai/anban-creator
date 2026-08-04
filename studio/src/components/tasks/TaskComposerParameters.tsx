@@ -71,20 +71,20 @@ export function TaskComposerParameters({
             variant="ghost"
             size="sm"
             disabled={disabled}
-            aria-label={`创作设置：${summary}`}
+            aria-label={`创作参数：${summary}`}
             className="max-w-full px-2 text-muted-foreground"
           />
         )}
       >
         <SlidersHorizontalIcon data-icon="inline-start" />
-        <span>创作设置</span>
+        <span>创作参数</span>
         <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
       <PopoverContent
         align="start"
         className="max-h-[var(--available-height)] w-[min(36rem,calc(100vw-2rem))] gap-3 overflow-y-auto p-4"
       >
-        <PopoverTitle className="sr-only">创作设置</PopoverTitle>
+        <PopoverTitle className="sr-only">创作参数</PopoverTitle>
         <section className="flex flex-col gap-2">
           <h3 className="font-medium">执行配置</h3>
           <ExecutionProfileSelector {...execution} />
@@ -98,9 +98,13 @@ export function TaskComposerParameters({
         {quantity ? (
           <>
             <Separator />
-            <section className="flex items-center justify-between gap-3">
-              <h3 className="font-medium">{quantity.label}</h3>
-              <QuantityStepper {...quantity} />
+            <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
+              <h3 className={quantity.min === quantity.max ? 'sr-only' : 'font-medium'}>
+                {quantity.label}
+              </h3>
+              <div className="flex min-w-0 justify-end">
+                <QuantityStepper {...quantity} />
+              </div>
             </section>
           </>
         ) : null}

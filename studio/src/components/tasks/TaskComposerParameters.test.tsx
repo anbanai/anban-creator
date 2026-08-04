@@ -80,20 +80,23 @@ describe('TaskComposerParameters', () => {
       />,
     )
 
-    const trigger = screen.getByRole('button', { name: /创作设置：/ })
-    expect(trigger).toHaveTextContent('创作设置')
+    const trigger = screen.getByRole('button', { name: /创作参数：/ })
+    expect(trigger).toHaveTextContent('创作参数')
     expect(screen.queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '任务数量：1' })).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
-    const popover = screen.getByRole('dialog')
+    const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-1')
     expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('sm:grid-cols-3')
     expect(within(popover).getByRole('group', { name: '图片比例' })).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
     expect(within(popover).getByLabelText('任务数量：1')).toBeInTheDocument()
+    expect(within(popover).getByText('任务数量').closest('section')).toHaveClass(
+      'grid-cols-[4.5rem_minmax(0,1fr)]',
+    )
 
     fireEvent.click(within(popover).getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(popover).getByRole('button', { name: '4:3' }))
@@ -110,8 +113,8 @@ describe('TaskComposerParameters', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /创作设置：/ }))
-    const popover = screen.getByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: /创作参数：/ }))
+    const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
     expect(within(popover).queryByText('图片比例')).not.toBeInTheDocument()
     expect(within(popover).queryByText('任务数量')).not.toBeInTheDocument()
