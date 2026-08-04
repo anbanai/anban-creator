@@ -12,6 +12,8 @@ export interface ExecutionResult {
   duration_ms?: number;
   log_text?: string;
   model_usage?: unknown[];
+  tool_use_count?: number;
+  tool_use_summary?: Record<string, number>;
   [key: string]: unknown;
 }
 

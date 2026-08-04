@@ -145,6 +145,7 @@ const CLAUDE_ENVIRONMENT_KEYS_TO_UNSET = new Set([
 ]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
+export interface ToolUseDiagnostics { tool_use_count: number; tool_use_summary: Record<string, number>; }
 export type RunnerReporter = Pick<Reporter, "progress">;
 
 export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
@@ -155,8 +156,9 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   let logText = "";
   let initValidated = false;
   const toolCalls = new Map<string, TrackedToolCall>();
+  const toolUseDiagnostics: ToolUseDiagnostics = { tool_use_count: 0, tool_use_summary: {} };
   for await (const message of query({ prompt: data.prompt, options })) {
-    const consumed = await consumeMessage(message, reporter, logText, toolCalls, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
+    const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
     logText = consumed.logText;
     if (message.type === "system" && message.subtype === "init") {
       validateManagedInit(message, data.task_type);
@@ -168,7 +170,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
       return consumed.terminal;
     }
   }
-  return { success: false, error: "managed agent stream ended without a result message", work_dir: workspace, log_text: logText };
+  return { success: false, error: "managed agent stream ended without a result message", work_dir: workspace, log_text: logText, ...toolUseDiagnostics };
 }
 
 export function buildQueryOptions(
@@ -188,6 +190,7 @@ export function buildQueryOptions(
     resume: data.resume_session_id,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
+    disallowedTools: ["Agent", "ScheduleWakeup", "AskUserQuestion"],
     plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
@@ -223,8 +226,9 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
 }
 
-async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, logText: string, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
+async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, logText: string, toolCalls: Map<string, TrackedToolCall>, toolUseDiagnostics: ToolUseDiagnostics, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
   if (message.type === "assistant") {
+    recordAssistantToolUses(message.message.content, toolUseDiagnostics);
     for (const block of message.message.content) {
       if (block.type === "text" && block.text.trim()) {
         logText = logText ? `${logText}\n${block.text.trim()}` : block.text.trim();
@@ -238,11 +242,23 @@ async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, log
   }
   if (message.type === "user") await handleToolResults(message as unknown as { message: { content?: unknown } }, toolCalls, cwd, serverURL, token, signal);
   if (message.type === "result") {
-    const error = message.subtype === "success" ? undefined : message.errors.join("\n");
-    const usage = terminalModelUsage(message.modelUsage ?? {}, aliases);
-    return { logText, terminal: { success: message.subtype === "success", error, work_dir: cwd, session_id: message.session_id, result_subtype: message.subtype, num_turns: message.num_turns, duration_ms: message.duration_ms, duration_api_ms: message.duration_api_ms, log_text: logText, model_usage: usage.usage, cost_status: usage.cost_status, cost_diagnostics: usage.cost_diagnostics } };
+    return { logText, terminal: terminalExecutionResult(message, cwd, logText, aliases, toolUseDiagnostics) };
   }
   return { logText };
+}
+
+export function recordAssistantToolUses(content: ReadonlyArray<{ type: string; name?: string }>, diagnostics: ToolUseDiagnostics): void {
+  for (const block of content) {
+    if (block.type !== "tool_use" || typeof block.name !== "string") continue;
+    diagnostics.tool_use_count += 1;
+    diagnostics.tool_use_summary[block.name] = (diagnostics.tool_use_summary[block.name] ?? 0) + 1;
+  }
+}
+
+export function terminalExecutionResult(message: Extract<SDKMessage, { type: "result" }>, cwd: string, logText: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"], toolUseDiagnostics: ToolUseDiagnostics): ExecutionResult {
+  const error = message.subtype === "success" ? undefined : message.errors.join("\n");
+  const usage = terminalModelUsage(message.modelUsage ?? {}, aliases);
+  return { success: message.subtype === "success", error, work_dir: cwd, session_id: message.session_id, result_subtype: message.subtype, num_turns: message.num_turns, duration_ms: message.duration_ms, duration_api_ms: message.duration_api_ms, log_text: logText, model_usage: usage.usage, cost_status: usage.cost_status, cost_diagnostics: usage.cost_diagnostics, ...toolUseDiagnostics };
 }
 
 export function terminalModelUsage(modelUsage: Record<string, unknown>, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {

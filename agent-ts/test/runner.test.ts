@@ -89,13 +89,13 @@ describe("buildQueryOptions", () => {
     expect(runner.buildQueryOptions({ ...data, runtime_adapter: "openmontage" }, "/workspace").cwd).toBe("/workspace/openmontage");
   });
 
-  test("gives the managed runtime unrestricted tool access", () => {
+  test("keeps unrestricted access within the managed session policy", () => {
     const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
 
     expect(options.permissionMode).toBe("bypassPermissions");
     expect(options.allowDangerouslySkipPermissions).toBe(true);
     expect(options).not.toHaveProperty("allowedTools");
-    expect(options).not.toHaveProperty("disallowedTools");
+    expect(options.disallowedTools).toEqual(["Agent", "ScheduleWakeup", "AskUserQuestion"]);
     expect(options).not.toHaveProperty("canUseTool");
   });
 
@@ -110,6 +110,45 @@ describe("buildQueryOptions", () => {
       ANTHROPIC_MODEL: "kimi-k3[1m]",
       MAX_THINKING_TOKENS: "0",
       ENABLE_TOOL_SEARCH: "false",
+    });
+  });
+});
+
+describe("recordAssistantToolUses", () => {
+  test("counts assistant tool uses for terminal diagnostics", () => {
+    const diagnostics = { tool_use_count: 0, tool_use_summary: {} as Record<string, number> };
+
+    runner.recordAssistantToolUses([
+      { type: "tool_use", id: "tool-1", name: "Agent", input: {} },
+      { type: "text", text: "delegating" },
+      { type: "tool_use", id: "tool-2", name: "mcp__anban__write_article", input: {} },
+      { type: "tool_use", id: "tool-3", name: "Agent", input: {} },
+    ], diagnostics);
+
+    expect(diagnostics).toEqual({
+      tool_use_count: 3,
+      tool_use_summary: { Agent: 2, mcp__anban__write_article: 1 },
+    });
+  });
+
+  test("includes tool-use diagnostics in the terminal execution result", () => {
+    const terminal = runner.terminalExecutionResult({
+      type: "result",
+      subtype: "success",
+      session_id: "session-1",
+      num_turns: 2,
+      duration_ms: 100,
+      duration_api_ms: 80,
+      modelUsage: {},
+    } as Parameters<typeof runner.terminalExecutionResult>[0], "/workspace", "done", {}, {
+      tool_use_count: 2,
+      tool_use_summary: { Agent: 2 },
+    });
+
+    expect(terminal).toMatchObject({
+      success: true,
+      tool_use_count: 2,
+      tool_use_summary: { Agent: 2 },
     });
   });
 });
