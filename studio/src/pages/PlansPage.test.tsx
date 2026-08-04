@@ -118,7 +118,7 @@ vi.mock('@/lib/api', async () => {
 })
 
 async function openPlanParameters(dialog: HTMLElement) {
-  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  const trigger = await within(dialog).findByRole('button', { name: /^创作参数：/ })
   if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
   return waitFor(() => {
     const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
@@ -195,7 +195,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：.*性价比/ }))
     expect(await screen.findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
@@ -240,7 +240,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
 
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作设置：.*极致效果/ }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：.*极致效果/ }))
     expect(await screen.findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
 
@@ -270,7 +270,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
-    const parametersControl = await within(composer!).findByRole('button', { name: /^创作设置：/ })
+    const parametersControl = await within(composer!).findByRole('button', { name: /^创作参数：/ })
 
     const projectControl = await within(composer as HTMLElement).findByRole('combobox', { name: '项目：未选择' })
     expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -394,7 +394,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
-    await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ })
+    await within(dialog).findByRole('button', { name: /^创作参数：.*性价比/ })
     const createButton = within(dialog).getByRole('button', { name: '创建' })
     expect(createButton).toBeDisabled()
     fireEvent.click(createButton)

@@ -275,12 +275,12 @@ describe('Designer shared prompt composer', () => {
     })
 
     fireEvent.click(await screen.findByRole('button', {
-      name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+      name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
     }))
     fireEvent.click(screen.getByRole('button', { name: '增加图片数量' }))
     fireEvent.click(screen.getByRole('button', { name: '增加图片数量' }))
     expect(screen.getByRole('button', {
-      name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 3 张',
+      name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 3 张',
     })).toBeInTheDocument()
 
     await act(async () => {
@@ -292,7 +292,7 @@ describe('Designer shared prompt composer', () => {
 
     expect(await screen.findByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {
-      name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+      name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
     }))
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '单张海报' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
@@ -309,7 +309,7 @@ describe('Designer shared prompt composer', () => {
     const promptAddon = projectControl.closest('[data-slot="input-group-addon"]')
     expect(promptAddon).not.toBeNull()
     const imageSettings = within(promptAddon as HTMLElement).getByRole('button', {
-      name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
+      name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
     })
     expect(projectControl.compareDocumentPosition(imageSettings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 

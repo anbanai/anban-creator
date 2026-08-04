@@ -192,7 +192,7 @@ function renderDialog(props: Partial<TaskFormDialogProps> = {}) {
 }
 
 async function findImageSettings(dialog: HTMLElement, summary: string) {
-  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  const trigger = await within(dialog).findByRole('button', { name: /^创作参数：/ })
   for (const part of summary.split(' · ')) {
     expect(trigger).toHaveAccessibleName(expect.stringContaining(part))
   }
@@ -200,7 +200,7 @@ async function findImageSettings(dialog: HTMLElement, summary: string) {
 }
 
 async function openTaskParameters(dialog: HTMLElement) {
-  const trigger = await within(dialog).findByRole('button', { name: /^创作设置：/ })
+  const trigger = await within(dialog).findByRole('button', { name: /^创作参数：/ })
   if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
   return waitFor(() => {
     const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
@@ -343,7 +343,7 @@ describe('TaskFormDialog', () => {
     expect(viralPrompt).toBeInTheDocument()
     const viralTextarea = within(viralPrompt!).getByRole('textbox', { name: '源笔记链接或分享文本' })
     const viralProject = within(viralPrompt!).getByRole('combobox', { name: '项目：种草项目' })
-    const viralParameters = within(viralPrompt!).getByRole('button', { name: /^创作设置：/ })
+    const viralParameters = within(viralPrompt!).getByRole('button', { name: /^创作参数：/ })
     expect(viralProject.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(viralTextarea.compareDocumentPosition(viralProject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(viralProject.compareDocumentPosition(viralParameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -399,7 +399,7 @@ describe('TaskFormDialog', () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog')
 
-    const executionControl = await within(dialog).findByRole('button', { name: /^创作设置：.*性价比/ })
+    const executionControl = await within(dialog).findByRole('button', { name: /^创作参数：.*性价比/ })
     expect(within(dialog).getByText(/4,800 × 1 =/)).toBeInTheDocument()
     expect(within(dialog).queryByText('在本机运行')).not.toBeInTheDocument()
 
@@ -418,7 +418,7 @@ describe('TaskFormDialog', () => {
     renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, execution_profile: 'quality' } })
 
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*极致效果/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作参数：.*极致效果/ })).toBeInTheDocument()
     expect(within(dialog).getByText(/18,000 × 1 =/)).toBeInTheDocument()
   })
 
@@ -458,7 +458,7 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
-    const parametersControl = await within(composer!).findByRole('button', { name: /^创作设置：/ })
+    const parametersControl = await within(composer!).findByRole('button', { name: /^创作参数：/ })
     const projectControl = await within(composer!).findByRole('combobox', { name: '项目：公众号项目' })
     expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(composer!).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
@@ -780,19 +780,19 @@ describe('TaskFormDialog', () => {
     await closeOpenPopover()
 
     await selectProject(/种草项目/)
-    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 5/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作参数：.*任务数量 5/ })).toBeInTheDocument()
     await selectProject(/朋友圈项目/)
-    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 5/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作参数：.*任务数量 5/ })).toBeInTheDocument()
 
     await selectProject(/电商项目/)
-    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 1/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作参数：.*任务数量 1/ })).toBeInTheDocument()
     const ecommerceParameters = await openTaskParameters(dialog)
     expect(within(ecommerceParameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
     expect(within(ecommerceParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
     await closeOpenPopover()
 
     await selectProject(/剪辑项目/)
-    expect(await within(dialog).findByRole('button', { name: /^创作设置：.*任务数量 1/ })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('button', { name: /^创作参数：.*任务数量 1/ })).toBeInTheDocument()
     const montageParameters = await openTaskParameters(dialog)
     expect(within(montageParameters).getByLabelText('任务数量：1，当前能力上限')).toBeInTheDocument()
     expect(within(montageParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()

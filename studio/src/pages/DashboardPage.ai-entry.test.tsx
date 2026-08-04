@@ -258,7 +258,7 @@ vi.mock('@/lib/api', async () => {
 })
 
 async function getParametersTrigger(container: HTMLElement = document.body) {
-  return within(container).findByRole('button', { name: /^创作设置：/ })
+  return within(container).findByRole('button', { name: /^创作参数：/ })
 }
 
 async function openParameters(container: HTMLElement = document.body) {

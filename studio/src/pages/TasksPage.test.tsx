@@ -320,7 +320,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
 
-    const parametersControl = await screen.findByRole('button', { name: /^创作设置：/ })
+    const parametersControl = await screen.findByRole('button', { name: /^创作参数：/ })
     fireEvent.click(parametersControl)
     fireEvent.click(await screen.findByRole('button', { name: '性价比，全部用户' }))
     await waitFor(() => expect(parametersControl).toHaveAccessibleName(expect.stringContaining('性价比')))
