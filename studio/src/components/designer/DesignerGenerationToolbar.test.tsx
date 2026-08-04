@@ -50,15 +50,25 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
-    expect(screen.getByRole('dialog', { name: '创作设置' })).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog', { name: '创作参数' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByRole('group', { name: '图像能力' })).toHaveClass('flex-col')
     expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.textContent)).toEqual([
       '1:1 · 2K', '3:4 · 2K', '4:3 · 2K',
     ])
     expect(within(screen.getByRole('group', { name: '质量' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高'])
     expect(within(screen.getByRole('group', { name: '输出格式' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['PNG', 'WEBP'])
     expect(screen.queryByText('1:1')).not.toBeInTheDocument()
+    for (const label of ['尺寸', '质量', '输出格式']) {
+      expect(within(dialog).getByText(label).closest('section')).toHaveClass(
+        'grid-cols-[4.5rem_minmax(0,1fr)]',
+      )
+    }
+    expect(within(dialog).getByText('图片数量').closest('section')).toHaveClass(
+      'grid-cols-[4.5rem_minmax(0,1fr)]',
+    )
   })
 
   it('reports capability_key, size, quality, output_format, and capability-driven n changes', () => {
@@ -74,7 +84,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '3:4 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '高' }))
     fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WEBP' }))
@@ -101,7 +111,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
     expect(screen.getByText('图片数量 1 · 当前能力上限')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
@@ -119,7 +129,7 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作设置：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
 
     expect(screen.getByRole('dialog')).toHaveClass('max-h-[var(--available-height)]', 'overflow-y-auto')
   })

@@ -63,17 +63,17 @@ export function DesignerGenerationToolbar({
             variant="ghost"
             size="sm"
             disabled={disabled || !selectedCapability}
-            aria-label={`创作设置：${summary}`}
+            aria-label={`创作参数：${summary}`}
             className="max-w-full gap-1.5 px-2 text-muted-foreground"
           />
         )}
       >
         <SlidersHorizontalIcon data-icon="inline-start" />
-        <span>创作设置</span>
+        <span>创作参数</span>
         <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
       <PopoverContent align="start" className="max-h-[var(--available-height)] w-[min(30rem,calc(100vw-2rem))] gap-3 overflow-y-auto p-4">
-        <PopoverTitle className="sr-only">创作设置</PopoverTitle>
+        <PopoverTitle className="sr-only">创作参数</PopoverTitle>
         <section className="flex flex-col gap-2">
           <h3 className="font-medium">图像能力</h3>
           <ToggleGroup
@@ -102,8 +102,8 @@ export function DesignerGenerationToolbar({
           </ToggleGroup>
         </section>
 
-        <section className="flex flex-col gap-2">
-          <h3 className="font-medium">尺寸</h3>
+        <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
+          <h3 className="pt-1 font-medium">尺寸</h3>
           <ToggleGroup
             aria-label="尺寸"
             value={settings.size ? [settings.size] : []}
@@ -112,7 +112,7 @@ export function DesignerGenerationToolbar({
             }}
             variant="outline"
             size="sm"
-            className="flex w-full flex-wrap justify-start"
+            className="flex min-w-0 flex-wrap justify-start"
           >
             {sizePresets.map((size) => (
               <ToggleGroupItem key={size} value={size}>{settingLabel(size)}</ToggleGroupItem>
@@ -121,8 +121,8 @@ export function DesignerGenerationToolbar({
         </section>
 
         {qualityLevels.length > 0 ? (
-          <section className="flex flex-col gap-2">
-            <h3 className="font-medium">质量</h3>
+          <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
+            <h3 className="pt-1 font-medium">质量</h3>
             <ToggleGroup
               aria-label="质量"
               value={settings.quality ? [settings.quality] : []}
@@ -131,7 +131,7 @@ export function DesignerGenerationToolbar({
               }}
               variant="outline"
               size="sm"
-              className="flex w-full flex-wrap justify-start"
+              className="flex min-w-0 flex-wrap justify-start"
             >
               {qualityLevels.map((quality) => (
                 <ToggleGroupItem key={quality} value={quality}>{QUALITY_LABELS[quality] ?? quality}</ToggleGroupItem>
@@ -140,8 +140,8 @@ export function DesignerGenerationToolbar({
           </section>
         ) : null}
 
-        <section className="flex flex-col gap-2">
-          <h3 className="font-medium">输出格式</h3>
+        <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
+          <h3 className="pt-1 font-medium">输出格式</h3>
           <ToggleGroup
             aria-label="输出格式"
             value={settings.outputFormat ? [settings.outputFormat] : []}
@@ -150,7 +150,7 @@ export function DesignerGenerationToolbar({
             }}
             variant="outline"
             size="sm"
-            className="flex w-full flex-wrap justify-start"
+            className="flex min-w-0 flex-wrap justify-start"
           >
             {outputFormats.map((format) => (
               <ToggleGroupItem key={format} value={format}>{format.toUpperCase()}</ToggleGroupItem>
@@ -158,15 +158,18 @@ export function DesignerGenerationToolbar({
           </ToggleGroup>
         </section>
 
-        <section className="flex justify-end">
-          <QuantityStepper
-            label="图片数量"
-            value={quantity}
-            min={1}
-            max={maxBatch}
-            onChange={(n) => onSettingsChange({ n })}
-            disabled={disabled}
-          />
+        <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
+          <h3 className={maxBatch === 1 ? 'sr-only' : 'font-medium'}>图片数量</h3>
+          <div className="flex min-w-0 justify-end">
+            <QuantityStepper
+              label="图片数量"
+              value={quantity}
+              min={1}
+              max={maxBatch}
+              onChange={(n) => onSettingsChange({ n })}
+              disabled={disabled}
+            />
+          </div>
         </section>
       </PopoverContent>
     </Popover>
