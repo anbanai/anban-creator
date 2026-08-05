@@ -34,6 +34,18 @@ describe('navigation IA', () => {
   })
 
   it('filters the combined navigation by administrator access', () => {
+    expect(allNavItems.map((item) => item.to)).toEqual([
+      '/',
+      '/projects',
+      '/tasks',
+      '/plans',
+      '/billing',
+      '/designer',
+      '/templates',
+      '/connect/claude-code',
+      '/connect/codex',
+      '/settings',
+    ])
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
     expect(visibleNavItems(allNavItems, true)).toEqual([
       ...mvpNavItems,
