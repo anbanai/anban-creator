@@ -1,42 +1,43 @@
-import { describe, expect, it } from 'vitest'
 import { Sparkles } from 'lucide-react'
+import { describe, expect, it } from 'vitest'
 
 import {
+  adminNavItems,
   allNavItems,
-  assetItems,
-  automationItems,
-  businessItems,
-  connectSettingItems,
-  creationItems,
-  todayItems,
+  mvpNavItems,
+  visibleNavItems,
 } from './navigation'
 
 describe('navigation IA', () => {
-  it('groups Studio navigation by creator outcomes', () => {
-    expect(todayItems.map((item) => item.label)).toEqual(['AI助手'])
-    expect(todayItems[0]?.icon).toBe(Sparkles)
-    expect(creationItems.map((item) => item.label)).toEqual(['项目', '任务', '设计师'])
-    expect(automationItems.map((item) => item.label)).toEqual(['计划', '时间轴'])
-    expect(assetItems.map((item) => item.label)).toEqual(['模板库'])
-    expect(businessItems.map((item) => item.label)).toEqual(['钱包', '用量'])
-		expect(connectSettingItems.map((item) => item.label)).toEqual(['Claude Code', 'Codex', '设置'])
+  it('defines the MVP navigation in approved order', () => {
+    expect(mvpNavItems.map((item) => item.label)).toEqual([
+      'AI助手',
+      '项目',
+      '任务',
+      '计划',
+      '钱包',
+    ])
+    expect(mvpNavItems[0]?.icon).toBe(Sparkles)
+    expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
+    expect(mvpNavItems.map((item) => item.to)).not.toContain('/usage')
   })
 
-  it('keeps route compatibility while naming the default workspace as the AI assistant', () => {
-    expect(allNavItems.map((item) => item.to)).toContain('/')
-    expect(allNavItems.find((item) => item.to === '/')?.label).toBe('AI助手')
-    expect(allNavItems.map((item) => item.to)).toEqual(expect.arrayContaining([
-      '/projects',
-      '/plans',
-      '/tasks',
-      '/timeline',
-      '/settings',
-    ]))
+  it('defines administrator navigation in approved order', () => {
+    expect(adminNavItems.map((item) => item.label)).toEqual([
+      '设计师',
+      '模板库',
+      'Claude Code',
+      'Codex',
+      '设置',
+    ])
+    expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
   })
 
-  it('marks designer and platform settings navigation as administrator-only', () => {
-    expect(creationItems.find((item) => item.to === '/designer')?.adminOnly).toBe(true)
-    expect(assetItems.every((item) => item.adminOnly)).toBe(true)
-    expect(connectSettingItems.every((item) => item.adminOnly)).toBe(true)
+  it('filters the combined navigation by administrator access', () => {
+    expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
+    expect(visibleNavItems(allNavItems, true)).toEqual([
+      ...mvpNavItems,
+      ...adminNavItems,
+    ])
   })
 })
