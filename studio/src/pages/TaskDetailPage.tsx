@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -654,27 +654,6 @@ export default function TaskDetailPage() {
         {task?.status === 'failed' && '任务失败'}
         {task?.status === 'cancelled' && '任务已取消'}
       </div>
-
-      {/* Goal mode banner */}
-      {task.goal_mode && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
-          <div className="flex items-start gap-2">
-            <Target className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                强目标模式
-              </p>
-              <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
-                <span className="font-medium">目标条件：</span>
-                {task.goal || '(未设置)'}
-              </p>
-              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                AI 会自动检查产出是否符合目标条件，未达成会继续修订直到符合（或达到最大尝试次数）。
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

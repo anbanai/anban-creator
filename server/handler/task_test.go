@@ -1327,8 +1327,6 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		"reference_image":{"asset_id":"`+referenceAsset.ID+`"},
 		"input_attachments":[{"type":"text","text":"validated attachment","file_name":"brief.txt"}],
 		"watermark":true,
-		"goal":"edited goal",
-		"goal_mode":true,
 		"has_content_image":false,
 		"has_tail_image":true,
 		"article_with_cover":false,
@@ -1367,8 +1365,8 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.ImageRatio != "1:1" || task.ImageCapabilityKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
 			t.Fatalf("shared overrides = %#v", task)
 		}
-		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
-			t.Fatalf("goal/image overrides = %#v", task)
+		if task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
+			t.Fatalf("image overrides = %#v", task)
 		}
 		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
@@ -2296,12 +2294,6 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			}
 			return `{"execution_profile":"effective","project_id":"` + destination.ID + `","quantity":1,"image_capability_key":"unknown"}`
 		}, wantStatus: fiber.StatusForbidden},
-		{name: "invalid goal", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
-			if err := repo.Projects().Create(t.Context(), destination); err != nil {
-				t.Fatal(err)
-			}
-			return `{"execution_profile":"effective","project_id":"` + destination.ID + `","quantity":1,"goal_mode":true,"goal":"  "}`
-		}, wantStatus: fiber.StatusBadRequest},
 		{name: "unsafe attachment", prepare: func(t *testing.T, repo repository.Repository, _ string, destination *model.Project) string {
 			if err := repo.Projects().Create(t.Context(), destination); err != nil {
 				t.Fatal(err)

@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldPath, type FieldPathValue, type Resolver } from 'react-hook-form'
 import { Link } from 'react-router-dom'
-import { Images, Minus, Package, Plus, Stamp, Target } from 'lucide-react'
+import { Images, Minus, Package, Plus, Stamp } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -163,8 +163,6 @@ export function TaskFormDialog({
     return () => window.clearTimeout(timer)
   }, [billingCatalog?.task_time_pricing?.next_transition_at, open, refetchBillingCatalog])
   const watermark = useWatch({ control: form.control, name: 'watermark' }) ?? false
-  const goalMode = useWatch({ control: form.control, name: 'goal_mode' }) ?? false
-  const goal = useWatch({ control: form.control, name: 'goal' }) ?? ''
   const hasContentImage = useWatch({ control: form.control, name: 'has_content_image' }) ?? true
   const hasTailImage = useWatch({ control: form.control, name: 'has_tail_image' }) ?? false
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
@@ -380,9 +378,7 @@ export function TaskFormDialog({
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-              : watchedType !== 'ecommerce' && goalMode && !goal.trim()
-                  ? { message: '强目标模式需要填写目标条件。', href: '' }
-                  : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+              : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
                     ? { message: '电商出图需要先上传产品图。', href: '' }
                     : null
 
@@ -726,38 +722,6 @@ export function TaskFormDialog({
                   onChange={(value) => setFormValue('agent_input', value)}
                 />
 
-                {watchedType !== 'ecommerce' && !isMontageTask && !isViralAnalysisTask ? (
-                  <div className={`rounded-lg border p-3 transition-colors ${goalMode ? 'border-primary bg-primary/5' : 'border-border'}`}>
-                    <div className="flex w-full items-start gap-3">
-                      <label htmlFor="task-goal-mode" className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left">
-                        <Target className={`mt-0.5 h-5 w-5 shrink-0 ${goalMode ? 'text-primary' : 'text-muted-foreground'}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className={`block text-sm font-medium ${goalMode ? 'text-foreground' : 'text-muted-foreground'}`}>强目标模式</span>
-                          <span className="mt-0.5 block text-xs text-muted-foreground">开启后扣费 ×3，最多尝试 3 次。任务执行后由 AI 评估产出是否满足「目标条件」，未达成自动重试。</span>
-                        </span>
-                      </label>
-                      <Switch id="task-goal-mode" checked={goalMode} onCheckedChange={(checked) => setFormValue('goal_mode', checked)} />
-                    </div>
-                    {goalMode ? (
-                      <div className="mt-3 space-y-2">
-                        <Textarea
-                          value={goal}
-                          onChange={(event) => setFormValue('goal', event.target.value)}
-                          placeholder="例：文章字数 ≥ 1500 字；必须包含 3 个真实案例；开头必须设置钩子；种草笔记必须包含具体使用感受…"
-                          className="min-h-[80px] resize-y text-sm"
-                          maxLength={4000}
-                        />
-                        <div className="flex flex-wrap gap-1.5">
-                          {['文章字数 ≥ 1500 字', '必须包含 3 个真实案例', '开头必须设置钩子，吸引读者继续阅读', '必须包含数据或引用来源'].map((example) => (
-                            <button key={example} type="button" onClick={() => setFormValue('goal', example)} className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground">
-                              {example}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
 
               <div className="pt-1">

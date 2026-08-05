@@ -4,7 +4,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
+import { Plus, FileText, Stamp, Loader2, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -22,7 +22,6 @@ import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -69,8 +68,6 @@ function planToFormValues(plan: Plan): PlanFormValues {
     input_attachments: plan.input_attachments ?? [],
     agent_input: plan.agent_input ?? {},
     watermark: plan.watermark || false,
-    goal: plan.goal || '',
-    goal_mode: plan.goal_mode || false,
     has_content_image: plan.has_content_image ?? true,
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
@@ -530,8 +527,6 @@ export default function PlansPage() {
       ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
       agent_input: values.agent_input,
       watermark: values.watermark || undefined,
-      goal_mode: values.type !== 'montage' && values.goal_mode ? true : undefined,
-      goal: values.type !== 'montage' && values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
@@ -954,50 +949,6 @@ export default function PlansPage() {
                 value={watchedAgentInput}
                 onChange={(value) => form.setValue('agent_input', value, { shouldDirty: true, shouldValidate: true })}
               />
-
-
-              {!isMontagePlan && <FormField control={form.control} name="goal_mode" render={({ field }) => (
-                <FormItem>
-                  <div className={`rounded-lg border p-3 transition-colors ${
-                    field.value ? 'border-primary bg-primary/5' : 'border-border'
-                  }`}>
-                    <button
-                      type="button"
-                      onClick={() => field.onChange(!field.value)}
-                      className="flex w-full items-start gap-3 text-left"
-                    >
-                      <Target className={`mt-0.5 h-5 w-5 shrink-0 ${field.value ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <div className="min-w-0 flex-1">
-                        <p className={`text-sm font-medium ${field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
-                          强目标模式
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          每次执行扣费 ×3，最多尝试 3 次。AI 自动评估产出是否满足目标条件，未达成自动重试。
-                        </p>
-                      </div>
-                      <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                    </button>
-                    {field.value && (
-                      <FormField control={form.control} name="goal" render={({ field: goalField }) => (
-                        <FormItem className="mt-3 space-y-2">
-                          <FormControl>
-                            <Textarea
-                              {...goalField}
-                              value={goalField.value ?? ''}
-                              placeholder="例：文章字数 ≥ 1500 字；必须包含 3 个真实案例；开头必须设置钩子…"
-                              className="min-h-[80px] resize-y text-sm"
-                              maxLength={4000}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                    )}
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )} />}
-
               {/* Each scheduled run resolves the active immutable task SKU at admission. */}
               {(() => {
                 const perRun = taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined)

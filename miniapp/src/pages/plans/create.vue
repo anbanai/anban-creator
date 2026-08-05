@@ -233,27 +233,6 @@
           <AbSwitch v-model="form.watermark" />
         </view>
       </view>
-
-      <!-- Goal mode -->
-      <view class="form-section">
-        <view class="switch-row">
-          <view class="switch-row__text">
-            <text class="form-section__label switch-row__label">强目标模式</text>
-            <text class="form-section__hint">设定明确的成功标准，循环优化直到达标</text>
-          </view>
-          <AbSwitch v-model="form.goalMode" />
-        </view>
-        <view class="field-spacer" v-if="form.goalMode">
-          <text class="form-section__label">成功目标 <text class="form-section__required">*</text></text>
-          <AbTextarea
-            v-model="form.goal"
-            placeholder="描述明确的完成标准，如：字数 800+、包含 3 个小标题、CTA 引导关注..."
-            :rows="3"
-            :maxlength="4000"
-            :error="errors.goal"
-          />
-        </view>
-      </view>
     </view>
 
     <!-- Fixed bottom button -->
@@ -332,15 +311,12 @@ const form = reactive({
   skipReferenceImage: false,
   referenceImage: null as ReferenceImageSelection | null,
   watermark: false,
-  goalMode: false,
-  goal: '',
 })
 
 const selectedTime = ref('09:00')
 const errors = reactive({
   projectId: '',
   cronExpr: '',
-  goal: '',
 })
 
 const submitting = ref(false)
@@ -423,7 +399,7 @@ const selectedExecutionProfileAvailable = computed(() => {
 })
 const canSubmit = computed(() => {
   if (!form.projectId || !selectedProject.value || planUnsupported.value) return false
-  if (!form.cronExpr.trim() || (form.goalMode && !form.goal.trim())) return false
+  if (!form.cronExpr.trim()) return false
   if (!form.executionProfile || !selectedExecutionProfileAvailable.value) return false
   if (imageCapabilityUnavailable.value) return false
   if (resolvedPlanPrice.value === undefined) return false
@@ -542,7 +518,6 @@ function pickTheme() {
 function validate(): boolean {
   errors.projectId = ''
   errors.cronExpr = ''
-  errors.goal = ''
 
   if (!form.projectId) {
     errors.projectId = '请选择账号'
@@ -564,12 +539,6 @@ function validate(): boolean {
   if (!form.cronExpr.trim()) {
     errors.cronExpr = '请设置执行频率'
     uni.showToast({ title: '请设置执行频率', icon: 'none' })
-    return false
-  }
-
-  if (form.goalMode && !form.goal.trim()) {
-    errors.goal = '强目标模式需填写成功目标'
-    uni.showToast({ title: '强目标模式需填写成功目标', icon: 'none' })
     return false
   }
 
@@ -614,8 +583,6 @@ async function handleSubmit() {
       writing_voice: form.writing_voice.trim() || undefined,
       persona_avatar: form.persona_avatar.trim() || undefined,
       watermark: form.watermark || undefined,
-      goal_mode: form.goalMode || undefined,
-      goal: form.goalMode && form.goal.trim() ? form.goal.trim() : undefined,
       has_content_image: isSeednote.value ? form.hasContentImage : undefined,
       has_tail_image: isSeednote.value ? form.hasTailImage : undefined,
       // Article image toggles: send actual boolean (incl. false when toggled off);
@@ -672,8 +639,6 @@ async function loadPlan(planId: string) {
       : null
     referencePreviewUrl.value = plan.reference_image?.download_url || ''
     form.watermark = plan.watermark || false
-    form.goalMode = plan.goal_mode || false
-    form.goal = plan.goal || ''
 
     // Extract time from cron
     const parts = (plan.cron_expr || '').trim().split(/\s+/)

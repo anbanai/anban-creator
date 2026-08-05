@@ -28,7 +28,6 @@ import (
 
 const (
 	maxTaskPromptCharacters = 5120
-	maxGoalTextCharacters   = 4000
 	maxTaskResumeFiles      = maxAgentInputAttachments
 	maxTaskResumeFileBytes  = 25 * 1024 * 1024
 )
@@ -151,8 +150,6 @@ type createTaskRequest struct {
 	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
 	AgentInput         map[string]any                   `json:"agent_input,omitempty"`
 	Watermark          *bool                            `json:"watermark"`
-	Goal               string                           `json:"goal"`
-	GoalMode           bool                             `json:"goal_mode"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -193,8 +190,6 @@ type cloneTaskRequest struct {
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
 	AgentInput               *map[string]any                  `json:"agent_input"`
 	Watermark                *bool                            `json:"watermark"`
-	Goal                     string                           `json:"goal"`
-	GoalMode                 bool                             `json:"goal_mode"`
 	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
 	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
@@ -568,15 +563,6 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
 		return nil, Error(c, fiber.StatusForbidden, err.Error())
 	}
-	if req.GoalMode {
-		goalText := strings.TrimSpace(req.Goal)
-		if goalText == "" {
-			return nil, Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
-		}
-		if utf8.RuneCountInString(goalText) > maxGoalTextCharacters {
-			return nil, Error(c, fiber.StatusBadRequest, "goal must not exceed 4000 characters")
-		}
-	}
 	if h.repo != nil {
 		finalizationStore := h.service.Storage()
 		if finalizationStore == nil {
@@ -627,8 +613,6 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			InputAttachments:         req.InputAttachments,
 			AgentInput:               req.AgentInput,
 			Watermark:                req.Watermark,
-			Goal:                     req.Goal,
-			GoalMode:                 req.GoalMode,
 			HasContentImage:          req.HasContentImage,
 			HasTailImage:             req.HasTailImage,
 			ArticleWithCover:         req.ArticleWithCover,
@@ -970,8 +954,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			ReferenceImage:           req.ReferenceImage,
 			InputAttachments:         attachments,
 			Watermark:                req.Watermark,
-			Goal:                     req.Goal,
-			GoalMode:                 req.GoalMode,
 			HasContentImage:          req.HasContentImage,
 			HasTailImage:             req.HasTailImage,
 			ArticleWithCover:         req.ArticleWithCover,
@@ -1004,8 +986,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			InputAttachments:         prepared.params.InputAttachments,
 			AgentInput:               prepared.params.AgentInput,
 			Watermark:                prepared.params.Watermark,
-			Goal:                     prepared.params.Goal,
-			GoalMode:                 prepared.params.GoalMode,
 			HasContentImage:          prepared.params.HasContentImage,
 			HasTailImage:             prepared.params.HasTailImage,
 			ArticleWithCover:         prepared.params.ArticleWithCover,

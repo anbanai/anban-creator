@@ -62,7 +62,6 @@ type LocalExecutionConfig struct {
 	AgentFlag                string `json:"agent_flag"` // "anban:<agent>"
 	MaxTurns                 int    `json:"max_turns"`
 	Model                    string `json:"model,omitempty"`
-	Goal                     string `json:"goal,omitempty"`
 	HasContentImage          bool   `json:"has_content_image"`
 	HasTailImage             bool   `json:"has_tail_image"`
 	ArticleWithCover         bool   `json:"article_with_cover"`
@@ -168,7 +167,6 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task, execution *mod
 		AgentFlag:                "anban:" + agent.TaskToAgent(task),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
 		Model:                    task.AgentProfileSnapshot.Envs[model.ClaudeEnvModel],
-		Goal:                     task.Goal,
 		HasContentImage:          task.HasContentImage,
 		HasTailImage:             task.HasTailImage,
 		ArticleWithCover:         task.ArticleWithCover == nil || *task.ArticleWithCover,

@@ -24,8 +24,6 @@ export interface Plan {
   writer_key?: string
   theme?: string
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
   // Article image toggles (公众号文章): cover + content images each independently
@@ -54,8 +52,6 @@ export interface CreatePlanRequest {
   writer_key?: string
   theme?: string
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   // Seednote image composition (see CreateTaskRequest).
   has_content_image?: boolean
   has_tail_image?: boolean
@@ -83,8 +79,6 @@ export interface UpdatePlanRequest {
   writer_key?: string
   theme?: string
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
   // Article image toggles (公众号文章): cover + content images each independently

@@ -57,14 +57,14 @@ describe('TasksPage recovery workspace contract', () => {
     expect(dialogSource).not.toContain('01 类型')
   })
 
-  it('keeps ecommerce creation on the base-fee path even if goal mode state is stale', () => {
+  it('does not expose the retired strong-goal mode', () => {
     const dialogSource = readFileSync(join(here, '../components/tasks/TaskFormDialog.tsx'), 'utf8')
     const formSource = readFileSync(join(here, '../lib/task-form.ts'), 'utf8')
 
-    expect(formSource).toContain("values.type !== 'ecommerce'")
-    expect(formSource).toContain('goal_mode: values.goal_mode')
+    expect(formSource).not.toContain('goal_mode')
+    expect(formSource).not.toContain('values.goal')
+    expect(dialogSource).not.toContain('强目标模式')
     expect(dialogSource).toContain('taskCreationCostPreview')
-    expect(dialogSource).toContain("watchedType === 'ecommerce'")
     expect(dialogSource).toContain('ecommerceModuleCatalog')
   })
 

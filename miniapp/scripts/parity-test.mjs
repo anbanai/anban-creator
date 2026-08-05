@@ -385,7 +385,7 @@ assertContains('src/pages/projects/detail.vue', [
 ])
 
 // Task detail clone is now server-side (tasksApi.retry preserves ALL fields —
-// 3D style/persona/ecommerce/model/watermark/goal — replacing the old partial
+// 3D style/persona/ecommerce/model/watermark — replacing the old partial
 // client-side create() that forwarded only a subset). File handling stays intact.
 assertContains('src/pages/tasks/detail.vue', [
   'tasksApi.retry',
@@ -674,11 +674,7 @@ assertContains('src/pages/tasks/create.vue', [
   'advancedOpen',
 ])
 assertContains('src/pages/tasks/create.vue', [
-  'const billableGoalMode = computed(() => !isEcommerce.value && form.goal_mode)',
-  '<!-- Goal mode -->\n    <view class="task-create__section" v-if="advancedOpen && !isEcommerce">',
   'if (balance.value < creationCost.value)',
-  'goal: billableGoalMode.value && form.goal.trim() ? form.goal.trim() : undefined',
-  'goal_mode: billableGoalMode.value || undefined',
 ])
 
 assertContains('src/pages/index/index.vue', [

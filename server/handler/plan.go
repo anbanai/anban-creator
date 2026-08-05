@@ -131,8 +131,6 @@ type createPlanRequest struct {
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	Watermark          *bool                            `json:"watermark"`
-	Goal               string                           `json:"goal"`
-	GoalMode           bool                             `json:"goal_mode"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off).
 	HasContentImage *bool `json:"has_content_image,omitempty"`
@@ -156,8 +154,6 @@ type updatePlanRequest struct {
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet        bool                             `json:"-"`
 	Watermark                *bool                            `json:"watermark"`
-	Goal                     string                           `json:"goal"`
-	GoalMode                 *bool                            `json:"goal_mode"`
 	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
 	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
@@ -226,9 +222,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
-		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
-	}
 	var pending repository.Repository
 	if h.repo != nil {
 		pending = h.repo
@@ -262,8 +255,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
-		Goal:                     req.Goal,
-		GoalMode:                 req.GoalMode,
 		HasContentImage:          req.HasContentImage,
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
@@ -435,9 +426,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 
-	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
-		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
-	}
 	var pending repository.Repository
 	if h.repo != nil {
 		pending = h.repo
@@ -472,8 +460,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
-		Goal:                     req.Goal,
-		GoalMode:                 req.GoalMode,
 		HasContentImage:          req.HasContentImage,
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,

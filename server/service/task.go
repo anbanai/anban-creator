@@ -392,8 +392,6 @@ type CreateManualParams struct {
 	// Pack declares a task_input Schema.
 	AgentInput map[string]any
 	Watermark  *bool
-	Goal       string
-	GoalMode   bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -495,8 +493,6 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 //
 // Style/author/theme dimensions are snapshotted from the project at creation.
 // Editing the project later does not change existing pending/running tasks.
-//
-// GoalMode is execution behavior only. It does not alter the fixed task SKU.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
 	if strings.TrimSpace(p.ExecutionProfile) == "" {
 		return nil, fmt.Errorf("execution_profile is required")
@@ -683,8 +679,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			InputSourceProjectID:     p.InputSourceProjectID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:                p.Watermark != nil && *p.Watermark,
-			Goal:                     p.Goal,
-			GoalMode:                 p.GoalMode,
 			HasContentImage:          hasContent,
 			HasTailImage:             hasTail,
 			ArticleWithCover:         &articleCover,
@@ -855,7 +849,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
 // The plan's scheduling-adjacent "what to produce" params (image model,
-// reference image, watermark, goal, seednote image composition) flow to the task.
+// reference image, watermark, and image composition) flow to the task.
 // Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	if plan == nil {
@@ -947,8 +941,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		montageExecutionTarget = target
 	}
 
-	planGoalMode := plan.GoalMode && strings.TrimSpace(plan.Goal) != ""
-
 	task := &model.Task{
 		ID:                       taskID,
 		UserID:                   plan.UserID,
@@ -962,8 +954,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,
-		Goal:                     plan.Goal,
-		GoalMode:                 planGoalMode,
 		HasContentImage:          plan.HasContentImage,
 		HasTailImage:             plan.HasTailImage,
 		ArticleWithCover:         plan.ArticleWithCover,

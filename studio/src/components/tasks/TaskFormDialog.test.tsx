@@ -110,8 +110,6 @@ const fixtures = vi.hoisted(() => {
     watermark: true,
     article_with_cover: false,
     article_with_content_images: true,
-    goal_mode: true,
-    goal: '必须包含三个案例',
     project_id: articleProject.id,
     execution_profile: 'effective',
     result: null,
@@ -482,7 +480,7 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByText('水印')).toBeInTheDocument()
     expect(within(dialog).getByText('仅在所选图像能力支持水印时生效')).toBeInTheDocument()
     expect(within(dialog).queryByText(/火山引擎/)).not.toBeInTheDocument()
-    expect(within(dialog).getByText('强目标模式')).toBeInTheDocument()
+    expect(within(dialog).queryByText('强目标模式')).not.toBeInTheDocument()
     expect(within(dialog).getByText('正文配图')).toBeInTheDocument()
     expect(within(dialog).queryByText('01 类型')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('选择项目后自动匹配任务类型')).not.toBeInTheDocument()
@@ -565,7 +563,6 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
     expect(within(dialog).queryByText('resume.txt')).not.toBeInTheDocument()
     expect(within(dialog).getByText('仅生成正文配图；发布草稿不设封面')).toBeInTheDocument()
-    expect(within(dialog).getByDisplayValue('必须包含三个案例')).toBeInTheDocument()
   })
 
   it('submits a full normalized clone request', async () => {
@@ -585,8 +582,6 @@ describe('TaskFormDialog', () => {
       image_ratio: '16:9',
       image_capability_key: 'source-capability',
       watermark: true,
-      goal_mode: true,
-      goal: '必须包含三个案例',
       article_with_cover: false,
       article_with_content_images: true,
       input_attachments: [
@@ -941,20 +936,6 @@ describe('TaskFormDialog', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
-  })
-
-  it('uses a label and sibling switch for goal mode without nested interactive controls', async () => {
-    renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目'))
-
-    const goalModeText = within(dialog).getByText('强目标模式')
-    const goalModeLabel = goalModeText.closest('label')
-    expect(goalModeLabel).not.toBeNull()
-    const goalModeSwitch = within(goalModeLabel!.parentElement!).getByRole('switch')
-    expect(goalModeSwitch.parentElement?.closest('button')).toBeNull()
-    fireEvent.click(goalModeLabel!)
-    expect(goalModeSwitch).toBeChecked()
   })
 
   it('shows destination Montage defaults and removes incompatible article controls', async () => {

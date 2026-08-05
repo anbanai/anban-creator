@@ -3,20 +3,6 @@
     <AbLoading v-if="initialLoading" text="加载中" />
 
     <view v-else-if="task">
-      <!-- Goal mode banner -->
-      <view v-if="task.goal_mode" class="task-detail__goal-banner">
-        <text class="task-detail__goal-icon">目</text>
-        <view class="task-detail__goal-body">
-          <text class="task-detail__goal-title">强目标模式</text>
-          <text class="task-detail__goal-text">
-            目标条件：{{ task.goal || '(未设置)' }}
-          </text>
-          <text class="task-detail__goal-hint">
-            AI 会自动检查产出是否符合目标条件，未达成会继续修订直到符合（或达到最大尝试次数）。
-          </text>
-        </view>
-      </view>
-
       <!-- Header card -->
       <view class="task-detail__header">
         <view class="task-detail__badges">
@@ -1063,7 +1049,7 @@ async function onRetry() {
   actionLoading.value = true
   try {
     // Server clones full task configuration (style/author/ecommerce/image
-    // model/watermark/goal mode...) — preserves everything, unlike the old
+    // model/watermark...) — preserves everything, unlike the old
     // client-side create() which only forwarded a subset of fields.
     const newTask = await tasksApi.retry(task.value.id)
 
@@ -1295,45 +1281,6 @@ onShareAppMessage(() => ({
       color: $ab-text;
       line-height: 1.5;
       flex: 1;
-    }
-  }
-
-  &__goal-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: $ab-space-sm;
-    background-color: $ab-warning-bg;
-    border: 2rpx solid rgba($ab-warning, 0.4);
-    border-radius: $ab-radius-md;
-    padding: $ab-space-md;
-    margin-bottom: $ab-space-sm;
-
-    &-icon {
-      font-size: 36rpx;
-      flex-shrink: 0;
-    }
-
-    &-title {
-      display: block;
-      font-size: $ab-text-base;
-      font-weight: $ab-font-semibold;
-      color: $ab-warning;
-      margin-bottom: 4rpx;
-    }
-
-    &-text {
-      display: block;
-      font-size: $ab-text-sm;
-      color: $ab-text;
-      line-height: 1.5;
-      margin-bottom: 4rpx;
-    }
-
-    &-hint {
-      display: block;
-      font-size: $ab-text-xs;
-      color: $ab-text-secondary;
-      line-height: 1.5;
     }
   }
 

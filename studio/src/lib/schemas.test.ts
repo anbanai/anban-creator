@@ -302,36 +302,16 @@ describe('createTaskSchema', () => {
     expect(result.article_with_content_images).toBe(false)
   })
 
-  it('accepts goal_mode with a non-empty goal', () => {
-    expect(createTaskSchema.safeParse({
+  it('strips retired strong-goal fields from legacy form data', () => {
+    const result = createTaskSchema.parse({
       project_id: 'ch-1',
       type: 'article',
       prompt: '测试',
       goal_mode: true,
       goal: '字数 ≥ 1500',
-    }).success).toBe(true)
-  })
-
-  it('rejects goal_mode=true without a goal', () => {
-    const result = createTaskSchema.safeParse({
-      project_id: 'ch-1',
-      type: 'article',
-      prompt: '测试',
-      goal_mode: true,
-      goal: '',
     })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects goal longer than 4000 characters', () => {
-    const result = createTaskSchema.safeParse({
-      project_id: 'ch-1',
-      type: 'article',
-      prompt: '测试',
-      goal_mode: true,
-      goal: 'a'.repeat(4001),
-    })
-    expect(result.success).toBe(false)
+    expect(result).not.toHaveProperty('goal_mode')
+    expect(result).not.toHaveProperty('goal')
   })
 
   it('accepts moments tasks without a separate image-mode field', () => {

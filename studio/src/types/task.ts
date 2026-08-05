@@ -88,10 +88,6 @@ export interface Task {
   // acted on. Drives the approval card on the task detail page.
   publish_approval_state?: PublishApprovalState
   workflow_status?: WorkflowStatus | string | null
-  // Goal mode: condition is prepended to user prompt as /goal slash command;
-  // the loop runs entirely inside Claude Code, server observes only the result.
-  goal?: string
-  goal_mode?: boolean
   overrides?: StyleOverrides
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
@@ -210,8 +206,6 @@ export interface CreateTaskRequest {
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean

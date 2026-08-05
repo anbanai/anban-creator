@@ -316,7 +316,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, err
 	}
-	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{TaskType: task.Type, Topic: task.Prompt, Goal: task.Goal, TaskID: task.ID, ProjectID: task.ProjectID, HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage, ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages})
+	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{TaskType: task.Type, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID, HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage, ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages})
 	resumeContextPath := ""
 	for _, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {

@@ -538,57 +538,6 @@ func TestBuildUserPrompt_TopicPreClaimWording(t *testing.T) {
 	}
 }
 
-func TestBuildUserPrompt_Goal(t *testing.T) {
-	// Empty goal — no /goal prefix.
-	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭"})
-	if strings.Contains(got, "/goal ") {
-		t.Errorf("empty goal should not include /goal prefix; got %q", got)
-	}
-
-	// Non-empty goal — /goal prefix appears with the condition, followed by the base prompt.
-	goal := "文章字数不少于 1000 字"
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: goal})
-	if !strings.HasPrefix(got, "/goal "+goal) {
-		t.Errorf("BuildUserPrompt with goal should start with %q; got %q", "/goal "+goal, got[:min(len(got), 80)])
-	}
-	// Base prompt must still be present after the goal line.
-	if !strings.Contains(got, "春季穿搭") {
-		t.Errorf("BuildUserPrompt with goal lost the base prompt topic; got %q", got)
-	}
-
-	// Whitespace-only goal is treated as empty.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "   \n\t  "})
-	if strings.Contains(got, "/goal ") {
-		t.Errorf("whitespace-only goal should not include /goal prefix; got %q", got)
-	}
-
-	// Surrounding whitespace is trimmed.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "  含关键词 ABC  "})
-	wantPrefix := "/goal 含关键词 ABC"
-	if !strings.HasPrefix(got, wantPrefix) {
-		t.Errorf("goal should be trimmed; want prefix %q, got %q", wantPrefix, got[:min(len(got), 80)])
-	}
-
-	// Multi-line goal is flattened to a single /goal line (Claude Code's slash
-	// parser only registers the first line as the condition).
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "字数 ≥ 1000\n包含 3 个案例\n带封面图"})
-	firstLine := got
-	if idx := strings.Index(got, "\n"); idx >= 0 {
-		firstLine = got[:idx]
-	}
-	if !strings.HasPrefix(firstLine, "/goal ") {
-		t.Errorf("first line should start with /goal; got %q", firstLine)
-	}
-	for _, frag := range []string{"字数 ≥ 1000", "包含 3 个案例", "带封面图"} {
-		if !strings.Contains(firstLine, frag) {
-			t.Errorf("multi-line goal fragment %q missing from /goal line %q", frag, firstLine)
-		}
-	}
-	if strings.Contains(firstLine, "\n") {
-		t.Errorf("goal line must be single-line; got %q", firstLine)
-	}
-}
-
 func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	// Both task_id and project_id present.
 	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", TaskID: "task-123", ProjectID: "chan-abc"})

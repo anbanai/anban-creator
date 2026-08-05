@@ -25,8 +25,6 @@ export interface Plan {
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
   // Article image toggles (公众号文章): cover + content images each independently
@@ -51,8 +49,6 @@ export interface CreatePlanRequest {
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   // Seednote image composition (see CreateTaskRequest).
   has_content_image?: boolean
   has_tail_image?: boolean
@@ -74,8 +70,6 @@ export interface UpdatePlanRequest {
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
   // Article image toggles (公众号文章): leave-unchanged when omitted.

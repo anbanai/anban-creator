@@ -24,9 +24,8 @@ export const tasksApi = {
   cancel: (id: string) =>
     post<void>(`/tasks/${id}/cancel`),
 
-  /** Retry a failed/cancelled task by cloning its full configuration
-   *  (three-dimensional style, author/persona, ecommerce config, image model,
-   *  watermark, goal mode...) into a fresh billed task on the server. */
+  /** Retry a failed/cancelled task by cloning its full configuration into a
+   *  fresh billed task on the server. */
   retry: (id: string) =>
     post<Task>(`/tasks/${id}/retry`),
 

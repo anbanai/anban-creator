@@ -34,8 +34,6 @@ type CloneTaskOverrides struct {
 	InputAttachments         []model.EntryAttachment
 	AgentInput               map[string]any
 	Watermark                *bool
-	Goal                     string
-	GoalMode                 bool
 	HasContentImage          *bool
 	HasTailImage             *bool
 	ArticleWithCover         *bool
@@ -91,8 +89,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			InputAttachments:         attachments,
 			AgentInput:               override.AgentInput,
 			Watermark:                override.Watermark,
-			Goal:                     override.Goal,
-			GoalMode:                 override.GoalMode,
 			HasContentImage:          override.HasContentImage,
 			HasTailImage:             override.HasTailImage,
 			ArticleWithCover:         override.ArticleWithCover,
@@ -151,8 +147,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Overrides:                &overrides,
 		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,
-		Goal:                     src.Goal,
-		GoalMode:                 src.GoalMode,
 		HasContentImage:          &hasContent,
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         articleCover,

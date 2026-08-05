@@ -35,8 +35,6 @@ pub struct LocalExecutionConfig {
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
-    pub goal: Option<String>,
-    #[serde(default)]
     pub has_content_image: bool,
     #[serde(default)]
     pub has_tail_image: bool,

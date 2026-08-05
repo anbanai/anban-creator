@@ -23,7 +23,6 @@ type Config struct {
 	RuntimeAdapter           string
 	RuntimeProfile           string
 	Topic                    string
-	Goal                     string
 	Workspace                string
 	AgentFlag                string
 	AutoMemoryDirectory      string
@@ -59,7 +58,6 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "runtime-adapter", Usage: "frozen runtime adapter", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "runtime-profile", Usage: "frozen runtime profile", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "topic", Usage: "task topic/prompt", Config: cli.StringConfig{TrimSpace: true}},
-		&cli.StringFlag{Name: "goal", Usage: "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringSliceFlag{Name: "model-usage-alias", Usage: "exact raw=provider/model terminal usage identity"},
 		&cli.StringFlag{Name: "agent-flag", Usage: "Claude Code --agent flag", Config: cli.StringConfig{TrimSpace: true}},
@@ -88,7 +86,6 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		RuntimeAdapter:           cmd.String("runtime-adapter"),
 		RuntimeProfile:           cmd.String("runtime-profile"),
 		Topic:                    cmd.String("topic"),
-		Goal:                     cmd.String("goal"),
 		Workspace:                cmd.String("workspace"),
 		AgentFlag:                cmd.String("agent-flag"),
 		AutoMemoryDirectory:      cmd.String("auto-memory-directory"),
@@ -163,7 +160,6 @@ func (c *Config) UserPrompt() string {
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType:                 c.TaskType,
 		Topic:                    c.Topic,
-		Goal:                     c.Goal,
 		TaskID:                   c.TaskID,
 		ProjectID:                firstNonEmpty(c.ProjectID, os.Getenv("ANBAN_DEFAULT_PROJECT")),
 		HasContentImage:          c.HasContentImage,

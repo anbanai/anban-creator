@@ -109,6 +109,9 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.MigrateGoalModeRemoval(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to remove goal mode schema")
+		}
 		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
 		}

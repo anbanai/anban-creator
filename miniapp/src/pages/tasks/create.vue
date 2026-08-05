@@ -50,7 +50,7 @@
     <view class="task-create__advanced-toggle" @tap="advancedOpen = !advancedOpen">
       <view class="task-create__advanced-toggle-main">
         <text class="task-create__advanced-toggle-title">高级控制</text>
-        <text class="task-create__advanced-toggle-desc">视觉、人设、参考图和强目标模式</text>
+        <text class="task-create__advanced-toggle-desc">视觉、人设和参考图</text>
       </view>
       <text class="task-create__advanced-toggle-arrow">{{ advancedOpen ? '收起' : '展开' }}</text>
     </view>
@@ -293,27 +293,6 @@
       </view>
     </view>
 
-    <!-- Goal mode -->
-    <view class="task-create__section" v-if="advancedOpen && !isEcommerce">
-      <view class="switch-row">
-        <view class="switch-row__text">
-          <text class="field-label switch-row__label">强目标模式</text>
-          <text class="field-hint">设定明确的成功标准，循环优化直到达标</text>
-        </view>
-        <AbSwitch v-model="form.goal_mode" />
-      </view>
-      <view class="field-spacer" v-if="form.goal_mode">
-        <text class="field-label">成功目标 <text class="field-required">*</text></text>
-        <AbTextarea
-          v-model="form.goal"
-          placeholder="描述明确的完成标准，如：字数 800+、包含 3 个小标题、CTA 引导关注..."
-          :rows="3"
-          :maxlength="4000"
-          :error="errors.goal"
-        />
-      </view>
-    </view>
-
     <!-- Agent execution profile -->
     <view class="task-create__section">
       <text class="field-label">执行配置 <text class="field-required">*</text></text>
@@ -450,8 +429,6 @@ const form = reactive({
   byline: '',
   writing_voice: '',
   persona_avatar: '',
-  goal_mode: false,
-  goal: '',
   has_content_image: false,
   has_tail_image: false,
   // Article image toggles (公众号文章): cover + content images each independently
@@ -485,7 +462,6 @@ const allowedImageRatios = computed(() => platformConfigs.value.find((item) => i
 const isArticle = computed(() => platform.value === 'article')
 const isSeednote = computed(() => platform.value === 'seednote')
 const isEcommerce = computed(() => platform.value === 'ecommerce')
-const billableGoalMode = computed(() => !isEcommerce.value && form.goal_mode)
 
 // ---- E-commerce: product photos + delivery modules ----
 const uploadingPhoto = ref(false)
@@ -608,7 +584,6 @@ const canSubmit = computed(() => {
   if (!form.project_id || !form.prompt.trim() || !form.execution_profile) return false
   if (!selectedExecutionProfileAvailable.value) return false
   if (imageCapabilityUnavailable.value) return false
-  if (billableGoalMode.value && !form.goal.trim()) return false
   if (!priceAvailable.value || debt.value > 0 || balance.value < creationCost.value) return false
   return !submitting.value && !referenceUploading.value
 })
@@ -728,10 +703,6 @@ function validate(): boolean {
     uni.showToast({ title: errors.image_capability_key, icon: 'none' })
     return false
   }
-  if (billableGoalMode.value && !form.goal.trim()) {
-    errors.goal = '强目标模式需填写成功目标'
-    return false
-  }
   // Ecommerce requires product photos + at least one delivery module
   // (matches studio's createTaskSchema superRefine).
   if (isEcommerce.value) {
@@ -795,8 +766,6 @@ async function onSubmit() {
       product_photos: isEcommerce.value && form.product_photos.length ? form.product_photos : undefined,
       selected_modules:
         isEcommerce.value && enabledModuleCount.value > 0 ? form.selected_modules : undefined,
-      goal: billableGoalMode.value && form.goal.trim() ? form.goal.trim() : undefined,
-      goal_mode: billableGoalMode.value || undefined,
       skip_reference_image: form.skip_reference_image || undefined,
       reference_image: form.reference_image || undefined,
       watermark: form.watermark || undefined,

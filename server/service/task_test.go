@@ -1098,8 +1098,6 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		Status:     model.TaskStatusCompleted,
 		Prompt:     "finished topic",
 		ImageRatio: "16:9",
-		Goal:       "keep the same goal",
-		GoalMode:   true,
 	}
 	src.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "original input", FileName: "brief.txt"},
@@ -1125,8 +1123,8 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	if clone.Status != model.TaskStatusPending {
 		t.Fatalf("clone status = %q, want %q", clone.Status, model.TaskStatusPending)
 	}
-	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode {
-		t.Fatalf("clone config = prompt %q ratio %q goal %q mode %v, want source config", clone.Prompt, clone.ImageRatio, clone.Goal, clone.GoalMode)
+	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio {
+		t.Fatalf("clone config = prompt %q ratio %q, want source config", clone.Prompt, clone.ImageRatio)
 	}
 	if clone.ExecutionProfile != src.ExecutionProfile || clone.AgentProfileSnapshot.ProfileID != src.ExecutionProfile {
 		t.Fatalf("clone profile = %q snapshot=%#v, want source profile %q", clone.ExecutionProfile, clone.AgentProfileSnapshot, src.ExecutionProfile)
@@ -1515,8 +1513,6 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		ReferenceImageAssetID:    referenceAsset.ID,
 		InputAttachments:         attachments,
 		Watermark:                &watermark,
-		Goal:                     "edited goal",
-		GoalMode:                 true,
 		HasContentImage:          &hasContent,
 		HasTailImage:             &hasTail,
 		ArticleWithCover:         &articleCover,
@@ -1542,8 +1538,8 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || !task.Watermark {
 			t.Fatalf("reference/watermark fields = skip %v asset %q watermark %v", task.SkipReferenceImage, task.ReferenceImageAssetID, task.Watermark)
 		}
-		if task.Goal != "edited goal" || !task.GoalMode || task.HasContentImage || !task.HasTailImage {
-			t.Fatalf("goal/seednote fields = goal %q mode %v content %v tail %v", task.Goal, task.GoalMode, task.HasContentImage, task.HasTailImage)
+		if task.HasContentImage || !task.HasTailImage {
+			t.Fatalf("seednote fields = content %v tail %v", task.HasContentImage, task.HasTailImage)
 		}
 		if task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
 			t.Fatalf("article fields = cover %v content %v", task.ArticleWithCover, task.ArticleWithContentImages)

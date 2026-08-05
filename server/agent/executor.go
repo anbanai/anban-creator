@@ -22,7 +22,6 @@ import (
 type UserPromptParams struct {
 	TaskType  string // model.PlatformArticle / model.PlatformSeednote / model.PlatformMoments / ...
 	Topic     string // user prompt; empty triggers autonomous research mode
-	Goal      string // goal-mode condition; empty = no /goal prefix
 	TaskID    string // injected as task_id=<x> into the prompt body
 	ProjectID string // injected as project_id=<x> into the prompt body
 	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
@@ -47,12 +46,6 @@ type UserPromptParams struct {
 // settings.json. Injecting them here too would create a second, divergent copy
 // of the same values.
 //
-// p.Goal, when non-empty, is prepended as a /goal slash command so Claude Code's
-// built-in goal loop drives turn-by-turn evaluation inside the same session.
-// The CLI registers the condition as a prompt-based Stop hook and keeps working
-// across turns until a small fast model confirms the condition holds (or
-// max_turns is exhausted). Empty string is a no-op.
-//
 // For seednote tasks, p.HasContentImage / p.HasTailImage are emitted as a
 // structured seednote_image_mode runtime control (cover always generated).
 // Non-seednote types ignore it.
@@ -60,11 +53,6 @@ type UserPromptParams struct {
 // For article tasks, p.ArticleWithCover / p.ArticleWithContentImages are emitted
 // as a structured article_image_mode runtime control. The agent and skills own
 // detailed workflow semantics for each mode; Go only passes state.
-//
-// Multi-line goal conditions are flattened to a single line (newlines →
-// spaces) because Claude Code's slash command parser only registers the first
-// line as the condition — anything after a newline would leak into the user
-// prompt body and silently drop from evaluation.
 func BuildUserPrompt(p UserPromptParams) string {
 	var base string
 	if p.Topic == "" {
@@ -88,9 +76,6 @@ func BuildUserPrompt(p UserPromptParams) string {
 			parts = append(parts, "project_id="+p.ProjectID)
 		}
 		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
-	}
-	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {
-		return "/goal " + trimmedGoal + "\n\n" + base
 	}
 	return base
 }
@@ -165,23 +150,6 @@ func articleImageMode(withCover, withContent bool) string {
 	default:
 		return "text_only"
 	}
-}
-
-// normalizeGoalCondition trims surrounding whitespace and collapses internal
-// newlines into spaces so the condition fits on a single /goal command line.
-func normalizeGoalCondition(goal string) string {
-	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		return ""
-	}
-	lines := strings.Split(goal, "\n")
-	parts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if line = strings.TrimSpace(line); line != "" {
-			parts = append(parts, line)
-		}
-	}
-	return strings.Join(parts, " ")
 }
 
 // truncateKey returns the first 8 characters of a key for safe logging.

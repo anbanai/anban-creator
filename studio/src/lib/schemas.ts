@@ -1,18 +1,12 @@
 import * as z from "zod"
 
 export const PROMPT_MAX_LENGTH = 5120
-export const GOAL_TEXT_MAX_LENGTH = 4000
 
 const unicodeLength = (value: string) => Array.from(value).length
 
 const promptSchema = z.string().refine(
   (value) => unicodeLength(value) <= PROMPT_MAX_LENGTH,
   `Prompt 不能超过 ${PROMPT_MAX_LENGTH} 个字符`,
-)
-
-const goalSchema = z.string().refine(
-  (value) => unicodeLength(value) <= GOAL_TEXT_MAX_LENGTH,
-  `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
 const executionProfileSchema = z
@@ -135,8 +129,6 @@ export const createTaskSchema = z.object({
     .default([]),
   agent_input: z.record(z.string(), z.unknown()).default({}),
   watermark: z.boolean().optional(),
-  goal: goalSchema.optional(),
-  goal_mode: z.boolean().default(false),
   // Seednote image composition: cover always generated. Content defaults on, tail
   // defaults off — matches server column defaults and the seednote form default.
   // Non-seednote task types ignore these fields server-side.
@@ -208,16 +200,6 @@ export const createTaskSchema = z.object({
     }
   }
 
-  if (data.goal_mode) {
-    const goal = data.goal?.trim() || ""
-    if (!goal) {
-      ctx.addIssue({
-        code: "custom",
-        message: "开启强目标模式后必须填写目标条件",
-        path: ["goal"],
-      })
-    }
-  }
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
@@ -236,8 +218,6 @@ export const planSchema = z.object({
     .default([]),
   agent_input: z.record(z.string(), z.unknown()).default({}),
   watermark: z.boolean().optional(),
-  goal: goalSchema.optional(),
-  goal_mode: z.boolean().default(false),
   // Seednote image composition (see createTaskSchema). Defaults match the server.
   has_content_image: z.boolean().default(true),
   has_tail_image: z.boolean().default(false),
@@ -258,16 +238,6 @@ export const planSchema = z.object({
     }
   }
 
-  if (data.goal_mode) {
-    const goal = data.goal?.trim() || ""
-    if (!goal) {
-      ctx.addIssue({
-        code: "custom",
-        message: "开启强目标模式后必须填写目标条件",
-        path: ["goal"],
-      })
-    }
-  }
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 

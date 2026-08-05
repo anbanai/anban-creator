@@ -9,7 +9,7 @@ import (
 // Plan represents a scheduled content generation plan.
 //
 // A plan is a scheduler under a project. It owns scheduling (cron / topic hint /
-// status), goal-mode, and a few per-plan image defaults that flow to spawned
+// status) and a few per-plan image defaults that flow to spawned
 // tasks. Project/account style config is snapshotted from the project when the
 // task is created; plans no longer override visual/writer/author/theme.
 type Plan struct {
@@ -52,10 +52,6 @@ type Plan struct {
 	Writer      string `gorm:"type:varchar(100);default:''" json:"writer,omitempty"`        // 写作者 YAML resource key
 	Author      string `gorm:"type:varchar(200);default:''" json:"author,omitempty"`        // 作者署名 (publish author — never a writer persona name)
 	Theme       string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`          // 排版主题 key
-
-	// Goal mode configuration propagated to tasks created from this plan.
-	Goal     string `gorm:"type:text" json:"goal,omitempty"`
-	GoalMode bool   `gorm:"default:false" json:"goal_mode"`
 
 	NextRunAt *time.Time `gorm:"index" json:"next_run_at"`
 	CreatedAt time.Time  `json:"created_at"`

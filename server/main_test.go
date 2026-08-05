@@ -141,6 +141,20 @@ func TestMainMigratesPlanReferencesAfterAutoMigrateAndFailsFast(t *testing.T) {
 	}
 }
 
+func TestMainRemovesGoalModeSchemaAfterAutoMigrate(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	src := string(raw)
+	autoMigrate := strings.Index(src, "migrateModels(mysqlDB, model.AutoMigrate)")
+	goalRemoval := strings.Index(src, "service.MigrateGoalModeRemoval(context.Background(), mysqlDB, log)")
+	templateMigration := strings.Index(src, "service.MigrateTemplatePrompt(context.Background(), mysqlDB, log)")
+	if autoMigrate < 0 || goalRemoval <= autoMigrate || templateMigration <= goalRemoval {
+		t.Fatalf("goal removal order invalid: auto_migrate=%d goal_removal=%d template_migration=%d", autoMigrate, goalRemoval, templateMigration)
+	}
+}
+
 func TestBuildBillingRuntime(t *testing.T) {
 	catalogDir, err := filepath.Abs("billing")
 	if err != nil {

@@ -197,12 +197,6 @@ fn agent_args(
             args.push(model.clone());
         }
     }
-    if let Some(goal) = &cfg.goal {
-        if !goal.is_empty() {
-            args.push("--goal".to_string());
-            args.push(goal.clone());
-        }
-    }
     // Bool flags mirror the Go flag defaults and server/agent/docker_executor.go.
     args.extend([
         format!("--has-content-image={}", cfg.has_content_image),
@@ -234,7 +228,6 @@ mod tests {
             agent_flag: "anban:article".to_string(),
             max_turns: 12,
             model: None,
-            goal: None,
             has_content_image: true,
             has_tail_image: false,
             article_with_cover: false,

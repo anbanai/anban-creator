@@ -61,8 +61,6 @@ type CreatePlanParams struct {
 	SkipReferenceImage    *bool
 	ReferenceImageAssetID string
 	Watermark             *bool
-	Goal                  string
-	GoalMode              bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -81,10 +79,6 @@ type CreatePlanParams struct {
 // Create validates the cron expression, resolves the project, computes the next run
 // time, and persists the plan. The task type is derived from the project's platform.
 // ImageCapabilityKey optionally selects a per-plan image model (validated upstream by the handler).
-//
-// Goal and GoalMode propagate to tasks spawned from this plan; when GoalMode is
-// true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
-// after each execution.
 //
 // HasContentImage / HasTailImage control seednote image composition on spawned
 // tasks. nil falls back to the model's column defaults (content on, tail off).
@@ -186,8 +180,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		articleContent = *p.ArticleWithContentImages
 	}
-	// A plan carries scheduling-adjacent "what to produce" image params + goal
-	// mode. Project/account style config is snapshotted when a task is spawned.
+	// A plan carries scheduling-adjacent "what to produce" image params.
+	// Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
 		ID:                       uuid.New().String(),
 		UserID:                   p.UserID,
@@ -203,8 +197,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ReferenceImageAssetID:    p.ReferenceImageAssetID,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
-		Goal:                     p.Goal,
-		GoalMode:                 p.GoalMode,
 		HasContentImage:          hasContent,
 		HasTailImage:             hasTail,
 		ArticleWithCover:         &articleCover,
@@ -268,11 +260,10 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageAssetID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
-//   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
 //
-// ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
-// unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
+// ID, CronExpr, and Prompt are plain strings. CronExpr=="" means "leave
+// unchanged"; an empty Prompt is a valid value meaning "no prompt".
 type UpdatePlanParams struct {
 	ID                       string
 	ExecutionProfile         string
@@ -283,8 +274,6 @@ type UpdatePlanParams struct {
 	SkipReferenceImage       *bool
 	ReferenceImageAssetID    *string
 	Watermark                *bool
-	Goal                     string
-	GoalMode                 *bool
 	HasContentImage          *bool
 	HasTailImage             *bool
 	ArticleWithCover         *bool
@@ -359,7 +348,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		}
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
-	plan.Goal = p.Goal
 	if model.IsMontagePlatform(plan.Type) {
 		plan.ImageCapabilityKey = ""
 		plan.ImageRatio = ""
@@ -381,9 +369,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	}
 	if p.Watermark != nil {
 		plan.Watermark = *p.Watermark
-	}
-	if p.GoalMode != nil {
-		plan.GoalMode = *p.GoalMode
 	}
 	if p.HasContentImage != nil {
 		plan.HasContentImage = *p.HasContentImage

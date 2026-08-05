@@ -48,9 +48,6 @@ export interface Task {
   published: boolean
   published_at: string | null
   workflow_status?: WorkflowStatus | string | null
-  // Goal mode: condition is prepended to user prompt as /goal slash command.
-  goal?: string
-  goal_mode?: boolean
   // 公众号人设：署名 + 写作风格模仿 + 可选头像
   byline?: string
   writing_voice?: string
@@ -118,8 +115,6 @@ export interface CreateTaskRequest {
   writer_key?: string
   theme?: string
   watermark?: boolean
-  goal?: string
-  goal_mode?: boolean
   // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。空则兜底到项目。
   byline?: string
   writing_voice?: string

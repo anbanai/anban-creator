@@ -162,13 +162,6 @@ type Task struct {
 	MaxRetries            int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount   int        `gorm:"default:0" json:"rate_limit_retry_count"`
 
-	// Goal mode: when GoalMode is true, Goal is prepended to the user prompt as
-	// a /goal slash command so Claude Code's built-in goal loop drives
-	// turn-by-turn evaluation inside a single agent session. No server-side
-	// retry / evaluation log; the loop is opaque to the server.
-	Goal     string `gorm:"type:text" json:"goal,omitempty"`
-	GoalMode bool   `gorm:"default:false" json:"goal_mode"`
-
 	Published   bool       `gorm:"default:false" json:"published"`
 	PublishedAt *time.Time `gorm:"index" json:"published_at,omitempty"`
 	// PublishApprovalState drives the publish-approval gate (Batch 4A): "", then

@@ -6,8 +6,6 @@ import { getProjectCreationDefaults } from '@/lib/studio-ux'
 export interface TaskFormDefaults extends CreateTaskFormValues {
   quantity: number
   watermark: boolean
-  goal: string
-  goal_mode: boolean
   has_content_image: boolean
   has_tail_image: boolean
   article_with_cover: boolean
@@ -48,8 +46,6 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     input_attachments: [],
     agent_input: {},
     watermark: false,
-    goal: '',
-    goal_mode: false,
     has_content_image: true,
     has_tail_image: false,
     article_with_cover: true,
@@ -108,8 +104,6 @@ export function switchTaskFormDefaults(
     reference_image: cloneValue(current.reference_image),
     input_attachments: cloneValue(current.input_attachments),
     watermark: current.watermark,
-    goal: current.goal,
-    goal_mode: current.goal_mode,
     montage_input: projectMontageInput(project, current.prompt),
   }
 }
@@ -146,8 +140,6 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     input_attachments: clonedAttachments,
     agent_input: cloneValue(task.agent_input ?? {}),
     watermark: task.watermark ?? false,
-    goal: task.goal ?? '',
-    goal_mode: task.goal_mode ?? false,
     has_content_image: task.has_content_image ?? true,
     has_tail_image: task.has_tail_image ?? false,
     article_with_cover: task.article_with_cover ?? true,
@@ -176,7 +168,6 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
       agent_input: cloneValue(values.agent_input),
     }
   }
-  const goal = values.goal?.trim() || undefined
   const sellingPoints = values.selling_points?.trim() || undefined
   const hasActiveModules = Object.values(values.selected_modules ?? {}).some((quantity) => quantity >= 1)
   return {
@@ -195,12 +186,6 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     input_attachments: cloneValue(values.input_attachments),
     agent_input: cloneValue(values.agent_input),
     watermark: values.watermark,
-    ...(values.type !== 'ecommerce'
-      ? {
-          goal_mode: values.goal_mode,
-          ...(values.goal_mode && goal ? { goal } : {}),
-        }
-      : {}),
     ...(values.type === 'seednote'
       ? {
           has_content_image: values.has_content_image,

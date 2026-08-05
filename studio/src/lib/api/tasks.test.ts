@@ -105,8 +105,6 @@ describe('tasksApi', () => {
       reference_image: { asset_id: 'asset-1' },
       input_attachments: [],
       watermark: false,
-      goal: '',
-      goal_mode: false,
       has_content_image: false,
       has_tail_image: false,
       article_with_cover: false,

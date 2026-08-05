@@ -65,7 +65,7 @@ Anban 智能创作助手采用**钱包模式**管理积分：
 - `task_costs` 只表示基础服务费，不包含 Claude Code runtime 和后续 MCP/模型/媒体操作费
 - `agent_runtime_reserve` 表示云端 Claude Code agent run 的预留额度；执行完成后按官方返回的真实成本多退少补
 - 本机运行使用用户自己的 Claude Code 环境，不预扣平台 Claude Code 运行费
-- 批量创建：基础服务费和运行预留均按数量计入；强目标模式按配置倍率计入基础服务费和运行预留
+- 批量创建：基础服务费和运行预留均按数量计入
 - 电商出图创建只扣 `task_costs.ecommerce`；所选模块只影响后续图片生成/理解操作用量
 - 失败/取消退款只退相应任务基础服务费；已成功发生的 Claude Code runtime 与独立 MCP 操作交易不自动合并到基础费里
 

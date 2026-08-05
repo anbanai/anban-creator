@@ -79,8 +79,6 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 		"reference_image_asset_id":    plan.ReferenceImageAssetID,
 		"skip_reference_image":        plan.SkipReferenceImage,
 		"watermark":                   plan.Watermark,
-		"goal":                        plan.Goal,
-		"goal_mode":                   plan.GoalMode,
 		"has_content_image":           plan.HasContentImage,
 		"has_tail_image":              plan.HasTailImage,
 		"article_with_cover":          plan.ArticleWithCover,
