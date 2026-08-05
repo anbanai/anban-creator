@@ -108,6 +108,16 @@ func IsProjectPlatform(value string) bool {
 	}
 }
 
+// IsAdminOnlyProjectPlatform reports project types that are still in internal validation.
+func IsAdminOnlyProjectPlatform(value string) bool {
+	switch value {
+	case PlatformMoments, PlatformEcommerce, PlatformMontage:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
 	return IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis

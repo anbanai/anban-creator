@@ -39,12 +39,25 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).not.toContain("selectedPlatform !== 'seednote'")
   })
 
-  it('keeps project cards focused on creation readiness', () => {
+  it('keeps project cards focused on project identity and basic activity', () => {
     const cardSource = readFileSync(join(here, '../components/ProjectCard.tsx'), 'utf8')
     const pageSource = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(cardSource).toContain('buildProjectReadinessSummary')
-    expect(cardSource).toContain('用此项目创建任务')
-    expect(pageSource).toContain('createTaskHref')
+    expect(cardSource).not.toContain('buildProjectReadinessSummary')
+    expect(cardSource).not.toContain('还有配置可补齐')
+    expect(cardSource).not.toContain('onCreateTask')
+    expect(cardSource).not.toContain('onDelete')
+    expect(cardSource).not.toContain('成功率')
+    expect(pageSource).not.toContain('createTaskHref')
+    expect(pageSource).not.toContain('deleteMutation')
+  })
+
+  it('keeps internal project platforms behind the admin gate', () => {
+    const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
+
+    expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce', 'montage'])")
+    expect(source).toContain('user?.is_admin === true')
+    expect(source).toContain('canViewPlatform(project.platform, isAdmin)')
+    expect(source).toContain('canViewPlatform(opt.value, isAdmin)')
   })
 })

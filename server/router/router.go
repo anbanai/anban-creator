@@ -200,13 +200,6 @@ func NewRouter(svc *Services) *fiber.App {
 		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
 
-	// ---------------------------------------------------------------------------
-	// Public project config endpoint (no auth required — returns static data).
-	// ---------------------------------------------------------------------------
-
-	if svc.ProjectHandler != nil {
-		app.Get("/api/v1/projects/platform-configs", svc.ProjectHandler.GetPlatformConfigs)
-	}
 	if svc.AgentPackHandler != nil {
 		app.Get("/api/v1/agent-packs", svc.AgentPackHandler.List)
 	}
@@ -266,6 +259,7 @@ func NewRouter(svc *Services) *fiber.App {
 	// ---------------------------------------------------------------------------
 
 	if svc.ProjectHandler != nil {
+		apiV1.Get("/projects/platform-configs", svc.ProjectHandler.GetPlatformConfigs)
 		apiV1.Get("/projects", svc.ProjectHandler.List)
 		apiV1.Get("/projects/stats", svc.ProjectHandler.Stats)
 		apiV1.Post("/projects", svc.ProjectHandler.Create)

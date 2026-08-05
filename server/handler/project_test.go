@@ -210,15 +210,117 @@ func newProjectHandlerTestApp(repo repository.Repository, store *projectReferenc
 	injectUser := func(c fiber.Ctx) error {
 		if uid := c.Get("X-User-ID"); uid != "" {
 			c.Locals("user_id", uid)
+			c.Locals("user", &model.User{ID: uid, IsAdmin: c.Get("X-Admin") != "false"})
 		}
 		return c.Next()
 	}
 	app.Delete("/api/v1/projects/:id", injectUser, h.Delete)
+	app.Get("/api/v1/projects/platform-configs", injectUser, h.GetPlatformConfigs)
 	app.Get("/api/v1/projects", injectUser, h.List)
 	app.Get("/api/v1/projects/:id", injectUser, h.Get)
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
 	return app
+}
+
+func doProjectRequestAsNonAdmin(t *testing.T, app *fiber.App, method, path, userID string, body any) *http.Response {
+	t.Helper()
+	var reqBody io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		reqBody = strings.NewReader(string(raw))
+	}
+	req := httptest.NewRequest(method, path, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Admin", "false")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	return resp
+}
+
+func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	projectIDs := make(map[string]string)
+	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage} {
+		projectID := uuid.NewString()
+		if err := repo.Projects().Create(t.Context(), &model.Project{
+			ID: projectID, UserID: userID, Platform: platform,
+			Name: platform, Status: model.ProjectStatusActive,
+		}); err != nil {
+			t.Fatalf("create %s project: %v", platform, err)
+		}
+		projectIDs[platform] = projectID
+	}
+
+	resp := doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects", userID, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	items := decodeBody(t, resp)["data"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("non-admin projects = %#v, want article and seednote only", items)
+	}
+	for _, item := range items {
+		platform := item.(map[string]any)["platform"].(string)
+		if model.IsAdminOnlyProjectPlatform(platform) {
+			t.Fatalf("non-admin list exposed %q", platform)
+		}
+	}
+
+	for _, platform := range []string{model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage} {
+		t.Run("reject create "+platform, func(t *testing.T) {
+			resp := doProjectRequestAsNonAdmin(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+				"platform": platform,
+				"name":     "Hidden " + platform,
+			})
+			if resp.StatusCode != fiber.StatusForbidden {
+				t.Fatalf("non-admin create status = %d, want 403; body=%#v", resp.StatusCode, decodeBody(t, resp))
+			}
+		})
+	}
+
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects/"+projectIDs[model.PlatformMontage], userID, nil)
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("non-admin get hidden project status = %d, want 403", resp.StatusCode)
+	}
+
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPut, "/api/v1/projects/"+projectIDs[model.PlatformArticle], userID, map[string]any{
+		"platform": model.PlatformMontage,
+		"name":     "Hidden montage",
+	})
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("non-admin update to hidden platform status = %d, want 403", resp.StatusCode)
+	}
+
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects/platform-configs", userID, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
+	}
+	configs := decodeBody(t, resp)["data"].([]any)
+	if len(configs) != 2 {
+		t.Fatalf("non-admin platform configs = %#v, want article and seednote only", configs)
+	}
+	for _, item := range configs {
+		platform := item.(map[string]any)["id"].(string)
+		if model.IsAdminOnlyProjectPlatform(platform) {
+			t.Fatalf("non-admin platform configs exposed %q", platform)
+		}
+	}
+
+	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/platform-configs", userID, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
+	}
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 4 {
+		t.Fatalf("admin platform configs = %#v, want all four configured platforms", configs)
+	}
 }
 
 func TestProjectHandlerCreateReturnsCanonicalRecommendedTemplates(t *testing.T) {

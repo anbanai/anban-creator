@@ -66,7 +66,6 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "keywords", Label: "关键词", Placeholder: "例如 美妆, 时尚, 生活方式", Type: "textarea", Group: "advanced"},
 			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 手绘感，暖色调，小清新，治愈系水彩插画风格", Type: "textarea", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "例如 autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
-			{Key: "author", Label: "作者名", Placeholder: "例如 张三", Type: "text", Group: "advanced"},
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（种草笔记默认）", Type: "select", Group: "advanced"},
 		},
 	},

@@ -21,3 +21,28 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 		t.Fatal("Pack-only value was accepted as a task type")
 	}
 }
+
+func TestAdminOnlyProjectPlatforms(t *testing.T) {
+	for _, platform := range []string{PlatformMoments, PlatformEcommerce, PlatformMontage} {
+		if !IsAdminOnlyProjectPlatform(platform) {
+			t.Errorf("IsAdminOnlyProjectPlatform(%q) = false", platform)
+		}
+	}
+	for _, platform := range []string{PlatformArticle, PlatformSeednote} {
+		if IsAdminOnlyProjectPlatform(platform) {
+			t.Errorf("IsAdminOnlyProjectPlatform(%q) = true", platform)
+		}
+	}
+}
+
+func TestSeednoteProjectConfigHasNoPublishingAuthor(t *testing.T) {
+	config := GetPlatformConfig(PlatformSeednote)
+	if config == nil {
+		t.Fatal("seednote platform config is missing")
+	}
+	for _, field := range config.Fields {
+		if field.Key == "author" {
+			t.Fatal("seednote platform config must not expose a publishing author")
+		}
+	}
+}

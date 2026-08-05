@@ -4,7 +4,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Loader2, Minus } from 'lucide-react'
+import { Plus, Inbox, Minus } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -35,11 +35,12 @@ import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
-import { createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
+import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
+import { useAuth } from '@/contexts/AuthContext'
 
 const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -48,6 +49,12 @@ const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'ecommerce', label: '电商出图' },
   { value: 'montage', label: 'Montage' },
 ]
+
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'montage'])
+
+function canViewPlatform(platform: ProjectPlatform, isAdmin: boolean) {
+  return isAdmin || !adminOnlyPlatforms.has(platform)
+}
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -92,14 +99,15 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   require_publish_approval: false,
 }
 
-function projectPlatformFromIntent(type?: string): ProjectPlatform {
+function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): ProjectPlatform {
   switch (type) {
     case 'article':
     case 'seednote':
+      return type
     case 'moments':
     case 'ecommerce':
     case 'montage':
-      return type
+      return isAdmin ? type : CHANNEL_FORM_DEFAULTS.platform
     default:
       return CHANNEL_FORM_DEFAULTS.platform
   }
@@ -141,6 +149,8 @@ function projectToForm(ch: Project): ProjectFormValues {
 }
 
 export default function ProjectsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.is_admin === true
   const agentPacksQuery = useAgentPacks()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -151,7 +161,6 @@ export default function ProjectsPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -321,20 +330,24 @@ export default function ProjectsPage() {
       }),
   })
 
+  const visibleProjects = useMemo(
+    () => (projects ?? []).filter((project) => canViewPlatform(project.platform, isAdmin)),
+    [isAdmin, projects],
+  )
+
   const filteredProjects = useMemo(() => {
-    if (!projects) return []
-    if (!searchFilter.trim()) return projects
+    if (!searchFilter.trim()) return visibleProjects
     const q = searchFilter.toLowerCase()
-    return projects.filter((ch) => ch.name.toLowerCase().includes(q))
-  }, [projects, searchFilter])
+    return visibleProjects.filter((ch) => ch.name.toLowerCase().includes(q))
+  }, [searchFilter, visibleProjects])
 
   const { data: projectStats = {} } = useQuery({
-    queryKey: ['project-stats', statusFilter, projects?.map((project) => project.id).join(',')],
+    queryKey: ['project-stats', statusFilter, visibleProjects.map((project) => project.id).join(',')],
     queryFn: async () => {
-      if (!projects || projects.length === 0) return {} as Record<string, ProjectStats>
-      return api.projects.stats(projects.map((project) => project.id))
+      if (visibleProjects.length === 0) return {} as Record<string, ProjectStats>
+      return api.projects.stats(visibleProjects.map((project) => project.id))
     },
-    enabled: Boolean(projects && projects.length > 0),
+    enabled: visibleProjects.length > 0,
   })
 
   const createMutation = useMutation({
@@ -348,7 +361,7 @@ export default function ProjectsPage() {
         resetModal()
         navigate(projectCreatedReturnHref({
           returnTo,
-          type: createIntent.type ?? createdProject.platform,
+          type: createdProject.platform,
           projectId: createdProject.id,
           intent: createIntent.intent,
         }))
@@ -399,23 +412,10 @@ export default function ProjectsPage() {
     },
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.projects.delete(id),
-    onSuccess: () => {
-      toast.success('项目已删除')
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
-      setDeleteTarget(null)
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '删除项目失败，请重试'))
-    },
-  })
-
   function openCreate() {
     setEditingProject(null)
     setProfileFetchHint(null)
-    const platform = projectPlatformFromIntent(createIntent.type)
+    const platform = projectPlatformFromIntent(createIntent.type, isAdmin)
     form.reset({
       ...CHANNEL_FORM_DEFAULTS,
       platform,
@@ -488,7 +488,9 @@ export default function ProjectsPage() {
       visual_style: values.platform === 'montage' ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
-      author: values.author?.trim() || undefined,
+      author: values.platform === 'article' || values.platform === 'moments'
+        ? values.author?.trim() || undefined
+        : undefined,
       image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
@@ -545,42 +547,40 @@ export default function ProjectsPage() {
     return form.handleSubmit(onSubmit)(event)
   }
 
-  function handleDelete(id: string) {
-    setDeleteTarget(id)
-  }
-
   const isSubmitting = createMutation.isPending || updateMutation.isPending
 
   return (
     <div className="space-y-6">
-      <PageHeader title="项目" description="管理你的内容项目和发布配置。">
+      <PageHeader title="项目">
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
           新建项目
         </Button>
       </PageHeader>
 
-      {/* Status filter tabs */}
-      <ToggleGroup
-        value={[statusFilter]}
-        onValueChange={(val) => setStatusFilter(val[0] || 'all')}
-        variant="outline"
-        size="sm"
-        spacing={2}
-      >
-        {statusTabs.map((tab) => (
-          <ToggleGroupItem key={tab.value} value={tab.value}>
-            {tab.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <ToggleGroup
+          value={[statusFilter]}
+          onValueChange={(val) => setStatusFilter(val[0] || 'all')}
+          variant="outline"
+          size="sm"
+          spacing={0}
+          aria-label="项目状态"
+        >
+          {statusTabs.map((tab) => (
+            <ToggleGroupItem key={tab.value} value={tab.value}>
+              {tab.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
 
-      <SearchInput
-        value={searchFilter}
-        onChange={setSearchFilter}
-        placeholder="搜索项目名称..."
-        className="w-full max-w-xs"
-      />
+        <SearchInput
+          value={searchFilter}
+          onChange={setSearchFilter}
+          placeholder="搜索项目"
+          className="w-full sm:w-64"
+        />
+      </div>
 
       {isError ? (
         <QueryErrorState onRetry={() => refetch()} />
@@ -607,10 +607,9 @@ export default function ProjectsPage() {
       ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!projects?.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃的项目' : '没有已归档的项目') : '未找到匹配的项目'}
-          description={!projects?.length ? '创建你的第一个内容项目开始创作。' : '尝试其他搜索关键词'}
-          action={!projects?.length ? { label: '新建项目', onClick: openCreate } : undefined}
-          note={!projects?.length ? '配置好项目后，任务和计划都会自动继承对应的平台参数。' : undefined}
+          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃的项目' : '没有已归档的项目') : '未找到匹配的项目'}
+          description={!visibleProjects.length ? '创建项目后即可开始创作。' : '换个关键词试试'}
+          action={!visibleProjects.length ? { label: '新建项目', onClick: openCreate } : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -624,12 +623,6 @@ export default function ProjectsPage() {
               restoring={restoreMutation.isPending}
               onArchive={(id) => { void submit(async () => archiveMutation.mutateAsync(id)).catch(() => {}) }}
               onRestore={(id) => { void submit(async () => restoreMutation.mutateAsync(id)).catch(() => {}) }}
-              onDelete={handleDelete}
-              onCreateTask={(project) => navigate(createTaskHref({
-                type: project.platform,
-                projectId: project.id,
-                intent: 'new',
-              }))}
             />
           ))}
         </div>
@@ -674,7 +667,7 @@ export default function ProjectsPage() {
                         )}
                       </SelectTrigger>
                       <SelectContent>
-                        {platformOptions.map((opt) => (
+                        {platformOptions.filter((opt) => canViewPlatform(opt.value, isAdmin)).map((opt) => (
                           <SelectItem key={opt.value} value={opt.value} label={opt.label}>
                             <span className="flex items-center gap-1.5">
                               {renderPlatformIcon(opt.value)}
@@ -1056,16 +1049,6 @@ export default function ProjectsPage() {
                 </>
               )}
 
-              {/* 作者名（署名）：seednote 在此编辑；article 由上方公众号写作配置统一维护。 */}
-              {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
-                <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
-                  <FormControl>
-                    <Input className="flex-1 min-w-0" placeholder="例如 张三" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />}
             </form>
           </Form>
           <DialogFooter>
@@ -1076,23 +1059,6 @@ export default function ProjectsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Delete confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确定要删除此项目吗？</AlertDialogTitle>
-            <AlertDialogDescription>此操作不可撤销。删除后项目及其所有配置将永久移除。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void submit(async () => deleteMutation.mutateAsync(deleteTarget)).catch(() => {}) }}>
-              {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>

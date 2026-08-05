@@ -48,6 +48,7 @@ func setupProjectEcommerceTest(t *testing.T) (*fiber.App, repository.Repository,
 	injectUser := func(c fiber.Ctx) error {
 		if uid := c.Get("X-User-ID"); uid != "" {
 			c.Locals("user_id", uid)
+			c.Locals("user", &model.User{ID: uid, IsAdmin: true})
 		}
 		return c.Next()
 	}

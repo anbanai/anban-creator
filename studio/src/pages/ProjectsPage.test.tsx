@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
@@ -7,7 +7,7 @@ import type { Project } from '@/types'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
+const { errorMock, authState } = vi.hoisted(() => ({ errorMock: vi.fn(), authState: { isAdmin: true } }))
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 const projectWithReference: Project = {
@@ -40,7 +40,16 @@ const projectWithReference: Project = {
   updated_at: '2025-01-01T00:00:00Z',
 }
 
+async function clickProjectAction(projectName: string, actionName: string) {
+  fireEvent.click(await screen.findByRole('button', { name: `更多项目操作：${projectName}` }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: actionName }))
+}
+
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { is_admin: authState.isAdmin } }),
+}))
 
 vi.mock('@/lib/direct-upload', async () => {
   const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
@@ -62,7 +71,6 @@ vi.mock('@/lib/api', async () => {
         platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
         create: vi.fn(),
         update: vi.fn(),
-        delete: vi.fn(),
       },
       imageCapabilities: {
         ...actual.api.imageCapabilities,
@@ -76,9 +84,10 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-describe('ProjectsPage deletion feedback', () => {
+describe('ProjectsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authState.isAdmin = true
     vi.mocked(api.projects.list).mockResolvedValue([projectWithReference])
     vi.mocked(api.projects.stats).mockResolvedValue({
       'ch-1': {
@@ -94,7 +103,6 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.platformConfigs).mockResolvedValue([])
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.update).mockReset()
-    vi.mocked(api.projects.delete).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     uploadToOSSMock.mockResolvedValue({
       uploadSessionId: '11111111-1111-4111-8111-111111111111',
@@ -106,6 +114,53 @@ describe('ProjectsPage deletion feedback', () => {
       size: 9,
     })
     window.history.pushState({}, '', '/projects')
+  })
+
+  it('hides internal project platforms from ordinary users', async () => {
+    authState.isAdmin = false
+    vi.mocked(api.projects.list).mockResolvedValue([
+      projectWithReference,
+      { ...projectWithReference, id: 'moments-1', name: '内部朋友圈', platform: 'moments' },
+      { ...projectWithReference, id: 'ecommerce-1', name: '内部电商', platform: 'ecommerce' },
+      { ...projectWithReference, id: 'montage-1', name: '内部剪辑', platform: 'montage' },
+    ])
+
+    render(<ProjectsPage />)
+
+    expect(await screen.findByText('测试项目')).toBeInTheDocument()
+    expect(screen.queryByText('内部朋友圈')).not.toBeInTheDocument()
+    expect(screen.queryByText('内部电商')).not.toBeInTheDocument()
+    expect(screen.queryByText('内部剪辑')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.click(within(dialog).getAllByRole('combobox')[0])
+    expect(await screen.findByRole('option', { name: '公众号' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Montage' })).not.toBeInTheDocument()
+  })
+
+  it('falls back from an internal project deep link for ordinary users', async () => {
+    authState.isAdmin = false
+    window.history.pushState({}, '', '/projects?create=true&type=montage&intent=new')
+
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('公众号')
+    expect(within(dialog).queryByText('Montage 默认配置')).not.toBeInTheDocument()
+  })
+
+  it('does not ask seednote projects for a publishing author', async () => {
+    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
+
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).queryByLabelText('作者名')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('作者名')).not.toBeInTheDocument()
   })
 
   it('constrains project ratios with the selected business platform', () => {
@@ -202,7 +257,7 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    await clickProjectAction('测试项目', '编辑项目')
     expect(await screen.findByRole('img', { name: '参考图' })).toHaveAttribute(
       'src',
       'https://signed.example/project-reference.png',
@@ -219,7 +274,7 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    await clickProjectAction('测试项目', '编辑项目')
     fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
 
@@ -233,7 +288,7 @@ describe('ProjectsPage deletion feedback', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '编辑项目' }))
+    await clickProjectAction('测试项目', '编辑项目')
     fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
     fireEvent.change(screen.getByLabelText('参考图文件'), {
       target: { files: [new File(['replacement'], 'replacement.png', { type: 'image/png' })] },
@@ -247,26 +302,6 @@ describe('ProjectsPage deletion feedback', () => {
       upload_session_id: '11111111-1111-4111-8111-111111111111',
     })
     expect(payload).not.toHaveProperty('reference_image_url')
-  })
-
-  it('shows the server archive guidance when deleting a project fails with associated work', async () => {
-    vi.mocked(api.projects.delete).mockRejectedValueOnce({
-      response: {
-        data: {
-          msg: 'cannot delete project with 13 associated tasks; archive it instead',
-        },
-      },
-    })
-
-    render(<ProjectsPage />)
-
-    await screen.findByText('测试项目', {}, { timeout: 5000 })
-    fireEvent.click(await screen.findByRole('button', { name: '删除项目' }, { timeout: 5000 }))
-    fireEvent.click(await screen.findByRole('button', { name: '删除' }))
-
-    await waitFor(() => {
-      expect(errorMock).toHaveBeenCalledWith('cannot delete project with 13 associated tasks; archive it instead')
-    })
   })
 
   it('opens moments project creation without social-card preset jargon', async () => {
@@ -372,7 +407,7 @@ describe('ProjectsPage deletion feedback', () => {
     render(<ProjectsPage />)
 
     await screen.findByText('Saved montage')
-    fireEvent.click(screen.getByRole('button', { name: '编辑项目' }))
+    await clickProjectAction('Saved montage', '编辑项目')
     expect(await screen.findByLabelText('默认 Pipeline')).toHaveValue('social-short')
     expect(screen.getByLabelText('默认画幅')).toHaveValue('16:9')
     expect(screen.getByLabelText('默认时长（秒）')).toHaveValue(60)

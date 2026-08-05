@@ -277,6 +277,15 @@ func (h *ProjectHandler) List(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("list projects failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list projects")
 	}
+	if !projectUserIsAdmin(c) {
+		visible := projects[:0]
+		for _, ch := range projects {
+			if !model.IsAdminOnlyProjectPlatform(ch.Platform) {
+				visible = append(visible, ch)
+			}
+		}
+		projects = visible
+	}
 
 	// Sanitize all projects before returning.
 	for _, ch := range projects {
@@ -310,6 +319,9 @@ func (h *ProjectHandler) Stats(c fiber.Ctx) error {
 
 	allowed := make(map[string]struct{}, len(projects))
 	for _, ch := range projects {
+		if !projectUserIsAdmin(c) && model.IsAdminOnlyProjectPlatform(ch.Platform) {
+			continue
+		}
 		allowed[ch.ID] = struct{}{}
 	}
 
@@ -355,6 +367,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	if req.Platform == "" {
 		return Error(c, fiber.StatusBadRequest, "platform is required")
+	}
+	if model.IsAdminOnlyProjectPlatform(req.Platform) && !projectUserIsAdmin(c) {
+		return Forbidden(c, "project platform is currently available to administrators only")
 	}
 
 	// Validate required fields per platform.
@@ -463,6 +478,9 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("get project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get project")
 	}
+	if !projectPlatformIsVisibleToUser(c, ch.Platform) {
+		return Forbidden(c, "project platform is currently available to administrators only")
+	}
 
 	h.service.SanitizeProjectForResponse(ch)
 	h.signProjectURLs(c.Context(), ch)
@@ -499,6 +517,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
+	if !projectPlatformIsVisibleToUser(c, req.Platform) {
+		return Forbidden(c, "project platform is currently available to administrators only")
+	}
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
@@ -512,6 +533,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	current, _, err := h.service.Get(c.Context(), userID, projectID)
 	if err != nil {
 		return h.respondProjectUpdateError(c, projectID, err)
+	}
+	if !projectPlatformIsVisibleToUser(c, current.Platform) {
+		return Forbidden(c, "project platform is currently available to administrators only")
 	}
 	targetReferenceAssetID := current.ReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
@@ -658,7 +682,18 @@ func (h *ProjectHandler) Delete(c fiber.Ctx) error {
 
 // GetPlatformConfigs handles GET /projects/platform-configs.
 func (h *ProjectHandler) GetPlatformConfigs(c fiber.Ctx) error {
-	return Success(c, model.GetAllPlatformConfigs())
+	configs := model.GetAllPlatformConfigs()
+	if projectUserIsAdmin(c) {
+		return Success(c, configs)
+	}
+
+	visible := make([]*model.PlatformConfig, 0, len(configs))
+	for _, config := range configs {
+		if !model.IsAdminOnlyProjectPlatform(config.ID) {
+			visible = append(visible, config)
+		}
+	}
+	return Success(c, visible)
 }
 
 // fetchProfileRequest is the request body for fetching a platform profile.
@@ -825,6 +860,15 @@ func (h *ProjectHandler) getTierMaxConcurrent(c fiber.Ctx) int {
 		tier = model.ResolveTier(user.Tier)
 	}
 	return model.GetTierMaxConcurrentTasks(tier)
+}
+
+func projectUserIsAdmin(c fiber.Ctx) bool {
+	user, _ := c.Locals("user").(*model.User)
+	return user != nil && user.IsAdmin
+}
+
+func projectPlatformIsVisibleToUser(c fiber.Ctx, platform string) bool {
+	return projectUserIsAdmin(c) || !model.IsAdminOnlyProjectPlatform(platform)
 }
 
 // ---------------------------------------------------------------------------

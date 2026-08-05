@@ -1,5 +1,5 @@
 import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { ProjectCard } from './ProjectCard'
 import { render } from '@/test/test-utils'
@@ -30,8 +30,7 @@ function project(overrides: Partial<Project> = {}): Project {
 }
 
 describe('ProjectCard', () => {
-  it('shows a compact readiness summary and primary create action', () => {
-    const onCreateTask = vi.fn()
+  it('shows only basic project activity', () => {
     const stats: ProjectStats = {
       total_tasks: 10,
       completed_tasks: 8,
@@ -42,13 +41,22 @@ describe('ProjectCard', () => {
       last_activity_at: '2026-07-01T00:00:00.000Z',
     }
 
-    render(<ProjectCard project={project()} stats={stats} onCreateTask={onCreateTask} />)
+    render(<ProjectCard project={project()} stats={stats} />)
 
-    expect(screen.getByText('创作配置已就绪')).toBeInTheDocument()
-    expect(screen.getByText('发布需审核')).toBeInTheDocument()
-    expect(screen.getByText('视觉已配置')).toBeInTheDocument()
-    expect(screen.getByText('写作已配置')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '用此项目创建任务' }))
-    expect(onCreateTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
+    expect(screen.getByText('10 个任务')).toBeInTheDocument()
+    expect(screen.getByText('8 个已完成')).toBeInTheDocument()
+    expect(screen.queryByText('创作配置已就绪')).not.toBeInTheDocument()
+    expect(screen.queryByText('还有配置可补齐')).not.toBeInTheDocument()
+    expect(screen.queryByText(/成功率/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /创建任务/ })).not.toBeInTheDocument()
+  })
+
+  it('names the topic-only collection accurately', async () => {
+    render(<ProjectCard project={project()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '更多项目操作：公众号项目' }))
+
+    expect(await screen.findByRole('menuitem', { name: '选题池' })).toBeInTheDocument()
+    expect(screen.queryByText('素材与选题')).not.toBeInTheDocument()
   })
 })
