@@ -33,4 +33,10 @@ describe('navigation IA', () => {
       '/settings',
     ]))
   })
+
+  it('marks designer and platform settings navigation as administrator-only', () => {
+    expect(creationItems.find((item) => item.to === '/designer')?.adminOnly).toBe(true)
+    expect(assetItems.every((item) => item.adminOnly)).toBe(true)
+    expect(connectSettingItems.every((item) => item.adminOnly)).toBe(true)
+  })
 })

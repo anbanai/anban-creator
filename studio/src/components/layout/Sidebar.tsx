@@ -30,6 +30,7 @@ import {
   connectSettingItems,
   creationItems,
   todayItems,
+  visibleNavItems,
 } from "@/lib/navigation";
 import {
   commandPaletteStore,
@@ -56,6 +57,7 @@ function useCollapsedState() {
 
 export default function Sidebar() {
   const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useCollapsedState();
 
@@ -168,13 +170,15 @@ export default function Sidebar() {
               />
             ))}
           </div>
-          <SidebarSection label="创作" icon={Workflow} items={creationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="创作" icon={Workflow} items={visibleNavItems(creationItems, isAdmin)} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          {user?.is_admin ? (
+          {isAdmin ? (
             <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           ) : null}
           <SidebarSection label="经营" icon={BarChart3} items={businessItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          <SidebarSection label="平台与设置" icon={Settings} items={connectSettingItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          {isAdmin ? (
+            <SidebarSection label="平台与设置" icon={Settings} items={connectSettingItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          ) : null}
         </nav>
 
         {isDesktop() && (

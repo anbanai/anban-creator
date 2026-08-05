@@ -103,12 +103,15 @@ describe('GlobalCommandPalette actions', () => {
     expect(await screen.findByText('创建')).toBeInTheDocument()
     expect(await screen.findByText('恢复')).toBeInTheDocument()
     expect(await screen.findByText('跳转')).toBeInTheDocument()
-    expect((await screen.findAllByText('设置')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('设计师')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claude Code')).not.toBeInTheDocument()
+    expect(screen.queryByText('打开接入就绪中心')).not.toBeInTheDocument()
     expect(await screen.findByText('恢复失败任务')).toBeInTheDocument()
     expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
   })
 
-  it('surfaces setup review before generic creation when readiness is missing', async () => {
+  it('surfaces setup review to administrators when readiness is missing', async () => {
+    authState.isAdmin = true
     renderWithProviders(<GlobalCommandPalette />)
 
     act(() => commandPaletteStore.open())
@@ -117,11 +120,14 @@ describe('GlobalCommandPalette actions', () => {
     expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
   })
 
-  it('only exposes template administration navigation to administrators', async () => {
+  it('only exposes administrator navigation to administrators', async () => {
     const regularView = renderWithProviders(<GlobalCommandPalette />)
     act(() => commandPaletteStore.open())
     expect(await screen.findByRole('dialog', { name: '行动面板' })).toBeInTheDocument()
     expect(screen.queryByText('模板库')).not.toBeInTheDocument()
+    expect(screen.queryByText('设计师')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claude Code')).not.toBeInTheDocument()
+    expect(screen.queryByText('Codex')).not.toBeInTheDocument()
     regularView.unmount()
 
     commandPaletteStore.close()
@@ -129,5 +135,9 @@ describe('GlobalCommandPalette actions', () => {
     renderWithProviders(<GlobalCommandPalette />)
     act(() => commandPaletteStore.open())
     expect(await screen.findByText('模板库')).toBeInTheDocument()
+    expect(await screen.findByText('设计师')).toBeInTheDocument()
+    expect(await screen.findByText('Claude Code')).toBeInTheDocument()
+    expect(await screen.findByText('Codex')).toBeInTheDocument()
+    expect(await screen.findByText('打开接入就绪中心')).toBeInTheDocument()
   })
 })

@@ -19,6 +19,7 @@ export interface NavItem {
   label: string
   icon: LucideIcon
   end?: boolean
+  adminOnly?: boolean
 }
 
 export const todayItems: NavItem[] = [
@@ -28,7 +29,7 @@ export const todayItems: NavItem[] = [
 export const creationItems: NavItem[] = [
   { to: '/projects', label: '项目', icon: Rss },
   { to: '/tasks', label: '任务', icon: ListChecks },
-  { to: '/designer', label: '设计师', icon: Palette },
+  { to: '/designer', label: '设计师', icon: Palette, adminOnly: true },
 ]
 
 export const automationItems: NavItem[] = [
@@ -37,7 +38,7 @@ export const automationItems: NavItem[] = [
 ]
 
 export const assetItems: NavItem[] = [
-  { to: '/templates', label: '模板库', icon: LayoutGrid },
+  { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
 ]
 
 export const businessItems: NavItem[] = [
@@ -46,14 +47,18 @@ export const businessItems: NavItem[] = [
 ]
 
 export const platformItems: NavItem[] = [
-  { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal },
-  { to: '/connect/codex', label: 'Codex', icon: Boxes },
+  { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal, adminOnly: true },
+  { to: '/connect/codex', label: 'Codex', icon: Boxes, adminOnly: true },
 ]
 
 export const connectSettingItems: NavItem[] = [
   ...platformItems,
-  { to: '/settings', label: '设置', icon: Settings },
+  { to: '/settings', label: '设置', icon: Settings, adminOnly: true },
 ]
+
+export function visibleNavItems(items: NavItem[], isAdmin: boolean): NavItem[] {
+  return items.filter((item) => !item.adminOnly || isAdmin)
+}
 
 export const workflowItems: NavItem[] = [
   ...todayItems,

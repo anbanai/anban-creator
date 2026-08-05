@@ -4,9 +4,10 @@ import { SHORTCUT_LIST } from '@/hooks/useKeyboardShortcuts'
 interface ShortcutHelpProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  isAdmin: boolean
 }
 
-export default function ShortcutHelp({ open, onOpenChange }: ShortcutHelpProps) {
+export default function ShortcutHelp({ open, onOpenChange, isAdmin }: ShortcutHelpProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -14,7 +15,7 @@ export default function ShortcutHelp({ open, onOpenChange }: ShortcutHelpProps) 
           <DialogTitle>键盘快捷键</DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
-          {SHORTCUT_LIST.map((shortcut) => (
+          {SHORTCUT_LIST.filter((shortcut) => !shortcut.adminOnly || isAdmin).map((shortcut) => (
             <div key={shortcut.keys} className="flex items-center justify-between py-1.5">
               <span className="text-sm text-muted-foreground">{shortcut.description}</span>
               <kbd className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">

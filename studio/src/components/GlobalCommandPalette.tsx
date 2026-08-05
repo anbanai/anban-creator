@@ -13,7 +13,7 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from '@/components/ui/command'
-import { allNavItems, type NavItem } from '@/lib/navigation'
+import { allNavItems, visibleNavItems, type NavItem } from '@/lib/navigation'
 import { commandPaletteStore } from '@/lib/command-palette'
 import { api } from '@/lib/api'
 import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref } from '@/lib/command-center'
@@ -45,6 +45,7 @@ export default function GlobalCommandPalette() {
   const navigate = useNavigate()
   const { setTheme } = useTheme()
   const { user } = useAuth()
+  const isAdmin = user?.is_admin === true
 
   const { data: tasksData } = useQuery({
     queryKey: ['command-palette', 'tasks'],
@@ -73,7 +74,7 @@ export default function GlobalCommandPalette() {
       const data = await api.apiKeys.list()
       return data.items || []
     },
-    enabled: open,
+    enabled: open && isAdmin,
   })
   const tasks = tasksData?.items ?? []
   const plans = plansData?.items ?? []
@@ -85,12 +86,15 @@ export default function GlobalCommandPalette() {
     apiKeysReady: apiKeys.length > 0,
     localExecutorReady: true,
   }), [tasks, plans, projects, billingWallet, apiKeys.length])
-  const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
+  const nextActions = useMemo(
+    () => buildNextBestActions(signals).filter((action) => action.id !== 'connect-settings' || isAdmin),
+    [isAdmin, signals],
+  )
   const failedTasks = signals.failedTasks.slice(0, 5)
   const defaultProject = signals.projects[0]
   const navigationItems = useMemo(
-    () => user?.is_admin ? allNavItems : allNavItems.filter((item) => item.to !== '/templates'),
-    [user?.is_admin],
+    () => visibleNavItems(allNavItems, isAdmin),
+    [isAdmin],
   )
 
   const setOpen = useCallback((v: boolean) => {
@@ -194,10 +198,12 @@ export default function GlobalCommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="设置">
-          <CommandItem onSelect={() => handleSelect(() => navigate('/settings'))}>
-            <Settings className="mr-2 h-4 w-4" />
-            打开接入就绪中心
-          </CommandItem>
+          {isAdmin ? (
+            <CommandItem onSelect={() => handleSelect(() => navigate('/settings'))}>
+              <Settings className="mr-2 h-4 w-4" />
+              打开接入就绪中心
+            </CommandItem>
+          ) : null}
           <CommandItem onSelect={() => handleSelect(() => setTheme('light'))}>
             <Sun className="mr-2 h-4 w-4" />
             亮色模式

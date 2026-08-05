@@ -92,9 +92,11 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
 function KeyboardShortcuts() {
   const [showHelp, setShowHelp] = useState(false)
-  useKeyboardShortcuts(() => setShowHelp(true))
+  const { user } = useAuth()
+  const isAdmin = user?.is_admin === true
+  useKeyboardShortcuts(() => setShowHelp(true), { isAdmin })
 
-  return <ShortcutHelp open={showHelp} onOpenChange={setShowHelp} />
+  return <ShortcutHelp open={showHelp} onOpenChange={setShowHelp} isAdmin={isAdmin} />
 }
 
 function AppRoutes() {
@@ -145,12 +147,40 @@ function AppRoutes() {
             )}
           />
 
-          <Route path="designer" element={<LazyPage component={DesignerPage} />} />
+          <Route
+            path="designer"
+            element={(
+              <AdminRoute>
+                <LazyPage component={DesignerPage} />
+              </AdminRoute>
+            )}
+          />
           <Route path="billing" element={<LazyPage component={BillingPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
-          <Route path="settings" element={<LazyPage component={SettingsPage} />} />
-          <Route path="connect/claude-code" element={<LazyPage component={ClaudeCodeGuidePage} />} />
-          <Route path="connect/codex" element={<LazyPage component={CodexGuidePage} />} />
+          <Route
+            path="settings"
+            element={(
+              <AdminRoute>
+                <LazyPage component={SettingsPage} />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="connect/claude-code"
+            element={(
+              <AdminRoute>
+                <LazyPage component={ClaudeCodeGuidePage} />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="connect/codex"
+            element={(
+              <AdminRoute>
+                <LazyPage component={CodexGuidePage} />
+              </AdminRoute>
+            )}
+          />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

@@ -5,7 +5,10 @@ interface ShortcutMap {
   [key: string]: () => void;
 }
 
-export function useKeyboardShortcuts(onShowHelp?: () => void) {
+export function useKeyboardShortcuts(
+  onShowHelp?: () => void,
+  { isAdmin = false }: { isAdmin?: boolean } = {},
+) {
   const navigate = useNavigate();
   const sequenceRef = useRef("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -17,7 +20,7 @@ export function useKeyboardShortcuts(onShowHelp?: () => void) {
     "g t": () => navigate("/tasks"),
     "g l": () => navigate("/timeline"),
     "g $": () => navigate("/billing"),
-    "g s": () => navigate("/settings"),
+    ...(isAdmin ? { "g s": () => navigate("/settings") } : {}),
     "?": () => onShowHelp?.(),
   };
 
@@ -68,7 +71,7 @@ export function useKeyboardShortcuts(onShowHelp?: () => void) {
         }
       }
     },
-    [navigate, onShowHelp],
+    [isAdmin, navigate, onShowHelp],
   );
 
   useEffect(() => {
@@ -87,7 +90,7 @@ export const SHORTCUT_LIST = [
   { keys: "g t", description: "前往任务" },
   { keys: "g l", description: "前往时间轴" },
   { keys: "g $", description: "前往积分" },
-  { keys: "g s", description: "前往设置" },
+  { keys: "g s", description: "前往设置", adminOnly: true },
   { keys: "?", description: "显示快捷键帮助" },
   { keys: "⌘K", description: "打开命令面板" },
 ];

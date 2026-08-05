@@ -28,6 +28,7 @@ import {
   type LogLevel,
 } from '@/lib/local-executor-store'
 import { localExecutorCreateHint } from '@/lib/local-executor-ux'
+import { useAuth } from '@/contexts/AuthContext'
 
 /**
  * Desktop-only live-log drawer. Surfaces the `local-run://event` stream the Rust
@@ -48,6 +49,7 @@ export default function LocalRunLogSheet() {
   const status = useLocalExecutorStatus()
   const logs = useLocalExecutorLogs()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [toggling, setToggling] = useState(false)
 
@@ -117,17 +119,19 @@ export default function LocalRunLogSheet() {
                 <Badge variant="outline" className="text-[10px] text-amber-600">未就绪</Badge>
               )}
             </SheetTitle>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="打开设置"
-              onClick={() => {
-                localExecutorStore.closePanel()
-                navigate('/settings')
-              }}
-            >
-              <Settings className="h-4 w-4" />
-            </Button>
+            {user?.is_admin ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title="打开设置"
+                onClick={() => {
+                  localExecutorStore.closePanel()
+                  navigate('/settings')
+                }}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+            ) : null}
           </div>
           <SheetDescription className="sr-only">
             本地执行器实时日志与控制

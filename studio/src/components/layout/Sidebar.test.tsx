@@ -78,14 +78,20 @@ describe('Sidebar', () => {
     expect(screen.getByText('任务')).toBeInTheDocument()
   })
 
-  it('只向管理员显示模板库导航', () => {
+  it('只向管理员显示管理功能导航', () => {
     const regular = renderSidebar()
     expect(screen.queryByRole('link', { name: '模板库' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '设计师' })).not.toBeInTheDocument()
+    expect(screen.queryByText('平台与设置')).not.toBeInTheDocument()
     regular.unmount()
 
     authState.isAdmin = true
     renderSidebar()
     expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '设计师' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
 
   it('renders user account popover', () => {
@@ -100,7 +106,8 @@ describe('Sidebar', () => {
     expect(screen.queryByText('创意工坊')).not.toBeInTheDocument()
   })
 
-  it('renders connection and settings links directly in the sidebar', () => {
+  it('renders connection and settings links directly for administrators', () => {
+    authState.isAdmin = true
     renderSidebar()
 
     expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
@@ -110,6 +117,7 @@ describe('Sidebar', () => {
   })
 
   it('keeps expanded utility links reachable when collapsed', () => {
+    authState.isAdmin = true
     renderSidebar()
 
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
@@ -120,6 +128,7 @@ describe('Sidebar', () => {
   })
 
   it('navigates directly to settings from the sidebar', async () => {
+    authState.isAdmin = true
     renderAuthenticatedShell()
 
     fireEvent.click(screen.getByRole('link', { name: '设置' }))
@@ -128,6 +137,7 @@ describe('Sidebar', () => {
   })
 
   it('closes the mobile drawer after navigating from an expanded utility link', async () => {
+    authState.isAdmin = true
     renderAuthenticatedShell()
 
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
