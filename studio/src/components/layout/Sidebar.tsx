@@ -1,16 +1,12 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   Menu,
   X,
-  Workflow,
-  BarChart3,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  CalendarRange,
-  Boxes,
-  Settings,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
@@ -24,13 +20,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  assetItems,
-  automationItems,
-  businessItems,
-  connectSettingItems,
-  creationItems,
-  todayItems,
-  visibleNavItems,
+  adminNavItems,
+  mvpNavItems,
 } from "@/lib/navigation";
 import {
   commandPaletteStore,
@@ -160,8 +151,8 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
-          <div className="mb-2">
-            {todayItems.map((item) => (
+          <div className="flex flex-col gap-0.5">
+            {mvpNavItems.map((item) => (
               <SidebarNavLink
                 key={item.to}
                 item={item}
@@ -170,14 +161,17 @@ export default function Sidebar() {
               />
             ))}
           </div>
-          <SidebarSection label="创作" icon={Workflow} items={visibleNavItems(creationItems, isAdmin)} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
           {isAdmin ? (
-            <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          ) : null}
-          <SidebarSection label="经营" icon={BarChart3} items={businessItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          {isAdmin ? (
-            <SidebarSection label="平台与设置" icon={Settings} items={connectSettingItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+            <div className="mt-3 flex flex-col gap-0.5 border-t border-sidebar-border pt-3">
+              {adminNavItems.map((item) => (
+                <SidebarNavLink
+                  key={item.to}
+                  item={item}
+                  collapsed={collapsed}
+                  onClick={() => setMobileOpen(false)}
+                />
+              ))}
+            </div>
           ) : null}
         </nav>
 
@@ -247,64 +241,12 @@ function CommandPaletteTrigger({
   )
 }
 
-function SidebarSection({
-  label,
-  icon: Icon,
-  items,
-  collapsed,
-  onSelect,
-}: {
-  label: string
-  icon: typeof Workflow
-  items: Array<{ to: string; label: string; icon: typeof Workflow; end?: boolean }>
-  collapsed: boolean
-  onSelect: () => void
-}) {
-  if (collapsed) {
-    return (
-      <div className="mb-4">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className="flex items-center justify-center py-2 cursor-pointer" />
-            }
-          >
-            <Icon className="h-4 w-4 text-sidebar-foreground/65" />
-          </TooltipTrigger>
-          <TooltipContent side="right">{label}</TooltipContent>
-        </Tooltip>
-        <div className="flex flex-col gap-0.5">
-          {items.map((item) => (
-            <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mb-4">
-      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/62">
-        <span className="inline-flex items-center gap-2">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
-        </span>
-      </div>
-      <div className="flex flex-col gap-0.5">
-        {items.map((item) => (
-          <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function SidebarNavLink({
   item,
   collapsed,
   onClick,
 }: {
-  item: { to: string; label: string; icon: typeof Workflow; end?: boolean }
+  item: { to: string; label: string; icon: LucideIcon; end?: boolean }
   collapsed: boolean
   onClick: () => void
 }) {

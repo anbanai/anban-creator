@@ -4,10 +4,8 @@ import {
   Rss,
   CalendarRange,
   ListChecks,
-  Clock,
   Settings,
   Coins,
-  Activity,
   Terminal,
   LayoutGrid,
   Palette,
@@ -46,22 +44,3 @@ export const allNavItems: NavItem[] = [
 export function visibleNavItems(items: NavItem[], isAdmin: boolean): NavItem[] {
   return items.filter((item) => !item.adminOnly || isAdmin)
 }
-
-// Temporary group exports keep the current Sidebar compiling until it adopts
-// mvpNavItems and adminNavItems.
-export const todayItems = mvpNavItems.filter((item) => item.to === '/')
-export const creationItems = allNavItems.filter((item) =>
-  ['/projects', '/tasks', '/designer'].includes(item.to),
-)
-export const automationItems: NavItem[] = [
-  ...mvpNavItems.filter((item) => item.to === '/plans'),
-  { to: '/timeline', label: '时间轴', icon: Clock },
-]
-export const assetItems = adminNavItems.filter((item) => item.to === '/templates')
-export const businessItems: NavItem[] = [
-  ...mvpNavItems.filter((item) => item.to === '/billing'),
-  { to: '/usage', label: '用量', icon: Activity },
-]
-export const connectSettingItems = adminNavItems.filter((item) =>
-  ['/connect/claude-code', '/connect/codex', '/settings'].includes(item.to),
-)

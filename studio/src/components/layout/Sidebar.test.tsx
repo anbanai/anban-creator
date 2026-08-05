@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -68,14 +68,22 @@ describe('Sidebar', () => {
     } catch {}
   })
 
-  it('renders navigation items', () => {
+  it('renders only the approved MVP navigation for regular users', () => {
     renderSidebar()
 
-    expect(screen.getByRole('link', { name: 'AI助手' })).toBeInTheDocument()
-    expect(screen.queryByText('首页')).not.toBeInTheDocument()
-    expect(screen.getByText('项目')).toBeInTheDocument()
-    expect(screen.getByText('计划')).toBeInTheDocument()
-    expect(screen.getByText('任务')).toBeInTheDocument()
+    const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
+    expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'AI助手',
+      '项目',
+      '任务',
+      '计划',
+      '钱包',
+    ])
+    expect(navigation.queryByText('创作')).not.toBeInTheDocument()
+    expect(navigation.queryByText('自动化')).not.toBeInTheDocument()
+    expect(navigation.queryByText('经营')).not.toBeInTheDocument()
+    expect(navigation.queryByRole('link', { name: '时间轴' })).not.toBeInTheDocument()
+    expect(navigation.queryByRole('link', { name: '用量' })).not.toBeInTheDocument()
   })
 
   it('只向管理员显示管理功能导航', () => {
@@ -92,6 +100,8 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
+    expect(screen.queryByText('平台与设置')).not.toBeInTheDocument()
+    expect(screen.queryByText('资产')).not.toBeInTheDocument()
   })
 
   it('renders user account popover', () => {
