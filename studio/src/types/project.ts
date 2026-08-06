@@ -63,6 +63,7 @@ export interface ProjectStats {
   failed_tasks: number
   running_tasks: number
   pending_tasks: number
+  unused_topics: number
   success_rate: number
   last_activity_at: string
 }

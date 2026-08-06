@@ -138,6 +138,7 @@ export const mockProjectDetail: ProjectDetail = {
     failed_tasks: 1,
     running_tasks: 0,
     pending_tasks: 1,
+    unused_topics: 6,
     success_rate: 80,
     last_activity_at: '2025-01-15T10:00:00Z',
   },

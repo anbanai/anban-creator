@@ -6,6 +6,66 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
+func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := t.Context()
+
+	projects := []*model.Project{
+		{ID: "project-stats-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "one", Status: model.ProjectStatusActive},
+		{ID: "project-stats-2", UserID: "user-1", Platform: model.PlatformArticle, Name: "two", Status: model.ProjectStatusActive},
+		{ID: "project-stats-3", UserID: "user-1", Platform: model.PlatformArticle, Name: "three", Status: model.ProjectStatusActive},
+	}
+	for _, project := range projects {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project %s: %v", project.ID, err)
+		}
+	}
+
+	for _, task := range []*model.Task{
+		{ID: "task-stats-1", UserID: "user-1", ProjectID: projects[0].ID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted},
+		{ID: "task-stats-2", UserID: "user-1", ProjectID: projects[0].ID, Type: model.PlatformArticle, Status: model.TaskStatusPending},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+
+	usedTaskID := "task-stats-1"
+	if err := repo.TopicPools().CreateBatch(ctx, []*model.TopicPool{
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused one", Status: model.TopicStatusUnused},
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused two", Status: model.TopicStatusUnused},
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "used", Status: model.TopicStatusUsed, TaskID: &usedTaskID},
+		{UserID: "user-1", ProjectID: projects[1].ID, Topic: "unused other", Status: model.TopicStatusUnused},
+	}); err != nil {
+		t.Fatalf("create topics: %v", err)
+	}
+
+	assertStats := func(t *testing.T, stats *ProjectStats, wantTasks, wantUnused int64) {
+		t.Helper()
+		if stats.TotalTasks != wantTasks {
+			t.Fatalf("total_tasks = %d, want %d", stats.TotalTasks, wantTasks)
+		}
+		if stats.UnusedTopics != wantUnused {
+			t.Fatalf("unused_topics = %d, want %d", stats.UnusedTopics, wantUnused)
+		}
+	}
+
+	single, err := repo.Projects().GetStats(ctx, projects[0].ID)
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	assertStats(t, single, 2, 2)
+
+	batch, err := repo.Projects().GetStatsByProjectIDs(ctx, []string{projects[0].ID, projects[1].ID, projects[2].ID})
+	if err != nil {
+		t.Fatalf("get batch stats: %v", err)
+	}
+	assertStats(t, batch[projects[0].ID], 2, 2)
+	assertStats(t, batch[projects[1].ID], 0, 1)
+	assertStats(t, batch[projects[2].ID], 0, 0)
+}
+
 func TestProjectUpdateIfReferenceImageAssetID(t *testing.T) {
 	repo := New(setupTestDB(t))
 	project := &model.Project{

@@ -32,6 +32,7 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     mutationFn: (topics: string[]) => api.topicPool.create(project.id, { topics }),
     onSuccess: (_data, topics) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       setNewTopics('')
       toast.success(`已添加 ${topics.length} 条选题`)
     },
@@ -44,6 +45,7 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     mutationFn: (id: number) => api.topicPool.delete(project.id, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '删除选题失败，请重试'))
@@ -54,6 +56,7 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     mutationFn: (id: number) => api.topicPool.reset(project.id, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '重置选题失败，请重试'))

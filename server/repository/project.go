@@ -19,6 +19,7 @@ type ProjectStats struct {
 	FailedTasks    int64      `json:"failed_tasks"`
 	RunningTasks   int64      `json:"running_tasks"`
 	PendingTasks   int64      `json:"pending_tasks"`
+	UnusedTopics   int64      `json:"unused_topics"`
 	SuccessRate    float64    `json:"success_rate"`
 	LastActivityAt *time.Time `json:"last_activity_at"`
 }
@@ -206,6 +207,7 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 		FailedTasks    int64
 		RunningTasks   int64
 		PendingTasks   int64
+		UnusedTopics   int64
 		LastActivityAt *time.Time
 	}
 
@@ -216,9 +218,10 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
 			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
+			(SELECT COUNT(*) FROM topic_pool WHERE project_id = ? AND status = ?) as unused_topics,
 			MAX(completed_at) as last_activity_at
 		FROM tasks WHERE project_id = ?
-	`, projectID).Scan(&stats).Error
+	`, projectID, model.TopicStatusUnused, projectID).Scan(&stats).Error
 
 	if err != nil {
 		return nil, err
@@ -230,6 +233,7 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 		FailedTasks:    stats.FailedTasks,
 		RunningTasks:   stats.RunningTasks,
 		PendingTasks:   stats.PendingTasks,
+		UnusedTopics:   stats.UnusedTopics,
 		LastActivityAt: stats.LastActivityAt,
 	}
 
@@ -291,6 +295,23 @@ func (r *gormProjectRepository) GetStatsByProjectIDs(ctx context.Context, projec
 			stats.SuccessRate = float64(row.CompletedTasks) / float64(row.TotalTasks)
 		}
 		statsMap[row.ProjectID] = stats
+	}
+
+	type topicStatsRow struct {
+		ProjectID    string
+		UnusedTopics int64
+	}
+	var topicRows []topicStatsRow
+	if err := r.db.WithContext(ctx).
+		Model(&model.TopicPool{}).
+		Select("project_id, COUNT(*) AS unused_topics").
+		Where("project_id IN ? AND status = ?", projectIDs, model.TopicStatusUnused).
+		Group("project_id").
+		Scan(&topicRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range topicRows {
+		statsMap[row.ProjectID].UnusedTopics = row.UnusedTopics
 	}
 
 	return statsMap, nil

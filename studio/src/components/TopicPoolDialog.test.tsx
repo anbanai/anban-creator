@@ -4,6 +4,7 @@ import { TopicPoolDialog } from './TopicPoolDialog'
 import { render } from '@/test/test-utils'
 import { mockProjects } from '@/test/mocks/handlers'
 import { api } from '@/lib/api'
+import { QueryClient } from '@tanstack/react-query'
 
 // Capture toast calls so we can assert the silent-failure feedback.
 const { errorMock, successMock } = vi.hoisted(() => ({
@@ -34,8 +35,13 @@ vi.mock('@/lib/api', async () => {
 
 describe('TopicPoolDialog — mutation feedback (no silent failure)', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     errorMock.mockClear()
     successMock.mockClear()
+    vi.mocked(api.topicPool.list).mockResolvedValue({ items: [], total: 0 })
+    vi.mocked(api.topicPool.create).mockReset()
+    vi.mocked(api.topicPool.delete).mockReset()
+    vi.mocked(api.topicPool.reset).mockReset()
   })
 
   it('surfaces a toast with the server message when adding topics fails', async () => {
@@ -60,6 +66,7 @@ describe('TopicPoolDialog — mutation feedback (no silent failure)', () => {
   })
 
   it('confirms with a count when topics are added successfully', async () => {
+    const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
     vi.mocked(api.topicPool.create).mockResolvedValueOnce({} as never)
 
     render(
@@ -72,6 +79,40 @@ describe('TopicPoolDialog — mutation feedback (no silent failure)', () => {
 
     await waitFor(() => {
       expect(successMock).toHaveBeenCalledWith('已添加 2 条选题')
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['project-stats'] })
+  })
+
+  it('refreshes project stats when an unused topic is deleted', async () => {
+    const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    vi.mocked(api.topicPool.list).mockResolvedValueOnce({
+      items: [{ id: 11, user_id: '1', project_id: mockProjects[0].id, topic: '待删除', status: 'unused', created_at: '', updated_at: '' }],
+      total: 1,
+    })
+    vi.mocked(api.topicPool.delete).mockResolvedValueOnce(undefined)
+
+    render(<TopicPoolDialog project={mockProjects[0]} open onOpenChange={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }))
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['project-stats'] })
+    })
+  })
+
+  it('refreshes project stats when a used topic is reset', async () => {
+    const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    vi.mocked(api.topicPool.list).mockResolvedValueOnce({
+      items: [{ id: 12, user_id: '1', project_id: mockProjects[0].id, topic: '待重置', status: 'used', created_at: '', updated_at: '' }],
+      total: 1,
+    })
+    vi.mocked(api.topicPool.reset).mockResolvedValueOnce(undefined)
+
+    render(<TopicPoolDialog project={mockProjects[0]} open onOpenChange={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: '重置' }))
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['project-stats'] })
     })
   })
 })

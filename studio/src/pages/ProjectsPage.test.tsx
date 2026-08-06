@@ -41,8 +41,7 @@ const projectWithReference: Project = {
 }
 
 async function clickProjectAction(projectName: string, actionName: string) {
-  fireEvent.click(await screen.findByRole('button', { name: `更多项目操作：${projectName}` }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: actionName }))
+  fireEvent.click(await screen.findByRole('button', { name: `${actionName}：${projectName}` }))
 }
 
 vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
@@ -96,6 +95,7 @@ describe('ProjectsPage', () => {
         failed_tasks: 0,
         running_tasks: 0,
         pending_tasks: 0,
+        unused_topics: 0,
         success_rate: 0,
         last_activity_at: '',
       },
