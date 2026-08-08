@@ -13,7 +13,7 @@ require (
 	github.com/disintegration/imaging v1.6.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
-	github.com/elazarl/goproxy v1.8.5
+	github.com/elazarl/goproxy v1.9.0
 	github.com/fasthttp/websocket v1.5.12
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-sql-driver/mysql v1.10.0
@@ -22,7 +22,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.26.0
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260804014539-f87da02040c7
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260808010613-f138f1acc4f7
 	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/moby/docker-image-spec v1.3.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -34,7 +34,7 @@ require (
 	github.com/severity1/claude-agent-sdk-go v0.6.22
 	github.com/silenceper/wechat/v2 v2.1.14
 	github.com/urfave/cli/v3 v3.10.1
-	github.com/volcengine/volcengine-go-sdk v1.2.45
+	github.com/volcengine/volcengine-go-sdk v1.2.46
 	github.com/wneessen/go-mail v0.8.1
 	github.com/yuin/goldmark v1.8.5
 	golang.org/x/crypto v0.54.0
@@ -42,7 +42,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
-	google.golang.org/genai v1.66.0
+	google.golang.org/genai v1.67.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/mysql v1.6.0
@@ -57,7 +57,7 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.22.0 // indirect
+	cloud.google.com/go/auth v0.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -114,7 +114,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
@@ -159,7 +159,7 @@ require (
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/api v0.292.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260807164820-c8921c73eeea // indirect
 	google.golang.org/grpc v1.83.0 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
