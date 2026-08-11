@@ -218,10 +218,12 @@ export function buildExecutionEnvironment(
   };
 }
 
-export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills">, taskType: string): void {
+export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills" | "tools">, taskType: string): void {
   const managed = message.mcp_servers.find((server) => server.name === "anban");
   if (!managed || managed.status !== "connected") throw new Error(`managed MCP readiness failed: server "anban" is not connected`);
   if (!message.plugins.some((plugin) => plugin.name === "anban")) throw new Error("managed plugin readiness failed: plugin anban is not loaded");
+  const tools = new Set(message.tools.filter((tool) => tool.startsWith("mcp__anban__")).map((tool) => tool.slice("mcp__anban__".length)));
+  for (const required of requiredMCPTools(taskType)) if (!tools.has(required)) throw new Error(`managed MCP readiness failed: server "anban" is missing required tool for ${taskType}: ${required}`);
   const skills = new Set(message.skills);
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
 }
@@ -333,6 +335,11 @@ function requiredSkills(taskType: string): string[] {
   if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design"];
   if (taskType === "article" || taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "live-slicer") return ["anban:live-slice", "anban:capcut-draft"];
+  return [];
+}
+
+function requiredMCPTools(taskType: string): string[] {
+  if (taskType === "seednote") return ["analyze_image", "check_seednote_login_status", "finalize_task_title", "generate_image", "get_project_profile", "get_seednote_feed_detail", "get_seednote_login_qrcode", "get_seednote_user_profile", "list_project_titles", "search_seednote_feeds", "submit_agent_feedback", "update_task_progress"];
   return [];
 }
 

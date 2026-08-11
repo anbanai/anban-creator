@@ -39,7 +39,7 @@ const validBootstrap = () => ({
 
 describe("validateManagedInit", () => {
   test("requires the configured remote MCP and article plugin skill", () => {
-    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], skills: [] }, "article")).toThrow("anban:humanizer");
+    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "article")).toThrow("anban:humanizer");
   });
 
   test("requires Seednote phase skills without Agent Reach", () => {
@@ -48,6 +48,20 @@ describe("validateManagedInit", () => {
       subtype: "init" as const,
       mcp_servers: [{ name: "anban", status: "connected" as const }],
       plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: [
+        "mcp__anban__analyze_image",
+        "mcp__anban__check_seednote_login_status",
+        "mcp__anban__finalize_task_title",
+        "mcp__anban__generate_image",
+        "mcp__anban__get_project_profile",
+        "mcp__anban__get_seednote_feed_detail",
+        "mcp__anban__get_seednote_login_qrcode",
+        "mcp__anban__get_seednote_user_profile",
+        "mcp__anban__list_project_titles",
+        "mcp__anban__search_seednote_feeds",
+        "mcp__anban__submit_agent_feedback",
+        "mcp__anban__update_task_progress",
+      ],
       skills: [
         "anban:seednote-research",
         "anban:seednote-viral-analysis",
@@ -56,6 +70,9 @@ describe("validateManagedInit", () => {
       ],
     };
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
+    message.tools = message.tools.filter((tool) => tool !== "mcp__anban__search_seednote_feeds");
+    expect(() => validateManagedInit(message, "seednote")).toThrow("search_seednote_feeds");
+    message.tools = [...message.tools, "mcp__anban__search_seednote_feeds"];
     message.skills = message.skills.slice(1);
     expect(() => validateManagedInit(message, "seednote")).toThrow("anban:seednote-research");
   });
