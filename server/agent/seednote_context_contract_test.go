@@ -33,7 +33,6 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 	body := readRepoFile(t, path)
 	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{
-		"  - agent-reach",
 		"  - seednote-research",
 		"  - seednote-viral-analysis",
 		"  - seednote-writing",
@@ -42,6 +41,9 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 		if !strings.Contains(frontmatter, want) {
 			t.Fatalf("%s missing declared phase Skill %q", path, want)
 		}
+	}
+	if strings.Contains(frontmatter, "agent-reach") {
+		t.Fatalf("%s frontmatter still declares removed agent-reach Skill", path)
 	}
 	for _, want := range []string{
 		"output/topic-analysis.md",

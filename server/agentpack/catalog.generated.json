@@ -466,7 +466,6 @@
       "agent": {
         "name": "seednote",
         "skills": [
-          "agent-reach",
           "seednote-research",
           "seednote-viral-analysis",
           "seednote-writing",
@@ -486,7 +485,7 @@
       "runtime": {
         "profile": "seednote",
         "adapter": "standard",
-        "max_turns": 50
+        "max_turns": 20
       },
       "surfaces": [
         "plugin",
@@ -540,7 +539,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "7e852a74a35e4f2becf413451ea07aed190038e8ee568aedc2bb70a95b9e4c39"
+      "digest": "36a0e3a2b6e986a6d9463b567bf4645ba850982e6442dc97d356223203dadab0"
     }
   ]
 }

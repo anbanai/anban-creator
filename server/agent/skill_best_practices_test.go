@@ -90,8 +90,6 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 	claudeReadme := readRepoFile(t, filepath.Join(root, "plugins", "README.md"))
 	for _, want := range []string{
 		"docs/claude/",
-		"agent-reach",
-		"Panniantong/agent-reach",
 		"moments",
 		"Caihui0127/caihui-moments-skill",
 		"不默认使用“彩卉”人设",
@@ -170,7 +168,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"live-slicer": {"live-slice", "capcut-draft"},
 		"moments":     {"moments", "humanizer"},
 		"montage":     {"montage"},
-		"seednote":    {"agent-reach", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"seednote":    {"seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
 		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
 	}
 

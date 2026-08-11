@@ -446,7 +446,7 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 	}
 }
 
-func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
+func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "agents", "seednote.md"),
@@ -461,23 +461,39 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 			body := string(data)
 
 			for _, want := range []string{
-				"agent-reach",
-				"Agent-Reach",
-				"agent-reach doctor --json",
-				`xiaohongshu.status == "ok"`,
-				"active_backend",
-				"唯一外部数据入口",
-				"backend 顺序和可用性完全由 Agent-Reach 决定",
+				"check_seednote_login_status",
+				"get_seednote_login_qrcode",
+				"search_seednote_feeds",
+				"get_seednote_feed_detail",
+				"get_seednote_user_profile",
+				"data_source=xiaohongshu-mcp",
+				"mcp_tools_used",
+				"available",
+				"logged_in",
+				"token_source",
+				"missing_fields",
+				"fallback_reason",
+				"只能使用 MCP 工具返回",
 				"原创模式不得",
 				"账号画像",
 				"不得生成虚构热门数据",
+				"output/failure-state.json",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing Agent-Reach contract term %q", path, want)
+					t.Fatalf("%s missing authenticated Seednote MCP contract term %q", path, want)
 				}
 			}
 
 			for _, forbidden := range []string{
+				"Agent-Reach",
+				"agent-reach",
+				"active_backend",
+				"backend_command_family",
+				"mcporter",
+				"OpenCLI",
+				"xhs-cli",
+				"http://seednote:18060",
+				"localhost:18060",
 				"opencli xiaohongshu publish",
 				"opencli xiaohongshu delete-note",
 				"opencli xiaohongshu follow",
@@ -491,46 +507,17 @@ func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
 	}
 }
 
-func TestAgentReachSkillsTreatUnavailableBackendAsOptionalForOriginalResearch(t *testing.T) {
+func TestAgentReachSkillIsNotDistributed(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	canonicalPath := filepath.Join(root, "plugins", "skills", "agent-reach", "SKILL.md")
-	canonicalData, err := os.ReadFile(canonicalPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", canonicalPath, err)
-	}
-	canonical := string(canonicalData)
-	for _, want := range []string{
-		`xiaohongshu.status == "ok"`,
-		"`active_backend` alone never proves usability",
-		"OpenCLI",
-		"xiaohongshu-mcp",
-		"xhs-cli (xiaohongshu-cli)",
-		"optional enhancement for original Seednote research",
-		"must not create `output/failure-state.json`",
-		"source content can be resolved",
-		"Do not run `pip`, `pipx`, `npm`, `agent-reach install`",
-		"channel_status",
-	} {
-		if !strings.Contains(canonical, want) {
-			t.Fatalf("%s missing managed Agent-Reach contract %q", canonicalPath, want)
-		}
-	}
-	for _, distro := range []string{"plugins"} {
-		path := filepath.Join(root, distro, "skills", "agent-reach", "SKILL.md")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if string(data) != canonical {
-			t.Fatalf("%s must match %s", path, canonicalPath)
-		}
+	path := filepath.Join(root, "plugins", "skills", "agent-reach")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("removed Agent-Reach Skill still exists at %s: %v", path, err)
 	}
 }
 
-func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T) {
+func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
 	}
 
@@ -542,32 +529,40 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 			}
 			body := string(data)
 			for _, want := range []string{
-				"Agent-Reach",
-				"agent-reach doctor --json",
-				`status == "ok"`,
-				"active_backend",
-				"channel_status=<ok|warn|off|error|missing>",
-				"xhs-cli (xiaohongshu-cli)",
-				"data_source=<agent-reach|task_topic|topic_pool|project_context>",
-				"backend_command_family",
+				"check_seednote_login_status",
+				"get_seednote_login_qrcode",
+				"search_seednote_feeds",
+				"get_seednote_feed_detail",
+				"get_seednote_user_profile",
+				"data_source=xiaohongshu-mcp",
+				"mcp_tools_used",
+				"available",
+				"logged_in",
 				"token_source",
 				"missing_fields",
 				"fallback_reason",
+				"只能使用 MCP 工具返回",
 				"不能凭空构造",
 				"只读",
-				"不要在 Anban 内自行判断",
-				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
-				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
 				"原创模式不得失败、不得写 `output/failure-state.json`",
 				"missing_fields=external_hot_data",
 				"无外部数据时不得套用 CES",
 				"这条失败规则不适用于原创模式",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing Agent-Reach research contract term %q", path, want)
+					t.Fatalf("%s missing authenticated Seednote MCP research contract term %q", path, want)
 				}
 			}
 			for _, forbidden := range []string{
+				"Agent-Reach",
+				"agent-reach",
+				"active_backend",
+				"backend_command_family",
+				"mcporter",
+				"OpenCLI",
+				"xhs-cli",
+				"http://seednote:18060",
+				"localhost:18060",
 				"opencli xiaohongshu publish",
 				"opencli xiaohongshu delete-note",
 				"opencli xiaohongshu follow",
@@ -599,7 +594,7 @@ func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T)
 	}
 }
 
-func TestSeednoteAgentsDoNotUseLegacyXHSMCPAsMainPath(t *testing.T) {
+func TestSeednoteAgentsPreserveReadOnlyResearchBoundary(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "plugins", "agents", "seednote.md"),
@@ -615,21 +610,26 @@ func TestSeednoteAgentsDoNotUseLegacyXHSMCPAsMainPath(t *testing.T) {
 			body := string(data)
 			for _, want := range []string{
 				"seednote-research",
-				"Agent-Reach",
+				"check_seednote_login_status",
+				"search_seednote_feeds",
+				"get_seednote_feed_detail",
+				"get_seednote_user_profile",
 				"原创模式不得因此写",
-				"failure-state.json",
+				"output/failure-state.json",
+				"只读",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing seednote Agent-Reach handoff term %q", path, want)
+					t.Fatalf("%s missing Seednote MCP read-only term %q", path, want)
 				}
 			}
 			for _, forbidden := range []string{
-				"list_project_topics(",
-				"MCP `get_feed_detail",
-				"先获取 xsec_token，再调用 MCP",
+				"publish_seednote",
+				"delete_seednote",
+				"like_seednote",
+				"follow_seednote",
 			} {
 				if strings.Contains(body, forbidden) {
-					t.Fatalf("%s still uses legacy XHS MCP main path %q", path, forbidden)
+					t.Fatalf("%s includes forbidden Seednote write operation %q", path, forbidden)
 				}
 			}
 		})

@@ -361,8 +361,8 @@ func TestDefaultMaxTurnsUsesManagedRuntimeBudget(t *testing.T) {
 		want     int
 	}{
 		{model.PlatformArticle, 60},
-		{model.PlatformSeednote, 50},
-		{model.TaskTypeViralAnalysis, 50},
+		{model.PlatformSeednote, 20},
+		{model.TaskTypeViralAnalysis, 20},
 		{model.PlatformMoments, 25},
 		{model.PlatformEcommerce, 90},
 		{model.PlatformMontage, 40},
