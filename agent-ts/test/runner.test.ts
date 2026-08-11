@@ -42,6 +42,24 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], skills: [] }, "article")).toThrow("anban:humanizer");
   });
 
+  test("requires Seednote phase skills without Agent Reach", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      skills: [
+        "anban:seednote-research",
+        "anban:seednote-viral-analysis",
+        "anban:seednote-writing",
+        "anban:seednote-visual-design",
+      ],
+    };
+    expect(() => validateManagedInit(message, "seednote")).not.toThrow();
+    message.skills = message.skills.slice(1);
+    expect(() => validateManagedInit(message, "seednote")).toThrow("anban:seednote-research");
+  });
+
   test("maps terminal SDK usage through the bootstrap model aliases", () => {
     expect(terminalModelUsage({ raw: { inputTokens: 3, outputTokens: 5, cacheReadInputTokens: 7, cacheCreationInputTokens: 11 } }, { raw: { provider: "anthropic", model: "claude-sonnet" } })).toEqual({ usage: [{ provider: "anthropic", model: "claude-sonnet", input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 7, cache_creation_input_tokens: 11 }], cost_status: "reconciled", cost_diagnostics: [] });
   });

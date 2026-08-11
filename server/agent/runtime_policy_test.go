@@ -127,19 +127,24 @@ func TestValidateManagedMCPStatusRequiresConnectedSeednoteTools(t *testing.T) {
 	}
 }
 
-func TestManagedRequiredMCPToolsExcludeArchive(t *testing.T) {
+func TestManagedRequiredMCPToolsRequiresSeednoteResearchTools(t *testing.T) {
 	got := managedRequiredMCPTools("seednote")
 	want := []string{
 		"analyze_image",
+		"check_seednote_login_status",
 		"finalize_task_title",
 		"generate_image",
 		"get_project_profile",
+		"get_seednote_feed_detail",
+		"get_seednote_login_qrcode",
+		"get_seednote_user_profile",
 		"list_project_titles",
+		"search_seednote_feeds",
 		"submit_agent_feedback",
 		"update_task_progress",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("managedRequiredMCPTools(\"seednote\") = %#v, want %#v", got, want)
+		t.Fatalf("managedRequiredMCPTools(seednote) = %#v, want %#v", got, want)
 	}
 }
 
@@ -263,13 +268,12 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 		{
 			taskType: "seednote",
 			skills: []any{
-				"anban:agent-reach",
 				"anban:seednote-research",
 				"anban:seednote-viral-analysis",
 				"anban:seednote-writing",
 				"anban:seednote-visual-design",
 			},
-			missing: "anban:agent-reach",
+			missing: "anban:seednote-research",
 		},
 		{taskType: "article", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},
 		{taskType: "ecommerce", skills: []any{"anban:humanizer"}, missing: "anban:humanizer"},

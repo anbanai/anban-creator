@@ -229,7 +229,6 @@ func managedRequiredPluginSkills(taskType string) []string {
 	switch strings.TrimSpace(taskType) {
 	case "seednote":
 		return []string{
-			"anban:agent-reach",
 			"anban:seednote-research",
 			"anban:seednote-viral-analysis",
 			"anban:seednote-writing",
@@ -288,10 +287,15 @@ func managedRequiredMCPTools(taskType string) []string {
 	case "seednote":
 		return []string{
 			"analyze_image",
+			"check_seednote_login_status",
 			"finalize_task_title",
 			"generate_image",
 			"get_project_profile",
+			"get_seednote_feed_detail",
+			"get_seednote_login_qrcode",
+			"get_seednote_user_profile",
 			"list_project_titles",
+			"search_seednote_feeds",
 			"submit_agent_feedback",
 			"update_task_progress",
 		}
