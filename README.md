@@ -12,7 +12,9 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 
 Managed execution uses separate `creator-agent-article`, `creator-agent-seednote`,
 and `creator-agent-montage` images. They share the same plugin tree while keeping
-Python/Agent-Reach and OpenMontage/Remotion/ffmpeg out of the standard image.
+the Seednote workflow image independent from the Montage OpenMontage/Remotion/ffmpeg
+profile. Seednote Xiaohongshu research flows through authenticated Anban Server MCP
+tools backed by the separately deployed `seednote` sidecar.
 Their independent build definitions, together with the Server, Studio, and
 wcfLink definitions, live in `deploy/docker/` and use the repository root as the
 Docker build context.
@@ -29,7 +31,7 @@ The shared scheduler configuration is:
 
 - `ANBAN_AGENT_EXECUTOR`: `docker` or `kubernetes`.
 - `ANBAN_AGENT_IMAGE_ARTICLE`: the minimal Article runtime image.
-- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the Python and Agent-Reach runtime image.
+- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its Xiaohongshu research uses authenticated Anban Server MCP tools.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
   to mint short-lived workload tokens.

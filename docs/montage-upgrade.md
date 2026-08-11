@@ -32,7 +32,7 @@ cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.co
 Production uses three immutable Agent images:
 
 - `ANBAN_AGENT_IMAGE_ARTICLE` (deployed from `article_agent_image_repo`): the minimal Article runtime.
-- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the Seednote runtime with Python, Agent-Reach, and mcporter.
+- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow runtime. Xiaohongshu research uses authenticated Anban Server MCP tools backed by the separately deployed `seednote` sidecar.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the Montage runtime with an embedded OpenMontage template.
 
 Build all three images with:

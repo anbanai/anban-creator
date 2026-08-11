@@ -34,7 +34,7 @@ make server-dev               # Run server via go run (development)
 make server-test              # Run server tests (go test -v ./server/...)
 
 make docker-agent-image       # Build minimal Article Agent image
-make docker-seednote-agent-image # Build Seednote image (Python + Agent-Reach)
+make docker-seednote-agent-image # Build independent Seednote workflow image
 make docker-montage-agent-image  # Build Montage image (OpenMontage + Remotion + ffmpeg)
 make docker-server-image      # Build server Docker image (Go binary)
 make docker-wcflink-image     # Build pinned wcfLink sidecar Docker image
