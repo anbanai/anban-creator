@@ -33,8 +33,8 @@ func TestContainerRuntimePathUsesPackRuntimeAdapter(t *testing.T) {
 	if got := runtimeAdapterForTaskType(model.TaskTypeLiveSlicer); got != "standard" {
 		t.Fatalf("live-slicer adapter = %q", got)
 	}
-	if got := containerRuntimePath(model.PlatformSeednote); got != ContainerSeednoteRuntimePath {
-		t.Fatalf("seednote runtime PATH = %q", got)
+	if got := containerRuntimePath(model.PlatformSeednote); got != ContainerContentRuntimePath {
+		t.Fatalf("seednote runtime PATH = %q, want content PATH", got)
 	}
 	if got := containerRuntimePath(model.PlatformMontage); got != ContainerMontageRuntimePath {
 		t.Fatalf("montage runtime PATH = %q", got)

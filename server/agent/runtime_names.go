@@ -15,10 +15,8 @@ const (
 	ContainerRuntimeUser             = "1000:1000"
 	ContainerHomePath                = "/home/node"
 	RuntimeHomeDirName               = ".anban-runtime-home"
-	ContainerAgentReachVenvPath      = "/opt/agent-reach-venv"
 	ContainerOpenMontageVenvPath     = "/opt/openmontage-venv"
 	ContainerContentRuntimePath      = "/usr/local/bin:/usr/bin:/bin"
-	ContainerSeednoteRuntimePath     = ContainerAgentReachVenvPath + "/bin:" + ContainerContentRuntimePath
 	ContainerMontageRuntimePath      = ContainerOpenMontageVenvPath + "/bin:" + ContainerContentRuntimePath
 	MontageSubmoduleEnvName          = "ANBAN_MONTAGE_SUBMODULE_PATH"
 	MontageTemplateEnvName           = "ANBAN_MONTAGE_TEMPLATE_PATH"
@@ -40,12 +38,7 @@ func containerRuntimePath(taskType string) string {
 	if pack.Runtime.Adapter == agentpack.AdapterOpenMontage {
 		return ContainerMontageRuntimePath
 	}
-	switch pack.Runtime.Profile {
-	case "seednote":
-		return ContainerSeednoteRuntimePath
-	default:
-		return ContainerContentRuntimePath
-	}
+	return ContainerContentRuntimePath
 }
 
 func runtimeAdapterForTaskType(taskType string) string {

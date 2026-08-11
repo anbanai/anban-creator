@@ -18,7 +18,7 @@ SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup agent-reach-update humanizer-update \
+        server-build server-run server-dev server-test git-sync-setup humanizer-update \
         agent-pack-new agent-pack-generate agent-pack-check \
         agent-build-native \
         web-install web-dev web-build \
@@ -66,11 +66,6 @@ deps:
 # Configure repository-local pull/push behavior for managed submodules.
 git-sync-setup:
 	@scripts/setup-git-sync.sh
-
-# Fast-forward the pinned third-party Agent-Reach source to upstream main.
-# Rebuild the Agent image after committing the updated submodule gitlink.
-agent-reach-update:
-	@scripts/update-agent-reach.sh
 
 # Delegate the pinned Humanizer gitlink update to Creator Skills.
 # The child target validates the upstream checkout and plugin manifests.
@@ -163,9 +158,9 @@ docker-agent-image:
 	docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
-# Build the Seednote Agent image with Agent-Reach and its Python runtime.
+# Build the independent Seednote workflow image.
 docker-seednote-agent-image:
-	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/Agent-Reach
+	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
@@ -185,7 +180,6 @@ docker-agent-ts-image:
 	echo "Image build complete: $(TS_AGENT_IMAGE)"
 
 docker-seednote-agent-ts-image:
-	@git submodule update --init --recursive third_party/Agent-Reach
 	@echo "Building $(TS_SEEDNOTE_AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-seednote-ts -t $(TS_SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(TS_SEEDNOTE_AGENT_IMAGE)"
@@ -263,7 +257,6 @@ help:
 	@echo "  make fmt           - Format code"
 	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
-	@echo "  make agent-reach-update - Pull Agent-Reach main and update its gitlink"
 	@echo "  make humanizer-update - Pull upstream Humanizer and sync all plugin copies"
 	@echo "  make agent-pack-new ARGS=... - Scaffold a canonical Agent Pack"
 	@echo "  make agent-pack-generate - Generate native Agents and Server Catalog"
@@ -287,7 +280,7 @@ help:
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
-	@echo "  make docker-seednote-agent-image - Build Seednote agent image with Agent-Reach"
+	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
 	@echo "  make docker-agent-ts-image - Build TypeScript Article runtime candidate"
 	@echo "  make docker-seednote-agent-ts-image - Build TypeScript Seednote runtime candidate"

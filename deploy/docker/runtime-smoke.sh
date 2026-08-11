@@ -490,7 +490,7 @@ runtime_smoke_main() {
     *) fail "ANBAN_RUNTIME_SMOKE_CLIENT must be go or ts" ;;
   esac
   git -C "$REPO_ROOT" submodule update --init --recursive \
-    third_party/claude-agent-sdk-go third_party/Agent-Reach third_party/OpenMontage
+    third_party/claude-agent-sdk-go third_party/OpenMontage
   docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"

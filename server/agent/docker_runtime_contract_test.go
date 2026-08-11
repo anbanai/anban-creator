@@ -332,14 +332,9 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 			}
 		}
 	}
-	for _, forbidden := range []string{"Agent-Reach", "python3", "mcporter", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
-		if strings.Contains(article, forbidden) {
-			t.Fatalf("%s must not contain specialized dependency %q", articlePath, forbidden)
-		}
-	}
-	for _, want := range []string{"python3 python3-venv", "ARG MCPORTER_VERSION=0.9.0", "mcporter --version", "COPY third_party/Agent-Reach/", `python3 -m venv "$AGENT_REACH_VENV"`} {
-		if !strings.Contains(seednote, want) {
-			t.Fatalf("%s missing %q", seednotePath, want)
+	for _, forbidden := range []string{"Agent-Reach", "AGENT_REACH", "python3", "python3-venv", "pip", "venv", "mcporter", "third_party/Agent-Reach", "OpenCLI", "xhs-cli", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
+		if strings.Contains(article, forbidden) || strings.Contains(seednote, forbidden) {
+			t.Fatalf("Article and Seednote Dockerfiles must not contain dependency %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "ANBAN_MONTAGE_SUBMODULE_PATH"} {
@@ -498,45 +493,25 @@ func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	}
 }
 
-func TestAgentReachIsBuildInstalledAndRuntimeReadOnly(t *testing.T) {
+func TestSeednoteRuntimeUsesContentPATHWithoutExternalRouter(t *testing.T) {
 	root := repositoryRoot(t)
-	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"))
-	for _, want := range []string{
-		`python3 -m venv "$AGENT_REACH_VENV"`,
-		`"$AGENT_REACH_VENV/bin/pip" install`,
-		`--constraint /app/third_party/Agent-Reach/constraints.txt`,
-		`"$AGENT_REACH_VENV/bin/agent-reach" --version`,
-		`"$AGENT_REACH_VENV/bin/agent-reach" doctor --json`,
-		`{"status", "active_backend", "message"}`,
-		`chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"`,
-		`chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("deploy/docker/Dockerfile.agent-seednote missing Agent-Reach build contract %q", want)
+	if got := containerRuntimePath(model.PlatformSeednote); got != ContainerContentRuntimePath {
+		t.Fatalf("seednote runtime PATH = %q, want %q", got, ContainerContentRuntimePath)
+	}
+	for _, name := range []string{"Dockerfile.agent-seednote", "Dockerfile.agent-seednote-ts"} {
+		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
+		for _, forbidden := range []string{"Agent-Reach", "AGENT_REACH", "python3", "pip", "venv", "mcporter"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s contains removed dependency %q", name, forbidden)
+			}
 		}
-	}
-	installAt := strings.Index(body, `python3 -m venv "$AGENT_REACH_VENV"`)
-	runtimeUserAt := strings.Index(body[installAt:], "USER 1000:1000")
-	if runtimeUserAt >= 0 {
-		runtimeUserAt += installAt
-	}
-	if installAt < 0 || runtimeUserAt < installAt {
-		t.Fatalf("Agent-Reach must be installed before switching to runtime user: install=%d user=%d", installAt, runtimeUserAt)
-	}
-	if ContainerSeednoteRuntimePath != "/opt/agent-reach-venv/bin:/usr/local/bin:/usr/bin:/bin" {
-		t.Fatalf("ContainerSeednoteRuntimePath = %q, want Agent-Reach venv first", ContainerSeednoteRuntimePath)
 	}
 }
 
-func TestAgentReachSubmodulePathIsDeclared(t *testing.T) {
+func TestAgentReachSubmoduleIsRemoved(t *testing.T) {
 	gitmodules := readTextFile(t, filepath.Join(repositoryRoot(t), ".gitmodules"))
-	want := "[submodule \"third_party/Agent-Reach\"]\n" +
-		"\tpath = third_party/Agent-Reach\n" +
-		"\turl = https://github.com/Panniantong/Agent-Reach.git\n" +
-		"\tbranch = main\n" +
-		"\tshallow = true\n"
-	if !strings.Contains(gitmodules, want) {
-		t.Fatalf(".gitmodules missing exact Agent-Reach submodule contract:\n%s", want)
+	if strings.Contains(gitmodules, "Agent-Reach") {
+		t.Fatal(".gitmodules still declares Agent Reach")
 	}
 }
 
@@ -623,16 +598,6 @@ func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
 		}
 	}
 
-	seednotePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote")
-	seednote := readTextFile(t, seednotePath)
-	for _, want := range []string{
-		`printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"`,
-		`install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"`,
-	} {
-		if !strings.Contains(seednote, want) {
-			t.Fatalf("%s missing Seednote home-template contract %q", seednotePath, want)
-		}
-	}
 }
 
 func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {

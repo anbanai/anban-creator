@@ -65,49 +65,6 @@ RUN set -eux; \
     chmod -R a=rX "$ANBAN_HOME_TEMPLATE"; \
     install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban
 
-# Seednote-only dependencies: external research boundary and quality gate.
-USER root
-
-ARG MCPORTER_VERSION=0.9.0
-ENV AGENT_REACH_VENV=/opt/agent-reach-venv
-
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends python3 python3-venv; \
-    rm -rf /var/lib/apt/lists/*; \
-    npm install -g "mcporter@${MCPORTER_VERSION}"; \
-    mcporter --version; \
-    npm cache clean --force; \
-    rm -rf /root/.npm
-
-COPY third_party/Agent-Reach/ /app/third_party/Agent-Reach/
-
-RUN set -eux; \
-    python3 -m venv "$AGENT_REACH_VENV"; \
-    "$AGENT_REACH_VENV/bin/pip" install \
-      --no-cache-dir \
-      --constraint /app/third_party/Agent-Reach/constraints.txt \
-      /app/third_party/Agent-Reach; \
-    "$AGENT_REACH_VENV/bin/agent-reach" --version; \
-    "$AGENT_REACH_VENV/bin/agent-reach" doctor --json | \
-      "$AGENT_REACH_VENV/bin/python" -c 'import json, sys; data = json.load(sys.stdin); xhs = data["xiaohongshu"]; assert {"status", "active_backend", "message"} <= set(xhs)'; \
-    chown -R root:root /app/third_party/Agent-Reach "$AGENT_REACH_VENV"; \
-    chmod -R a=rX /app/third_party/Agent-Reach "$AGENT_REACH_VENV"
-
-ENV PATH="${AGENT_REACH_VENV}/bin:${PATH}"
-
-USER 1000:1000
-RUN set -eux; \
-    install -d "$HOME/.config/yt-dlp"; \
-    printf '%s\n' '--js-runtimes node' > "$HOME/.config/yt-dlp/config"
-
-USER root
-RUN set -eux; \
-    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.config/yt-dlp"; \
-    install -m 0444 "$HOME/.config/yt-dlp/config" "$ANBAN_HOME_TEMPLATE/.config/yt-dlp/config"; \
-    chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
-    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"
-
 USER 1000:1000
 WORKDIR /workspace
 
