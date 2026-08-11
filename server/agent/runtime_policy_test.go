@@ -193,6 +193,12 @@ func TestManagedMCPBoundaryHookBlocksDirectMCPAndSeednoteSidecar(t *testing.T) {
 			if got := decision == "deny"; got != tc.denied {
 				t.Fatalf("permission decision = %q, denied=%v, want %v", decision, got, tc.denied)
 			}
+			if tc.denied {
+				specific := output.HookSpecificOutput.(claudecode.PreToolUseHookSpecificOutput)
+				if specific.PermissionDecisionReason == nil || strings.Contains(strings.ToLower(*specific.PermissionDecisionReason), "recoverable failure") {
+					t.Fatalf("permission reason = %v, want task-neutral MCP guidance", specific.PermissionDecisionReason)
+				}
+			}
 		})
 	}
 

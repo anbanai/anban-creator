@@ -231,8 +231,10 @@ func TestRunnerOptionsInjectBootstrapClaudeEnvironmentWithoutOverridingExecution
 	if got["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" || got["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" {
 		t.Fatalf("Claude runtime environment = %#v", got)
 	}
-	if got["ANBAN_API_KEY"] != "execution-jwt" || got["ANBAN_API_URL"] != "https://server.example.com" {
-		t.Fatalf("execution identity environment = %#v", got)
+	for _, key := range []string{"ANBAN_API_KEY", "ANBAN_API_URL"} {
+		if _, exposed := got[key]; exposed {
+			t.Fatalf("managed Agent environment exposes %s: %#v", key, got)
+		}
 	}
 	if got["ANBAN_DEFAULT_PROJECT"] != "" {
 		t.Fatalf("unexpected project environment = %#v", got)
@@ -249,7 +251,7 @@ func TestRunnerOptionsRemoveInheritedClaudeEnvironmentBeforeFrozenInjection(t *t
 		t.Fatalf("buildSDKOptions: %v", err)
 	}
 	got := claudecode.NewOptions(opts...)
-	want := serveragent.ClaudeEnvironmentKeysToUnset()
+	want := append(serveragent.ClaudeEnvironmentKeysToUnset(), "ANBAN_API_KEY", "ANBAN_API_URL")
 	if len(got.UnsetEnv) != len(want) {
 		t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
 	}
@@ -258,7 +260,7 @@ func TestRunnerOptionsRemoveInheritedClaudeEnvironmentBeforeFrozenInjection(t *t
 			t.Fatalf("unset Claude environment = %#v, want %#v", got.UnsetEnv, want)
 		}
 	}
-	for _, key := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} {
+	for _, key := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANBAN_API_KEY", "ANBAN_API_URL"} {
 		if !slices.Contains(got.UnsetEnv, key) {
 			t.Fatalf("inherited Claude routing key %q was not unset: %#v", key, got.UnsetEnv)
 		}
@@ -310,8 +312,13 @@ func TestRunnerOptionsInjectExplicitMontageEnv(t *testing.T) {
 	if got["NEW_PROVIDER_TOKEN"] != "future-secret" {
 		t.Fatalf("Montage env = %#v, want future provider key", got)
 	}
-	if got["ANBAN_API_KEY"] != "execution-jwt" || got["ANBAN_API_URL"] != "https://server.example.com" || got["ANBAN_DEFAULT_PROJECT"] != "project-1" {
-		t.Fatalf("Montage env overrode execution identity: %#v", got)
+	for _, key := range []string{"ANBAN_API_KEY", "ANBAN_API_URL"} {
+		if _, exposed := got[key]; exposed {
+			t.Fatalf("Montage Agent environment exposes %s: %#v", key, got)
+		}
+	}
+	if got["ANBAN_DEFAULT_PROJECT"] != "project-1" {
+		t.Fatalf("Montage env overrode project identity: %#v", got)
 	}
 	if got["ANTHROPIC_AUTH_TOKEN"] != "runtime-token" {
 		t.Fatalf("Montage env overrode managed Claude runtime: %#v", got)

@@ -240,7 +240,7 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(runtimeCwd(r.cfg.Workspace, r.cfg.RuntimeAdapter)),
-		claudecode.WithUnsetEnv(serveragent.ClaudeEnvironmentKeysToUnset()...),
+		claudecode.WithUnsetEnv(append(serveragent.ClaudeEnvironmentKeysToUnset(), "ANBAN_API_KEY", "ANBAN_API_URL")...),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		// Load both user and project setting sources so a CLAUDE.md in the
 		// workspace (e.g., written by the desktop shell in the future) is picked up
@@ -255,10 +255,6 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 	if r.cfg.RuntimeAdapter == agentpack.AdapterOpenMontage && len(r.cfg.Env) > 0 {
 		sdkOpts = append(sdkOpts, claudecode.WithEnv(withoutClaudeRuntimeEnv(r.cfg.Env)))
 	}
-	sdkOpts = append(sdkOpts,
-		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
-		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
-	)
 	if r.cfg.ServerURL != "" && r.cfg.APIKey != "" {
 		sdkOpts = append(sdkOpts, serveragent.WithManagedMCPAccess(r.cfg.ServerURL, r.cfg.APIKey))
 	}
@@ -298,6 +294,9 @@ func (r *Runner) buildSDKOptions(ctx context.Context) ([]claudecode.Option, erro
 func withoutClaudeRuntimeEnv(configured map[string]string) map[string]string {
 	excluded := make(map[string]struct{}, len(serveragent.ClaudeEnvironmentKeysToUnset()))
 	for _, key := range serveragent.ClaudeEnvironmentKeysToUnset() {
+		excluded[key] = struct{}{}
+	}
+	for _, key := range []string{"ANBAN_API_KEY", "ANBAN_API_URL"} {
 		excluded[key] = struct{}{}
 	}
 	result := make(map[string]string, len(configured))

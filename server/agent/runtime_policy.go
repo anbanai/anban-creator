@@ -348,7 +348,7 @@ func managedMCPBoundaryHook() claudecode.Option {
 			return claudecode.HookJSONOutput{}, nil
 		}
 		decision := "deny"
-		reason := "Anban MCP must be called through the Claude Code MCP tools injected by the Agent SDK. Do not probe /mcp or build a custom client. If the native tools are unavailable, record the recoverable failure and stop."
+		reason := "Anban MCP must be called through the Claude Code MCP tools injected by the Agent SDK. Do not probe /mcp or build a custom client; follow the task-specific fallback or failure contract when a native tool is unavailable."
 		return claudecode.HookJSONOutput{HookSpecificOutput: claudecode.PreToolUseHookSpecificOutput{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       &decision,

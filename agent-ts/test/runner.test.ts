@@ -244,7 +244,7 @@ describe("recordAssistantToolUses", () => {
 
 describe("buildExecutionEnvironment", () => {
   test("applies frozen runtime environment after execution identity", () => {
-    expect(buildExecutionEnvironment(
+    const managed = buildExecutionEnvironment(
       {
         ANTHROPIC_MODEL: "process-model",
         ANTHROPIC_API_KEY: "inherited-api-key",
@@ -276,16 +276,17 @@ describe("buildExecutionEnvironment", () => {
       },
       "https://server.example.com",
       "execution-jwt",
-    )).toEqual(expect.objectContaining({
+    );
+    expect(managed).toEqual(expect.objectContaining({
       NEW_PROVIDER_TOKEN: "future-secret",
-      ANBAN_API_KEY: "execution-jwt",
-      ANBAN_API_URL: "https://server.example.com",
       ANBAN_DEFAULT_PROJECT: "project-1",
       ANTHROPIC_AUTH_TOKEN: "runtime-token",
       ANTHROPIC_BASE_URL: "https://runtime.example.com/anthropic",
       ANTHROPIC_MODEL: "runtime-model",
       PATH: "/usr/bin",
     }));
+    expect(managed).not.toHaveProperty("ANBAN_API_KEY");
+    expect(managed).not.toHaveProperty("ANBAN_API_URL");
     const isolated = buildExecutionEnvironment(
       { ANTHROPIC_API_KEY: "inherited-api-key", CLAUDE_CODE_USE_BEDROCK: "true", CLAUDE_CODE_USE_VERTEX: "true" },
       { task_type: "article", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },

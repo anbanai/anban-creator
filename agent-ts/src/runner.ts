@@ -238,15 +238,15 @@ function createManagedMCPBoundaryHook() {
 export function buildExecutionEnvironment(
   processEnvironment: NodeJS.ProcessEnv,
   data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "execution_profile">,
-  serverURL: string,
-  token: string,
+  _serverURL: string,
+  _token: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
+  delete environment.ANBAN_API_KEY;
+  delete environment.ANBAN_API_URL;
   return {
     ...environment,
-    ANBAN_API_KEY: token,
-    ANBAN_API_URL: serverURL,
     ANBAN_DEFAULT_PROJECT: data.project_id,
     ...data.execution_profile.envs,
   };
