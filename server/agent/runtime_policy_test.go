@@ -127,24 +127,86 @@ func TestValidateManagedMCPStatusRequiresConnectedSeednoteTools(t *testing.T) {
 	}
 }
 
-func TestManagedRequiredMCPToolsRequiresSeednoteResearchTools(t *testing.T) {
+func TestManagedRequiredMCPToolsKeepsSeednoteResearchOptional(t *testing.T) {
 	got := managedRequiredMCPTools("seednote")
 	want := []string{
 		"analyze_image",
-		"check_seednote_login_status",
+		"claim_topic",
 		"finalize_task_title",
 		"generate_image",
 		"get_project_profile",
-		"get_seednote_feed_detail",
-		"get_seednote_login_qrcode",
-		"get_seednote_user_profile",
 		"list_project_titles",
-		"search_seednote_feeds",
 		"submit_agent_feedback",
 		"update_task_progress",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedRequiredMCPTools(seednote) = %#v, want %#v", got, want)
+	}
+}
+
+func TestManagedRequiredMCPToolsCoversViralAnalysisRuntime(t *testing.T) {
+	want := []string{
+		"get_project_profile",
+		"list_project_titles",
+		"submit_agent_feedback",
+		"update_task_progress",
+	}
+	if got := managedRequiredMCPTools(model.TaskTypeViralAnalysis); !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedRequiredMCPTools(viral_analysis) = %#v, want %#v", got, want)
+	}
+}
+
+func TestManagedMCPBoundaryHookBlocksDirectMCPAndSeednoteSidecar(t *testing.T) {
+	options := claudecode.NewOptions(managedMCPBoundaryHook())
+	hooks, ok := options.Hooks.(map[claudecode.HookEvent][]claudecode.HookMatcher)
+	if !ok || len(hooks[claudecode.HookEventPreToolUse]) != 1 {
+		t.Fatalf("PreToolUse hooks = %#v, want one matcher", options.Hooks)
+	}
+	matcher := hooks[claudecode.HookEventPreToolUse][0]
+	if matcher.Matcher != "Bash|WebFetch" || len(matcher.Hooks) != 1 {
+		t.Fatalf("matcher = %#v, want one Bash/WebFetch callback", matcher)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		command string
+		denied  bool
+	}{
+		{name: "server mcp", command: "curl https://creator.anbanai.com/mcp", denied: true},
+		{name: "seednote mcp", command: "node -e 'fetch(\"http://seednote:18060/mcp\")'", denied: true},
+		{name: "seednote rest", command: "curl http://seednote:18060/api/v1/feeds", denied: true},
+		{name: "ordinary command", command: "printf done", denied: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := matcher.Hooks[0](context.Background(), &claudecode.PreToolUseHookInput{
+				HookEventName: "PreToolUse",
+				ToolName:      "Bash",
+				ToolInput:     map[string]any{"command": tc.command},
+			}, nil, claudecode.HookContext{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision := ""
+			if specific, ok := output.HookSpecificOutput.(claudecode.PreToolUseHookSpecificOutput); ok && specific.PermissionDecision != nil {
+				decision = *specific.PermissionDecision
+			}
+			if got := decision == "deny"; got != tc.denied {
+				t.Fatalf("permission decision = %q, denied=%v, want %v", decision, got, tc.denied)
+			}
+		})
+	}
+
+	output, err := matcher.Hooks[0](context.Background(), &claudecode.PreToolUseHookInput{
+		HookEventName: "PreToolUse",
+		ToolName:      "WebFetch",
+		ToolInput:     map[string]any{"url": "http://seednote:18060/api/v1/feeds"},
+	}, nil, claudecode.HookContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	specific, ok := output.HookSpecificOutput.(claudecode.PreToolUseHookSpecificOutput)
+	if !ok || specific.PermissionDecision == nil || *specific.PermissionDecision != "deny" {
+		t.Fatalf("WebFetch output = %#v, want deny", output)
 	}
 }
 
@@ -267,6 +329,16 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 	}{
 		{
 			taskType: "seednote",
+			skills: []any{
+				"anban:seednote-research",
+				"anban:seednote-viral-analysis",
+				"anban:seednote-writing",
+				"anban:seednote-visual-design",
+			},
+			missing: "anban:seednote-research",
+		},
+		{
+			taskType: model.TaskTypeViralAnalysis,
 			skills: []any{
 				"anban:seednote-research",
 				"anban:seednote-viral-analysis",

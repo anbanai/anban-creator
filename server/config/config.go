@@ -1122,7 +1122,7 @@ func (c *Config) applyDefaults() {
 	// Agent Packs own default turn budgets. Claude.MaxTurns contains only
 	// explicit operator overrides and is intentionally left sparse.
 	if c.Claude.Docker.Network == "" {
-		c.Claude.Docker.Network = "anban-creator-network"
+		c.Claude.Docker.Network = "creator-runtime-network"
 	}
 	if c.Claude.Docker.CPUCores == 0 && !c.Claude.Docker.cpuCoresSet {
 		c.Claude.Docker.CPUCores = 2

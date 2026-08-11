@@ -42,7 +42,7 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "article")).toThrow("anban:humanizer");
   });
 
-  test("requires Seednote phase skills without Agent Reach", () => {
+  test("requires Seednote core tools and phase skills while research tools remain optional", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
@@ -50,6 +50,7 @@ describe("validateManagedInit", () => {
       plugins: [{ name: "anban", path: "/anbanai" }],
       tools: [
         "mcp__anban__analyze_image",
+        "mcp__anban__claim_topic",
         "mcp__anban__check_seednote_login_status",
         "mcp__anban__finalize_task_title",
         "mcp__anban__generate_image",
@@ -71,10 +72,36 @@ describe("validateManagedInit", () => {
     };
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
     message.tools = message.tools.filter((tool) => tool !== "mcp__anban__search_seednote_feeds");
-    expect(() => validateManagedInit(message, "seednote")).toThrow("search_seednote_feeds");
-    message.tools = [...message.tools, "mcp__anban__search_seednote_feeds"];
+    expect(() => validateManagedInit(message, "seednote")).not.toThrow();
+    message.tools = message.tools.filter((tool) => tool !== "mcp__anban__generate_image");
+    expect(() => validateManagedInit(message, "seednote")).toThrow("generate_image");
+    message.tools = [...message.tools, "mcp__anban__generate_image"];
     message.skills = message.skills.slice(1);
     expect(() => validateManagedInit(message, "seednote")).toThrow("anban:seednote-research");
+  });
+
+  test("applies Seednote readiness to viral analysis without requiring external research tools", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: [
+        "mcp__anban__get_project_profile",
+        "mcp__anban__list_project_titles",
+        "mcp__anban__submit_agent_feedback",
+        "mcp__anban__update_task_progress",
+      ],
+      skills: [
+        "anban:seednote-research",
+        "anban:seednote-viral-analysis",
+        "anban:seednote-writing",
+        "anban:seednote-visual-design",
+      ],
+    };
+    expect(() => validateManagedInit(message, "viral_analysis")).not.toThrow();
+    message.skills = [];
+    expect(() => validateManagedInit(message, "viral_analysis")).toThrow("anban:seednote-research");
   });
 
   test("maps terminal SDK usage through the bootstrap model aliases", () => {
@@ -132,6 +159,33 @@ describe("buildQueryOptions", () => {
     expect(options).not.toHaveProperty("allowedTools");
     expect(options.disallowedTools).toEqual(["Agent", "ScheduleWakeup", "AskUserQuestion"]);
     expect(options).not.toHaveProperty("canUseTool");
+  });
+
+  test("enforces the MCP boundary and Seednote stop gate for both Seednote task types", async () => {
+    const articleOptions = runner.buildQueryOptions(validBootstrap(), "/workspace");
+    const articleHooks = articleOptions.hooks as Record<string, Array<{ hooks: Array<(input: unknown, toolUseID: string | undefined, options: { signal: AbortSignal }) => Promise<Record<string, unknown>>> }>>;
+    expect(articleHooks.PreToolUse).toHaveLength(1);
+    expect(articleHooks.Stop).toBeUndefined();
+
+    const boundary = articleHooks.PreToolUse[0].hooks[0];
+    const hookOptions = { signal: new AbortController().signal };
+    const direct = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://seednote:18060/mcp" }, tool_use_id: "tool-1" }, "tool-1", hookOptions);
+    expect(direct).toMatchObject({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });
+    const directRest = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://seednote:18060/api/v1/feeds" }, tool_use_id: "tool-rest" }, "tool-rest", hookOptions);
+    expect(directRest).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
+    expect(await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "printf done" }, tool_use_id: "tool-2" }, "tool-2", hookOptions)).toEqual({});
+
+    for (const taskType of ["seednote", "viral_analysis"]) {
+      const options = runner.buildQueryOptions({ ...validBootstrap(), task_type: taskType }, "/workspace");
+      const hooks = options.hooks as Record<string, unknown[]>;
+      expect(hooks.PreToolUse).toHaveLength(1);
+      expect(hooks.Stop).toHaveLength(1);
+    }
+  });
+
+  test("preserves the concrete task type in Seednote quality gate input", () => {
+    expect(runner.seednoteGateInput("seednote")).toEqual({ agent_type: "anban:seednote", managed_main_session: true, task_type: "seednote" });
+    expect(runner.seednoteGateInput("viral_analysis")).toEqual({ agent_type: "anban:seednote", managed_main_session: true, task_type: "viral_analysis" });
   });
 
   test("does not translate frozen controls into SDK-only options", () => {

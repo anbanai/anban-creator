@@ -182,6 +182,12 @@ export function buildQueryOptions(
   controller = new AbortController(),
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
+  const hooks: NonNullable<Options["hooks"]> = {
+    PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
+  };
+  if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
+    hooks.Stop = [{ hooks: [createSeednoteStopGate(cwd, data.task_type)] }];
+  }
   return {
     abortController: controller,
     cwd,
@@ -197,7 +203,35 @@ export function buildQueryOptions(
     env: buildExecutionEnvironment(process.env, data, serverURL, token),
     includePartialMessages: false,
     stderr: (line) => void reporter.progress(line.trim()),
-    hooks: data.task_type === "seednote" ? { Stop: [{ hooks: [createSeednoteStopGate(cwd)] }] } : undefined,
+    hooks,
+  };
+}
+
+function createManagedMCPBoundaryHook() {
+  return async (input: unknown): Promise<HookJSONOutput> => {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) return {};
+    const hookInput = input as Record<string, unknown>;
+    if (hookInput.hook_event_name !== "PreToolUse") return {};
+    const toolInput = hookInput.tool_input;
+    if (typeof toolInput !== "object" || toolInput === null || Array.isArray(toolInput)) return {};
+    const values = toolInput as Record<string, unknown>;
+    const value = hookInput.tool_name === "WebFetch" ? values.url : values.command;
+    if (typeof value !== "string") return {};
+
+    const lower = value.toLowerCase();
+    const directSeednote = lower.includes("seednote:18060") || lower.includes("localhost:18060") || lower.includes("127.0.0.1:18060");
+    const probesMCP = lower.includes("mcp-session-id")
+      || lower.includes("mcp_client")
+      || (lower.includes("/mcp") && ["curl", "wget", "python", "requests", "http", "mcporter", "jsonrpc"].some((needle) => lower.includes(needle)));
+    if (!directSeednote && !probesMCP) return {};
+
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Managed runtimes must use the authenticated anban MCP tools instead of calling MCP endpoints or the Seednote sidecar directly.",
+      },
+    };
   };
 }
 
@@ -307,10 +341,10 @@ async function handleToolResults(message: { message: { content?: unknown } }, to
   }
 }
 
-function createSeednoteStopGate(cwd: string) {
+function createSeednoteStopGate(cwd: string, taskType: string) {
   return async (_input: unknown, _toolUseID: string | undefined, hookOptions: { signal: AbortSignal }): Promise<HookJSONOutput> => {
     try {
-      const stdout = await runSeednoteGate(cwd, hookOptions.signal);
+      const stdout = await runSeednoteGate(cwd, taskType, hookOptions.signal);
       if (!stdout.trim()) return {};
       return JSON.parse(stdout) as HookJSONOutput;
     } catch (error) {
@@ -319,7 +353,11 @@ function createSeednoteStopGate(cwd: string) {
   };
 }
 
-function runSeednoteGate(cwd: string, signal: AbortSignal): Promise<string> {
+export function seednoteGateInput(taskType: string) {
+  return { agent_type: "anban:seednote", managed_main_session: true, task_type: taskType };
+}
+
+function runSeednoteGate(cwd: string, taskType: string, signal: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn("/anbanai/hooks/seednote-quality-gate.sh", [], { cwd, signal, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -327,19 +365,20 @@ function runSeednoteGate(cwd: string, signal: AbortSignal): Promise<string> {
     child.stdout.setEncoding("utf8").on("data", (data: string) => { if (stdout.length <= 64 << 10) stdout += data; });
     child.stderr.setEncoding("utf8").on("data", (data: string) => { if (stderr.length <= 64 << 10) stderr += data; });
     child.on("error", reject).on("close", (code) => code === 0 ? resolvePromise(stdout) : reject(new Error(stderr.trim() || `quality gate exited with ${code}`)));
-    child.stdin.end(JSON.stringify({ agent_type: "anban:seednote", managed_main_session: true }));
+    child.stdin.end(JSON.stringify(seednoteGateInput(taskType)));
   });
 }
 
 function requiredSkills(taskType: string): string[] {
-  if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design"];
+  if (taskType === "seednote" || taskType === "viral_analysis") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design"];
   if (taskType === "article" || taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "live-slicer") return ["anban:live-slice", "anban:capcut-draft"];
   return [];
 }
 
 function requiredMCPTools(taskType: string): string[] {
-  if (taskType === "seednote") return ["analyze_image", "check_seednote_login_status", "finalize_task_title", "generate_image", "get_project_profile", "get_seednote_feed_detail", "get_seednote_login_qrcode", "get_seednote_user_profile", "list_project_titles", "search_seednote_feeds", "submit_agent_feedback", "update_task_progress"];
+  if (taskType === "seednote") return ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback", "update_task_progress"];
+  if (taskType === "viral_analysis") return ["get_project_profile", "list_project_titles", "submit_agent_feedback", "update_task_progress"];
   return [];
 }
 

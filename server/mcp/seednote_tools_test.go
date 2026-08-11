@@ -41,6 +41,24 @@ func TestCheckSeednoteLoginStatusReportsUnavailableWhenSidecarNotReady(t *testin
 	}
 }
 
+func TestCheckSeednoteLoginStatusPreservesTransportError(t *testing.T) {
+	old := svcs
+	svcs = &Services{
+		SeednoteCapabilitySvc: service.NewSeednoteCapabilityService(
+			seednote.NewClient("http://127.0.0.1:1", 10*time.Millisecond), seednoteReadiness(true),
+		),
+	}
+	t.Cleanup(func() { svcs = old })
+
+	result, err := checkSeednoteLoginStatusHandler(context.Background(), &mcp.CallToolRequest{})
+	if err == nil {
+		t.Fatalf("result = %#v, want transport error", result)
+	}
+	if !strings.Contains(err.Error(), "check login status") {
+		t.Fatalf("error = %v, want original transport context", err)
+	}
+}
+
 func TestSeednoteLoginResultsContainStateWithoutCrossToolSequencing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,7 +96,11 @@ func TestSeednoteLoginResultsContainStateWithoutCrossToolSequencing(t *testing.T
 	if len(qr.Content) != 1 {
 		t.Fatalf("QR result content count = %d, want image state only", len(qr.Content))
 	}
-	if _, ok := qr.Content[0].(*mcp.ImageContent); !ok {
+	image, ok := qr.Content[0].(*mcp.ImageContent)
+	if !ok {
 		t.Fatalf("QR result content = %T, want image", qr.Content[0])
+	}
+	if string(image.Data) != "png" {
+		t.Fatalf("QR image data = %q, want decoded PNG bytes", image.Data)
 	}
 }

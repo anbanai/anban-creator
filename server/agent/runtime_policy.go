@@ -227,7 +227,7 @@ func ValidateManagedPluginInit(message *claudecode.SystemMessage, taskType strin
 
 func managedRequiredPluginSkills(taskType string) []string {
 	switch strings.TrimSpace(taskType) {
-	case "seednote":
+	case model.PlatformSeednote, model.TaskTypeViralAnalysis:
 		return []string{
 			"anban:seednote-research",
 			"anban:seednote-viral-analysis",
@@ -284,18 +284,21 @@ func initStringValues(value any) map[string]bool {
 
 func managedRequiredMCPTools(taskType string) []string {
 	switch strings.TrimSpace(taskType) {
-	case "seednote":
+	case model.PlatformSeednote:
 		return []string{
 			"analyze_image",
-			"check_seednote_login_status",
+			"claim_topic",
 			"finalize_task_title",
 			"generate_image",
 			"get_project_profile",
-			"get_seednote_feed_detail",
-			"get_seednote_login_qrcode",
-			"get_seednote_user_profile",
 			"list_project_titles",
-			"search_seednote_feeds",
+			"submit_agent_feedback",
+			"update_task_progress",
+		}
+	case model.TaskTypeViralAnalysis:
+		return []string{
+			"get_project_profile",
+			"list_project_titles",
 			"submit_agent_feedback",
 			"update_task_progress",
 		}
@@ -320,7 +323,7 @@ func managedRequiredMCPTools(taskType string) []string {
 }
 
 func managedMCPBoundaryHook() claudecode.Option {
-	return claudecode.WithPreToolUseHook("Bash", func(
+	return claudecode.WithPreToolUseHook("Bash|WebFetch", func(
 		_ context.Context,
 		input any,
 		_ *string,
@@ -330,12 +333,18 @@ func managedMCPBoundaryHook() claudecode.Option {
 		if !ok {
 			return claudecode.HookJSONOutput{}, nil
 		}
-		command, _ := pre.ToolInput["command"].(string)
-		lower := strings.ToLower(command)
+		value, _ := pre.ToolInput["command"].(string)
+		if pre.ToolName == "WebFetch" {
+			value, _ = pre.ToolInput["url"].(string)
+		}
+		lower := strings.ToLower(value)
+		directSeednote := strings.Contains(lower, "seednote:18060") ||
+			strings.Contains(lower, "localhost:18060") ||
+			strings.Contains(lower, "127.0.0.1:18060")
 		probesMCP := strings.Contains(lower, "mcp-session-id") ||
 			strings.Contains(lower, "mcp_client") ||
 			(strings.Contains(lower, "/mcp") && containsAny(lower, "curl", "wget", "python", "requests", "http", "mcporter", "jsonrpc"))
-		if !probesMCP {
+		if !probesMCP && !directSeednote {
 			return claudecode.HookJSONOutput{}, nil
 		}
 		decision := "deny"

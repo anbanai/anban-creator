@@ -209,3 +209,25 @@ spec:
       port: 18060
       protocol: TCP
       targetPort: 18060
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seednote-server-only
+  namespace: "${namespace}"
+  labels:
+    app: seednote
+spec:
+  podSelector:
+    matchLabels:
+      app: seednote
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: "${server_app_label}"
+      ports:
+        - protocol: TCP
+          port: 18060

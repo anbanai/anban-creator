@@ -27,8 +27,8 @@ func TestDockerSchedulerDefaults(t *testing.T) {
 	cfg := &Config{}
 	cfg.applyDefaults()
 
-	if cfg.Claude.Docker.Network != "anban-creator-network" {
-		t.Errorf("claude.docker.network default = %q, want anban-creator-network", cfg.Claude.Docker.Network)
+	if cfg.Claude.Docker.Network != "creator-runtime-network" {
+		t.Errorf("claude.docker.network default = %q, want creator-runtime-network", cfg.Claude.Docker.Network)
 	}
 	if cfg.Claude.Docker.CPUCores != 2 {
 		t.Errorf("claude.docker.cpu_cores default = %d, want 2", cfg.Claude.Docker.CPUCores)

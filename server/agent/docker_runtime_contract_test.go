@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -923,9 +924,11 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_ARTICLE: \"creator-agent-article:latest\"",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
 		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
+		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
 		"anban-creator-network:\n    name: anban-creator-network\n    driver: bridge",
+		"creator-runtime-network:\n    name: creator-runtime-network\n    driver: bridge",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("docker-compose.yml missing managed Docker runtime contract %q", want)
@@ -955,7 +958,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 			"article: \"${ANBAN_AGENT_IMAGE_ARTICLE}\"",
 			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
 			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
-			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-anban-creator-network}\"",
+			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
 		} {
 			if !strings.Contains(body, want) {
@@ -992,6 +995,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 				EnvFile     []string          `yaml:"env_file"`
 				Volumes     []string          `yaml:"volumes"`
 				GroupAdd    []string          `yaml:"group_add"`
+				Networks    []string          `yaml:"networks"`
+				Ports       []string          `yaml:"ports"`
 			} `yaml:"services"`
 		}
 		if err := yaml.Unmarshal([]byte(body), &compose); err != nil {
@@ -1006,6 +1011,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_AGENT_DOCKER_NETWORK":         "creator-runtime-network",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
 			"ANBAN_BILLING_ADMIN_API_KEY":        "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
 			"ANBAN_JWT_SECRET_KEY":               "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
@@ -1040,6 +1046,16 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 		if !containsString(server.GroupAdd, "${DOCKER_GID:-0}") {
 			t.Fatalf("server group_add = %v, want Docker socket group", server.GroupAdd)
+		}
+		if !reflect.DeepEqual(server.Networks, []string{"anban-creator-network", "creator-runtime-network"}) {
+			t.Fatalf("server networks = %v, want sidecar and isolated Agent networks", server.Networks)
+		}
+		seednote := compose.Services["seednote"]
+		if !reflect.DeepEqual(seednote.Networks, []string{"anban-creator-network"}) {
+			t.Fatalf("seednote networks = %v, want sidecar network only", seednote.Networks)
+		}
+		if !reflect.DeepEqual(seednote.Ports, []string{"127.0.0.1:18060:18060"}) {
+			t.Fatalf("seednote ports = %v, want loopback-only host access", seednote.Ports)
 		}
 		for _, volume := range server.Volumes {
 			if strings.Contains(volume, ":/workspace") || strings.Contains(volume, ":/app/data/workspace") {

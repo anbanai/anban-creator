@@ -43,6 +43,7 @@ shared namespace and pull secret:
 | `seednote_image_repo` | `xpzouying/xiaohongshu-mcp@sha256:<64 lowercase hex>` |
 | `wcflink_storage_size` | `10Gi` |
 | `seednote_storage_size` | `10Gi` |
+| `server_app_label` | `anban-creator-server` |
 
 ## Stage 1: build and push wcfLink
 
@@ -84,6 +85,7 @@ export wcflink_image_repo="${wcflink_image_repo:?set the immutable wcfLink ACR i
 export seednote_image_repo="${seednote_image_repo:?set the immutable Seednote Docker Hub image reference in Yunxiao}"
 export wcflink_storage_size="${wcflink_storage_size:?set the wcfLink PVC size in Yunxiao}"
 export seednote_storage_size="${seednote_storage_size:?set the Seednote PVC size in Yunxiao}"
+export server_app_label="${server_app_label:?set the Server Pod app label in Yunxiao}"
 
 if [[ ${#namespace} -gt 63 || ! "$namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
   echo "invalid namespace: $namespace" >&2
@@ -91,6 +93,10 @@ if [[ ${#namespace} -gt 63 || ! "$namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ 
 fi
 if [[ ${#imagePullSecret} -gt 63 || ! "$imagePullSecret" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
   echo "invalid imagePullSecret: $imagePullSecret" >&2
+  exit 1
+fi
+if [[ ${#server_app_label} -gt 63 || ! "$server_app_label" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+  echo "invalid server_app_label: $server_app_label" >&2
   exit 1
 fi
 if [[ ! "$wcflink_image_repo" =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$wcflink_image_repo" != */*:* ]] || [[ "$wcflink_image_repo" == *:latest ]]; then
@@ -166,11 +172,12 @@ preflight_pvc_storage() {
 preflight_pvc_storage wcflink-state "$wcflink_storage_size"
 preflight_pvc_storage seednote-data "$seednote_storage_size"
 
-envsubst '${namespace} ${imagePullSecret} ${wcflink_image_repo} ${seednote_image_repo} ${wcflink_storage_size} ${seednote_storage_size}' < deploy/k8s/ack-sidecars.yaml | kubectl apply -f -
+envsubst '${namespace} ${imagePullSecret} ${wcflink_image_repo} ${seednote_image_repo} ${wcflink_storage_size} ${seednote_storage_size} ${server_app_label}' < deploy/k8s/ack-sidecars.yaml | kubectl apply -f -
 kubectl -n "$namespace" rollout status deployment/wcflink --timeout=10m
 kubectl -n "$namespace" rollout status deployment/seednote --timeout=10m
 kubectl -n "$namespace" get deployment,pod,service,pvc -l 'app in (wcflink,seednote)'
 kubectl -n "$namespace" get endpoints wcflink seednote
+kubectl -n "$namespace" get networkpolicy seednote-server-only
 ```
 
 No rollout restart is required. Applying a changed `seednote_image_repo`
@@ -194,6 +201,13 @@ ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060
 ANBAN_ILINK_ENABLED=true
 ANBAN_ILINK_BASE_URL=http://wcflink:18070
 ```
+
+Set `server_app_label` to the exact value of the Server Pod's `app` label. The
+included `seednote-server-only` NetworkPolicy allows inbound TCP/18060 only
+from Pods with that label in the same namespace. The ACK cluster's CNI must
+enforce Kubernetes NetworkPolicy; verify that capability before treating this
+policy as an access-control boundary. One-shot Agent Jobs must not carry the
+Server label.
 
 ## First login and verification
 
@@ -236,8 +250,8 @@ npx @modelcontextprotocol/inspector
 Use `http://127.0.0.1:18060/mcp` in the inspector. The `seednote-data` PVC
 persists cookies and browser state after successful login.
 
-Both services are unauthenticated. `ClusterIP` prevents direct external
-exposure but does not restrict callers inside the cluster. Use administrator-
-only port-forwarding and apply a namespace-appropriate NetworkPolicy that
-allows only intended workloads; no generic policy is supplied because caller
-labels vary by deployment.
+Both services are unauthenticated, so keep them as `ClusterIP` and use
+administrator-only port-forwarding. The supplied NetworkPolicy restricts
+Seednote to the labeled Server Pods; wcfLink remains reachable by workloads in
+the namespace and should be covered by a deployment-specific policy if its
+callers need equivalent isolation.

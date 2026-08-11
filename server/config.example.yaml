@@ -327,7 +327,7 @@ claude:
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
   docker:
-    network: "${ANBAN_AGENT_DOCKER_NETWORK:-anban-creator-network}"
+    network: "${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}"
     cpu_cores: 2
     memory_mb: 4096
     pids_limit: 512

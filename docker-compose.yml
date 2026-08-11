@@ -48,7 +48,9 @@ services:
     container_name: anban-creator-seednote
     restart: unless-stopped
     ports:
-      - "18060:18060"
+      # Local login and inspection only. The API is unauthenticated; the Server
+      # reaches it through the Compose network at http://seednote:18060.
+      - "127.0.0.1:18060:18060"
     volumes:
       - ./data/seednote:/app/data
     environment:
@@ -148,6 +150,7 @@ services:
       ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
       ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
       ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
+      ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://wcflink:18070"
@@ -162,6 +165,7 @@ services:
       - "${DOCKER_GID:-0}"
     networks:
       - anban-creator-network
+      - creator-runtime-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -195,4 +199,7 @@ services:
 networks:
   anban-creator-network:
     name: anban-creator-network
+    driver: bridge
+  creator-runtime-network:
+    name: creator-runtime-network
     driver: bridge

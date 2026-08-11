@@ -19,7 +19,8 @@ type managedStopGate struct {
 }
 
 var managedStopGates = map[string]managedStopGate{
-	"seednote": {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
+	"seednote":       {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
+	"viral_analysis": {agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
 }
 
 // ManagedTaskStopHook returns a task-specific SDK Stop hook for sessions that
@@ -50,6 +51,7 @@ func ManagedTaskStopHook(taskType, workspace, pluginRoot string) (claudecode.Opt
 			"agent_type":           gate.agentType,
 			"managed_main_session": true,
 			"stop_hook_active":     stop.StopHookActive,
+			"task_type":            strings.TrimSpace(taskType),
 		})
 		if err != nil {
 			return claudecode.HookJSONOutput{}, err

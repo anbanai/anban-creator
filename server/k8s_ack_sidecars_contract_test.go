@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -21,6 +22,7 @@ const (
 	ackSidecarsTestImagePullSecret = "anban-acr-pull"
 	ackSidecarsTestWcflinkStorage  = "10Gi"
 	ackSidecarsTestSeednoteStorage = "10Gi"
+	ackSidecarsTestServerAppLabel  = "anban-creator-server"
 )
 
 func TestACKSidecarsManifestContract(t *testing.T) {
@@ -31,8 +33,8 @@ func TestACKSidecarsManifestContract(t *testing.T) {
 	assertACKSidecarsRawTemplateContract(t, string(raw))
 
 	documents := splitACKSidecarsManifest(t, renderACKSidecarsManifest(string(raw)))
-	if len(documents) != 6 {
-		t.Fatalf("ACK sidecars manifest must contain exactly 6 documents, got %d", len(documents))
+	if len(documents) != 7 {
+		t.Fatalf("ACK sidecars manifest must contain exactly 7 documents, got %d", len(documents))
 	}
 
 	var wcflinkPVC corev1.PersistentVolumeClaim
@@ -66,17 +68,35 @@ func TestACKSidecarsManifestContract(t *testing.T) {
 	strictUnmarshalACKSidecarsDocument(t, documents[5], &seednoteService)
 	assertACKSidecarsObject(t, seednoteService.TypeMeta, seednoteService.ObjectMeta, "Service", "seednote", "seednote")
 	assertACKSidecarsService(t, seednoteService, "seednote", 18060)
+
+	var seednotePolicy networkingv1.NetworkPolicy
+	strictUnmarshalACKSidecarsDocument(t, documents[6], &seednotePolicy)
+	assertACKSidecarsObject(t, seednotePolicy.TypeMeta, seednotePolicy.ObjectMeta, "NetworkPolicy", "seednote-server-only", "seednote")
+	if !reflect.DeepEqual(seednotePolicy.Spec.PodSelector.MatchLabels, map[string]string{"app": "seednote"}) {
+		t.Fatalf("NetworkPolicy pod selector = %v, want app=seednote", seednotePolicy.Spec.PodSelector.MatchLabels)
+	}
+	if !reflect.DeepEqual(seednotePolicy.Spec.PolicyTypes, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}) || len(seednotePolicy.Spec.Ingress) != 1 {
+		t.Fatalf("NetworkPolicy types/ingress = %v/%v, want one Ingress rule", seednotePolicy.Spec.PolicyTypes, seednotePolicy.Spec.Ingress)
+	}
+	rule := seednotePolicy.Spec.Ingress[0]
+	if len(rule.From) != 1 || rule.From[0].PodSelector == nil || !reflect.DeepEqual(rule.From[0].PodSelector.MatchLabels, map[string]string{"app": ackSidecarsTestServerAppLabel}) {
+		t.Fatalf("NetworkPolicy ingress source = %v, want server app label", rule.From)
+	}
+	if len(rule.Ports) != 1 || rule.Ports[0].Port == nil || rule.Ports[0].Port.IntVal != 18060 || rule.Ports[0].Protocol == nil || *rule.Ports[0].Protocol != corev1.ProtocolTCP {
+		t.Fatalf("NetworkPolicy ingress ports = %v, want TCP/18060", rule.Ports)
+	}
 }
 
 func assertACKSidecarsRawTemplateContract(t *testing.T, raw string) {
 	t.Helper()
 	for placeholder, wantCount := range map[string]int{
-		"${namespace}":             6,
+		"${namespace}":             7,
 		"${wcflink_storage_size}":  1,
 		"${seednote_storage_size}": 1,
 		"${wcflink_image_repo}":    1,
 		"${seednote_image_repo}":   1,
 		"${imagePullSecret}":       1,
+		"${server_app_label}":      1,
 	} {
 		if gotCount := strings.Count(raw, placeholder); gotCount != wantCount {
 			t.Fatalf("raw ACK sidecars template placeholder %q occurs %d times, want %d", placeholder, gotCount, wantCount)
@@ -104,6 +124,7 @@ func renderACKSidecarsManifest(raw string) string {
 		"${seednote_image_repo}", ackSidecarsTestSeednoteImage,
 		"${wcflink_storage_size}", ackSidecarsTestWcflinkStorage,
 		"${seednote_storage_size}", ackSidecarsTestSeednoteStorage,
+		"${server_app_label}", ackSidecarsTestServerAppLabel,
 	).Replace(raw)
 }
 
@@ -138,6 +159,9 @@ func assertACKSidecarsObject(t *testing.T, typeMeta metav1.TypeMeta, objectMeta 
 func apiVersionForKind(kind string) string {
 	if kind == "Deployment" {
 		return "apps/v1"
+	}
+	if kind == "NetworkPolicy" {
+		return "networking.k8s.io/v1"
 	}
 	return "v1"
 }

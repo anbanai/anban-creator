@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -178,7 +179,7 @@ func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolReque
 	}
 	result, err := svcs.SeednoteCapabilitySvc.LoginStatus(ctx, service.SeednoteLoginStatusRequest{})
 	if err != nil {
-		return textResult(map[string]any{"available": true, "logged_in": false, "message": err.Error()})
+		return nil, fmt.Errorf("检查登录状态失败: %w", err)
 	}
 	if !result.Available {
 		return textResult(map[string]any{"available": false, "logged_in": false, "message": result.Message})
@@ -198,10 +199,14 @@ func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest
 	if !result.Available {
 		return seednoteUnavailableMessage(result.Message)
 	}
+	imageData, err := base64.StdEncoding.DecodeString(result.Value)
+	if err != nil {
+		return nil, fmt.Errorf("二维码数据不是有效的 base64 PNG: %w", err)
+	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			&mcp.ImageContent{Data: []byte(result.Value), MIMEType: "image/png"},
+			&mcp.ImageContent{Data: imageData, MIMEType: "image/png"},
 		},
 	}, nil
 }

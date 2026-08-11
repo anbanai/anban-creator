@@ -22,6 +22,7 @@ func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
 		script    string
 	}{
 		{name: "seednote", taskType: "seednote", agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
+		{name: "viral analysis", taskType: "viral_analysis", agentType: "anban:seednote", script: "seednote-quality-gate.sh"},
 	}
 
 	for _, tt := range tests {
@@ -37,10 +38,10 @@ func TestManagedTaskStopHookRunsTaskGateForMainAgent(t *testing.T) {
 input=$(cat)
 test "$CLAUDE_PROJECT_DIR" = %q || exit 3
 case "$input" in
-  *'"agent_type":"%s"'*'"managed_main_session":true'*) printf '%%s' '{"decision":"block","reason":"gate-ran"}' ;;
-  *) exit 2 ;;
+	  *'"agent_type":"%s"'*'"managed_main_session":true'*'"task_type":"%s"'*) printf '%%s' '{"decision":"block","reason":"gate-ran"}' ;;
+	  *) exit 2 ;;
 esac
-`, workspace, tt.agentType)
+	`, workspace, tt.agentType, tt.taskType)
 			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -245,6 +246,18 @@ func TestSeednoteQualityGateDoesNotFallBackToProcessWorkingDirectory(t *testing.
 	}
 }
 
+func TestSeednoteQualityGateUsesRuntimeNodeWithoutPython(t *testing.T) {
+	hook := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	if !strings.Contains(hook, "node <<'JS'") {
+		t.Fatal("seednote quality gate must execute with the Node runtime shipped in every Seednote image")
+	}
+	for _, forbidden := range []string{"python3", "python -", "import json", "from pathlib"} {
+		if strings.Contains(hook, forbidden) {
+			t.Fatalf("seednote quality gate retains Python dependency %q", forbidden)
+		}
+	}
+}
+
 func TestSeednoteQualityGateBlocksMissingPlannedContentImages(t *testing.T) {
 	workspace := t.TempDir()
 	seednoteDir := writeSeednoteGateFixture(t, workspace, true)
@@ -286,6 +299,55 @@ func TestSeednoteQualityGateAcceptsRecoverableFailure(t *testing.T) {
 
 	if output := runSeednoteQualityGate(t, workspace); strings.TrimSpace(output) != "" {
 		t.Fatalf("quality gate blocked a valid recoverable failure: %s", output)
+	}
+}
+
+func TestSeednoteQualityGateAcceptsViralAnalysisArtifacts(t *testing.T) {
+	workspace := t.TempDir()
+	outputDir := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"source-analysis.md", "viral-template.json"} {
+		if err := os.WriteFile(filepath.Join(outputDir, name), []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output := runSeednoteQualityGateInvocation(
+		t,
+		workspace,
+		`{"agent_type":"anban:seednote","managed_main_session":true,"task_type":"viral_analysis"}`,
+		workspace,
+	)
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("quality gate blocked complete viral analysis output: %s", output)
+	}
+}
+
+func TestSeednoteQualityGateBlocksIncompleteViralAnalysisArtifacts(t *testing.T) {
+	workspace := t.TempDir()
+	outputDir := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "source-analysis.md"), []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGateInvocation(
+		t,
+		workspace,
+		`{"agent_type":"anban:seednote","managed_main_session":true,"task_type":"viral_analysis"}`,
+		workspace,
+	)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "output/viral-template.json") {
+		t.Fatalf("quality gate output = %#v, want missing viral template block", result)
 	}
 }
 
@@ -448,6 +510,27 @@ func TestSeednoteQualityGateRequiresExactUniqueSummaryOutputSet(t *testing.T) {
 	}
 }
 
+func TestSeednoteQualityGateRejectsNonObjectSummary(t *testing.T) {
+	workspace := t.TempDir()
+	dir := writeSeednoteGateFixture(t, workspace, true)
+	if err := os.WriteFile(filepath.Join(dir, "reference-usage-summary.json"), []byte("null"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSeednoteQualityGate(t, workspace)
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("quality gate accepted a non-object reference usage summary")
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("parse quality gate output %q: %v", output, err)
+	}
+	reason, _ := result["reason"].(string)
+	if result["decision"] != "block" || !strings.Contains(reason, "必须为 JSON 对象") {
+		t.Fatalf("quality gate output = %#v, want non-object summary block", result)
+	}
+}
+
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
@@ -554,7 +637,7 @@ func runSeednoteQualityGate(t *testing.T, workspace string) string {
 	return runSeednoteQualityGateInvocation(
 		t,
 		workspace,
-		`{"agent_type":"anban:seednote","managed_main_session":true}`,
+		`{"agent_type":"anban:seednote","managed_main_session":true,"task_type":"seednote"}`,
 		workspace,
 	)
 }
