@@ -18,7 +18,7 @@ import (
 const (
 	ackSidecarsTestNamespace       = "anbanai-test"
 	ackSidecarsTestWcflinkImage    = "registry.cn-hangzhou.aliyuncs.com/anban/wcflink:sha256-test"
-	ackSidecarsTestSeednoteImage   = "xpzouying/xiaohongshu-mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	ackSidecarsTestSeednoteImage   = "registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ackSidecarsTestImagePullSecret = "anban-acr-pull"
 	ackSidecarsTestWcflinkStorage  = "10Gi"
 	ackSidecarsTestSeednoteStorage = "10Gi"
@@ -95,7 +95,7 @@ func assertACKSidecarsRawTemplateContract(t *testing.T, raw string) {
 		"${seednote_storage_size}": 1,
 		"${wcflink_image_repo}":    1,
 		"${seednote_image_repo}":   1,
-		"${imagePullSecret}":       1,
+		"${imagePullSecret}":       2,
 		"${server_app_label}":      1,
 	} {
 		if gotCount := strings.Count(raw, placeholder); gotCount != wantCount {
@@ -103,6 +103,7 @@ func assertACKSidecarsRawTemplateContract(t *testing.T, raw string) {
 		}
 	}
 	for _, obsoletePath := range []string{
+		"../deploy/k8s/sidecars.yaml",
 		"../deploy/k8s/ack-seednote.yaml",
 		"../deploy/k8s/ack-seednote.md",
 		"../docs/superpowers/specs/2026-07-20-ack-seednote-standalone-design.md",
@@ -232,7 +233,7 @@ func assertWcflinkPodSpec(t *testing.T, pod corev1.PodSpec) {
 
 func assertSeednoteACKPodSpec(t *testing.T, pod corev1.PodSpec) {
 	t.Helper()
-	assertACKSidecarsPodBase(t, pod, nil)
+	assertACKSidecarsPodBase(t, pod, []corev1.LocalObjectReference{{Name: ackSidecarsTestImagePullSecret}})
 	container := pod.Containers[0]
 	if container.Name != "seednote" || container.Image != ackSidecarsTestSeednoteImage || container.ImagePullPolicy != corev1.PullIfNotPresent {
 		t.Fatalf("container name/image/pull policy = %s/%s/%s", container.Name, container.Image, container.ImagePullPolicy)
@@ -254,6 +255,45 @@ func assertSeednoteACKPodSpec(t *testing.T, pod corev1.PodSpec) {
 	shm := pod.Volumes[1]
 	if shm.Name != "browser-shm" || shm.EmptyDir == nil || shm.EmptyDir.Medium != corev1.StorageMediumMemory || shm.EmptyDir.SizeLimit == nil || shm.EmptyDir.SizeLimit.Cmp(resource.MustParse("1Gi")) != 0 {
 		t.Fatalf("Seednote shared-memory volume = %+v, want Memory emptyDir with 1Gi size limit", shm)
+	}
+}
+
+func TestServerDeploymentInjectsSidecarURLs(t *testing.T) {
+	raw, err := os.ReadFile("Deployment.yaml")
+	if err != nil {
+		t.Fatalf("read server deployment: %v", err)
+	}
+	text := string(raw)
+
+	for _, want := range []string{
+		"name: ANBAN_SEEDNOTE_BASE_URL",
+		"value: http://seednote:18060",
+		"name: ANBAN_ILINK_ENABLED",
+		"value: \"true\"",
+		"name: ANBAN_ILINK_BASE_URL",
+		"value: http://wcflink:18070",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("server deployment missing %q", want)
+		}
+	}
+}
+
+func TestConfigExampleDocumentsSeednoteSidecarEnv(t *testing.T) {
+	raw, err := os.ReadFile("config.example.yaml")
+	if err != nil {
+		t.Fatalf("read config example: %v", err)
+	}
+	text := string(raw)
+
+	for _, want := range []string{
+		"seednote:",
+		`base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"`,
+		"timeout: 30",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config example missing %q", want)
+		}
 	}
 }
 

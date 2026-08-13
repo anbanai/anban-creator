@@ -139,6 +139,8 @@ spec:
       automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: amd64
+      imagePullSecrets:
+        - name: "${imagePullSecret}"
       containers:
         - name: seednote
           image: "${seednote_image_repo}"

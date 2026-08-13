@@ -914,6 +914,39 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	}
 }
 
+func TestSeednoteSidecarBuildUsesPinnedUpstreamCommit(t *testing.T) {
+	root := repositoryRoot(t)
+	script := readTextFile(t, filepath.Join(root, "scripts/build-seednote-sidecar.sh"))
+	for _, want := range []string{
+		"SEEDNOTE_SIDECAR_SOURCE_REPO:-https://github.com/xpzouying/xiaohongshu-mcp.git",
+		"SEEDNOTE_SIDECAR_SOURCE_COMMIT must be a lowercase 40-character Git commit",
+		"git -C \"$build_dir\" fetch --depth 1 origin \"$source_commit\"",
+		"test",
+		"--platform \"$target_platform\"",
+		"--build-arg \"VERSION=$source_commit\"",
+		"org.opencontainers.image.revision=$source_commit",
+		"SEEDNOTE_SIDECAR_PUSH must be 0 or 1",
+		"docker push \"$target_image\" | tee \"$push_output\"",
+		"docker push did not return an image digest",
+		"printf '%s@%s\\n' \"${target_image%:*}\" \"$digest\"",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("Seednote sidecar build script missing contract %q", want)
+		}
+	}
+
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	for _, want := range []string{
+		"docker-seednote-sidecar-image:",
+		"SEEDNOTE_SIDECAR_SOURCE_COMMIT=\"$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)\"",
+		"scripts/build-seednote-sidecar.sh",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("Makefile missing Seednote sidecar build contract %q", want)
+		}
+	}
+}
+
 func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))

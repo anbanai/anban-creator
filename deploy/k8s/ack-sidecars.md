@@ -55,14 +55,28 @@ connection, set the build context to `.`, Dockerfile to
 source commit SHA, and never overwrite that tag. Digest and untagged references
 are rejected because the destination must be known before the push. Stage 2
 reads the same pre-set pipeline variable. The Kubernetes `imagePullSecret` is
-not a build credential and is used only by the wcfLink Pod at pull time. There
-Add a second Docker build/push task for Seednote using
+not a build credential and is used by both sidecar Pods at pull time. Add a
+second Docker build/push task for Seednote using
 `https://github.com/xpzouying/xiaohongshu-mcp.git` at a pinned commit, the
 repository root as context, the root `Dockerfile`, platform `linux/amd64`, and
 `VERSION=<pinned commit or release version>`. Push a unique tag to ACR and use
 the resulting digest for `seednote_image_repo`. The upstream Dockerfile
 preloads its browser under `/app/cache`; the Kubernetes manifest uses that path
 and does not override `ROD_BROWSER_BIN`.
+
+The repository-owned build entry point used by that Yunxiao task is:
+
+```bash
+make docker-seednote-sidecar-image \
+  SEEDNOTE_SIDECAR_SOURCE_COMMIT=<40-character-upstream-commit> \
+  SEEDNOTE_SIDECAR_IMAGE=registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp:<same-commit> \
+  SEEDNOTE_SIDECAR_PUSH=1
+```
+
+The script shallow-fetches only that upstream commit, builds its root
+`Dockerfile` for `linux/amd64`, pushes only when explicitly requested, and
+prints the pushed repository digest. Set `seednote_image_repo` to that digest,
+not to the temporary commit tag.
 
 The upstream Seednote `docker-release` workflow publishes its version input as
 both the version tag and `latest`. Resolve a chosen version tag to its digest
