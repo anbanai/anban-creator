@@ -78,6 +78,7 @@ metadata:
   labels:
     app: wcflink
 spec:
+  storageClassName: nas-sc-creator
   accessModes:
     - ReadWriteOnce
   resources:
@@ -105,14 +106,18 @@ spec:
         kubernetes.io/arch: amd64
       containers:
         - name: seednote
-          image: xpzouying/xiaohongshu-mcp:latest
+          image: ${seednote_image_repo}
           ports:
             - containerPort: 18060
           env:
-            - name: ROD_BROWSER_BIN
-              value: "/usr/bin/google-chrome"
             - name: COOKIES_PATH
               value: "/app/data/cookies.json"
+            - name: HOME
+              value: "/app/data/home"
+            - name: XDG_CACHE_HOME
+              value: "/app/cache"
+            - name: XDG_CONFIG_HOME
+              value: "/app/data/config"
           readinessProbe:
             httpGet:
               path: /health
@@ -162,6 +167,7 @@ metadata:
   labels:
     app: seednote
 spec:
+  storageClassName: nas-sc-creator
   accessModes:
     - ReadWriteOnce
   resources:

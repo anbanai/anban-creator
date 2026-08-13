@@ -6,6 +6,7 @@ metadata:
   labels:
     app: wcflink
 spec:
+  storageClassName: nas-sc-creator
   accessModes:
     - ReadWriteOnce
   resources:
@@ -109,6 +110,7 @@ metadata:
   labels:
     app: seednote
 spec:
+  storageClassName: nas-sc-creator
   accessModes:
     - ReadWriteOnce
   resources:
@@ -146,14 +148,12 @@ spec:
               containerPort: 18060
               protocol: TCP
           env:
-            - name: ROD_BROWSER_BIN
-              value: "/usr/local/bin/cloak-chromium"
             - name: COOKIES_PATH
               value: "/app/data/cookies.json"
             - name: HOME
               value: "/app/data/home"
             - name: XDG_CACHE_HOME
-              value: "/app/data/cache"
+              value: "/app/cache"
             - name: XDG_CONFIG_HOME
               value: "/app/data/config"
           readinessProbe:

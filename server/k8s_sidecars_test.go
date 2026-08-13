@@ -19,6 +19,7 @@ func TestK8sSidecarManifestDefinesInternalWcflinkAndSeednoteServices(t *testing.
 		"kind: PersistentVolumeClaim",
 		"claimName: wcflink-state",
 		"claimName: seednote-data",
+		"image: ${seednote_image_repo}",
 		"type: ClusterIP",
 		"port: 18070",
 		"targetPort: 18070",
@@ -33,6 +34,10 @@ func TestK8sSidecarManifestDefinesInternalWcflinkAndSeednoteServices(t *testing.
 		if !strings.Contains(text, want) {
 			t.Fatalf("sidecar manifest missing %q", want)
 		}
+	}
+
+	if got := strings.Count(text, "storageClassName: nas-sc-creator"); got != 2 {
+		t.Fatalf("sidecar manifest storage class declarations = %d, want 2", got)
 	}
 
 	if strings.Contains(text, "kind: Ingress") || strings.Contains(text, "type: LoadBalancer") || strings.Contains(text, "type: NodePort") {

@@ -168,6 +168,9 @@ func apiVersionForKind(kind string) string {
 
 func assertACKSidecarsPVC(t *testing.T, pvc corev1.PersistentVolumeClaim, storage string) {
 	t.Helper()
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nas-sc-creator" {
+		t.Fatalf("PVC storage class = %v, want nas-sc-creator", pvc.Spec.StorageClassName)
+	}
 	if !reflect.DeepEqual(pvc.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}) {
 		t.Fatalf("PVC access modes = %v, want [ReadWriteOnce]", pvc.Spec.AccessModes)
 	}
@@ -236,7 +239,7 @@ func assertSeednoteACKPodSpec(t *testing.T, pod corev1.PodSpec) {
 	}
 	assertACKSidecarsPort(t, container, 18060)
 	assertACKSidecarsEnv(t, container.Env, map[string]string{
-		"ROD_BROWSER_BIN": "/usr/local/bin/cloak-chromium", "COOKIES_PATH": "/app/data/cookies.json", "HOME": "/app/data/home", "XDG_CACHE_HOME": "/app/data/cache", "XDG_CONFIG_HOME": "/app/data/config",
+		"COOKIES_PATH": "/app/data/cookies.json", "HOME": "/app/data/home", "XDG_CACHE_HOME": "/app/cache", "XDG_CONFIG_HOME": "/app/data/config",
 	})
 	assertACKSidecarsProbe(t, "readiness", container.ReadinessProbe, "/health", 18060, ackSidecarsProbeTiming{initialDelaySeconds: 10, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6})
 	assertACKSidecarsProbe(t, "liveness", container.LivenessProbe, "/health", 18060, ackSidecarsProbeTiming{initialDelaySeconds: 30, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3})

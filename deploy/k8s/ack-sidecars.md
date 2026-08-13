@@ -15,14 +15,14 @@ share one Pod.
 wcfLink has no official published image or Dockerfile upstream. This
 repository's `deploy/docker/Dockerfile.wcflink` is the supported build source: it
 fetches `v0.1.0` and verifies commit
-`fb0999b81043c91e8fddb780eb2ecf03f1f8588f`. Seednote pulls a configured,
-immutable `xpzouying/xiaohongshu-mcp` digest directly from Docker Hub. Do not
-build or mirror Seednote in this workflow.
+`fb0999b81043c91e8fddb780eb2ecf03f1f8588f`. Build Seednote from a pinned
+commit of `https://github.com/xpzouying/xiaohongshu-mcp.git` and push it to ACR.
 
 ## Prerequisites
 
-- ACK has at least one `amd64` node and a default `StorageClass`.
-- ACK nodes can reach Docker Hub for the public Seednote image.
+- ACK has at least one `amd64` node and the `nas-sc-creator` StorageClass.
+- Yunxiao build workers can reach GitHub and the upstream browser CDN used by
+  the Seednote Dockerfile.
 - The Yunxiao ACK/Kubernetes service connection provides the target `kubectl`
   context, and the command runner has Bash, `kubectl`, and `envsubst`.
 - The Yunxiao Docker build/push task has an ACR service connection for build and
@@ -40,7 +40,7 @@ shared namespace and pull secret:
 | `namespace` | `anbanai-prod` |
 | `imagePullSecret` | `anban-acr-pull` |
 | `wcflink_image_repo` | `registry.cn-hangzhou.aliyuncs.com/anban/wcflink:20260720-abc1234` |
-| `seednote_image_repo` | `xpzouying/xiaohongshu-mcp@sha256:<64 lowercase hex>` |
+| `seednote_image_repo` | `registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp@sha256:<64 lowercase hex>` |
 | `wcflink_storage_size` | `10Gi` |
 | `seednote_storage_size` | `10Gi` |
 | `server_app_label` | `anban-creator-server` |
@@ -56,12 +56,18 @@ source commit SHA, and never overwrite that tag. Digest and untagged references
 are rejected because the destination must be known before the push. Stage 2
 reads the same pre-set pipeline variable. The Kubernetes `imagePullSecret` is
 not a build credential and is used only by the wcfLink Pod at pull time. There
-is no Seednote build or mirror stage.
+Add a second Docker build/push task for Seednote using
+`https://github.com/xpzouying/xiaohongshu-mcp.git` at a pinned commit, the
+repository root as context, the root `Dockerfile`, platform `linux/amd64`, and
+`VERSION=<pinned commit or release version>`. Push a unique tag to ACR and use
+the resulting digest for `seednote_image_repo`. The upstream Dockerfile
+preloads its browser under `/app/cache`; the Kubernetes manifest uses that path
+and does not override `ROD_BROWSER_BIN`.
 
 The upstream Seednote `docker-release` workflow publishes its version input as
 both the version tag and `latest`. Resolve a chosen version tag to its digest
-before setting `seednote_image_repo`; version tags, including `latest`, are not
-accepted by this deployment. For example:
+before mirroring; version tags, including `latest`, are not accepted by this
+deployment. For example:
 
 ```sh
 seednote_tag=v2026.06.12.1403-5c43e3d
@@ -69,8 +75,8 @@ docker pull "xpzouying/xiaohongshu-mcp:$seednote_tag"
 docker image inspect --format '{{index .RepoDigests 0}}' "xpzouying/xiaohongshu-mcp:$seednote_tag"
 ```
 
-Use the returned `xpzouying/xiaohongshu-mcp@sha256:<64 lowercase hex>` value
-for `seednote_image_repo` after verifying it is the intended upstream digest.
+When building in Yunxiao, use the pushed ACR image's digest for
+`seednote_image_repo` after verifying it is the intended source revision.
 
 ## Stage 2: deploy
 
@@ -82,7 +88,7 @@ set -euo pipefail
 export namespace="${namespace:?set the ACK namespace in Yunxiao}"
 export imagePullSecret="${imagePullSecret:?set the existing ACR pull secret name in Yunxiao}"
 export wcflink_image_repo="${wcflink_image_repo:?set the immutable wcfLink ACR image reference in Yunxiao}"
-export seednote_image_repo="${seednote_image_repo:?set the immutable Seednote Docker Hub image reference in Yunxiao}"
+export seednote_image_repo="${seednote_image_repo:?set the immutable Seednote ACR image reference in Yunxiao}"
 export wcflink_storage_size="${wcflink_storage_size:?set the wcfLink PVC size in Yunxiao}"
 export seednote_storage_size="${seednote_storage_size:?set the Seednote PVC size in Yunxiao}"
 export server_app_label="${server_app_label:?set the Server Pod app label in Yunxiao}"
@@ -103,8 +109,8 @@ if [[ ! "$wcflink_image_repo" =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-
   echo "wcflink_image_repo must use a non-latest tag after the final slash" >&2
   exit 1
 fi
-if [[ ! "$seednote_image_repo" =~ ^xpzouying/xiaohongshu-mcp@sha256:[a-f0-9]{64}$ ]]; then
-  echo "seednote_image_repo must be xpzouying/xiaohongshu-mcp@sha256:<64 lowercase hex>" >&2
+if [[ ! "$seednote_image_repo" =~ ^[a-z0-9][a-z0-9._/-]*/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$ ]]; then
+  echo "seednote_image_repo must be an image repository with an immutable sha256 digest" >&2
   exit 1
 fi
 if [[ ! "$wcflink_storage_size" =~ ^[1-9][0-9]*(Mi|Gi|Ti)$ ]] || [[ ! "$seednote_storage_size" =~ ^[1-9][0-9]*(Mi|Gi|Ti)$ ]]; then
