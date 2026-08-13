@@ -14,7 +14,9 @@ TS_MONTAGE_AGENT_IMAGE ?= creator-agent-montage-ts:latest
 SERVER_IMAGE := anban-creator-server:latest
 WCFLINK_IMAGE := anban-creator-wcflink:latest
 SEEDNOTE_SIDECAR_IMAGE ?= anban-seednote-sidecar:dev
+SEEDNOTE_SIDECAR_SOURCE_REPO ?= https://github.com/xpzouying/xiaohongshu-mcp.git
 SEEDNOTE_SIDECAR_SOURCE_COMMIT ?=
+SEEDNOTE_SIDECAR_PLATFORM ?= linux/amd64
 SEEDNOTE_SIDECAR_PUSH ?= 0
 STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
@@ -213,8 +215,10 @@ docker-wcflink-image:
 # Build the Seednote integration sidecar from a pinned upstream commit. Set
 # SEEDNOTE_SIDECAR_PUSH=1 after authenticating Docker to the target registry.
 docker-seednote-sidecar-image:
-	@SEEDNOTE_SIDECAR_SOURCE_COMMIT="$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)" \
+	@SEEDNOTE_SIDECAR_SOURCE_REPO="$(SEEDNOTE_SIDECAR_SOURCE_REPO)" \
+	SEEDNOTE_SIDECAR_SOURCE_COMMIT="$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)" \
 	SEEDNOTE_SIDECAR_IMAGE="$(SEEDNOTE_SIDECAR_IMAGE)" \
+	SEEDNOTE_SIDECAR_PLATFORM="$(SEEDNOTE_SIDECAR_PLATFORM)" \
 	SEEDNOTE_SIDECAR_PUSH="$(SEEDNOTE_SIDECAR_PUSH)" \
 	scripts/build-seednote-sidecar.sh
 

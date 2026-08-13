@@ -938,6 +938,7 @@ func TestSeednoteSidecarBuildUsesPinnedUpstreamCommit(t *testing.T) {
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
 		"docker-seednote-sidecar-image:",
+		"SEEDNOTE_SIDECAR_SOURCE_REPO=\"$(SEEDNOTE_SIDECAR_SOURCE_REPO)\"",
 		"SEEDNOTE_SIDECAR_SOURCE_COMMIT=\"$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)\"",
 		"scripts/build-seednote-sidecar.sh",
 	} {

@@ -113,9 +113,10 @@ change.
 
 ## Deployment
 
-Continue deploying `deploy/k8s/ack-sidecars.yaml` through Yunxiao with an
-immutable `xpzouying/xiaohongshu-mcp@sha256:...` image reference. The Server
-and sidecar use the same namespace, and the Server retains
+Deploy `deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml` as two
+independent Yunxiao workflows with an immutable
+`xpzouying/xiaohongshu-mcp@sha256:...` image reference for Seednote. The Server
+and each sidecar use the same namespace, and the Server retains
 `ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060`.
 
 No Agent Job environment variable or mcporter configuration is needed. The

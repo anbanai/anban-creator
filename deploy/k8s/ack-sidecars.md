@@ -1,16 +1,14 @@
 # ACK wcfLink and Seednote deployment with Yunxiao
 
-`deploy/k8s/ack-sidecars.yaml` is the sole Yunxiao deployment workflow for the
-wcfLink and Seednote integrations. The Server deployment, wcfLink, and
-Seednote must receive the same `namespace` pipeline variable. That makes their
-in-cluster endpoints exactly `http://wcflink:18070` and
-`http://seednote:18060/mcp`.
+wcfLink and Seednote use two independent Yunxiao deployment workflows:
+`deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml`. Keep their
+build and deployment tasks separate. The Server deployment and each sidecar
+must receive the same `namespace` pipeline variable. Their in-cluster endpoints
+are `http://wcflink:18070` and `http://seednote:18060/mcp`.
 
-This consolidation removes a duplicate deployment source; it does not reduce
-the processes' actual CPU or memory consumption. wcfLink and Seednote remain
-separate one-replica Deployments deliberately: they have independent images,
-lifecycles, health checks, resource limits, and persistent state, and must not
-share one Pod.
+The manifests are intentionally independent: each sidecar has its own image,
+lifecycle, health checks, resource limits, and persistent state. Deploying one
+does not require rebuilding or applying the other.
 
 wcfLink has no official published image or Dockerfile upstream. This
 repository's `deploy/docker/Dockerfile.wcflink` is the supported build source: it
@@ -68,6 +66,7 @@ The repository-owned build entry point used by that Yunxiao task is:
 
 ```bash
 make docker-seednote-sidecar-image \
+  SEEDNOTE_SIDECAR_SOURCE_REPO=https://github.com/royalmorty/xiaohongshu-mcp.git \
   SEEDNOTE_SIDECAR_SOURCE_COMMIT=<40-character-upstream-commit> \
   SEEDNOTE_SIDECAR_IMAGE=registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp:<same-commit> \
   SEEDNOTE_SIDECAR_PUSH=1
@@ -94,7 +93,7 @@ When building in Yunxiao, use the pushed ACR image's digest for
 
 ## Stage 2: deploy
 
-Add a Bash command task after Stage 1. Use this exact script:
+Add a Bash command task after the image build tasks. Use this exact script:
 
 ```bash
 set -euo pipefail
@@ -192,8 +191,10 @@ preflight_pvc_storage() {
 preflight_pvc_storage wcflink-state "$wcflink_storage_size"
 preflight_pvc_storage seednote-data "$seednote_storage_size"
 
-envsubst '${namespace} ${imagePullSecret} ${wcflink_image_repo} ${seednote_image_repo} ${wcflink_storage_size} ${seednote_storage_size} ${server_app_label}' < deploy/k8s/ack-sidecars.yaml | kubectl apply -f -
+envsubst '${namespace} ${imagePullSecret} ${wcflink_image_repo} ${wcflink_storage_size}' < deploy/k8s/ack-wcflink.yaml | kubectl apply -f -
 kubectl -n "$namespace" rollout status deployment/wcflink --timeout=10m
+
+envsubst '${namespace} ${imagePullSecret} ${seednote_image_repo} ${seednote_storage_size} ${server_app_label}' < deploy/k8s/ack-seednote.yaml | kubectl apply -f -
 kubectl -n "$namespace" rollout status deployment/seednote --timeout=10m
 kubectl -n "$namespace" get deployment,pod,service,pvc -l 'app in (wcflink,seednote)'
 kubectl -n "$namespace" get endpoints wcflink seednote

@@ -606,7 +606,7 @@ git commit -m "docs: describe direct Seednote MCP research"
 **Files:**
 - Verify: all changed parent files
 - Verify: all changed plugin child files
-- Verify: `deploy/k8s/ack-sidecars.yaml`
+- Verify: `deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml`
 - Verify: `server/Deployment.yaml`
 
 - [ ] **Step 1: Verify the plugin child without staging the Humanizer change**
