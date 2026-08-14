@@ -194,8 +194,8 @@ func main() {
 	}, log)
 	log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client configured")
 
-	// 9.2 Create ilink transport client. wcflink remains the underlying HTTP
-	// sidecar, while ilink is the platform channel name.
+	// 9.2 Create the iLink transport client. The iLink sidecar is the underlying
+	// HTTP transport, while ilink is the platform channel name.
 	var wcfClient *wcf.Client
 	var ilinkMonitor *service.SidecarMonitor
 	if cfg.Ilink.Enabled {

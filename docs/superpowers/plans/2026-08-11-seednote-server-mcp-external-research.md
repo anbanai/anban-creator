@@ -4,7 +4,7 @@
 
 **Goal:** Make authenticated Anban Server MCP tools the canonical managed Seednote Xiaohongshu research path and remove Agent Reach, Python, and mcporter from Seednote runtimes.
 
-**Architecture:** Managed Seednote Jobs call the existing atomic Seednote tools on the authenticated Anban MCP connection. Server `SeednoteCapabilityService` continues to call the independently deployed `xiaohongshu-mcp` sidecar at `http://seednote:18060`; the Agent Job never connects to the sidecar directly. Workflow sequencing and fallback stay in the Seednote Agent and `seednote-research` Skill.
+**Architecture:** Managed Seednote Jobs call the existing atomic Seednote tools on the authenticated Anban MCP connection. Server `SeednoteCapabilityService` continues to call the independently deployed `sidecar-seednote` at `http://sidecar-seednote:18060`; the Agent Job never connects to the sidecar directly. Workflow sequencing and fallback stay in the Seednote Agent and `seednote-research` Skill.
 
 **Tech Stack:** Go 1.24, Model Context Protocol Go SDK, React-independent plugin Markdown/TOML, Agent Pack generator, TypeScript/Bun Agent runtime, Docker, Kubernetes/ACK, Git submodules.
 
@@ -217,7 +217,7 @@ required := []string{
 }
 forbidden := []string{
 	"Agent-Reach", "agent-reach", "active_backend", "backend_command_family",
-	"mcporter", "OpenCLI", "xhs-cli", "http://seednote:18060", "localhost:18060",
+	"mcporter", "OpenCLI", "xhs-cli", "http://sidecar-seednote:18060", "localhost:18060",
 }
 ```
 
@@ -581,8 +581,8 @@ not a Python/Agent Reach profile. Keep `creator-agent-montage` documented as the
 Python/OpenMontage profile. Update build-target comments accordingly.
 
 In operational docs, state that Xiaohongshu research flows through authenticated
-Anban Server MCP tools backed by the separately deployed `seednote` sidecar.
-Do not describe direct Agent Job access to `http://seednote:18060`.
+Anban Server MCP tools backed by the separately deployed `sidecar-seednote`.
+Do not describe direct Agent Job access to `http://sidecar-seednote:18060`.
 
 - [ ] **Step 3: Re-run the current-surface scan**
 
@@ -606,7 +606,7 @@ git commit -m "docs: describe direct Seednote MCP research"
 **Files:**
 - Verify: all changed parent files
 - Verify: all changed plugin child files
-- Verify: `deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml`
+- Verify: `deploy/k8s/ack-sidecar-ilink.yaml` and `deploy/k8s/ack-sidecar-seednote.yaml`
 - Verify: `server/Deployment.yaml`
 
 - [ ] **Step 1: Verify the plugin child without staging the Humanizer change**
@@ -659,7 +659,7 @@ claim image-level completion from source tests alone.
 
 ```bash
 go test ./server -run 'TestACK.*Sidecars|Test.*Kubernetes.*Seednote' -count=1
-rg -n 'ANBAN_SEEDNOTE_BASE_URL|http://seednote:18060' server/Deployment.yaml deploy/k8s/ack-sidecars.md
+rg -n 'ANBAN_SEEDNOTE_BASE_URL|http://sidecar-seednote:18060' server/Deployment.yaml deploy/k8s/ack-sidecars.md
 ```
 
 Expected: tests pass, Server still points at the in-cluster sidecar, and no

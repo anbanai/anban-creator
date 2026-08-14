@@ -1,36 +1,36 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: wcflink-state
+  name: sidecar-ilink-state
   namespace: "${namespace}"
   labels:
-    app: wcflink
+    app: sidecar-ilink
 spec:
   storageClassName: nas-sc-creator
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: "${wcflink_storage_size}"
+      storage: "${sidecar_ilink_storage_size}"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wcflink
+  name: sidecar-ilink
   namespace: "${namespace}"
   labels:
-    app: wcflink
+    app: sidecar-ilink
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: wcflink
+      app: sidecar-ilink
   template:
     metadata:
       labels:
-        app: wcflink
+        app: sidecar-ilink
     spec:
       automountServiceAccountToken: false
       nodeSelector:
@@ -38,9 +38,9 @@ spec:
       imagePullSecrets:
         - name: "${imagePullSecret}"
       containers:
-        - name: wcflink
-          image: "${wcflink_image_repo}"
-          imagePullPolicy: IfNotPresent
+        - name: sidecar-ilink
+          image: "${sidecar_ilink_image_repo}"
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 18070
@@ -78,24 +78,24 @@ spec:
               cpu: 500m
               memory: 512Mi
           volumeMounts:
-            - name: wcflink-state
+            - name: sidecar-ilink-state
               mountPath: /app/state
       volumes:
-        - name: wcflink-state
+        - name: sidecar-ilink-state
           persistentVolumeClaim:
-            claimName: wcflink-state
+            claimName: sidecar-ilink-state
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: wcflink
+  name: sidecar-ilink
   namespace: "${namespace}"
   labels:
-    app: wcflink
+    app: sidecar-ilink
 spec:
   type: ClusterIP
   selector:
-    app: wcflink
+    app: sidecar-ilink
   ports:
     - name: http
       port: 18070

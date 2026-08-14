@@ -17,40 +17,40 @@ import (
 
 const (
 	ackSidecarsTestNamespace       = "anbanai-test"
-	ackSidecarsTestWcflinkImage    = "registry.cn-hangzhou.aliyuncs.com/anban/wcflink:sha256-test"
-	ackSidecarsTestSeednoteImage   = "registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	ackSidecarsTestIlinkImage      = "registry.cn-hangzhou.aliyuncs.com/anban/sidecar-ilink:latest"
+	ackSidecarsTestSeednoteImage   = "registry.cn-hangzhou.aliyuncs.com/anban/sidecar-seednote:latest"
 	ackSidecarsTestImagePullSecret = "anban-acr-pull"
-	ackSidecarsTestWcflinkStorage  = "10Gi"
+	ackSidecarsTestIlinkStorage    = "10Gi"
 	ackSidecarsTestSeednoteStorage = "10Gi"
 	ackSidecarsTestServerAppLabel  = "anban-creator-server"
 )
 
-func TestACKWcflinkManifestContract(t *testing.T) {
-	raw := readACKSidecarsManifest(t, "../deploy/k8s/ack-wcflink.yaml")
-	assertACKWcflinkRawTemplateContract(t, raw)
+func TestACKIlinkManifestContract(t *testing.T) {
+	raw := readACKSidecarsManifest(t, "../deploy/k8s/ack-sidecar-ilink.yaml")
+	assertACKIlinkRawTemplateContract(t, raw)
 	documents := splitACKSidecarsManifest(t, renderACKSidecarsManifest(raw))
 	if len(documents) != 3 {
-		t.Fatalf("ACK wcfLink manifest must contain exactly 3 documents, got %d", len(documents))
+		t.Fatalf("ACK iLink manifest must contain exactly 3 documents, got %d", len(documents))
 	}
-	var wcflinkPVC corev1.PersistentVolumeClaim
-	strictUnmarshalACKSidecarsDocument(t, documents[0], &wcflinkPVC)
-	assertACKSidecarsObject(t, wcflinkPVC.TypeMeta, wcflinkPVC.ObjectMeta, "PersistentVolumeClaim", "wcflink-state", "wcflink")
-	assertACKSidecarsPVC(t, wcflinkPVC, ackSidecarsTestWcflinkStorage)
+	var ilinkPVC corev1.PersistentVolumeClaim
+	strictUnmarshalACKSidecarsDocument(t, documents[0], &ilinkPVC)
+	assertACKSidecarsObject(t, ilinkPVC.TypeMeta, ilinkPVC.ObjectMeta, "PersistentVolumeClaim", "sidecar-ilink-state", "sidecar-ilink")
+	assertACKSidecarsPVC(t, ilinkPVC, ackSidecarsTestIlinkStorage)
 
-	var wcflinkDeployment appsv1.Deployment
-	strictUnmarshalACKSidecarsDocument(t, documents[1], &wcflinkDeployment)
-	assertACKSidecarsObject(t, wcflinkDeployment.TypeMeta, wcflinkDeployment.ObjectMeta, "Deployment", "wcflink", "wcflink")
-	assertACKSidecarsDeployment(t, wcflinkDeployment, "wcflink")
-	assertWcflinkPodSpec(t, wcflinkDeployment.Spec.Template.Spec)
+	var ilinkDeployment appsv1.Deployment
+	strictUnmarshalACKSidecarsDocument(t, documents[1], &ilinkDeployment)
+	assertACKSidecarsObject(t, ilinkDeployment.TypeMeta, ilinkDeployment.ObjectMeta, "Deployment", "sidecar-ilink", "sidecar-ilink")
+	assertACKSidecarsDeployment(t, ilinkDeployment, "sidecar-ilink")
+	assertIlinkPodSpec(t, ilinkDeployment.Spec.Template.Spec)
 
-	var wcflinkService corev1.Service
-	strictUnmarshalACKSidecarsDocument(t, documents[2], &wcflinkService)
-	assertACKSidecarsObject(t, wcflinkService.TypeMeta, wcflinkService.ObjectMeta, "Service", "wcflink", "wcflink")
-	assertACKSidecarsService(t, wcflinkService, "wcflink", 18070)
+	var ilinkService corev1.Service
+	strictUnmarshalACKSidecarsDocument(t, documents[2], &ilinkService)
+	assertACKSidecarsObject(t, ilinkService.TypeMeta, ilinkService.ObjectMeta, "Service", "sidecar-ilink", "sidecar-ilink")
+	assertACKSidecarsService(t, ilinkService, "sidecar-ilink", 18070)
 }
 
 func TestACKSeednoteManifestContract(t *testing.T) {
-	raw := readACKSidecarsManifest(t, "../deploy/k8s/ack-seednote.yaml")
+	raw := readACKSidecarsManifest(t, "../deploy/k8s/ack-sidecar-seednote.yaml")
 	assertACKSeednoteRawTemplateContract(t, raw)
 	documents := splitACKSidecarsManifest(t, renderACKSidecarsManifest(raw))
 	if len(documents) != 4 {
@@ -58,25 +58,25 @@ func TestACKSeednoteManifestContract(t *testing.T) {
 	}
 	var seednotePVC corev1.PersistentVolumeClaim
 	strictUnmarshalACKSidecarsDocument(t, documents[0], &seednotePVC)
-	assertACKSidecarsObject(t, seednotePVC.TypeMeta, seednotePVC.ObjectMeta, "PersistentVolumeClaim", "seednote-data", "seednote")
+	assertACKSidecarsObject(t, seednotePVC.TypeMeta, seednotePVC.ObjectMeta, "PersistentVolumeClaim", "sidecar-seednote-data", "sidecar-seednote")
 	assertACKSidecarsPVC(t, seednotePVC, ackSidecarsTestSeednoteStorage)
 
 	var seednoteDeployment appsv1.Deployment
 	strictUnmarshalACKSidecarsDocument(t, documents[1], &seednoteDeployment)
-	assertACKSidecarsObject(t, seednoteDeployment.TypeMeta, seednoteDeployment.ObjectMeta, "Deployment", "seednote", "seednote")
-	assertACKSidecarsDeployment(t, seednoteDeployment, "seednote")
+	assertACKSidecarsObject(t, seednoteDeployment.TypeMeta, seednoteDeployment.ObjectMeta, "Deployment", "sidecar-seednote", "sidecar-seednote")
+	assertACKSidecarsDeployment(t, seednoteDeployment, "sidecar-seednote")
 	assertSeednoteACKPodSpec(t, seednoteDeployment.Spec.Template.Spec)
 
 	var seednoteService corev1.Service
 	strictUnmarshalACKSidecarsDocument(t, documents[2], &seednoteService)
-	assertACKSidecarsObject(t, seednoteService.TypeMeta, seednoteService.ObjectMeta, "Service", "seednote", "seednote")
-	assertACKSidecarsService(t, seednoteService, "seednote", 18060)
+	assertACKSidecarsObject(t, seednoteService.TypeMeta, seednoteService.ObjectMeta, "Service", "sidecar-seednote", "sidecar-seednote")
+	assertACKSidecarsService(t, seednoteService, "sidecar-seednote", 18060)
 
 	var seednotePolicy networkingv1.NetworkPolicy
 	strictUnmarshalACKSidecarsDocument(t, documents[3], &seednotePolicy)
-	assertACKSidecarsObject(t, seednotePolicy.TypeMeta, seednotePolicy.ObjectMeta, "NetworkPolicy", "seednote-server-only", "seednote")
-	if !reflect.DeepEqual(seednotePolicy.Spec.PodSelector.MatchLabels, map[string]string{"app": "seednote"}) {
-		t.Fatalf("NetworkPolicy pod selector = %v, want app=seednote", seednotePolicy.Spec.PodSelector.MatchLabels)
+	assertACKSidecarsObject(t, seednotePolicy.TypeMeta, seednotePolicy.ObjectMeta, "NetworkPolicy", "sidecar-seednote-server-only", "sidecar-seednote")
+	if !reflect.DeepEqual(seednotePolicy.Spec.PodSelector.MatchLabels, map[string]string{"app": "sidecar-seednote"}) {
+		t.Fatalf("NetworkPolicy pod selector = %v, want app=sidecar-seednote", seednotePolicy.Spec.PodSelector.MatchLabels)
 	}
 	if !reflect.DeepEqual(seednotePolicy.Spec.PolicyTypes, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}) || len(seednotePolicy.Spec.Ingress) != 1 {
 		t.Fatalf("NetworkPolicy types/ingress = %v/%v, want one Ingress rule", seednotePolicy.Spec.PolicyTypes, seednotePolicy.Spec.Ingress)
@@ -99,13 +99,13 @@ func readACKSidecarsManifest(t *testing.T, path string) string {
 	return string(raw)
 }
 
-func assertACKWcflinkRawTemplateContract(t *testing.T, raw string) {
+func assertACKIlinkRawTemplateContract(t *testing.T, raw string) {
 	t.Helper()
 	for placeholder, wantCount := range map[string]int{
-		"${namespace}": 3, "${wcflink_storage_size}": 1, "${wcflink_image_repo}": 1, "${imagePullSecret}": 1,
+		"${namespace}": 3, "${sidecar_ilink_storage_size}": 1, "${sidecar_ilink_image_repo}": 1, "${imagePullSecret}": 1,
 	} {
 		if gotCount := strings.Count(raw, placeholder); gotCount != wantCount {
-			t.Fatalf("raw ACK wcfLink template placeholder %q occurs %d times, want %d", placeholder, gotCount, wantCount)
+			t.Fatalf("raw ACK iLink template placeholder %q occurs %d times, want %d", placeholder, gotCount, wantCount)
 		}
 	}
 }
@@ -113,11 +113,11 @@ func assertACKWcflinkRawTemplateContract(t *testing.T, raw string) {
 func assertACKSeednoteRawTemplateContract(t *testing.T, raw string) {
 	t.Helper()
 	for placeholder, wantCount := range map[string]int{
-		"${namespace}":             4,
-		"${seednote_storage_size}": 1,
-		"${seednote_image_repo}":   1,
-		"${imagePullSecret}":       1,
-		"${server_app_label}":      1,
+		"${namespace}":                     4,
+		"${sidecar_seednote_storage_size}": 1,
+		"${sidecar_seednote_image_repo}":   1,
+		"${imagePullSecret}":               1,
+		"${server_app_label}":              1,
 	} {
 		if gotCount := strings.Count(raw, placeholder); gotCount != wantCount {
 			t.Fatalf("raw ACK sidecars template placeholder %q occurs %d times, want %d", placeholder, gotCount, wantCount)
@@ -125,6 +125,8 @@ func assertACKSeednoteRawTemplateContract(t *testing.T, raw string) {
 	}
 	for _, obsoletePath := range []string{
 		"../deploy/k8s/ack-sidecars.yaml",
+		"../deploy/k8s/ack-wcflink.yaml",
+		"../deploy/k8s/ack-seednote.yaml",
 		"../deploy/k8s/ack-seednote.md",
 		"../docs/superpowers/specs/2026-07-20-ack-seednote-standalone-design.md",
 		"../docs/superpowers/plans/2026-07-20-ack-seednote-standalone.md",
@@ -141,10 +143,10 @@ func renderACKSidecarsManifest(raw string) string {
 	return strings.NewReplacer(
 		"${namespace}", ackSidecarsTestNamespace,
 		"${imagePullSecret}", ackSidecarsTestImagePullSecret,
-		"${wcflink_image_repo}", ackSidecarsTestWcflinkImage,
-		"${seednote_image_repo}", ackSidecarsTestSeednoteImage,
-		"${wcflink_storage_size}", ackSidecarsTestWcflinkStorage,
-		"${seednote_storage_size}", ackSidecarsTestSeednoteStorage,
+		"${sidecar_ilink_image_repo}", ackSidecarsTestIlinkImage,
+		"${sidecar_seednote_image_repo}", ackSidecarsTestSeednoteImage,
+		"${sidecar_ilink_storage_size}", ackSidecarsTestIlinkStorage,
+		"${sidecar_seednote_storage_size}", ackSidecarsTestSeednoteStorage,
 		"${server_app_label}", ackSidecarsTestServerAppLabel,
 	).Replace(raw)
 }
@@ -231,11 +233,11 @@ func assertACKSidecarsPodBase(t *testing.T, pod corev1.PodSpec, wantPullSecrets 
 	}
 }
 
-func assertWcflinkPodSpec(t *testing.T, pod corev1.PodSpec) {
+func assertIlinkPodSpec(t *testing.T, pod corev1.PodSpec) {
 	t.Helper()
 	assertACKSidecarsPodBase(t, pod, []corev1.LocalObjectReference{{Name: ackSidecarsTestImagePullSecret}})
 	container := pod.Containers[0]
-	if container.Name != "wcflink" || container.Image != ackSidecarsTestWcflinkImage || container.ImagePullPolicy != corev1.PullIfNotPresent {
+	if container.Name != "sidecar-ilink" || container.Image != ackSidecarsTestIlinkImage || container.ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("container name/image/pull policy = %s/%s/%s", container.Name, container.Image, container.ImagePullPolicy)
 	}
 	assertACKSidecarsPort(t, container, 18070)
@@ -246,8 +248,8 @@ func assertWcflinkPodSpec(t *testing.T, pod corev1.PodSpec) {
 	assertACKSidecarsProbe(t, "liveness", container.LivenessProbe, "/health/live", 18070, ackSidecarsProbeTiming{initialDelaySeconds: 10, periodSeconds: 20, timeoutSeconds: 3, failureThreshold: 3})
 	assertACKSidecarsResources(t, "container resource requests", container.Resources.Requests, corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("256Mi")})
 	assertACKSidecarsResources(t, "container resource limits", container.Resources.Limits, corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi")})
-	if !reflect.DeepEqual(container.VolumeMounts, []corev1.VolumeMount{{Name: "wcflink-state", MountPath: "/app/state", ReadOnly: false}}) || len(pod.Volumes) != 1 || pod.Volumes[0].Name != "wcflink-state" || pod.Volumes[0].PersistentVolumeClaim == nil || pod.Volumes[0].PersistentVolumeClaim.ClaimName != "wcflink-state" || pod.Volumes[0].PersistentVolumeClaim.ReadOnly {
-		t.Fatalf("wcfLink volumes/mounts = %v/%v, want PVC wcflink-state at /app/state", pod.Volumes, container.VolumeMounts)
+	if !reflect.DeepEqual(container.VolumeMounts, []corev1.VolumeMount{{Name: "sidecar-ilink-state", MountPath: "/app/state", ReadOnly: false}}) || len(pod.Volumes) != 1 || pod.Volumes[0].Name != "sidecar-ilink-state" || pod.Volumes[0].PersistentVolumeClaim == nil || pod.Volumes[0].PersistentVolumeClaim.ClaimName != "sidecar-ilink-state" || pod.Volumes[0].PersistentVolumeClaim.ReadOnly {
+		t.Fatalf("iLink volumes/mounts = %v/%v, want PVC sidecar-ilink-state at /app/state", pod.Volumes, container.VolumeMounts)
 	}
 }
 
@@ -255,7 +257,7 @@ func assertSeednoteACKPodSpec(t *testing.T, pod corev1.PodSpec) {
 	t.Helper()
 	assertACKSidecarsPodBase(t, pod, []corev1.LocalObjectReference{{Name: ackSidecarsTestImagePullSecret}})
 	container := pod.Containers[0]
-	if container.Name != "seednote" || container.Image != ackSidecarsTestSeednoteImage || container.ImagePullPolicy != corev1.PullIfNotPresent {
+	if container.Name != "sidecar-seednote" || container.Image != ackSidecarsTestSeednoteImage || container.ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("container name/image/pull policy = %s/%s/%s", container.Name, container.Image, container.ImagePullPolicy)
 	}
 	assertACKSidecarsPort(t, container, 18060)
@@ -266,11 +268,11 @@ func assertSeednoteACKPodSpec(t *testing.T, pod corev1.PodSpec) {
 	assertACKSidecarsProbe(t, "liveness", container.LivenessProbe, "/health", 18060, ackSidecarsProbeTiming{initialDelaySeconds: 30, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3})
 	assertACKSidecarsResources(t, "container resource requests", container.Resources.Requests, corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("1Gi")})
 	assertACKSidecarsResources(t, "container resource limits", container.Resources.Limits, corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi")})
-	if !reflect.DeepEqual(container.VolumeMounts, []corev1.VolumeMount{{Name: "seednote-data", MountPath: "/app/data", ReadOnly: false}, {Name: "browser-shm", MountPath: "/dev/shm", ReadOnly: false}}) || len(pod.Volumes) != 2 {
+	if !reflect.DeepEqual(container.VolumeMounts, []corev1.VolumeMount{{Name: "sidecar-seednote-data", MountPath: "/app/data", ReadOnly: false}, {Name: "browser-shm", MountPath: "/dev/shm", ReadOnly: false}}) || len(pod.Volumes) != 2 {
 		t.Fatalf("Seednote volumes/mounts = %v/%v, want data PVC and browser shared-memory volume", pod.Volumes, container.VolumeMounts)
 	}
-	if pod.Volumes[0].Name != "seednote-data" || pod.Volumes[0].PersistentVolumeClaim == nil || pod.Volumes[0].PersistentVolumeClaim.ClaimName != "seednote-data" || pod.Volumes[0].PersistentVolumeClaim.ReadOnly {
-		t.Fatalf("Seednote data volume = %+v, want PVC seednote-data", pod.Volumes[0])
+	if pod.Volumes[0].Name != "sidecar-seednote-data" || pod.Volumes[0].PersistentVolumeClaim == nil || pod.Volumes[0].PersistentVolumeClaim.ClaimName != "sidecar-seednote-data" || pod.Volumes[0].PersistentVolumeClaim.ReadOnly {
+		t.Fatalf("Seednote data volume = %+v, want PVC sidecar-seednote-data", pod.Volumes[0])
 	}
 	shm := pod.Volumes[1]
 	if shm.Name != "browser-shm" || shm.EmptyDir == nil || shm.EmptyDir.Medium != corev1.StorageMediumMemory || shm.EmptyDir.SizeLimit == nil || shm.EmptyDir.SizeLimit.Cmp(resource.MustParse("1Gi")) != 0 {
@@ -287,11 +289,11 @@ func TestServerDeploymentInjectsSidecarURLs(t *testing.T) {
 
 	for _, want := range []string{
 		"name: ANBAN_SEEDNOTE_BASE_URL",
-		"value: http://seednote:18060",
+		"value: http://sidecar-seednote:18060",
 		"name: ANBAN_ILINK_ENABLED",
 		"value: \"true\"",
 		"name: ANBAN_ILINK_BASE_URL",
-		"value: http://wcflink:18070",
+		"value: http://sidecar-ilink:18070",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("server deployment missing %q", want)
@@ -299,7 +301,7 @@ func TestServerDeploymentInjectsSidecarURLs(t *testing.T) {
 	}
 }
 
-func TestConfigExampleDocumentsSeednoteSidecarEnv(t *testing.T) {
+func TestConfigExampleDocumentsSidecarEnvs(t *testing.T) {
 	raw, err := os.ReadFile("config.example.yaml")
 	if err != nil {
 		t.Fatalf("read config example: %v", err)
@@ -308,8 +310,10 @@ func TestConfigExampleDocumentsSeednoteSidecarEnv(t *testing.T) {
 
 	for _, want := range []string{
 		"seednote:",
-		`base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"`,
+		`base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://sidecar-seednote:18060}"`,
 		"timeout: 30",
+		"ilink:",
+		`base_url: "${ANBAN_ILINK_BASE_URL:-http://sidecar-ilink:18070}"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("config example missing %q", want)

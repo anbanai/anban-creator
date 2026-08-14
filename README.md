@@ -14,9 +14,9 @@ Managed execution uses separate `creator-agent-article`, `creator-agent-seednote
 and `creator-agent-montage` images. They share the same plugin tree while keeping
 the Seednote workflow image independent from the Montage OpenMontage/Remotion/ffmpeg
 profile. Seednote Xiaohongshu research flows through authenticated Anban Server MCP
-tools backed by the separately deployed `seednote` sidecar.
+tools backed by the separately deployed `sidecar-seednote`.
 Their independent build definitions, together with the Server, Studio, and
-wcfLink definitions, live in `deploy/docker/` and use the repository root as the
+sidecar iLink definitions, live in `deploy/docker/` and use the repository root as the
 Docker build context.
 
 ## Managed Agent Runtime

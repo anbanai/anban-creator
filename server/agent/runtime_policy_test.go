@@ -173,8 +173,8 @@ func TestManagedMCPBoundaryHookBlocksDirectMCPAndSeednoteSidecar(t *testing.T) {
 		denied  bool
 	}{
 		{name: "server mcp", command: "curl https://creator.anbanai.com/mcp", denied: true},
-		{name: "seednote mcp", command: "node -e 'fetch(\"http://seednote:18060/mcp\")'", denied: true},
-		{name: "seednote rest", command: "curl http://seednote:18060/api/v1/feeds", denied: true},
+		{name: "seednote mcp", command: "node -e 'fetch(\"http://sidecar-seednote:18060/mcp\")'", denied: true},
+		{name: "seednote rest", command: "curl http://sidecar-seednote:18060/api/v1/feeds", denied: true},
 		{name: "ordinary command", command: "printf done", denied: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -205,7 +205,7 @@ func TestManagedMCPBoundaryHookBlocksDirectMCPAndSeednoteSidecar(t *testing.T) {
 	output, err := matcher.Hooks[0](context.Background(), &claudecode.PreToolUseHookInput{
 		HookEventName: "PreToolUse",
 		ToolName:      "WebFetch",
-		ToolInput:     map[string]any{"url": "http://seednote:18060/api/v1/feeds"},
+		ToolInput:     map[string]any{"url": "http://sidecar-seednote:18060/api/v1/feeds"},
 	}, nil, claudecode.HookContext{})
 	if err != nil {
 		t.Fatal(err)

@@ -169,9 +169,9 @@ describe("buildQueryOptions", () => {
 
     const boundary = articleHooks.PreToolUse[0].hooks[0];
     const hookOptions = { signal: new AbortController().signal };
-    const direct = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://seednote:18060/mcp" }, tool_use_id: "tool-1" }, "tool-1", hookOptions);
+    const direct = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://sidecar-seednote:18060/mcp" }, tool_use_id: "tool-1" }, "tool-1", hookOptions);
     expect(direct).toMatchObject({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });
-    const directRest = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://seednote:18060/api/v1/feeds" }, tool_use_id: "tool-rest" }, "tool-rest", hookOptions);
+    const directRest = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://sidecar-seednote:18060/api/v1/feeds" }, tool_use_id: "tool-rest" }, "tool-rest", hookOptions);
     expect(directRest).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
     expect(await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "printf done" }, tool_use_id: "tool-2" }, "tool-2", hookOptions)).toEqual({});
 

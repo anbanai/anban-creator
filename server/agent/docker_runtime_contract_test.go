@@ -706,16 +706,22 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 			want: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
 		},
 		{
-			path: filepath.Join(root, "deploy/docker/Dockerfile.wcflink"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"),
 			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-seednote"),
+			want: []string{"FROM golang:1.24 AS source", "FROM ubuntu:22.04"},
 		},
 		{
 			path: filepath.Join(root, "docker-compose.yml"),
 			want: []string{
 				"image: mysql:latest",
 				"image: redis:alpine",
-				"image: xpzouying/xiaohongshu-mcp:latest",
-				"dockerfile: deploy/docker/Dockerfile.wcflink",
+				"image: anban-creator-sidecar-ilink:latest",
+				"image: anban-creator-sidecar-seednote:latest",
+				"dockerfile: deploy/docker/Dockerfile.sidecar-ilink",
+				"dockerfile: deploy/docker/Dockerfile.sidecar-seednote",
 				"dockerfile: deploy/docker/Dockerfile.studio",
 				"VITE_API_BASE_URL: /api/v1",
 			},
@@ -741,8 +747,9 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-seednote",
 		"deploy/docker/Dockerfile.agent-seednote-ts",
 		"deploy/docker/Dockerfile.server",
+		"deploy/docker/Dockerfile.sidecar-ilink",
+		"deploy/docker/Dockerfile.sidecar-seednote",
 		"deploy/docker/Dockerfile.studio",
-		"deploy/docker/Dockerfile.wcflink",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("repository-owned Dockerfile inventory mismatch\nwant: %v\n got: %v", want, got)
@@ -841,15 +848,13 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 	}
 }
 
-func TestWcfLinkDockerfileRetainsPinnedBuildContract(t *testing.T) {
+func TestIlinkDockerfileBuildsLatestUpstream(t *testing.T) {
 	root := repositoryRoot(t)
-	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.wcflink"))
+	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"))
 	for _, want := range []string{
-		"ARG WCFLINK_REPO=https://github.com/lich0821/wcfLink.git",
-		"ARG WCFLINK_REF=refs/tags/v0.1.0",
-		"ARG WCFLINK_COMMIT=fb0999b81043c91e8fddb780eb2ecf03f1f8588f",
-		"git fetch --depth 1 origin \"$WCFLINK_REF\"",
-		"test \"$(git rev-parse HEAD)\" = \"$WCFLINK_COMMIT\"",
+		"ARG ILINK_REPO=https://github.com/lich0821/wcfLink.git",
+		"ARG ILINK_REF=master",
+		"git fetch --depth 1 origin \"$ILINK_REF\"",
 		"CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags=\"-s -w\" -o /out/wcfLink ./cmd/wcfLink",
 		"FROM alpine:latest",
 		"COPY --from=builder /out/wcfLink /app/wcfLink",
@@ -860,7 +865,7 @@ func TestWcfLinkDockerfileRetainsPinnedBuildContract(t *testing.T) {
 	} {
 		want = strings.ReplaceAll(want, "\n+", "\n")
 		if !strings.Contains(body, want) {
-			t.Fatalf("deploy/docker/Dockerfile.wcflink missing pinned runtime contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.sidecar-ilink missing latest runtime contract %q", want)
 		}
 	}
 }
@@ -869,7 +874,10 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"wcflink:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.wcflink",
+		"sidecar-ilink:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.sidecar-ilink",
+		"sidecar-seednote:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.sidecar-seednote",
+		"ANBAN_SEEDNOTE_BASE_URL: \"http://sidecar-seednote:18060\"",
+		"ANBAN_ILINK_BASE_URL: \"http://sidecar-ilink:18070\"",
 		"server:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.server",
 		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio",
 		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio\n      args:\n        VITE_API_BASE_URL: /api/v1",
@@ -881,7 +889,8 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"WCFLINK_IMAGE := anban-creator-wcflink:latest",
+		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
+		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",
 		"TS_AGENT_IMAGE ?= creator-agent-article-ts:latest",
 		"TS_SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote-ts:latest",
@@ -891,21 +900,24 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-montage-agent-ts-image:",
 		"docker-seednote-agent-image:",
 		"docker-montage-agent-image:",
-		"docker-wcflink-image:",
+		"docker-sidecar-ilink-image:",
+		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
 		"docker build -f deploy/docker/Dockerfile.agent-article-ts -t $(TS_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote-ts -t $(TS_SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage-ts -t $(TS_MONTAGE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.wcflink -t $(WCFLINK_IMAGE) .",
+		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
+		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image: docker-agent-image",
 		"make docker-agent-image",
 		"make docker-server-image",
-		"make docker-wcflink-image",
+		"make docker-sidecar-ilink-image",
+		"make docker-sidecar-seednote-image",
 		"make docker-studio-image",
 	} {
 		if !strings.Contains(makefile, want) {
@@ -914,33 +926,38 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	}
 }
 
-func TestSeednoteSidecarBuildUsesPinnedUpstreamCommit(t *testing.T) {
+func TestSidecarDockerfilesBuildLatestUpstream(t *testing.T) {
 	root := repositoryRoot(t)
-	script := readTextFile(t, filepath.Join(root, "scripts/build-seednote-sidecar.sh"))
+	ilinkDockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"))
 	for _, want := range []string{
-		"SEEDNOTE_SIDECAR_SOURCE_REPO:-https://github.com/xpzouying/xiaohongshu-mcp.git",
-		"SEEDNOTE_SIDECAR_SOURCE_COMMIT must be a lowercase 40-character Git commit",
-		"git -C \"$build_dir\" fetch --depth 1 origin \"$source_commit\"",
-		"test",
-		"--platform \"$target_platform\"",
-		"--build-arg \"VERSION=$source_commit\"",
-		"org.opencontainers.image.revision=$source_commit",
-		"SEEDNOTE_SIDECAR_PUSH must be 0 or 1",
-		"docker push \"$target_image\" | tee \"$push_output\"",
-		"docker push did not return an image digest",
-		"printf '%s@%s\\n' \"${target_image%:*}\" \"$digest\"",
+		"ILINK_REPO=https://github.com/lich0821/wcfLink.git",
+		"ILINK_REF=master",
+		"git fetch --depth 1 origin \"$ILINK_REF\"",
 	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("Seednote sidecar build script missing contract %q", want)
+		if !strings.Contains(ilinkDockerfile, want) {
+			t.Fatalf("iLink Dockerfile missing latest-upstream build contract %q", want)
+		}
+	}
+
+	seednoteDockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.sidecar-seednote"))
+	for _, want := range []string{
+		"SEEDNOTE_REPO=https://github.com/xpzouying/xiaohongshu-mcp.git",
+		"SEEDNOTE_REF=main",
+		"git fetch --depth 1 origin \"$SEEDNOTE_REF\"",
+		"browser/browser_version.txt",
+		"sha256sum -c -",
+	} {
+		if !strings.Contains(seednoteDockerfile, want) {
+			t.Fatalf("Seednote Dockerfile missing latest-upstream build contract %q", want)
 		}
 	}
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-seednote-sidecar-image:",
-		"SEEDNOTE_SIDECAR_SOURCE_REPO=\"$(SEEDNOTE_SIDECAR_SOURCE_REPO)\"",
-		"SEEDNOTE_SIDECAR_SOURCE_COMMIT=\"$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)\"",
-		"scripts/build-seednote-sidecar.sh",
+		"docker-sidecar-ilink-image:",
+		"docker-sidecar-seednote-image:",
+		"--build-arg ILINK_REPO=\"$(SIDECAR_ILINK_REPO)\"",
+		"--build-arg SEEDNOTE_REPO=\"$(SIDECAR_SEEDNOTE_REPO)\"",
 	} {
 		if !strings.Contains(makefile, want) {
 			t.Fatalf("Makefile missing Seednote sidecar build contract %q", want)
@@ -1084,7 +1101,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 		if !reflect.DeepEqual(server.Networks, []string{"anban-creator-network", "creator-runtime-network"}) {
 			t.Fatalf("server networks = %v, want sidecar and isolated Agent networks", server.Networks)
 		}
-		seednote := compose.Services["seednote"]
+		seednote := compose.Services["sidecar-seednote"]
 		if !reflect.DeepEqual(seednote.Networks, []string{"anban-creator-network"}) {
 			t.Fatalf("seednote networks = %v, want sidecar network only", seednote.Networks)
 		}
@@ -1340,7 +1357,7 @@ func staleDockerfileReferencePaths(t *testing.T, root string) []string {
 		if bytes.IndexByte(body, 0) >= 0 {
 			continue
 		}
-		if bytes.Contains(body, []byte("studio/Dockerfile")) || bytes.Contains(body, []byte("docker/wcflink.Dockerfile")) {
+		if bytes.Contains(body, []byte("studio/Dockerfile")) || bytes.Contains(body, []byte("docker/wcflink.Dockerfile")) || bytes.Contains(body, []byte("Dockerfile.wcflink")) {
 			paths = append(paths, rel)
 		}
 	}

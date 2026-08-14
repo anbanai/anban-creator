@@ -80,8 +80,8 @@ type SeednoteConfig struct {
 	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
 }
 
-// IlinkConfig holds the ilink WeChat assistant channel configuration. wcflink is
-// the current transport implementation behind this platform channel.
+// IlinkConfig holds the ilink WeChat assistant channel configuration. The iLink
+// sidecar is the transport implementation behind this platform channel.
 type IlinkConfig struct {
 	Enabled              bool   `yaml:"enabled"`
 	BaseURL              string `yaml:"base_url"`

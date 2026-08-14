@@ -4,7 +4,8 @@
 
 Replace the legacy wcfLink and Seednote sidecar deployment identities with
 `sidecar-ilink` and `sidecar-seednote`, and build both sidecar images from
-repository-owned Dockerfiles that track the latest upstream `main` branch.
+repository-owned Dockerfiles that track each upstream repository's latest
+default branch (`master` for iLink and `main` for Seednote).
 
 ## Scope
 

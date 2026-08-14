@@ -38,23 +38,25 @@ services:
       timeout: 5s
       retries: 5
 
-  seednote:
-    image: xpzouying/xiaohongshu-mcp:latest
-    # The upstream image publishes an amd64 manifest only. On arm64 hosts
-    # (Apple Silicon) the pull fails with "no matching manifest for
-    # linux/arm64/v8". Force amd64 and run under Docker Desktop's QEMU/Rosetta
-    # emulation. It's an MCP sidecar, so the emulation overhead is acceptable.
+  sidecar-seednote:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.sidecar-seednote
+      no_cache: true
+      args:
+        SEEDNOTE_REF: main
+    image: anban-creator-sidecar-seednote:latest
+    pull_policy: build
     platform: linux/amd64
-    container_name: anban-creator-seednote
+    container_name: anban-creator-sidecar-seednote
     restart: unless-stopped
     ports:
       # Local login and inspection only. The API is unauthenticated; the Server
-      # reaches it through the Compose network at http://seednote:18060.
+      # reaches it through the Compose network at http://sidecar-seednote:18060.
       - "127.0.0.1:18060:18060"
     volumes:
-      - ./data/seednote:/app/data
+      - ./data/sidecar-seednote:/app/data
     environment:
-      ROD_BROWSER_BIN: /usr/bin/google-chrome
       COOKIES_PATH: /app/data/cookies.json
     networks:
       - anban-creator-network
@@ -66,35 +68,35 @@ services:
       timeout: 5s
       retries: 5
 
-  # wcfLink — WeChat bot sidecar (iLink channel). Built from the upstream
+  # iLink — WeChat bot sidecar. Built from the upstream
   # GitHub project (no official image). Holds logged-in WeChat sessions server-side;
   # Studio drives QR login, the server polls events for commands and pushes
   # task notifications via send-text.
-  wcflink:
+  sidecar-ilink:
     build:
       context: .
-      dockerfile: deploy/docker/Dockerfile.wcflink
+      dockerfile: deploy/docker/Dockerfile.sidecar-ilink
+      no_cache: true
       args:
-        WCFLINK_REF: refs/tags/v0.1.0
-        WCFLINK_COMMIT: fb0999b81043c91e8fddb780eb2ecf03f1f8588f
-    image: anban-creator-wcflink:latest
-    # Force build-only: this image is produced from the upstream wcfLink source and
+        ILINK_REF: master
+    image: anban-creator-sidecar-ilink:latest
+    # Force build-only: this image is produced from upstream source and
     # has no registry artifact. Without this, Compose probes Docker Hub for the
-    # (nonexistent) anban-creator-wcflink image and aborts on a transient registry
+    # (nonexistent) local image and aborts on a transient registry
     # EOF instead of falling back to the Dockerfile build.
     pull_policy: build
-    container_name: anban-creator-wcflink
+    container_name: anban-creator-sidecar-ilink
     restart: unless-stopped
     ports:
-      # Loopback-only: wcfLink's HTTP API is unauthenticated — anyone who can
+      # Loopback-only: the iLink HTTP API is unauthenticated — anyone who can
       # reach :18070 can start logins, read every account and inbound event, and
       # send messages as any logged-in user. The server reaches it over the
-      # compose network via http://wcflink:18070; this host binding exists only
+      # compose network via http://sidecar-ilink:18070; this host binding exists only
       # for local debugging (curl localhost:18070). Bind to 127.0.0.1 so the
       # unauthenticated API is not exposed on the LAN.
       - "127.0.0.1:18070:18070"
     volumes:
-      - ./data/wcflink:/app/state
+      - ./data/sidecar-ilink:/app/state
     environment:
       WCFLINK_LISTEN_ADDR: ":18070"
       WCFLINK_STATE_DIR: "/app/state"
@@ -122,7 +124,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      wcflink:
+      sidecar-seednote:
+        condition: service_started
+      sidecar-ilink:
         condition: service_started
     # Compose uses the root .env for interpolation only unless it is also an
     # env_file. Forward it so every ${...} reference in server/config.yaml can
@@ -151,9 +155,10 @@ services:
       ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
       ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
       ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
+      ANBAN_SEEDNOTE_BASE_URL: "http://sidecar-seednote:18060"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
-      ANBAN_ILINK_BASE_URL: "http://wcflink:18070"
+      ANBAN_ILINK_BASE_URL: "http://sidecar-ilink:18070"
     volumes:
       - ./server/config.yaml:/app/conf/config.yaml:ro
       - ./data/files:/app/data/files
@@ -182,7 +187,7 @@ services:
     image: anban-creator-studio:latest
     # Local-build-only image (no registry artifact). Without this compose probes
     # Docker Hub for anban-creator-studio and may abort on a registry hiccup instead
-    # of building — same rationale as the wcflink service above.
+    # of building — same rationale as the sidecar-ilink service above.
     pull_policy: build
     container_name: anban-creator-studio
     restart: unless-stopped

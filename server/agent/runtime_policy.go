@@ -338,7 +338,7 @@ func managedMCPBoundaryHook() claudecode.Option {
 			value, _ = pre.ToolInput["url"].(string)
 		}
 		lower := strings.ToLower(value)
-		directSeednote := strings.Contains(lower, "seednote:18060") ||
+		directSeednote := strings.Contains(lower, "sidecar-seednote:18060") ||
 			strings.Contains(lower, "localhost:18060") ||
 			strings.Contains(lower, "127.0.0.1:18060")
 		probesMCP := strings.Contains(lower, "mcp-session-id") ||

@@ -397,12 +397,12 @@ email:
   code_length: 6
 
 seednote:
-  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"
+  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://sidecar-seednote:18060}"
   timeout: 30
 
 ilink:
   enabled: ${ANBAN_ILINK_ENABLED:-true}
-  base_url: "${ANBAN_ILINK_BASE_URL:-http://wcflink:18070}"
+  base_url: "${ANBAN_ILINK_BASE_URL:-http://sidecar-ilink:18070}"
   timeout: 30
   poll_interval: 2
   notification_retry_max: 5

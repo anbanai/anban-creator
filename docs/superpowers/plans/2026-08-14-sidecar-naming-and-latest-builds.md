@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- iLink defaults to `https://github.com/lich0821/wcfLink.git` at `main`.
+- iLink defaults to `https://github.com/lich0821/wcfLink.git` at `master`.
 - Seednote defaults to `https://github.com/xpzouying/xiaohongshu-mcp.git` at `main`.
 - Do not pin a source revision in repository defaults.
 - ACK image variables can contain an operator-selected tag or digest.
@@ -90,7 +90,7 @@ Expected: failure because legacy paths, names, targets, and Dockerfiles remain.
 **Files:**
 - Create: `deploy/docker/Dockerfile.sidecar-ilink`
 - Create: `deploy/docker/Dockerfile.sidecar-seednote`
-- Delete: `deploy/docker/Dockerfile.wcflink`
+- Delete: legacy iLink sidecar Dockerfile
 - Delete: `scripts/build-seednote-sidecar.sh`
 - Modify: `Makefile`
 
@@ -104,7 +104,7 @@ Use:
 
 ```dockerfile
 ARG ILINK_REPO=https://github.com/lich0821/wcfLink.git
-ARG ILINK_REF=main
+ARG ILINK_REF=master
 RUN git init . \
     && git remote add origin "$ILINK_REPO" \
     && git fetch --depth 1 origin "$ILINK_REF" \
@@ -131,7 +131,7 @@ Set:
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
 SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
 SIDECAR_ILINK_REPO ?= https://github.com/lich0821/wcfLink.git
-SIDECAR_ILINK_REF ?= main
+SIDECAR_ILINK_REF ?= master
 SIDECAR_SEEDNOTE_REPO ?= https://github.com/xpzouying/xiaohongshu-mcp.git
 SIDECAR_SEEDNOTE_REF ?= main
 ```

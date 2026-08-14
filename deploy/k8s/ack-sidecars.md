@@ -1,278 +1,231 @@
-# ACK wcfLink and Seednote deployment with Yunxiao
+# ACK sidecar deployment with Yunxiao
 
-wcfLink and Seednote use two independent Yunxiao deployment workflows:
-`deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml`. Keep their
-build and deployment tasks separate. The Server deployment and each sidecar
-must receive the same `namespace` pipeline variable. Their in-cluster endpoints
-are `http://wcflink:18070` and `http://seednote:18060/mcp`.
+The iLink and Seednote sidecars have independent build and deployment paths:
 
-The manifests are intentionally independent: each sidecar has its own image,
-lifecycle, health checks, resource limits, and persistent state. Deploying one
-does not require rebuilding or applying the other.
+- `deploy/k8s/ack-sidecar-ilink.yaml`
+- `deploy/k8s/ack-sidecar-seednote.yaml`
 
-wcfLink has no official published image or Dockerfile upstream. This
-repository's `deploy/docker/Dockerfile.wcflink` is the supported build source: it
-fetches `v0.1.0` and verifies commit
-`fb0999b81043c91e8fddb780eb2ecf03f1f8588f`. Build Seednote from a pinned
-commit of `https://github.com/xpzouying/xiaohongshu-mcp.git` and push it to ACR.
+Deploying or rolling back one sidecar does not apply, restart, or rebuild the
+other. All image references are supplied by ACK pipeline variables; ACK may use
+an image tag or an immutable digest according to its release policy. The
+manifests use `imagePullPolicy: Always` so a recreated Pod fetches the image
+reference selected by ACK.
 
-## Prerequisites
+The Server and both sidecars must be deployed into the same `namespace`. Their
+in-cluster URLs are `http://sidecar-ilink:18070` and
+`http://sidecar-seednote:18060`.
 
-- ACK has at least one `amd64` node and the `nas-sc-creator` StorageClass.
-- Yunxiao build workers can reach GitHub and the upstream browser CDN used by
-  the Seednote Dockerfile.
-- The Yunxiao ACK/Kubernetes service connection provides the target `kubectl`
-  context, and the command runner has Bash, `kubectl`, and `envsubst`.
-- The Yunxiao Docker build/push task has an ACR service connection for build and
-  push credentials. The Kubernetes `imagePullSecret` is a separate, existing
-  pull credential in the target namespace. Both target ACR but serve different
-  mechanisms; do not put registry credentials in this repository.
+## Build images
+
+Both repository-owned Dockerfiles fetch the latest upstream default branch by
+default:
+
+| Sidecar | Dockerfile | Upstream source |
+| --- | --- | --- |
+| iLink | `deploy/docker/Dockerfile.sidecar-ilink` (`master`) | `https://github.com/lich0821/wcfLink.git` |
+| Seednote | `deploy/docker/Dockerfile.sidecar-seednote` (`main`) | `https://github.com/xpzouying/xiaohongshu-mcp.git` |
+
+In separate Yunxiao Docker build/push tasks, set the build context to this
+repository root and select the corresponding Dockerfile. Set the task's
+destination image to the variable used by its deployment task. Build for
+`linux/amd64`, because both ACK manifests select amd64 nodes. Enable the
+task's no-cache/pull options when building an upstream default branch; otherwise Docker may reuse a
+cached clone instead of fetching the current upstream commit.
+
+For local or scriptable builds, use:
+
+```bash
+make docker-sidecar-ilink-image \
+  SIDECAR_ILINK_IMAGE=chengdu.personal.cr.aliyuncs.com/bx_anbanai/sidecar-ilink:latest
+
+make docker-sidecar-seednote-image \
+  SIDECAR_SEEDNOTE_IMAGE=chengdu.personal.cr.aliyuncs.com/bx_anbanai/sidecar-seednote:latest
+```
+
+To build a different upstream revision, override `SIDECAR_ILINK_REF` or
+`SIDECAR_SEEDNOTE_REF`; to use a mirror, override the matching `*_REPO`
+variable. The defaults deliberately use the original upstream repositories.
 
 ## Pipeline variables
-
-Use the exact variable names already used by `server/Deployment.yaml` for the
-shared namespace and pull secret:
 
 | Variable | Example |
 | --- | --- |
 | `namespace` | `anbanai-prod` |
 | `imagePullSecret` | `anban-acr-pull` |
-| `wcflink_image_repo` | `registry.cn-hangzhou.aliyuncs.com/anban/wcflink:20260720-abc1234` |
-| `seednote_image_repo` | `registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp@sha256:<64 lowercase hex>` |
-| `wcflink_storage_size` | `10Gi` |
-| `seednote_storage_size` | `10Gi` |
+| `sidecar_ilink_image_repo` | `chengdu.personal.cr.aliyuncs.com/bx_anbanai/sidecar-ilink:latest` |
+| `sidecar_ilink_storage_size` | `10Gi` |
+| `sidecar_seednote_image_repo` | `chengdu.personal.cr.aliyuncs.com/bx_anbanai/sidecar-seednote:latest` |
+| `sidecar_seednote_storage_size` | `10Gi` |
 | `server_app_label` | `anban-creator-server` |
 
-## Stage 1: build and push wcfLink
+`imagePullSecret` is a Kubernetes pull secret already present in the target
+namespace. It is distinct from the ACR service connection used by Yunxiao to
+build and push images.
 
-Set `wcflink_image_repo` before the pipeline run to the desired immutable ACR
-reference. In Yunxiao's built-in Docker build/push task, use the ACR service
-connection, set the build context to `.`, Dockerfile to
-`deploy/docker/Dockerfile.wcflink`, and set its destination image field to that exact
-`wcflink_image_repo` pipeline variable. Use a non-`latest` tag, preferably the
-source commit SHA, and never overwrite that tag. Digest and untagged references
-are rejected because the destination must be known before the push. Stage 2
-reads the same pre-set pipeline variable. The Kubernetes `imagePullSecret` is
-not a build credential and is used by both sidecar Pods at pull time. Add a
-second Docker build/push task for Seednote using
-`https://github.com/xpzouying/xiaohongshu-mcp.git` at a pinned commit, the
-repository root as context, the root `Dockerfile`, platform `linux/amd64`, and
-`VERSION=<pinned commit or release version>`. Push a unique tag to ACR and use
-the resulting digest for `seednote_image_repo`. The upstream Dockerfile
-preloads its browser under `/app/cache`; the Kubernetes manifest uses that path
-and does not override `ROD_BROWSER_BIN`.
+## Deploy iLink
 
-The repository-owned build entry point used by that Yunxiao task is:
-
-```bash
-make docker-seednote-sidecar-image \
-  SEEDNOTE_SIDECAR_SOURCE_REPO=https://github.com/royalmorty/xiaohongshu-mcp.git \
-  SEEDNOTE_SIDECAR_SOURCE_COMMIT=<40-character-upstream-commit> \
-  SEEDNOTE_SIDECAR_IMAGE=registry.cn-hangzhou.aliyuncs.com/anban/xiaohongshu-mcp:<same-commit> \
-  SEEDNOTE_SIDECAR_PUSH=1
-```
-
-The script shallow-fetches only that upstream commit, builds its root
-`Dockerfile` for `linux/amd64`, pushes only when explicitly requested, and
-prints the pushed repository digest. Set `seednote_image_repo` to that digest,
-not to the temporary commit tag.
-
-The upstream Seednote `docker-release` workflow publishes its version input as
-both the version tag and `latest`. Resolve a chosen version tag to its digest
-before mirroring; version tags, including `latest`, are not accepted by this
-deployment. For example:
-
-```sh
-seednote_tag=v2026.06.12.1403-5c43e3d
-docker pull "xpzouying/xiaohongshu-mcp:$seednote_tag"
-docker image inspect --format '{{index .RepoDigests 0}}' "xpzouying/xiaohongshu-mcp:$seednote_tag"
-```
-
-When building in Yunxiao, use the pushed ACR image's digest for
-`seednote_image_repo` after verifying it is the intended source revision.
-
-## Stage 2: deploy
-
-Add a Bash command task after the image build tasks. Use this exact script:
+Use a dedicated Bash command task for iLink:
 
 ```bash
 set -euo pipefail
 
-export namespace="${namespace:?set the ACK namespace in Yunxiao}"
-export imagePullSecret="${imagePullSecret:?set the existing ACR pull secret name in Yunxiao}"
-export wcflink_image_repo="${wcflink_image_repo:?set the immutable wcfLink ACR image reference in Yunxiao}"
-export seednote_image_repo="${seednote_image_repo:?set the immutable Seednote ACR image reference in Yunxiao}"
-export wcflink_storage_size="${wcflink_storage_size:?set the wcfLink PVC size in Yunxiao}"
-export seednote_storage_size="${seednote_storage_size:?set the Seednote PVC size in Yunxiao}"
-export server_app_label="${server_app_label:?set the Server Pod app label in Yunxiao}"
-
-if [[ ${#namespace} -gt 63 || ! "$namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
-  echo "invalid namespace: $namespace" >&2
-  exit 1
-fi
-if [[ ${#imagePullSecret} -gt 63 || ! "$imagePullSecret" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
-  echo "invalid imagePullSecret: $imagePullSecret" >&2
-  exit 1
-fi
-if [[ ${#server_app_label} -gt 63 || ! "$server_app_label" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
-  echo "invalid server_app_label: $server_app_label" >&2
-  exit 1
-fi
-if [[ ! "$wcflink_image_repo" =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$wcflink_image_repo" != */*:* ]] || [[ "$wcflink_image_repo" == *:latest ]]; then
-  echo "wcflink_image_repo must use a non-latest tag after the final slash" >&2
-  exit 1
-fi
-if [[ ! "$seednote_image_repo" =~ ^[a-z0-9][a-z0-9._/-]*/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$ ]]; then
-  echo "seednote_image_repo must be an image repository with an immutable sha256 digest" >&2
-  exit 1
-fi
-if [[ ! "$wcflink_storage_size" =~ ^[1-9][0-9]*(Mi|Gi|Ti)$ ]] || [[ ! "$seednote_storage_size" =~ ^[1-9][0-9]*(Mi|Gi|Ti)$ ]]; then
-  echo "storage sizes must be positive Mi, Gi, or Ti quantities" >&2
-  exit 1
-fi
+export namespace="${namespace:?set the ACK namespace}"
+export imagePullSecret="${imagePullSecret:?set the existing ACR pull secret name}"
+export sidecar_ilink_image_repo="${sidecar_ilink_image_repo:?set the iLink image reference}"
+export sidecar_ilink_storage_size="${sidecar_ilink_storage_size:?set the iLink PVC size}"
 
 kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$namespace" get secret "$imagePullSecret" >/dev/null
 
-quantity_to_mi() {
-  local quantity="$1"
-  local number
-  local unit
-  local multiplier
-  local maximum
-  if [[ ! "$quantity" =~ ^([1-9][0-9]*)(Mi|Gi|Ti)$ ]]; then
-    return 1
-  fi
-  number="${BASH_REMATCH[1]}"
-  unit="${BASH_REMATCH[2]}"
-  case "$unit" in
-    Mi) multiplier=1; maximum=8796093022207 ;;
-    Gi) multiplier=1024; maximum=8589934591 ;;
-    Ti) multiplier=1048576; maximum=8388607 ;;
-  esac
-  # Equal-length positive decimal strings compare lexicographically by value.
-  if [[ ${#number} -gt ${#maximum} ]] || [[ ${#number} -eq ${#maximum} && "$number" > "$maximum" ]]; then
-    return 1
-  fi
-  printf '%d\n' "$((10#$number * multiplier))"
-}
-
-preflight_pvc_storage() {
-  local pvc_name="$1"
-  local desired_storage="$2"
-  local pvc_ref
-  local actual_storage
-  local actual_storage_mi
-  local desired_storage_mi
-  if ! desired_storage_mi=$(quantity_to_mi "$desired_storage"); then
-    echo "pipeline storage quantity for $pvc_name is unsupported: $desired_storage" >&2
-    return 1
-  fi
-  if ! pvc_ref=$(kubectl -n "$namespace" get pvc "$pvc_name" --ignore-not-found -o name); then
-    echo "failed to inspect existing PVC $pvc_name before apply" >&2
-    return 1
-  fi
-  if [[ -z "$pvc_ref" ]]; then
-    return 0
-  fi
-  if ! actual_storage=$(kubectl -n "$namespace" get pvc "$pvc_name" -o jsonpath='{.spec.resources.requests.storage}'); then
-    echo "failed to read storage request for existing PVC $pvc_name" >&2
-    return 1
-  fi
-  if ! actual_storage_mi=$(quantity_to_mi "$actual_storage"); then
-    echo "existing PVC $pvc_name has unsupported storage quantity: $actual_storage" >&2
-    return 1
-  fi
-  if [[ "$actual_storage_mi" != "$desired_storage_mi" ]]; then
-    echo "PVC storage mismatch for $pvc_name: existing=$actual_storage pipeline=$desired_storage; expand or migrate the PVC separately before this deploy" >&2
-    return 1
-  fi
-}
-preflight_pvc_storage wcflink-state "$wcflink_storage_size"
-preflight_pvc_storage seednote-data "$seednote_storage_size"
-
-envsubst '${namespace} ${imagePullSecret} ${wcflink_image_repo} ${wcflink_storage_size}' < deploy/k8s/ack-wcflink.yaml | kubectl apply -f -
-kubectl -n "$namespace" rollout status deployment/wcflink --timeout=10m
-
-envsubst '${namespace} ${imagePullSecret} ${seednote_image_repo} ${seednote_storage_size} ${server_app_label}' < deploy/k8s/ack-seednote.yaml | kubectl apply -f -
-kubectl -n "$namespace" rollout status deployment/seednote --timeout=10m
-kubectl -n "$namespace" get deployment,pod,service,pvc -l 'app in (wcflink,seednote)'
-kubectl -n "$namespace" get endpoints wcflink seednote
-kubectl -n "$namespace" get networkpolicy seednote-server-only
+envsubst '${namespace} ${imagePullSecret} ${sidecar_ilink_image_repo} ${sidecar_ilink_storage_size}' \
+  < deploy/k8s/ack-sidecar-ilink.yaml | kubectl apply -f -
+kubectl -n "$namespace" rollout restart deployment/sidecar-ilink
+kubectl -n "$namespace" rollout status deployment/sidecar-ilink --timeout=10m
+kubectl -n "$namespace" get deployment,pod,service,pvc -l app=sidecar-ilink
+kubectl -n "$namespace" get endpoints sidecar-ilink
 ```
 
-No rollout restart is required. Applying a changed `seednote_image_repo`
-updates only the Seednote Pod template and rolls only Seednote; changing only
-`wcflink_image_repo` rolls only wcfLink.
+The PVC is `sidecar-ilink-state`. Do not reduce its requested size. If its
+requested size differs from the pipeline variable, reconcile expansion or data
+migration before applying the manifest.
 
-The storage-size variables are PVC creation-time and steady-state values, not
-normal rollout controls. The preflight compares equivalent `Mi`, `Gi`, and
-`Ti` quantities semantically, so `1Gi` and `1024Mi` are compatible. Never
-shrink either PVC. To expand one, first confirm its StorageClass has
-`allowVolumeExpansion: true`, patch or expand the PVC separately and wait for
-that operation to finish, then update the corresponding pipeline variable. If
-expansion is unsupported, migrate the data to a new PVC. The preflight prevents
-a mismatched, unsupported, or int64-byte-overflowing size from reaching the
-multi-object apply, including on the first deployment when the PVC is absent.
+## Deploy Seednote
 
-The Server deployment should use these values in the same namespace:
+Use a separate Bash command task for Seednote:
+
+```bash
+set -euo pipefail
+
+export namespace="${namespace:?set the ACK namespace}"
+export imagePullSecret="${imagePullSecret:?set the existing ACR pull secret name}"
+export sidecar_seednote_image_repo="${sidecar_seednote_image_repo:?set the Seednote image reference}"
+export sidecar_seednote_storage_size="${sidecar_seednote_storage_size:?set the Seednote PVC size}"
+export server_app_label="${server_app_label:?set the Server Pod app label}"
+
+kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n "$namespace" get secret "$imagePullSecret" >/dev/null
+
+envsubst '${namespace} ${imagePullSecret} ${sidecar_seednote_image_repo} ${sidecar_seednote_storage_size} ${server_app_label}' \
+  < deploy/k8s/ack-sidecar-seednote.yaml | kubectl apply -f -
+kubectl -n "$namespace" rollout restart deployment/sidecar-seednote
+kubectl -n "$namespace" rollout status deployment/sidecar-seednote --timeout=10m
+kubectl -n "$namespace" get deployment,pod,service,pvc -l app=sidecar-seednote
+kubectl -n "$namespace" get endpoints sidecar-seednote
+kubectl -n "$namespace" get networkpolicy sidecar-seednote-server-only
+```
+
+The NetworkPolicy permits TCP/18060 only from Pods labelled with
+`server_app_label`. Confirm that the ACK CNI enforces NetworkPolicy before
+treating it as an access-control boundary. One-shot Agent Jobs must not receive
+the Server's `app` label.
+
+## Server settings
+
+Deploy the Server with the same namespace and these service URLs:
 
 ```sh
-ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060
 ANBAN_ILINK_ENABLED=true
-ANBAN_ILINK_BASE_URL=http://wcflink:18070
+ANBAN_ILINK_BASE_URL=http://sidecar-ilink:18070
+ANBAN_SEEDNOTE_BASE_URL=http://sidecar-seednote:18060
 ```
 
-Set `server_app_label` to the exact value of the Server Pod's `app` label. The
-included `seednote-server-only` NetworkPolicy allows inbound TCP/18060 only
-from Pods with that label in the same namespace. The ACK cluster's CNI must
-enforce Kubernetes NetworkPolicy; verify that capability before treating this
-policy as an access-control boundary. One-shot Agent Jobs must not carry the
-Server label.
+Roll out the Server after the corresponding Service exists. This does not
+require re-deploying an unchanged sidecar.
 
-## First login and verification
+## Manual PVC migration in ACK
 
-Use an administrator's `kubectl` context and the same namespace value. Keep
-each port-forward in a separate terminal; neither service is exposed outside
-the cluster.
+Renaming a PVC creates a new claim; Kubernetes cannot rename a bound PVC. Do
+not delete the old PVC until the new sidecar has been verified. Migrate each
+sidecar independently in an administrator-operated ACK terminal.
+
+For iLink, stop the old deployment and wait for its Pod to terminate:
+
+```sh
+kubectl -n "$namespace" scale deployment/wcflink --replicas=0
+kubectl -n "$namespace" wait --for=delete pod -l app=wcflink --timeout=10m
+```
+
+Create only the new `sidecar-ilink-state` PVC; the first document in the
+manifest is the PVC, so do not apply the Deployment yet:
+
+```sh
+envsubst '${namespace} ${sidecar_ilink_storage_size}' \
+  < deploy/k8s/ack-sidecar-ilink.yaml | sed '/^---$/,$d' | kubectl apply -f -
+```
+
+Run a temporary Pod that mounts old `wcflink-state` at `/old` and new
+`sidecar-ilink-state` at `/new` (use an image that includes `cp`, such as
+`busybox:1.36`):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: migrate-sidecar-ilink
+spec:
+  restartPolicy: Never
+  containers:
+    - name: copy
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - { name: old, mountPath: /old }
+        - { name: new, mountPath: /new }
+  volumes:
+    - name: old
+      persistentVolumeClaim: { claimName: wcflink-state }
+    - name: new
+      persistentVolumeClaim: { claimName: sidecar-ilink-state }
+```
+
+After the Pod is Running, copy and inspect the data:
+
+```sh
+kubectl -n "$namespace" exec migrate-sidecar-ilink -- sh -c 'cp -a /old/. /new/ && sync && find /new -maxdepth 2 -ls'
+kubectl -n "$namespace" delete pod migrate-sidecar-ilink --wait=true
+```
+
+For Seednote, repeat those four steps with old deployment `seednote`, old claim
+`seednote-data`, new claim `sidecar-seednote-data`, manifest
+`ack-sidecar-seednote.yaml`, and temporary Pod name
+`migrate-sidecar-seednote`. The temporary Pod must not run while either
+sidecar is writing to the same ReadWriteOnce claim. After copying, apply the
+new sidecar manifest using its independent deployment command above and verify
+its login state.
+
+Only after verification should the old Deployment, Service, and PVC be removed.
+To roll back, scale down the new deployment, restore the old Server URL and old
+deployment, then keep the new PVC for investigation. This repository supplies
+no automatic migration Job because the operator must control namespace access,
+claim binding, and the precise cutover window.
+
+## Login and verification
+
+Keep both services as `ClusterIP`; the APIs are unauthenticated. Use
+administrator-only port forwarding for initial login:
 
 ```sh
 export namespace=anbanai-prod
-kubectl -n "$namespace" port-forward service/wcflink 18070:18070
-```
-
-Verify wcfLink through the local forward:
-
-```sh
+kubectl -n "$namespace" port-forward service/sidecar-ilink 18070:18070
 curl --fail http://127.0.0.1:18070/health/live
 ```
 
-To perform wcfLink's first account login, start a QR session through that same
-administrator-only forward, record its `session_id`, open the downloaded PNG,
-and poll until the status is `confirmed`:
+Start iLink's QR login through that forward:
 
 ```sh
 curl --fail --request POST http://127.0.0.1:18070/api/accounts/login/start \
-  --header 'Content-Type: application/json' \
-  --data '{"base_url":""}'
-curl --fail --output wcflink-login.png 'http://127.0.0.1:18070/api/accounts/login/qr?session_id=<session-id>'
+  --header 'Content-Type: application/json' --data '{"base_url":""}'
+curl --fail --output sidecar-ilink-login.png \
+  'http://127.0.0.1:18070/api/accounts/login/qr?session_id=<session-id>'
 curl --fail 'http://127.0.0.1:18070/api/accounts/login/status?session_id=<session-id>'
 ```
 
-For Seednote login, start a second forward, verify health, then connect an MCP
-Inspector to the local `/mcp` endpoint and complete the QR-code flow:
+For Seednote, use a second terminal:
 
 ```sh
-kubectl -n "$namespace" port-forward service/seednote 18060:18060
+kubectl -n "$namespace" port-forward service/sidecar-seednote 18060:18060
 curl --fail http://127.0.0.1:18060/health
-npx @modelcontextprotocol/inspector
 ```
 
-Use `http://127.0.0.1:18060/mcp` in the inspector. The `seednote-data` PVC
-persists cookies and browser state after successful login.
-
-Both services are unauthenticated, so keep them as `ClusterIP` and use
-administrator-only port-forwarding. The supplied NetworkPolicy restricts
-Seednote to the labeled Server Pods; wcfLink remains reachable by workloads in
-the namespace and should be covered by a deployment-specific policy if its
-callers need equivalent isolation.
+Connect an MCP Inspector to `http://127.0.0.1:18060/mcp` and complete its QR
+login. The `sidecar-seednote-data` PVC preserves its cookies and browser state.

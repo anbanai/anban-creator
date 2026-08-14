@@ -7,7 +7,7 @@ runtime image, then ask Agent Reach to select an external Xiaohongshu backend.
 That indirection does not work in ACK: Agent Reach probes
 `http://localhost:18060/mcp`, while the independently deployed
 `xiaohongshu-mcp` workload is available at
-`http://seednote:18060/mcp`. The one-shot Agent Job does not receive a matching
+`http://sidecar-seednote:18060/mcp`. The one-shot Agent Job does not receive a matching
 mcporter configuration.
 
 Agent Reach is primarily an installer, environment doctor, credential helper,
@@ -38,15 +38,15 @@ Keep the existing three-process boundary:
 Managed Seednote Agent Job
   -> authenticated Anban Server MCP
   -> SeednoteCapabilityService
-  -> xiaohongshu-mcp REST API at http://seednote:18060
+  -> xiaohongshu-mcp REST API at http://sidecar-seednote:18060
   -> Xiaohongshu
 ```
 
 The Agent Job never connects directly to the unauthenticated
 `xiaohongshu-mcp` ClusterIP service. The Server remains the authenticated
 capability boundary and owns readiness, request timeouts, response shaping,
-and structured errors. The independent `seednote` Deployment and its
-`seednote-data` PVC remain unchanged.
+and structured errors. The independent `sidecar-seednote` Deployment and its
+`sidecar-seednote-data` PVC remain unchanged.
 
 No new MCP server, MCP proxy, backend router, database schema, Studio surface,
 or task field is introduced.
@@ -113,11 +113,11 @@ change.
 
 ## Deployment
 
-Deploy `deploy/k8s/ack-wcflink.yaml` and `deploy/k8s/ack-seednote.yaml` as two
+Deploy `deploy/k8s/ack-sidecar-ilink.yaml` and `deploy/k8s/ack-sidecar-seednote.yaml` as two
 independent Yunxiao workflows with an immutable
 `xpzouying/xiaohongshu-mcp@sha256:...` image reference for Seednote. The Server
 and each sidecar use the same namespace, and the Server retains
-`ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060`.
+`ANBAN_SEEDNOTE_BASE_URL=http://sidecar-seednote:18060`.
 
 No Agent Job environment variable or mcporter configuration is needed. The
 sidecar remains a single-replica `Recreate` Deployment because browser and

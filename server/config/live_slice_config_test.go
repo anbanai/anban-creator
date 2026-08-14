@@ -47,8 +47,8 @@ func TestExpandEnvVars(t *testing.T) {
 // affected by unrelated environment variables (the hidden override layer is gone).
 func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_REDIS", "redis:6379")
-	t.Setenv("ANBAN_TEST_ILINK_URL", "http://wcflink:18070")
-	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://seednote:18060")
+	t.Setenv("ANBAN_TEST_ILINK_URL", "http://sidecar-ilink:18070")
+	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://sidecar-seednote:18060")
 	// An unrelated env var that must NOT leak into config.
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "should-be-ignored-without-placeholder")
 
@@ -92,11 +92,11 @@ claude:
 	if cfg.Redis.Addr != "redis:6379" {
 		t.Errorf("redis.addr = %q, want redis:6379", cfg.Redis.Addr)
 	}
-	if cfg.Ilink.BaseURL != "http://wcflink:18070" {
-		t.Errorf("ilink.base_url = %q, want http://wcflink:18070", cfg.Ilink.BaseURL)
+	if cfg.Ilink.BaseURL != "http://sidecar-ilink:18070" {
+		t.Errorf("ilink.base_url = %q, want http://sidecar-ilink:18070", cfg.Ilink.BaseURL)
 	}
-	if cfg.Seednote.BaseURL != "http://seednote:18060" {
-		t.Errorf("seednote.base_url = %q, want http://seednote:18060", cfg.Seednote.BaseURL)
+	if cfg.Seednote.BaseURL != "http://sidecar-seednote:18060" {
+		t.Errorf("seednote.base_url = %q, want http://sidecar-seednote:18060", cfg.Seednote.BaseURL)
 	}
 	if !cfg.Ilink.Enabled {
 		t.Errorf("ilink.enabled = false, want true")

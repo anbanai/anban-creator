@@ -14,8 +14,8 @@ const (
 )
 
 // IlinkBinding maps a Studio user to a WeChat contact talking to a platform
-// assistant account. wcflink remains the transport implementation; ilink is the
-// platform channel name.
+// assistant account. The iLink sidecar is the transport implementation; ilink
+// is the platform channel name.
 type IlinkBinding struct {
 	ID                string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID            string     `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`

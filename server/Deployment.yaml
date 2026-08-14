@@ -31,11 +31,11 @@ spec:
             - name: TZ
               value: Asia/Shanghai
             - name: ANBAN_SEEDNOTE_BASE_URL
-              value: http://seednote:18060
+              value: http://sidecar-seednote:18060
             - name: ANBAN_ILINK_ENABLED
               value: "true"
             - name: ANBAN_ILINK_BASE_URL
-              value: http://wcflink:18070
+              value: http://sidecar-ilink:18070
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL

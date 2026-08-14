@@ -78,7 +78,7 @@ The managed runtime is split into three images: `creator-agent-article` for the
 minimal Article runtime, `creator-agent-seednote` for the independent Seednote
 workflow, and `creator-agent-montage` for OpenMontage/Remotion/ffmpeg. Seednote
 Xiaohongshu research flows through authenticated Anban Server MCP tools backed by
-the separately deployed `seednote` sidecar. Keep the canonical
+the separately deployed `sidecar-seednote`. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
 not which Skills are distributed.
 

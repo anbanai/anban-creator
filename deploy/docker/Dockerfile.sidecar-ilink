@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:alpine AS builder
+ARG ILINK_REPO=https://github.com/lich0821/wcfLink.git
+ARG ILINK_REF=master
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates git
+RUN git init . \
+    && git remote add origin "$ILINK_REPO" \
+    && git fetch --depth 1 origin "$ILINK_REF" \
+    && git checkout --detach FETCH_HEAD
+
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/wcfLink ./cmd/wcfLink
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates wget tzdata
+WORKDIR /app
+COPY --from=builder /out/wcfLink /app/wcfLink
+
+ENV WCFLINK_LISTEN_ADDR=:18070 \
+    WCFLINK_STATE_DIR=/app/state \
+    WCFLINK_DB_PATH=/app/state/wcf.db \
+    WCFLINK_LOG_LEVEL=info
+
+EXPOSE 18070
+VOLUME ["/app/state"]
+ENTRYPOINT ["/app/wcfLink"]

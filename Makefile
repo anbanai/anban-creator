@@ -12,12 +12,12 @@ TS_AGENT_IMAGE ?= creator-agent-article-ts:latest
 TS_SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote-ts:latest
 TS_MONTAGE_AGENT_IMAGE ?= creator-agent-montage-ts:latest
 SERVER_IMAGE := anban-creator-server:latest
-WCFLINK_IMAGE := anban-creator-wcflink:latest
-SEEDNOTE_SIDECAR_IMAGE ?= anban-seednote-sidecar:dev
-SEEDNOTE_SIDECAR_SOURCE_REPO ?= https://github.com/xpzouying/xiaohongshu-mcp.git
-SEEDNOTE_SIDECAR_SOURCE_COMMIT ?=
-SEEDNOTE_SIDECAR_PLATFORM ?= linux/amd64
-SEEDNOTE_SIDECAR_PUSH ?= 0
+SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
+SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
+SIDECAR_ILINK_REPO ?= https://github.com/lich0821/wcfLink.git
+SIDECAR_ILINK_REF ?= master
+SIDECAR_SEEDNOTE_REPO ?= https://github.com/xpzouying/xiaohongshu-mcp.git
+SIDECAR_SEEDNOTE_REF ?= main
 STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
@@ -28,7 +28,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-agent-ts-image docker-seednote-agent-ts-image docker-montage-agent-ts-image docker-server-image docker-wcflink-image docker-seednote-sidecar-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-agent-ts-image docker-seednote-agent-ts-image docker-montage-agent-ts-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke
 
@@ -206,21 +206,21 @@ docker-server-image:
 	docker build -f deploy/docker/Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
-# Build the wcfLink sidecar Docker image from its pinned upstream source.
-docker-wcflink-image:
-	@echo "Building $(WCFLINK_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.wcflink -t $(WCFLINK_IMAGE) . && \
-	echo "Image build complete: $(WCFLINK_IMAGE)"
+docker-sidecar-ilink-image:
+	@echo "Building $(SIDECAR_ILINK_IMAGE)..." && \
+	docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink \
+		--build-arg ILINK_REPO="$(SIDECAR_ILINK_REPO)" \
+		--build-arg ILINK_REF="$(SIDECAR_ILINK_REF)" \
+		-t $(SIDECAR_ILINK_IMAGE) . && \
+	echo "Image build complete: $(SIDECAR_ILINK_IMAGE)"
 
-# Build the Seednote integration sidecar from a pinned upstream commit. Set
-# SEEDNOTE_SIDECAR_PUSH=1 after authenticating Docker to the target registry.
-docker-seednote-sidecar-image:
-	@SEEDNOTE_SIDECAR_SOURCE_REPO="$(SEEDNOTE_SIDECAR_SOURCE_REPO)" \
-	SEEDNOTE_SIDECAR_SOURCE_COMMIT="$(SEEDNOTE_SIDECAR_SOURCE_COMMIT)" \
-	SEEDNOTE_SIDECAR_IMAGE="$(SEEDNOTE_SIDECAR_IMAGE)" \
-	SEEDNOTE_SIDECAR_PLATFORM="$(SEEDNOTE_SIDECAR_PLATFORM)" \
-	SEEDNOTE_SIDECAR_PUSH="$(SEEDNOTE_SIDECAR_PUSH)" \
-	scripts/build-seednote-sidecar.sh
+docker-sidecar-seednote-image:
+	@echo "Building $(SIDECAR_SEEDNOTE_IMAGE)..." && \
+	docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote \
+		--build-arg SEEDNOTE_REPO="$(SIDECAR_SEEDNOTE_REPO)" \
+		--build-arg SEEDNOTE_REF="$(SIDECAR_SEEDNOTE_REF)" \
+		-t $(SIDECAR_SEEDNOTE_IMAGE) . && \
+	echo "Image build complete: $(SIDECAR_SEEDNOTE_IMAGE)"
 
 # Build the Studio Docker image from the repository-root build context.
 docker-studio-image:
@@ -229,7 +229,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-wcflink-image docker-studio-image
+docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -302,8 +302,8 @@ help:
 	@echo "  make docker-montage-agent-ts-image - Build TypeScript Montage runtime candidate"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
-	@echo "  make docker-wcflink-image - Build wcfLink sidecar image"
-	@echo "  make docker-seednote-sidecar-image - Build pinned upstream Seednote sidecar image"
+	@echo "  make docker-sidecar-ilink-image - Build latest upstream iLink sidecar image"
+	@echo "  make docker-sidecar-seednote-image - Build latest upstream Seednote sidecar image"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
 	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"

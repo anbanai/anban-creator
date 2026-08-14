@@ -219,7 +219,7 @@ function createManagedMCPBoundaryHook() {
     if (typeof value !== "string") return {};
 
     const lower = value.toLowerCase();
-    const directSeednote = lower.includes("seednote:18060") || lower.includes("localhost:18060") || lower.includes("127.0.0.1:18060");
+    const directSeednote = lower.includes("sidecar-seednote:18060") || lower.includes("localhost:18060") || lower.includes("127.0.0.1:18060");
     const probesMCP = lower.includes("mcp-session-id")
       || lower.includes("mcp_client")
       || (lower.includes("/mcp") && ["curl", "wget", "python", "requests", "http", "mcporter", "jsonrpc"].some((needle) => lower.includes(needle)));
