@@ -369,6 +369,28 @@ describe('TaskDetailPage', () => {
     expect(logSection).toHaveTextContent('正在写作正文')
   })
 
+  it('restores automatic log following whenever the log view is opened', async () => {
+    mockTask(taskWith({
+      status: 'running',
+      progress_log: '已读取参考素材\n正在写作正文',
+      result: null,
+      completed_at: '',
+    }))
+
+    render(<TaskDetailPage />)
+
+    const context = await screen.findByRole('region', { name: '任务上下文' })
+    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    expect(screen.getByRole('button', { name: '暂停自动跟随' })).toHaveTextContent('自动跟随中')
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停自动跟随' }))
+    expect(screen.getByRole('button', { name: '开启自动跟随' })).toHaveTextContent('跟随已暂停')
+
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }))
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+    expect(screen.getByRole('button', { name: '暂停自动跟随' })).toHaveTextContent('自动跟随中')
+  })
+
   it('opens Overview from the general More details command', async () => {
     mockTask(taskWith({ status: 'completed', result: null }))
 

@@ -548,6 +548,12 @@ export default function TaskDetailPage() {
   }, [task?.id])
 
   useEffect(() => {
+    if (showTaskDetails && taskDetailsTab === 'logs') {
+      setAutoScrollLogs(true)
+    }
+  }, [showTaskDetails, taskDetailsTab])
+
+  useEffect(() => {
     setShowCancelDialog(false)
     setShowDeleteDialog(false)
     setShowProjectDialog(false)

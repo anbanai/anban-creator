@@ -263,12 +263,13 @@ function TaskLogDetails({
             size="xs"
             variant="ghost"
             aria-pressed={autoScrollLogs}
+            aria-label={autoScrollLogs ? '暂停自动跟随' : '开启自动跟随'}
             onClick={onToggleAutoScroll}
           >
             {autoScrollLogs
-              ? <Play data-icon="inline-start" />
-              : <Pause data-icon="inline-start" />}
-            {autoScrollLogs ? '跟随输出' : '暂停跟随'}
+              ? <Pause data-icon="inline-start" />
+              : <Play data-icon="inline-start" />}
+            {autoScrollLogs ? '自动跟随中' : '跟随已暂停'}
           </Button>
           <Button
             size="xs"

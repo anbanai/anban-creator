@@ -434,7 +434,8 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('heading', { name: '阶段日志' })).toBeInTheDocument()
     expect(props.logContainerRef.current).toBeInstanceOf(HTMLDivElement)
 
-    fireEvent.click(screen.getByRole('button', { name: '跟随输出' }))
+    expect(screen.getByRole('button', { name: '暂停自动跟随' })).toHaveTextContent('自动跟随中')
+    fireEvent.click(screen.getByRole('button', { name: '暂停自动跟随' }))
     fireEvent.click(screen.getByRole('button', { name: '复制日志' }))
     fireEvent.click(screen.getByRole('button', { name: '重新连接' }))
 
