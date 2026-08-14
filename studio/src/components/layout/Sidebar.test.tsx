@@ -50,7 +50,7 @@ function renderAuthenticatedShell(initialPath = '/') {
               <Route path="/projects" element={<h1>项目页</h1>} />
               <Route path="/tasks" element={<h1>任务页</h1>} />
               <Route path="/settings" element={<h1>设置页</h1>} />
-              <Route path="/connect/claude-code" element={<h1>Claude Code 页</h1>} />
+              <Route path="/plugins" element={<h1>插件页</h1>} />
             </Routes>
           </main>
         </TooltipProvider>
@@ -78,6 +78,8 @@ describe('Sidebar', () => {
       '任务',
       '计划',
       '钱包',
+      '插件',
+      '设置',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()
@@ -96,9 +98,8 @@ describe('Sidebar', () => {
     authState.isAdmin = true
     renderSidebar()
     expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '设计师' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '设计师' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.queryByText('平台与设置')).not.toBeInTheDocument()
     expect(screen.queryByText('资产')).not.toBeInTheDocument()
@@ -116,29 +117,24 @@ describe('Sidebar', () => {
     expect(screen.queryByText('创意工坊')).not.toBeInTheDocument()
   })
 
-  it('renders connection and settings links directly for administrators', () => {
-    authState.isAdmin = true
+  it('renders plugin and settings links directly for regular users', () => {
     renderSidebar()
 
     expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
 
   it('keeps expanded utility links reachable when collapsed', () => {
-    authState.isAdmin = true
     renderSidebar()
 
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
 
-    expect(screen.getByRole('link', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Codex' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
   })
 
   it('navigates directly to settings from the sidebar', async () => {
-    authState.isAdmin = true
     renderAuthenticatedShell()
 
     fireEvent.click(screen.getByRole('link', { name: '设置' }))
@@ -146,17 +142,16 @@ describe('Sidebar', () => {
     expect(await screen.findByRole('heading', { name: '设置页' })).toBeInTheDocument()
   })
 
-  it('closes the mobile drawer after navigating from an expanded utility link', async () => {
-    authState.isAdmin = true
+  it('closes the mobile drawer after navigating from a utility link', async () => {
     renderAuthenticatedShell()
 
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.getByRole('button', { name: '关闭菜单' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '打开菜单' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('link', { name: 'Claude Code' }))
+    fireEvent.click(screen.getByRole('link', { name: '插件' }))
 
-    expect(await screen.findByRole('heading', { name: 'Claude Code 页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '插件页' })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '关闭菜单' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: '打开菜单' })).toBeInTheDocument()

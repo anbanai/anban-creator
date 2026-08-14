@@ -41,6 +41,7 @@ type Services struct {
 	PlanHandler              *handler.PlanHandler
 	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
+	WechatAnalyticsHandler   *handler.WechatAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	AgentProfileHandler      *handler.AgentProfileHandler
 	AgentPackHandler         *handler.AgentPackHandler
@@ -59,7 +60,6 @@ type Services struct {
 	PosterHandler            *handler.PosterHandler
 	ResourceHandler          *handler.ResourceHandler
 	TopicPoolHandler         *handler.TopicPoolHandler
-	DesignerHandler          *handler.DesignerHandler
 	IlinkHandler             *handler.IlinkHandler
 	MCPHandler               http.Handler
 	StorageProvider          storage.Provider
@@ -284,21 +284,6 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Designer endpoints (image generation studio)
-	// ---------------------------------------------------------------------------
-
-	if svc.DesignerHandler != nil {
-		designer := apiV1.Group("/designer")
-		designer.Post("/quote", svc.DesignerHandler.Quote)
-		designer.Post("/generate", svc.DesignerHandler.Generate)
-		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
-		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
-		designer.Post("/upload-reference-from-url", svc.DesignerHandler.UploadReferenceFromURL)
-		designer.Get("/history", svc.DesignerHandler.GetHistory)
-		designer.Get("/generations/:id", svc.DesignerHandler.GetGeneration)
-	}
-
-	// ---------------------------------------------------------------------------
 	// Plan endpoints
 	// ---------------------------------------------------------------------------
 
@@ -329,6 +314,11 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
 		if svc.SeednoteAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/seednote-analytics", svc.SeednoteAnalyticsHandler.GetTaskAnalytics)
+			apiV1.Post("/tasks/:id/seednote-analytics/bind", svc.SeednoteAnalyticsHandler.BindTask)
+		}
+		if svc.WechatAnalyticsHandler != nil {
+			apiV1.Get("/tasks/:id/wechat-analytics", svc.WechatAnalyticsHandler.GetTaskAnalytics)
+			apiV1.Post("/tasks/:id/wechat-analytics/bind", svc.WechatAnalyticsHandler.BindTask)
 		}
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)

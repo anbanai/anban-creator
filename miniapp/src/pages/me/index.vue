@@ -217,7 +217,6 @@ interface MenuItem {
 }
 
 const creativeTools: MenuItem[] = [
-  { icon: '设', title: '设计师', path: '/pages/designer/index' },
   { icon: '拆', title: '爆文拆解', path: '/pages/workshop/index?tab=viral-analysis' },
   { icon: '图', title: '海报制作', path: '/pages/workshop/index?tab=poster' },
   { icon: '复', title: '爆款复刻', path: '/pages/workshop/index?tab=clone' },

@@ -128,12 +128,6 @@
 			}
 		},
 		{
-			"path": "pages/designer/index",
-			"style": {
-				"navigationBarTitleText": "设计师"
-			}
-		},
-		{
 			"path": "pages/connect/claude-code",
 			"style": {
 				"navigationBarTitleText": "Claude Code"

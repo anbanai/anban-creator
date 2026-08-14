@@ -112,6 +112,9 @@ func main() {
 		if err := service.MigrateGoalModeRemoval(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to remove goal mode schema")
 		}
+		if err := service.MigrateDesignerRemoval(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to remove Designer schema")
+		}
 		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
 		}
@@ -324,6 +327,7 @@ func main() {
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
+	var wechatTrackingSvc *service.WechatTrackingService
 	var templateSvc *service.TemplateService
 	var viralAnalysisHistorySvc *service.ViralAnalysisHistoryService
 	var posterSvc *service.PosterService
@@ -424,10 +428,11 @@ func main() {
 
 	if repo != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
+		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log), asynqClient, log)
 		log.Info().Msg("SeedNote tracking service initialized")
+		log.Info().Msg("WeChat article tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisHistorySvc = service.NewViralAnalysisHistoryService(repo)
-			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Msg("Viral analysis history service initialized")
 		}
 	}
@@ -466,6 +471,7 @@ func main() {
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
+	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
 	agentPackHandler := handler.NewAgentPackHandler()
@@ -484,8 +490,6 @@ func main() {
 	var topicPoolHandler *handler.TopicPoolHandler
 	var topicPoolSvc *service.TopicPoolService
 	var agentFeedbackSvc *service.AgentFeedbackService
-	var designerSvc *service.DesignerService
-	var designerHandler *handler.DesignerHandler
 	var ilinkHandler *handler.IlinkHandler
 
 	if repo != nil {
@@ -501,12 +505,15 @@ func main() {
 		if store != nil {
 			taskHandler.SetStore(store)
 		}
-		seednoteAnalyticsHandler = buildSeednoteAnalyticsHandler(repo, log)
+		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
+		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
+		projectHandler.SetUploadRepository(repo)
+		projectHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
 		if imageUnderstandingBaseClient != nil {
 			projectHandler.SetVisionClient(imageUnderstandingBaseClient)
 		}
@@ -594,17 +601,6 @@ func main() {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
 			imageSvc.SetImageCapabilityResolver(imageCapabilityResolver)
 		}
-		if mysqlDB != nil && imageSvc != nil {
-			designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
-			designerSvc.SetProviderCostService(fixedBilling.Cost)
-			designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
-			designerSvc.SetBillingWalletService(fixedBilling.Wallet)
-			if projectHandler != nil {
-				projectHandler.SetDesignerService(designerSvc)
-			}
-			designerHandler = handler.NewDesignerHandler(designerSvc, log)
-			designerHandler.SetDirectUploadDependencies(repo, store)
-		}
 		if imageSvc != nil {
 			imageSvc.SetProviderCostService(fixedBilling.Cost)
 		}
@@ -683,7 +679,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, wechatTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -691,6 +687,11 @@ func main() {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
+	}
+	if asynqClient != nil {
+		analyticsRecoveryCtx, analyticsRecoveryCancel := context.WithCancel(context.Background())
+		defer analyticsRecoveryCancel()
+		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, log)
 	}
 	var runtimeReconcilerDone <-chan struct{}
 	if runtimeReconciler != nil {
@@ -749,6 +750,7 @@ func main() {
 		PlanHandler:              planHandler,
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
+		WechatAnalyticsHandler:   wechatAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		AgentProfileHandler:      agentProfileHandler,
 		AgentPackHandler:         agentPackHandler,
@@ -766,7 +768,6 @@ func main() {
 		PosterHandler:            posterHandler,
 		ResourceHandler:          resourceHandler,
 		TopicPoolHandler:         topicPoolHandler,
-		DesignerHandler:          designerHandler,
 		IlinkHandler:             ilinkHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
@@ -1059,11 +1060,17 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
 			return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
+		}
+	}
+	var wechatCaptureHandler scheduler.WechatTrackingHandler
+	if wechatTrackingSvc != nil {
+		wechatCaptureHandler = func(ctx context.Context, trackingID string) error {
+			return wechatTrackingSvc.CaptureMetrics(ctx, trackingID)
 		}
 	}
 
@@ -1075,6 +1082,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
 		},
 		seednoteCaptureHandler,
+		wechatCaptureHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
@@ -1090,6 +1098,34 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+type analyticsRecoveryService interface {
+	RecoverDue(ctx context.Context, limit int) error
+}
+
+func startAnalyticsRecovery(ctx context.Context, seednote, wechat analyticsRecoveryService, log *zerolog.Logger) {
+	run := func() {
+		for name, tracker := range map[string]analyticsRecoveryService{"seednote": seednote, "wechat": wechat} {
+			if tracker == nil {
+				continue
+			}
+			if err := tracker.RecoverDue(ctx, 100); err != nil && ctx.Err() == nil {
+				log.Error().Err(err).Str("platform", name).Msg("analytics recovery failed")
+			}
+		}
+	}
+	run()
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }
 
 func uploadSessionCleanupStorage(store storage.Provider) (service.DirectUploadFinalizationStorage, bool) {

@@ -137,16 +137,3 @@ export type {
   ViralAnalysis,
   CreateViralAnalysisRequest,
 } from './viral-analysis'
-
-// Designer
-export type {
-  DesignerCapabilityFeatures,
-  DesignerCapability,
-  DesignerSettings,
-  GenerateRequest,
-  GenerateQuote,
-  GenerateImage,
-  ImageGeneration,
-  ImageGenerationResult,
-  HistoryResponse,
-} from './designer'

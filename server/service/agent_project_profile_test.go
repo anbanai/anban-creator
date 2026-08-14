@@ -157,12 +157,12 @@ func agentProjectProfileImageCapabilityResolver() *ImageCapabilityResolver {
 			Capabilities: map[string]config.ImageGenerationRouteConfig{
 				"default-route": {
 					Enabled: true, MinTier: "free",
-					DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "4:3"}},
+					GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1", "4:3"}},
 				},
 				"server-owned-route": {
 					Provider: "private-provider", Model: "private-model", BaseURL: "https://internal-route.invalid/v1",
 					APIKey: "private-api-key", BillingSKU: "private-billing-sku", Enabled: true, MinTier: "free",
-					DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"1:1", "3:4", "16:9"}},
+					GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1", "3:4", "16:9"}},
 				},
 			},
 		},

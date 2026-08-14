@@ -235,7 +235,7 @@ func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task,
 
 	if wasPublishedByAgent(logText) {
 		s.logger.Info().Str("task_id", taskID).Msg("agent already published, setting published flag")
-		if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true, SeednotePublicationIdentity{}); err != nil {
+		if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag")
 		}
 		return
@@ -249,7 +249,7 @@ func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task,
 	}
 	s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
 
-	if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true, SeednotePublicationIdentity{}); err != nil {
+	if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag after auto-publish")
 	}
 }

@@ -23,14 +23,14 @@ func TestIsUserOwnedStorageKey(t *testing.T) {
 		{name: "legacy channels upload owned", key: "uploads/channels/" + uid + "/legacy.png", want: true},
 
 		// Caller-specific extra prefixes.
-		{name: "designer path via extra", key: uid + "/designer/gen-1/0.png", extras: []string{uid + "/designer/"}, want: true},
+		{name: "generated path via extra", key: uid + "/generated/gen-1/0.png", extras: []string{uid + "/generated/"}, want: true},
 		{name: "bare user workspace via extra", key: uid + "/workspace/note.md", extras: []string{uid + "/"}, want: true},
 
 		// Negatives: another user's objects must never match.
 		{name: "other user projects", key: "uploads/projects/user-2/ref.png", want: false},
 		{name: "other user references", key: "uploads/references/user-2/source.png", want: false},
 		{name: "other user legacy channels", key: "uploads/channels/user-2/legacy.png", want: false},
-		{name: "other user designer not in caller extras", key: "user-2/designer/gen-2/0.png", extras: []string{uid + "/designer/"}, want: false},
+		{name: "other user generated not in caller extras", key: "user-2/generated/gen-2/0.png", extras: []string{uid + "/generated/"}, want: false},
 
 		// The trailing slash on every prefix is load-bearing: it stops a short
 		// userID from prefix-matching a longer one (no IDOR via "user-1" vs

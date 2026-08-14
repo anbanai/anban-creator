@@ -17,6 +17,6 @@ func TestFindSKUByExecutionProfile(t *testing.T) {
 		}
 	}
 	if _, ok := catalog.FindSKUByExecutionProfile("image.generate", "balanced"); ok {
-		t.Fatal("Designer must not resolve Agent execution profiles")
+		t.Fatal("image operations must not resolve Agent execution profiles")
 	}
 }

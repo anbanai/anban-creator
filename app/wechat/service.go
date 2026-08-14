@@ -19,7 +19,9 @@ import (
 	wechatcache "github.com/silenceper/wechat/v2/cache"
 	"github.com/silenceper/wechat/v2/officialaccount"
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
+	"github.com/silenceper/wechat/v2/officialaccount/datacube"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
+	"github.com/silenceper/wechat/v2/officialaccount/freepublish"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
 	"resty.dev/v3"
 )
@@ -149,6 +151,15 @@ type ListPublishedResult struct {
 	Items      []PublishedItem `json:"items"`
 }
 
+// ArticleTotalItem is the official cumulative metric series for one published
+// article returned by WeChat DataCube.
+type ArticleTotalItem struct {
+	RefDate string                         `json:"ref_date"`
+	MsgID   string                         `json:"msgid"`
+	Title   string                         `json:"title"`
+	Details []datacube.ArticleTotalDetails `json:"details"`
+}
+
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	oa := s.getOfficialAccount()
@@ -186,10 +197,20 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 
 // ListPublished 获取已发布文章列表
 func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, error) {
+	return s.listPublished(offset, count, true)
+}
+
+// ListPublishedWithContent returns published article metadata including each
+// article URL. It is intended for link ownership and analytics validation.
+func (s *Service) ListPublishedWithContent(offset, count int64) (*ListPublishedResult, error) {
+	return s.listPublished(offset, count, false)
+}
+
+func (s *Service) listPublished(offset, count int64, noReturnContent bool) (*ListPublishedResult, error) {
 	oa := s.getOfficialAccount()
 	fp := oa.GetFreePublish()
 
-	list, err := fp.Paginate(offset, count, true)
+	list, err := fp.Paginate(offset, count, noReturnContent)
 	if err != nil {
 		if wErr := ParseWechatError(err); wErr != nil {
 			s.log.Debug().Int("errcode", wErr.ErrCode).Str("msg", wErr.UserMsg).Msg("list published failed")
@@ -202,23 +223,49 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 	result := &ListPublishedResult{
 		TotalCount: list.TotalCount,
 		ItemCount:  list.ItemCount,
-		Items:      make([]PublishedItem, 0, len(list.Item)),
+		Items:      mapPublishedItems(list.Item),
 	}
-
-	for _, item := range list.Item {
-		pi := PublishedItem{
-			ArticleID:  item.ArticleID,
-			UpdateTime: item.UpdateTime,
-		}
-		if len(item.Content.NewsItem) > 0 {
-			pi.Title = item.Content.NewsItem[0].Title
-			pi.Digest = item.Content.NewsItem[0].Digest
-			pi.URL = item.Content.NewsItem[0].URL
-		}
-		result.Items = append(result.Items, pi)
-	}
-
 	return result, nil
+}
+
+func mapPublishedItems(items []freepublish.ArticleListItem) []PublishedItem {
+	result := make([]PublishedItem, 0, len(items))
+	for _, item := range items {
+		for _, article := range item.Content.NewsItem {
+			result = append(result, PublishedItem{
+				ArticleID:  item.ArticleID,
+				Title:      article.Title,
+				Digest:     article.Digest,
+				URL:        article.URL,
+				UpdateTime: item.UpdateTime,
+			})
+		}
+	}
+	return result
+}
+
+// GetArticleTotal returns cumulative official-account article metrics for the
+// requested publication date. WeChat requires beginDate and endDate in
+// YYYY-MM-DD format and limits the available historical window.
+func (s *Service) GetArticleTotal(beginDate, endDate string) ([]ArticleTotalItem, error) {
+	cube := s.getOfficialAccount().GetDataCube()
+	result, err := cube.GetArticleTotal(beginDate, endDate)
+	if err != nil {
+		if wErr := ParseWechatError(err); wErr != nil {
+			return nil, wErr
+		}
+		return nil, fmt.Errorf("get article total: %w", err)
+	}
+	items := make([]ArticleTotalItem, 0, len(result.List))
+	for _, item := range result.List {
+		items = append(items, ArticleTotalItem{
+			RefDate: item.RefDate,
+			MsgID:   item.MsgID,
+			Title:   item.Title,
+			Details: item.Details,
+		})
+	}
+	return items, nil
 }
 
 // UploadMaterialFromBytes 从字节数据上传素材

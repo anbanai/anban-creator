@@ -72,8 +72,8 @@ func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := generatingSkillContractPaths(t, root)
-	if len(paths) != 9 {
-		t.Fatalf("generating Skill count = %d (%v), want 9", len(paths), paths)
+	if len(paths) != 8 {
+		t.Fatalf("generating Skill count = %d (%v), want 8", len(paths), paths)
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestGeneratingSkillProseDoesNotDescribeTaskMCPSizeParameter(t *testing.T) {
 	}
 }
 
-func TestEcommercePlatformGuidanceDoesNotPassDesignerSizePresetsToTaskGeneration(t *testing.T) {
+func TestEcommercePlatformGuidanceDoesNotPassFixedSizePresetsToTaskGeneration(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{
 		"plugins/skills/ecommerce-platform-specs/SKILL.md",
@@ -185,7 +185,7 @@ func TestEcommercePlatformGuidanceDoesNotPassDesignerSizePresetsToTaskGeneration
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
 			for _, stale := range []string{"ratio:tier", "1:1:2K", "3:4:2K", "16:9:2K"} {
 				if strings.Contains(body, stale) {
-					t.Fatalf("%s still mixes Designer fixed size presets into task guidance via %q", rel, stale)
+					t.Fatalf("%s still mixes fixed size presets into task guidance via %q", rel, stale)
 				}
 			}
 		})
@@ -225,7 +225,6 @@ func TestImageSkillGuidanceDoesNotOverrideEffectiveRatioOrRestoreLegacyRoutes(t 
 		{path: "plugins/skills/article-cover-design/SKILL.md", stale: []string{"宽银幕叙事构图", "A cinematic 2.35:1 wide banner", "the 2.35:1 hero"}},
 		{path: "plugins/skills/article-visual-design/references/cover.md", stale: []string{"硬编码 900×383 / 2.35:1", "image_size=full-bleed`, `2.35:1", "A 2.35:1 horizontal image"}},
 		{path: "plugins/skills/ecommerce-visual-design/SKILL.md", stale: []string{"1:1:2K", "3:4:2K", "16:9:2K", "默认 cover 用更高质量"}},
-		{path: "plugins/skills/line-art-coloring/SKILL.md", stale: []string{"size=\"[从原线稿推断的比例]\""}},
 		{path: "plugins/skills/portrait-pose-variants/SKILL.md", stale: []string{"size=\"9:16\""}},
 		{path: "plugins/skills/short-video-cover/SKILL.md", stale: []string{"size=\"9:16\"", "size` 参数固定传 `\"9:16\"`"}},
 	}

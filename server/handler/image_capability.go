@@ -26,15 +26,15 @@ func NewImageCapabilityHandler(routes config.ImageGenerationRoutesConfig, repo r
 }
 
 type ImageCapabilityOption struct {
-	Key              string                              `json:"key"`
-	DisplayName      string                              `json:"display_name"`
-	Description      string                              `json:"description"`
-	MinTier          string                              `json:"min_tier"`
-	PriceCredits     int64                               `json:"price_credits"`
-	PriceAvailable   bool                                `json:"price_available"`
-	Enabled          bool                                `json:"enabled"`
-	SortOrder        int                                 `json:"sort_order"`
-	DesignerFeatures config.DesignerProviderCapabilities `json:"designer_features"`
+	Key                string                         `json:"key"`
+	DisplayName        string                         `json:"display_name"`
+	Description        string                         `json:"description"`
+	MinTier            string                         `json:"min_tier"`
+	PriceCredits       int64                          `json:"price_credits"`
+	PriceAvailable     bool                           `json:"price_available"`
+	Enabled            bool                           `json:"enabled"`
+	SortOrder          int                            `json:"sort_order"`
+	GenerationFeatures config.ImageGenerationFeatures `json:"generation_features"`
 }
 
 func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
@@ -66,9 +66,9 @@ func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
 		if !route.Enabled || !model.TierSatisfies(userTier, requiredTier) {
 			continue
 		}
-		features := route.DesignerFeatures
+		features := route.GenerationFeatures
 		features.MaxBatch = 1
-		item := ImageCapabilityOption{Key: key, DisplayName: route.Alias, Description: route.Description, MinTier: string(requiredTier), Enabled: route.Enabled, SortOrder: route.SortOrder, DesignerFeatures: features}
+		item := ImageCapabilityOption{Key: key, DisplayName: route.Alias, Description: route.Description, MinTier: string(requiredTier), Enabled: route.Enabled, SortOrder: route.SortOrder, GenerationFeatures: features}
 		if h.catalog != nil && strings.TrimSpace(route.BillingSKU) != "" {
 			if price, err := h.catalog.ResolvePriceBySKUID(c.Context(), "", route.BillingSKU, userTier); err == nil && price != nil {
 				item.PriceCredits = price.PriceCredits

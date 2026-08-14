@@ -1,103 +1,123 @@
-# Montage Upgrade Procedure
+# Montage Runtime Upgrade Procedure
 
-Montage is integrated as a git submodule at `third_party/OpenMontage`.
-Anban owns the adapter contract and does not modify upstream Montage source
-files during normal feature work.
+OpenMontage is an external runtime dependency. It is not stored as a parent
+repository submodule. Anban pins the original upstream repository and commit in
+`deploy/docker/Dockerfile.runtime-openmontage`, builds that source and its
+dependencies into an independent runtime image, and then builds the Anban
+Montage Agent image on top of it.
 
-## Update
+This packaging change does not change the managed runtime contract:
 
-```bash
-git submodule update --init --recursive
-git -C third_party/OpenMontage fetch origin
-git -C third_party/OpenMontage checkout origin/main
+- The immutable template remains at `/opt/montage-template`.
+- Each task receives a writable `/workspace/openmontage` copy.
+- `ANBAN_MONTAGE_SUBMODULE_PATH` remains `/workspace/openmontage` for
+  compatibility.
+- The Agent Pack runtime adapter remains `openmontage`.
+- Checkpoints, output links, task files, and resume behavior are unchanged.
+
+## Local Build
+
+The default source is the original upstream repository at the commit previously
+recorded by the removed submodule:
+
+```text
+repository=https://github.com/calesthio/OpenMontage.git
+commit=4eab34c5cfcccaa4f1970554928feccce73ee930
 ```
 
-Review the submodule diff:
+Build the Agent image and its runtime dependency:
 
 ```bash
-git diff --submodule=log
+make docker-montage-agent-image
 ```
 
-## Verify
+`docker-montage-agent-image` depends on `docker-openmontage-runtime-image`, so
+this builds both images in the required order. Use the runtime target directly
+only when you need to build that image by itself.
+
+## Yunxiao Build And Push
+
+Use the repository root as the Docker build context. Configure two ordered
+image-build steps in Yunxiao. The first step must finish and push its image
+before the second step starts.
+
+Runtime image:
+
+```bash
+OPENMONTAGE_RUNTIME_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-openmontage-runtime:4eab34c5
+
+docker build --pull \
+  -f deploy/docker/Dockerfile.runtime-openmontage \
+  --build-arg OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git \
+  --build-arg OPENMONTAGE_REF=4eab34c5cfcccaa4f1970554928feccce73ee930 \
+  -t "$OPENMONTAGE_RUNTIME_REF" .
+docker push "$OPENMONTAGE_RUNTIME_REF"
+```
+
+Montage Agent image:
+
+```bash
+OPENMONTAGE_RUNTIME_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-openmontage-runtime:4eab34c5
+MONTAGE_AGENT_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-agent-montage:<release-tag>
+
+docker build --pull \
+  -f deploy/docker/Dockerfile.agent-montage \
+  --build-arg OPENMONTAGE_RUNTIME_IMAGE="$OPENMONTAGE_RUNTIME_REF" \
+  -t "$MONTAGE_AGENT_REF" .
+docker push "$MONTAGE_AGENT_REF"
+```
+
+The Yunxiao worker needs outbound access to GitHub while building the runtime
+image. It does not need a checkout, fork, or submodule for OpenMontage.
+
+## ACK Deployment
+
+ACK only needs the final Montage Agent image. Set the existing
+`montage_agent_image_repo` variable, which becomes
+`ANBAN_AGENT_IMAGE_MONTAGE`, to the published `creator-agent-montage` reference.
+Do not configure the OpenMontage runtime image in the Kubernetes manifest; it is
+only a build-time parent of the final Agent image.
+
+Prefer an immutable digest in production:
+
+```text
+chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-agent-montage@sha256:<digest>
+```
+
+Existing executions continue using their persisted runtime image. New tasks use
+the newly deployed Agent image after the Server deployment is updated.
+
+## Upgrade OpenMontage
+
+1. Choose an upstream commit from `https://github.com/calesthio/OpenMontage.git`.
+2. Build and test a new runtime image using that full commit SHA.
+3. Build the Montage Agent image from the new runtime image.
+4. Run the contract and managed-runtime verification below.
+5. Publish both images with immutable references.
+6. Update ACK to the new final Montage Agent digest.
+7. Change the default `OPENMONTAGE_SOURCE_REF` only after acceptance succeeds.
+
+Do not update OpenMontage implicitly from a branch such as `main`. A full commit
+SHA keeps runtime builds reviewable and reproducible.
+
+## Verification
 
 ```bash
 go test ./server/agent -run Montage -count=1
 go test ./server/service -run Montage -count=1
 go test ./server/config -run Montage -count=1
-cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts
+(cd agent-ts && bun run typecheck && bun run test && bun run build)
+(cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts)
 ```
 
-## Runtime Images
-
-Production uses three immutable Agent images:
-
-- `ANBAN_AGENT_IMAGE_ARTICLE` (deployed from `article_agent_image_repo`): the minimal Article runtime.
-- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow runtime. Xiaohongshu research uses authenticated Anban Server MCP tools backed by the separately deployed `sidecar-seednote`.
-- `ANBAN_AGENT_IMAGE_MONTAGE`: the Montage runtime with an embedded OpenMontage template.
-
-Build all three images with:
-
-```bash
-make docker-agent-image
-make docker-seednote-agent-image
-make docker-montage-agent-image
-```
-
-The Montage image stores a complete read-only OpenMontage template at
-`/opt/montage-template`. Publish all three images by digest. Do not deploy
-mutable tags as the persisted `task_executions.runtime_image` value.
-
-## Workspace And Resume
-
-Every managed execution receives a fresh container or Kubernetes Job. The task
-workspace volume is mounted at `/workspace`, and the runtime owns its workspace
-and output. At Kubernetes task startup, the init container atomically copies the
-complete image template into a writable `/workspace/openmontage` directory when
-it does not already exist. The Agent uses the same materialization contract in
-Docker and runs with:
-
-```text
-cwd=/workspace/openmontage
-ANBAN_MONTAGE_SUBMODULE_PATH=/workspace/openmontage
-```
-
-OpenMontage project files, checkpoints, and Claude session state therefore stay
-on NAS across Job replacement and explicit task resume. Bootstrap replay only
-adds missing task/resume inputs and rejects conflicting files; it does not
-overwrite existing checkpoint or session data. A resume attempt reuses the
-parent execution's persisted runtime profile and image digest, even if current
-server configuration has changed.
-
-`/tmp` is an `emptyDir` and is intentionally not recoverable. Do not place
-resume-critical state there. Direct artifact upload uses
-`/workspace/openmontage/output`; source trees, checkpoints, `.anban-runtime-home`,
-`.claude`, secrets, and dependency caches remain on NAS and are not published as
-task artifacts unless the workflow explicitly registers a stable file through
-MCP.
-
-Terminal task workspaces remain available for resume. Permanently deleting the
-task deletes its task-workspace PVC; deleting the PVC out of band also makes the
-original execution state non-resumable. Project memory uses a separate PVC.
-
-Backlot is not exposed as an Anban task page. The platform retains normalized
-checkpoint, timeline, run-log, manifest, and delivery artifacts instead.
-
-Verify a live deployment with:
+Verify a live deployment:
 
 ```bash
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"="}{.imageID}{"\n"}{end}'
 kubectl -n anbanai-prod get pod <pod> -o jsonpath='{range .spec.volumes[*]}{.name}{"="}{.persistentVolumeClaim.claimName}{"\n"}{end}'
-kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -d /workspace/openmontage; test -w /workspace/openmontage; test -d /workspace/openmontage/remotion-composer'
+kubectl -n anbanai-prod exec <pod> -- sh -c 'pwd; test -d /workspace/openmontage; test -w /workspace/openmontage; test -d /workspace/openmontage/remotion-composer; test -L /workspace/openmontage/output'
 ```
 
-## Adapter Rule
-
-If upstream pipeline metadata changes, update only Anban's Montage adapter
-mapping and tests. Do not copy Montage internals into Studio schemas.
-
-The stable Anban boundary remains:
-
-- `montage_input` in API and Studio.
-- `montage-input.json` in the agent workspace.
-- `montage-project.json` as the adapter manifest.
-- `final_video` plus `delivery-manifest.json` as required completion deliverables.
+Backlot remains internal. The stable Anban boundary continues to be
+`montage_input`, `montage-input.json`, `montage-project.json`, `final_video`, and
+`delivery-manifest.json`.

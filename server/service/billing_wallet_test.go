@@ -35,7 +35,7 @@ func TestStandaloneChargeClassifiesMissingWalletAsLedgerInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newBillingWalletFixtureWithRepository(t, repository.New(db), 500, 0, 0)
-	quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "missing-wallet")
+	quote := f.quote(t, billingWalletUserID, "image.generate", "image_generation.capabilities.standard", "missing-wallet")
 	if err := db.Where("user_id = ?", billingWalletUserID).Delete(&model.BillingWalletAccount{}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestBillingWalletRejectsQuoteWithMismatchedSKUSnapshot(t *testing.T) {
 			},
 		},
 		{
-			name: "standalone", operation: "designer.generate_image", route: "image.designer",
+			name: "standalone", operation: "image.generate", route: "image_generation.capabilities.standard",
 			charge: func(f *billingWalletFixture, quote *model.BillingQuote) error {
 				_, err := f.wallet.ChargeStandaloneOperation(context.Background(), OperationChargeRequest{
 					UserID: quote.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
@@ -386,7 +386,7 @@ func TestBillingWalletDoesNotMapLotDatabaseErrorToInsufficient(t *testing.T) {
 			},
 		},
 		{
-			name: "standalone", operation: "designer.generate_image", route: "image.designer",
+			name: "standalone", operation: "image.generate", route: "image_generation.capabilities.standard",
 			charge: func(f *billingWalletFixture, quote *model.BillingQuote) error {
 				_, err := f.wallet.ChargeStandaloneOperation(context.Background(), OperationChargeRequest{
 					UserID: quote.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
@@ -511,7 +511,7 @@ func TestBillingWalletTaskOperationUsesFrozenTierAfterUserChange(t *testing.T) {
 		t.Fatalf("operation after tier change = %#v", second)
 	}
 	standaloneQuote, err := catalog.CreateQuote(ctx, QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "designer.generate_image", Route: "image.designer",
+		UserID: billingCatalogUserID, Operation: "image.generate", Route: "image_generation.capabilities.standard",
 		RequestFingerprint: billingFingerprint("tiered-standalone"), IdempotencyScope: "tiered-standalone-quote", IdempotencyKey: "tiered-standalone",
 	})
 	if err != nil {
@@ -614,7 +614,7 @@ func TestBillingWalletStandaloneOperationNeverOverdraws(t *testing.T) {
 	for _, paid := range []int64{0, 499} {
 		t.Run(fmt.Sprintf("paid_%d", paid), func(t *testing.T) {
 			f := newBillingWalletFixture(t, paid, 0, 0)
-			quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "standalone-1")
+			quote := f.quote(t, billingWalletUserID, "image.generate", "image_generation.capabilities.standard", "standalone-1")
 			req := OperationChargeRequest{
 				UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
 				ResourceType: "image", ResourceID: "image-1", RequestFingerprint: quote.RequestFingerprint,
@@ -1029,7 +1029,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 
 	t.Run("standalone operation", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "designer.generate_image", "image.designer", "post-lock-standalone")
+		quote := f.quote(t, billingWalletUserID, "image.generate", "image_generation.capabilities.standard", "post-lock-standalone")
 		req := OperationChargeRequest{
 			UserID: billingWalletUserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID,
 			ResourceType: "image", ResourceID: "post-lock-standalone", RequestFingerprint: quote.RequestFingerprint,

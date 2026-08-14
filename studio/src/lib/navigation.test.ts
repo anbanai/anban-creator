@@ -16,6 +16,8 @@ describe('navigation IA', () => {
       '任务',
       '计划',
       '钱包',
+      '插件',
+      '设置',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -24,11 +26,7 @@ describe('navigation IA', () => {
 
   it('defines administrator navigation in approved order', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
-      '设计师',
       '模板库',
-      'Claude Code',
-      'Codex',
-      '设置',
     ])
     expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
   })
@@ -40,11 +38,9 @@ describe('navigation IA', () => {
       '/tasks',
       '/plans',
       '/billing',
-      '/designer',
-      '/templates',
-      '/connect/claude-code',
-      '/connect/codex',
+      '/plugins',
       '/settings',
+      '/templates',
     ])
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
     expect(visibleNavItems(allNavItems, true)).toEqual([

@@ -24,7 +24,7 @@ const DefaultSignedURLTTL = 3600 // 1 hour
 //
 // store==nil, empty input, or any signing failure returns rawURL unchanged, so
 // handlers exercised in tests without a store are unaffected. This mirrors the
-// behaviour of TaskService.EnrichFilesWithURLs and DesignerService.signResultURLs.
+// behaviour of TaskService.EnrichFilesWithURLs and other signed asset responses.
 //
 // rawURL is NOT trusted: external URLs are never signed (IsOwnedURL guard), and
 // storage.StorageKeyFromURL performs no ownership validation by design.

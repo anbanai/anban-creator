@@ -155,6 +155,19 @@ func TestMainRemovesGoalModeSchemaAfterAutoMigrate(t *testing.T) {
 	}
 }
 
+func TestMainRemovesDesignerSchemaAfterAutoMigrate(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	autoMigrate := strings.Index(text, "migrateModels(mysqlDB, model.AutoMigrate)")
+	designerRemoval := strings.Index(text, "service.MigrateDesignerRemoval(context.Background(), mysqlDB, log)")
+	if autoMigrate < 0 || designerRemoval < 0 || designerRemoval < autoMigrate {
+		t.Fatalf("Designer removal must run after AutoMigrate: auto=%d removal=%d", autoMigrate, designerRemoval)
+	}
+}
+
 func TestBuildBillingRuntime(t *testing.T) {
 	catalogDir, err := filepath.Abs("billing")
 	if err != nil {

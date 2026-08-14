@@ -120,7 +120,7 @@ TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes and thro
 Fiber v3 HTTP API. Layered architecture: handler → service → repository → MySQL/GORM.
 
 Key packages:
-- `handler/` — HTTP handlers (auth, project, plan, task, timeline, websocket, credit, agent, designer, ilink)
+- `handler/` — HTTP handlers (auth, project, plan, task, timeline, websocket, credit, agent, ilink)
 - `router/` — `router.go` registers all `/api/v1` route groups, middleware, and the WS hub (the single source of truth for routes)
 - `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `ilink_*.go` (WeChat assistant binding, conversation, polling, and terminal notification outbox)
 - `wcf/` — HTTP client for the iLink sidecar transport used by the iLink channel; do not put product-level WeChat assistant behavior here
@@ -181,9 +181,8 @@ All routes are registered in `server/router/router.go`. Everything under `/api/v
 - `/api/v1/projects` — Project CRUD + fetch-profile, analyze-image, archive/restore, stats (formerly `/channels`)
 - `/api/v1/projects/:project_id/topics` — Topic pool (create/list/delete/reset)
 - `GET /api/v1/image-capabilities` — Tier-filtered public image capability catalog
-- `/api/v1/designer/*` — Image generation studio (quote, generate, upload-reference, history)
 - `/api/v1/plans` — Plan CRUD + pause/resume
-- `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), seednote-analytics
+- `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), Seednote analytics, and WeChat article analytics
 - `/api/v1/ilink/*` — ilink 微信助手 binding + commands + task terminal notifications
 - `/api/v1/timeline`, `/api/v1/usage/stats` — Timeline view, usage stats
 - `/api/v1/billing/*` — Wallet, immutable SKU catalog, quotes, transactions, and referral status
@@ -319,7 +318,7 @@ plugins/
 └── writers/                       # Shared writing styles
 ```
 
-Codex install flow: `codex plugin marketplace add ./plugins && codex plugin install anban`, then `bash plugins/install/install-subagents.sh`.
+Codex install flow: `codex plugin marketplace add ./plugins && codex plugin add anban@anbanai`, then `bash plugins/install/install-subagents.sh`.
 
 Both adapters use the `creator` MCP server key. Skills must remain host-neutral; unavoidable host syntax belongs in a manifest, Agent, MCP, Hook, or install adapter. Agents must call MCP tools directly, with no ad-hoc HTTP clients.
 

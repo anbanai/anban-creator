@@ -501,37 +501,6 @@ describe('usePromptAttachments', () => {
     expect(upload).not.toHaveBeenCalled()
   })
 
-  it('uploads designer references with their dedicated purpose and exposes uploaded identities', async () => {
-    const file = fileOf('design.png')
-    const upload = vi.fn().mockResolvedValue(uploadResult(file))
-    const { result } = renderHook(() => usePromptAttachments({
-      adapter: { mode: 'designer' },
-      policy,
-      upload,
-      createId: idSequence(),
-      createObjectURL: (item) => `blob:${item.name}`,
-      revokeObjectURL: vi.fn(),
-    }))
-
-    act(() => {
-      result.current.addFiles([file])
-    })
-    await waitFor(() => expect(result.current.attachments[0].status).toBe('uploaded'))
-
-    expect(upload).toHaveBeenCalledWith(expect.objectContaining({
-      purpose: 'designer_reference',
-      file,
-    }))
-    expect(result.current.attachments[0]).toEqual(expect.objectContaining({
-      uploadId: 'upload-design.png',
-      key: 'uploads/pending/user/upload-design.png/design.png',
-    }))
-    expect(result.current.toInputAttachments()).toEqual([expect.objectContaining({
-      upload_id: 'upload-design.png',
-      key: 'uploads/pending/user/upload-design.png/design.png',
-    })])
-  })
-
   it('revokes each transient URL once and ignores stale async completion', async () => {
     const operations: ReturnType<typeof deferred<UploadToOSSResult>>[] = []
     const signals: Array<AbortSignal | undefined> = []

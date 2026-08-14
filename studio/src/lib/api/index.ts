@@ -8,12 +8,12 @@ import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
 import { seednoteAnalyticsApi } from './seednote-analytics'
+import { wechatAnalyticsApi } from './wechat-analytics'
 import { templatesApi } from './templates'
 import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
-import { designerApi } from './designer'
 import { imageCapabilitiesApi } from './image-capabilities'
 import { ilinkApi } from './ilink'
 import { aiEntryApi } from './ai-entry'
@@ -32,12 +32,12 @@ export const api = {
   usage: usageApi,
   feedback: feedbackApi,
   seednoteAnalytics: seednoteAnalyticsApi,
+  wechatAnalytics: wechatAnalyticsApi,
   templates: templatesApi,
   posters: postersApi,
   viralAnalyses: viralAnalysesApi,
   resources: resourcesApi,
   topicPool: topicPoolApi,
-  designer: designerApi,
   imageCapabilities: imageCapabilitiesApi,
   ilink: ilinkApi,
   aiEntry: aiEntryApi,

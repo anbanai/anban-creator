@@ -35,7 +35,7 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 7 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 6 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "article" {

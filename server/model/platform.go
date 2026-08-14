@@ -102,6 +102,19 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "1:1（电商默认）", Type: "select", Group: "advanced"},
 		},
 	},
+	PlatformMontage: {
+		ID:                   PlatformMontage,
+		Label:                "Montage",
+		BadgeVariant:         "secondary",
+		SupportsPublishing:   false,
+		SupportsAutoFetch:    false,
+		SupportedImageRatios: []string{},
+		Fields: []PlatformFieldConfig{
+			{Key: "name", Label: "项目名称", Placeholder: "例如 产品发布短片", Required: true, Type: "text", Group: "basic"},
+			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向社交媒体的品牌短视频", Type: "textarea", Group: "basic"},
+			{Key: "keywords", Label: "关键词", Placeholder: "例如 产品发布, 竖屏短片, 节奏感", Type: "textarea", Group: "advanced"},
+		},
+	},
 }
 
 // GetPlatformConfig returns the config for a given platform, or nil if not found.
@@ -111,7 +124,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformMontage}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

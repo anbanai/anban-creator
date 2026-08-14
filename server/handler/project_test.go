@@ -264,8 +264,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
 	items := decodeBody(t, resp)["data"].([]any)
-	if len(items) != 2 {
-		t.Fatalf("non-admin projects = %#v, want article and seednote only", items)
+	if len(items) != 3 {
+		t.Fatalf("non-admin projects = %#v, want article, seednote, and montage", items)
 	}
 	for _, item := range items {
 		platform := item.(map[string]any)["platform"].(string)
@@ -274,7 +274,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		}
 	}
 
-	for _, platform := range []string{model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage} {
+	for _, platform := range []string{model.PlatformMoments, model.PlatformEcommerce} {
 		t.Run("reject create "+platform, func(t *testing.T) {
 			resp := doProjectRequestAsNonAdmin(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
 				"platform": platform,
@@ -287,16 +287,16 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	}
 
 	resp = doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects/"+projectIDs[model.PlatformMontage], userID, nil)
-	if resp.StatusCode != fiber.StatusForbidden {
-		t.Fatalf("non-admin get hidden project status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("non-admin get montage project status = %d, want 200", resp.StatusCode)
 	}
 
 	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPut, "/api/v1/projects/"+projectIDs[model.PlatformArticle], userID, map[string]any{
 		"platform": model.PlatformMontage,
-		"name":     "Hidden montage",
+		"name":     "Public montage",
 	})
-	if resp.StatusCode != fiber.StatusForbidden {
-		t.Fatalf("non-admin update to hidden platform status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("non-admin update to montage status = %d, want 200; body=%#v", resp.StatusCode, decodeBody(t, resp))
 	}
 
 	resp = doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects/platform-configs", userID, nil)
@@ -304,8 +304,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
 	}
 	configs := decodeBody(t, resp)["data"].([]any)
-	if len(configs) != 2 {
-		t.Fatalf("non-admin platform configs = %#v, want article and seednote only", configs)
+	if len(configs) != 3 {
+		t.Fatalf("non-admin platform configs = %#v, want article, seednote, and montage", configs)
 	}
 	for _, item := range configs {
 		platform := item.(map[string]any)["id"].(string)
@@ -318,8 +318,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
 	}
-	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 4 {
-		t.Fatalf("admin platform configs = %#v, want all four configured platforms", configs)
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 5 {
+		t.Fatalf("admin platform configs = %#v, want all five configured platforms", configs)
 	}
 }
 
@@ -392,6 +392,9 @@ func TestProjectHandler_CreateAndUpdateMontageDefaults(t *testing.T) {
 	if defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 || defaults.Preferences.VoiceoverMode != "narrated" {
 		t.Fatalf("created MontageDefaults = %#v", defaults)
 	}
+	if stored.ImageRatio != "" {
+		t.Fatalf("created Montage image ratio = %q, want empty", stored.ImageRatio)
+	}
 
 	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{
 		"platform": model.PlatformMontage,
@@ -414,6 +417,21 @@ func TestProjectHandler_CreateAndUpdateMontageDefaults(t *testing.T) {
 	defaults = stored.MontageDefaults.Data()
 	if defaults.DefaultPipeline != "product-demo" || defaults.Preferences.AspectRatio != "16:9" || defaults.Preferences.DurationSeconds != 30 {
 		t.Fatalf("updated MontageDefaults = %#v", defaults)
+	}
+	if stored.ImageRatio != "" {
+		t.Fatalf("updated Montage image ratio = %q, want empty", stored.ImageRatio)
+	}
+}
+
+func TestProjectHandler_RejectsImageRatioForMontage(t *testing.T) {
+	app, _ := setupProjectDeleteHandlerTest(t)
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), map[string]any{
+		"platform":    model.PlatformMontage,
+		"name":        "Launch montage",
+		"image_ratio": "9:16",
+	})
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%#v", resp.StatusCode, decodeBody(t, resp))
 	}
 }
 

@@ -257,8 +257,8 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		"Secrets only arrive through environment variables",
 		"env_keys",
 		"delivery-manifest.json",
-		"third_party/OpenMontage",
-		"Do not modify files under `third_party/OpenMontage`",
+		"immutable image template at `/opt/montage-template`",
+		"Do not modify the immutable image template",
 	} {
 		if !strings.Contains(canonical, want) {
 			t.Fatalf("montage skill missing %q", want)
@@ -269,7 +269,7 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		"/workspace/montage",
-		"fall back to the configured/default `third_party/OpenMontage` path",
+		"third_party/OpenMontage",
 		"workspace preparation",
 	} {
 		if strings.Contains(canonical, forbidden) {
@@ -329,13 +329,14 @@ func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 	}
 }
 
-func TestMontageSubmodulePathIsDeclared(t *testing.T) {
+func TestMontageRuntimeSourceIsNotAParentSubmodule(t *testing.T) {
 	root := repoRoot(t)
 	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
-	if !strings.Contains(gitmodules, "third_party/OpenMontage") {
-		t.Fatal(".gitmodules missing third_party/OpenMontage submodule")
+	if strings.Contains(gitmodules, "third_party/OpenMontage") {
+		t.Fatal(".gitmodules retains third_party/OpenMontage submodule")
 	}
-	if !strings.Contains(gitmodules, "https://github.com/calesthio/OpenMontage.git") {
-		t.Fatal(".gitmodules missing Montage upstream URL")
+	runtime := readRepoFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage"))
+	if !strings.Contains(runtime, "https://github.com/calesthio/OpenMontage.git") {
+		t.Fatal("runtime Dockerfile missing OpenMontage upstream URL")
 	}
 }

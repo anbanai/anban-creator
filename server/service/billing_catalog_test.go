@@ -243,14 +243,14 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 			req.Route = "legacy"
 		}},
 		{name: "operation rejects profile", mutate: func(req *QuoteRequest) {
-				req.Operation = "image.generate"
-				req.ExecutionProfile = "balanced"
-				req.Route = "image_generation.capabilities.standard"
+			req.Operation = "image.generate"
+			req.ExecutionProfile = "balanced"
+			req.Route = "image_generation.capabilities.standard"
 		}},
-		{name: "designer rejects profile", mutate: func(req *QuoteRequest) {
-				req.Operation = "image.generate"
-				req.ExecutionProfile = "balanced"
-				req.Route = "image_generation.capabilities.professional"
+		{name: "second image route rejects profile", mutate: func(req *QuoteRequest) {
+			req.Operation = "image.generate"
+			req.ExecutionProfile = "balanced"
+			req.Route = "image_generation.capabilities.professional"
 		}},
 	}
 	for _, tt := range tests {
@@ -1038,7 +1038,7 @@ func testBillingBundle() billing.Bundle {
 			SKUs: []billing.SKUConfig{
 				{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Route: "image.cover", Delivery: "image"},
-				{ID: "image.standalone.v1", Operation: "designer.generate_image", ChargePolicy: "standalone_operation", PriceCredits: 100, Route: "image.designer", Delivery: "image"},
+				{ID: "image.standalone.v1", Operation: "image.generate", ChargePolicy: "standalone_operation", PriceCredits: 100, Route: "image_generation.capabilities.standard", Delivery: "image"},
 			},
 		},
 	}

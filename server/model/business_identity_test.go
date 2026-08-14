@@ -23,15 +23,22 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 }
 
 func TestAdminOnlyProjectPlatforms(t *testing.T) {
-	for _, platform := range []string{PlatformMoments, PlatformEcommerce, PlatformMontage} {
+	for _, platform := range []string{PlatformMoments, PlatformEcommerce} {
 		if !IsAdminOnlyProjectPlatform(platform) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = false", platform)
 		}
 	}
-	for _, platform := range []string{PlatformArticle, PlatformSeednote} {
+	for _, platform := range []string{PlatformArticle, PlatformSeednote, PlatformMontage} {
 		if IsAdminOnlyProjectPlatform(platform) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = true", platform)
 		}
+	}
+}
+
+func TestMontageHasPublicPlatformConfig(t *testing.T) {
+	config := GetPlatformConfig(PlatformMontage)
+	if config == nil || config.ID != PlatformMontage || len(config.Fields) == 0 {
+		t.Fatalf("Montage platform config = %#v, want public form metadata", config)
 	}
 }
 

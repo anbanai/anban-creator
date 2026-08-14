@@ -163,7 +163,6 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
 	expected := map[string][]string{
-		"designer":    {"line-art-coloring"},
 		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
 		"live-slicer": {"live-slice", "capcut-draft"},
 		"moments":     {"moments", "humanizer"},

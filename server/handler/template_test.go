@@ -146,7 +146,7 @@ func TestTemplateHandlerAnalyzeThumbnailRequiresAdminAndUsesRestrictedPrompt(t *
 		validationResponse: `{"allowed":true}`,
 	}
 	h.SetVisionClient(llm)
-	key := "admin-analyze-user/designer/template-thumbnail.png"
+	key := "uploads/references/admin-analyze-user/template-thumbnail.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1a', '\n'}}}
 	h.SetStore(store)
 

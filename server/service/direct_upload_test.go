@@ -694,7 +694,7 @@ func TestPrepareDirectUploadAllowsAIEntryMediaAndDocuments(t *testing.T) {
 	}
 }
 
-func TestPrepareDirectUploadAllowsMontageMediaAndDocuments(t *testing.T) {
+func TestPrepareDirectUploadAllowsMontageMedia(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakeUploadSessionRepo{}
 	cfg := DirectUploadConfig{
@@ -708,8 +708,6 @@ func TestPrepareDirectUploadAllowsMontageMediaAndDocuments(t *testing.T) {
 		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "clip.mp4", ContentType: "video/mp4", Size: 50 * 1024 * 1024},
 		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "storyboard.png", ContentType: "image/png", Size: 8 * 1024 * 1024},
 		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "voice.m4a", ContentType: "audio/mp4", Size: 4 * 1024 * 1024},
-		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "script.md", ContentType: "text/markdown", Size: 1024},
-		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "brief.pdf", ContentType: "application/pdf", Size: 25 * 1024 * 1024},
 	}
 	for _, tc := range cases {
 		if _, err := PrepareDirectUpload(context.Background(), store, repo, cfg, tc); err != nil {
@@ -773,6 +771,8 @@ func TestPrepareDirectUploadRejectsInvalidPurposeSizeAndMIME(t *testing.T) {
 		{UserID: "u", Purpose: "bad", Filename: "a.png", ContentType: "image/png", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeProjectReference, Filename: "a.mp4", ContentType: "video/mp4", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "a.mp4", ContentType: "video/mp4", Size: 51 * 1024 * 1024},
+		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "script.md", ContentType: "text/markdown", Size: 1024},
+		{UserID: "u", Purpose: DirectUploadPurposeMontageAsset, Filename: "brief.pdf", ContentType: "application/pdf", Size: 1024},
 		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.exe", ContentType: "application/x-msdownload", Size: 1},
 		{UserID: "u", Purpose: DirectUploadPurposeAIEntryAttachment, Filename: "brief.pdf", ContentType: "application/pdf", Size: 26 * 1024 * 1024},
 	}

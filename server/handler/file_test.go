@@ -16,10 +16,10 @@ import (
 func setupFileHandlerTest(userID string) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeStorageProvider{data: map[string][]byte{
-		"user-1/designer/gen-1/0.png":                []byte("png-bytes"),
+		"user-1/generated/gen-1/0.png":               []byte("png-bytes"),
 		"uploads/projects/user-1/ref.png":            []byte("project-png"),
 		"uploads/references/user-1/source.png":       []byte("ref-png"),
-		"user-2/designer/gen-2/0.png":                []byte("other-user-png"),
+		"user-2/generated/gen-2/0.png":               []byte("other-user-png"),
 		"user-1/anban-creator_ref_fileid_source.png": []byte("ref-bytes"),
 	}}
 	h := NewFileHandler(store, &logger)
@@ -75,23 +75,23 @@ func TestServeFile_AllowsOwnStagingUploadSessionThroughRepository(t *testing.T) 
 	}
 }
 
-func TestServeFile_AllowsDesignerPathForOwner(t *testing.T) {
+func TestServeFile_RejectsRemovedGeneratedPathForOwner(t *testing.T) {
 	app := setupFileHandlerTest("user-1")
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/designer/gen-1/0.png", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/generated/gen-1/0.png", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
 }
 
-func TestServeFile_RejectsDesignerPathForOtherUser(t *testing.T) {
+func TestServeFile_RejectsGeneratedPathForOtherUser(t *testing.T) {
 	app := setupFileHandlerTest("user-1")
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-2/designer/gen-2/0.png", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-2/generated/gen-2/0.png", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestServeFile_StillAllowsUploadsPath(t *testing.T) {
 func TestServeFile_RejectsUnauthenticatedRequest(t *testing.T) {
 	app := setupFileHandlerTest("")
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/designer/gen-1/0.png", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/generated/gen-1/0.png", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -157,8 +157,8 @@ func TestServeFile_RejectsPathTraversalAttempt(t *testing.T) {
 	app := setupFileHandlerTest("user-1")
 
 	for _, path := range []string{
-		"/files/user-1/designer/../../user-2/designer/gen-2/0.png",
-		"/files/user-1/designer/%2e%2e/%2e%2e/user-2/designer/gen-2/0.png",
+		"/files/user-1/generated/../../user-2/generated/gen-2/0.png",
+		"/files/user-1/generated/%2e%2e/%2e%2e/user-2/generated/gen-2/0.png",
 		"/files/uploads/references/user-1/../../../etc/passwd",
 	} {
 		resp, err := app.Test(httptest.NewRequest("GET", path, nil))

@@ -28,8 +28,8 @@ func TestConnectionGuidesUseFixedPluginEndpoint(t *testing.T) {
 		relPath string
 		mode    connectionGuideCredentialMode
 	}{
-		{relPath: "studio/src/components/connect/ClaudeGuide.tsx", mode: claudePluginUserConfig},
-		{relPath: "studio/src/components/connect/CodexGuide.tsx", mode: codexEnvironment},
+		{relPath: "studio/public/claude/index.html", mode: claudePluginUserConfig},
+		{relPath: "studio/public/codex/index.html", mode: codexEnvironment},
 		{relPath: "miniapp/src/pages/connect/claude-code.vue", mode: claudePluginUserConfig},
 		{relPath: "miniapp/src/pages/connect/codex.vue", mode: codexEnvironment},
 	} {

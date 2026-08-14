@@ -349,7 +349,7 @@ func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.T
 	switch latestExecution.PublishingStatus {
 	case model.TaskExecutionPublishingSucceeded:
 		if !latestTask.Published {
-			return s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true, SeednotePublicationIdentity{})
+			return s.repo.Tasks().SetPublished(ctx, latestTask.ID, true)
 		}
 		return nil
 	case model.TaskExecutionPublishingSkipped:
@@ -368,7 +368,7 @@ func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.T
 		return s.markCloudPublishingSkipped(ctx, latestExecution)
 	}
 	if wasPublishedByAgent(result.LogText) || latestTask.Published {
-		if err := s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true, SeednotePublicationIdentity{}); err != nil {
+		if err := s.repo.Tasks().SetPublished(ctx, latestTask.ID, true); err != nil {
 			return err
 		}
 		won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSucceeded, []byte(`{"source":"agent"}`))
@@ -438,7 +438,7 @@ func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.T
 	if !won {
 		return ErrCloudPublishingAmbiguous
 	}
-	return s.setPublishedAndMaybeTrack(ctx, latestTask.UserID, latestTask, true, SeednotePublicationIdentity{})
+	return s.repo.Tasks().SetPublished(ctx, latestTask.ID, true)
 }
 
 // ResolveCloudPublishing closes the only ambiguity the WeChat draft API cannot
@@ -469,7 +469,7 @@ func (s *TaskService) ResolveCloudPublishing(ctx context.Context, executionID st
 	}
 	execution.PublishingStatus = target
 	if published {
-		if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true, SeednotePublicationIdentity{}); err != nil {
+		if err := s.repo.Tasks().SetPublished(ctx, task.ID, true); err != nil {
 			return err
 		}
 	}

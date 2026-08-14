@@ -36,14 +36,19 @@ describe('MontageSourceAssetInput', () => {
     vi.clearAllMocks()
   })
 
-  it('maps uploads to Montage assets and preserves saved asset metadata', async () => {
+  it.each([
+    { fileName: 'source.png', contentType: 'image/png', expectedType: 'image_url' as const },
+    { fileName: 'source.mp4', contentType: 'video/mp4', expectedType: 'video_url' as const },
+    { fileName: 'source.m4a', contentType: 'audio/mp4', expectedType: 'audio_url' as const },
+  ])('maps $contentType uploads to $expectedType and preserves saved asset metadata', async ({ fileName, contentType, expectedType }) => {
+    const previewUrl = `/${fileName}`
     vi.mocked(uploadToOSS).mockResolvedValue({
       uploadSessionId: 'session-source',
       uploadId: 'upload-source',
-      key: 'uploads/source.mp4',
-      previewUrl: '/source.mp4',
-      publicUrl: '/source.mp4',
-      contentType: 'video/mp4',
+      key: `uploads/${fileName}`,
+      previewUrl,
+      publicUrl: previewUrl,
+      contentType,
       size: 42,
     })
     const onValueChange = vi.fn()
@@ -65,22 +70,22 @@ describe('MontageSourceAssetInput', () => {
     )
 
     fireEvent.change(screen.getByLabelText('添加参考素材'), {
-      target: { files: [new File(['video'], 'source.mp4', { type: 'video/mp4' })] },
+      target: { files: [new File(['source'], fileName, { type: contentType })] },
     })
 
     await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
       existing,
       {
-        type: 'video_url',
-        url: '/source.mp4',
-        file_name: 'source.mp4',
-        mime_type: 'video/mp4',
+        type: expectedType,
+        url: previewUrl,
+        file_name: fileName,
+        mime_type: contentType,
         file_size: 42,
       },
     ]))
     expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
       purpose: 'montage_asset',
-      file: expect.objectContaining({ name: 'source.mp4' }),
+      file: expect.objectContaining({ name: fileName }),
     }))
     expect(onUploadingChange).toHaveBeenCalledWith(true)
     await waitFor(() => expect(onUploadingChange).toHaveBeenLastCalledWith(false))

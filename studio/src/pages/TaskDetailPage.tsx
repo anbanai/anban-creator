@@ -22,6 +22,7 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -999,8 +1000,12 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {task.type === 'seednote' && task.published && (
+      {task.type === 'seednote' && task.status === 'completed' && (
         <SeednoteAnalyticsPanel taskId={task.id} />
+      )}
+
+      {task.type === 'article' && task.status === 'completed' && (
+        <WechatAnalyticsPanel taskId={task.id} />
       )}
 
       <TaskContextSummary

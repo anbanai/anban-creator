@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -27,16 +28,16 @@ import (
 
 // ProjectHandler handles project-related HTTP endpoints.
 type ProjectHandler struct {
-	service         *service.ProjectService
-	logger          *zerolog.Logger
-	visionClient    service.LLMClient
-	templateSvc     *service.TemplateService
-	store           storage.Provider
-	uploadRepo      repository.Repository
-	referenceAssets *service.ReferenceAssetService
-	seednoteClient  *seednote.Client
-	seednoteReady   service.Readiness
-	designerSvc     *service.DesignerService
+	service           *service.ProjectService
+	logger            *zerolog.Logger
+	visionClient      service.LLMClient
+	templateSvc       *service.TemplateService
+	store             storage.Provider
+	uploadRepo        repository.Repository
+	referenceAssets   *service.ReferenceAssetService
+	seednoteClient    *seednote.Client
+	seednoteReady     service.Readiness
+	imageCapabilities map[string]config.ImageGenerationRouteConfig
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -67,24 +68,18 @@ func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetSer
 	h.referenceAssets = svc
 }
 
-// SetDesignerService wires the capability catalog used to validate new
-// project image defaults. Existing stored values remain readable, but new
-// writes must use a public, tier-authorized capability key.
-func (h *ProjectHandler) SetDesignerService(svc *service.DesignerService) {
-	h.designerSvc = svc
+// SetImageCapabilities wires the public capability catalog used to validate
+// new project image defaults.
+func (h *ProjectHandler) SetImageCapabilities(routes config.ImageGenerationRoutesConfig) {
+	h.imageCapabilities = routes.Capabilities
 }
 
 func (h *ProjectHandler) validateProjectImageCapability(ctx context.Context, userID string, req *projectRequest) error {
-	if req == nil || req.EcommerceDefaults == nil || h.designerSvc == nil {
+	if req == nil || req.EcommerceDefaults == nil || len(h.imageCapabilities) == 0 {
 		return nil
 	}
 	key := strings.TrimSpace(req.EcommerceDefaults.ImageCapabilityKey)
-	if key != "" {
-		if err := h.designerSvc.ValidateCapabilityForUser(ctx, userID, key); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateImageCapabilityKeyForUser(ctx, h.uploadRepo, userID, key, h.imageCapabilities)
 }
 
 // signProjectURLs resolves the stored avatar URL to
@@ -386,8 +381,8 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
+	if err := validateProjectImageRatio(req.Platform, req.ImageRatio); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
@@ -399,9 +394,6 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
-		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
-			return Forbidden(c, "image capability is not available for your tier")
-		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
 	ch := req.toProject()
@@ -521,10 +513,6 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Forbidden(c, "project platform is currently available to administrators only")
 	}
 
-	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
-		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
-	}
-
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
 	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -537,14 +525,18 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if !projectPlatformIsVisibleToUser(c, current.Platform) {
 		return Forbidden(c, "project platform is currently available to administrators only")
 	}
+	targetPlatform := current.Platform
+	if req.Platform != "" {
+		targetPlatform = req.Platform
+	}
+	if err := validateProjectImageRatio(targetPlatform, req.ImageRatio); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	targetReferenceAssetID := current.ReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
-		if errors.Is(err, service.ErrDesignerCapabilityAccessDenied) {
-			return Forbidden(c, "image capability is not available for your tier")
-		}
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
 	if req.ReferenceImageSet {
@@ -871,6 +863,23 @@ func projectPlatformIsVisibleToUser(c fiber.Ctx, platform string) bool {
 	return projectUserIsAdmin(c) || !model.IsAdminOnlyProjectPlatform(platform)
 }
 
+func validateProjectImageRatio(platform, ratio string) error {
+	ratio = strings.TrimSpace(ratio)
+	if ratio == "" {
+		return nil
+	}
+	if !model.ValidImageRatios[ratio] {
+		return errors.New(model.ValidImageRatioHint)
+	}
+	if len(model.SupportedImageRatios(platform)) == 0 {
+		return fmt.Errorf("image_ratio is not supported for platform %s", platform)
+	}
+	if !model.IsBusinessImageRatioAllowed(platform, ratio) {
+		return errors.New(model.ValidImageRatioHint)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Image style analysis
 // ---------------------------------------------------------------------------
@@ -1163,8 +1172,7 @@ func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
 		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
 	}
 	// Align with FileHandler.ServeFile (file.go) ownership rules:
-	// projects/references are user uploads, {userID}/designer/ are designer images.
-	if isUserOwnedStorageKey(userID, cleanKey, userID+"/designer/") {
+	if isUserOwnedStorageKey(userID, cleanKey) {
 		return cleanKey, nil
 	}
 	return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }

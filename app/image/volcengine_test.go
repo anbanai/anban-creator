@@ -59,7 +59,7 @@ func TestVolcengineRequestSizeIsOmittedForSemanticTaskGeneration(t *testing.T) {
 	}
 	got := volcengineRequestSize("1728x2304", false)
 	if got == nil || *got != "1728x2304" {
-		t.Fatalf("Designer request size = %v, want fixed pixels", got)
+		t.Fatalf("image generation request size = %v, want fixed pixels", got)
 	}
 }
 

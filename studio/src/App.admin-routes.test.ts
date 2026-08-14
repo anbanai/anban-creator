@@ -12,10 +12,22 @@ function routeDefinition(path: string): string {
 }
 
 describe('administrator routes', () => {
-  it.each(['templates', 'designer', 'settings', 'connect/claude-code', 'connect/codex'])(
+  it.each(['templates'])(
     'protects /%s with AdminRoute',
     (path) => {
       expect(routeDefinition(path)).toContain('<AdminRoute>')
     },
   )
+
+  it('does not expose the removed Designer route', () => {
+    expect(source).not.toContain('path="designer"')
+    expect(source).not.toContain('DesignerPage')
+  })
+
+  it('keeps plugin installation public and settings available to signed-in users', () => {
+    expect(routeDefinition('/plugins')).not.toContain('<ProtectedRoute>')
+    expect(routeDefinition('settings')).not.toContain('<AdminRoute>')
+    expect(source).toContain('<Navigate to="/plugins?client=claude" replace />')
+    expect(source).toContain('<Navigate to="/plugins?client=codex" replace />')
+  })
 })

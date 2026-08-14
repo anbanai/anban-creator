@@ -116,7 +116,7 @@ func TestLoadBundleRejectsAmbiguousOrUnroutableSKUs(t *testing.T) {
 			name: "standalone operation requires route",
 			products: strings.Replace(validProductsYAML, `operation: task.seednote
     execution_profile: balanced
-    charge_policy: task_admission`, `operation: designer.generate_image
+    charge_policy: task_admission`, `operation: image.generate
     charge_policy: standalone_operation`, 1),
 			want: "route is required for standalone_operation",
 		},

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
@@ -135,8 +135,30 @@ export function manualChunks(id: string) {
   return 'vendor'
 }
 
+export function rewriteAgentGuideURL(url: string | undefined): string | undefined {
+  const match = url?.match(/^\/(claude|codex)\/?(\?.*)?$/)
+  if (!match) return url
+  return `/${match[1]}/index.html${match[2] ?? ''}`
+}
+
+function agentGuideRoutes(): Plugin {
+  const rewrite = (req: { url?: string }, _res: unknown, next: () => void) => {
+    req.url = rewriteAgentGuideURL(req.url)
+    next()
+  }
+  return {
+    name: 'agent-guide-routes',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [agentGuideRoutes(), react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

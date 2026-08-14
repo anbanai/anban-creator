@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { manualChunks } from '../../vite.config'
+import { manualChunks, rewriteAgentGuideURL } from '../../vite.config'
 
 describe('manualChunks', () => {
   it.each([
@@ -76,5 +76,20 @@ describe('manualChunks', () => {
 
   it('normalizes Windows module paths before assigning chunks', () => {
     expect(manualChunks('C:\\project\\node_modules\\react\\index.js')).toBe('vendor-react')
+  })
+})
+
+describe('rewriteAgentGuideURL', () => {
+  it.each([
+    ['/claude', '/claude/index.html'],
+    ['/claude/', '/claude/index.html'],
+    ['/codex', '/codex/index.html'],
+    ['/codex/?source=plugin', '/codex/index.html?source=plugin'],
+  ])('serves %s from its static Agent guide', (input, expected) => {
+    expect(rewriteAgentGuideURL(input)).toBe(expected)
+  })
+
+  it('leaves unrelated routes unchanged', () => {
+    expect(rewriteAgentGuideURL('/plugins')).toBe('/plugins')
   })
 })

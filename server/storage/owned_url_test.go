@@ -13,7 +13,7 @@ func TestOSSProvider_IsOwnedURL(t *testing.T) {
 		url  string
 		want bool
 	}{
-		{"signed url", "https://anbancreator.oss-cn-chengdu.aliyuncs.com/user1/designer/gen1/0.png?Expires=1&Signature=abc", true},
+		{"signed url", "https://anbancreator.oss-cn-chengdu.aliyuncs.com/user1/generated/gen1/0.png?Expires=1&Signature=abc", true},
 		{"uppercase host", "https://ANBANCREATOR.oss-cn-chengdu.aliyuncs.com/x.png", true},
 		{"trailing dot in host", "https://anbancreator.oss-cn-chengdu.aliyuncs.com./x.png", true},
 		{"explicit port", "https://anbancreator.oss-cn-chengdu.aliyuncs.com:443/x.png", true},
@@ -89,7 +89,7 @@ func TestLocalProvider_IsOwnedURL(t *testing.T) {
 		url  string
 		want bool
 	}{
-		{"valid local path", "/api/v1/files/user1/designer/gen1/0.png", true},
+		{"valid local path", "/api/v1/files/user1/generated/gen1/0.png", true},
 		{"http absolute rejected", "http://localhost/api/v1/files/x", false},
 		{"https absolute rejected", "https://example.com/x", false},
 		{"empty", "", false},

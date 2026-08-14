@@ -56,10 +56,10 @@ export function MontageSourceAssetInput({ value, onChange, onUploadingChange }: 
     <ReferenceMaterialInput
       value={value.map(toAttachment)}
       onChange={(attachments) => onChange(attachments.map((attachment) => toMontageAsset(attachment as AdapterAttachment)))}
-      allowedTypes={['image', 'video', 'audio', 'document', 'text']}
+      allowedTypes={['image', 'video', 'audio']}
       maxCount={20}
       compact
-      hint="支持图片、视频、音频、文本和文档素材。"
+      hint="支持图片、视频和音频参考素材。"
       uploadPurpose="montage_asset"
       onUploadingChange={onUploadingChange}
     />

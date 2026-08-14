@@ -18,6 +18,7 @@ const (
 	TypeContentGenerate        = "content:generate"
 	TypePlanTrigger            = "plan:trigger"
 	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
+	TypeWechatCaptureMetrics   = "wechat:capture_metrics"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -111,12 +112,14 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 
 // SeednoteTrackingHandler is the function signature for SeedNote tracking jobs.
 type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
+type WechatTrackingHandler func(ctx context.Context, trackingID string) error
 
 // NewTaskProcessor creates a configured Asynq task processor with registered handlers.
 func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
 	seednoteCaptureHandler SeednoteTrackingHandler,
+	wechatCaptureHandler WechatTrackingHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
 	concurrency int,
@@ -163,6 +166,19 @@ func NewTaskProcessor(
 			return fmt.Errorf("seednote capture handler unavailable")
 		}
 		return seednoteCaptureHandler(ctx, trackingID)
+	})
+
+	mux.HandleFunc(TypeWechatCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
+		trackingID, err := parseSeednoteTrackingPayload(t.Payload())
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to unmarshal WeChat capture payload")
+			return err
+		}
+		logger.Info().Str("tracking_id", trackingID).Msg("processing WeChat capture metrics task")
+		if wechatCaptureHandler == nil {
+			return fmt.Errorf("WeChat capture handler unavailable")
+		}
+		return wechatCaptureHandler(ctx, trackingID)
 	})
 
 	srv := asynq.NewServer(

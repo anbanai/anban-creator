@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +45,51 @@ func setupSeednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Rep
 		c.Locals("user_id", c.Get("X-User-ID"))
 		return handler.GetTaskAnalytics(c)
 	})
+	app.Post("/tasks/:id/seednote-analytics/bind", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return handler.BindTask(c)
+	})
 	return app, repo
+}
+
+func TestSeednoteAnalyticsHandler_BindRejectsInvalidPublicationIdentity(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid id", body: `{"note_id":"invalid/id"}`},
+		{name: "invalid url", body: `{"note_url":"https://example.com/explore/note-1"}`},
+		{name: "conflicting identity", body: `{"note_id":"note-2","note_url":"https://www.xiaohongshu.com/explore/note-1"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo := setupSeednoteAnalyticsHandlerTest(t)
+			ctx := context.Background()
+			userID, projectID, taskID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: uuid.NewString()[:12]}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote", Status: model.ProjectStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/seednote-analytics/bind", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-User-ID", userID)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				data, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, data)
+			}
+		})
+	}
 }
 
 func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {

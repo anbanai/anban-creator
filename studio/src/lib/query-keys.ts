@@ -50,12 +50,6 @@ export const queryKeys = {
     all: (projectId: string) => ['topic-pool', projectId] as const,
     list: (projectId: string, status?: string) => ['topic-pool', projectId, status] as const,
   },
-  designer: {
-    all: ['designer'] as const,
-    history: (params?: { project_id?: string; page?: number; page_size?: number }) =>
-      ['designer', 'history', params] as const,
-    generation: (id: string) => ['designer', 'generation', id] as const,
-  },
   imageCapabilities: {
     all: ['image-capabilities'] as const,
   },

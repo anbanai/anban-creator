@@ -32,14 +32,14 @@
     <view class="step-card">
       <text class="step-card__title">3. 安装插件</text>
       <text class="step-text">
-        方式 A（推荐）：在 Codex CLI 里直接告诉它「帮我安装 Anban Creator Codex 插件」并贴上仓库地址，AI 会自动完成 marketplace 注册、插件安装、以及 7 个 subagent 的注册。
+        方式 A（推荐）：把下面一句话交给 Codex。它会读取专用说明，完成 marketplace 注册、插件安装以及 6 个 subagent 的注册。
       </text>
-      <view class="copy-block" @tap="copyText('帮我安装 Anban Creator Codex 插件 https://github.com/royalmorty/anbanwriter/tree/main/plugins')">
-        <text class="copy-block__code">帮我安装 Anban Creator Codex 插件 https://github.com/royalmorty/anbanwriter/tree/main/plugins</text>
+      <view class="copy-block" @tap="copyText(agentInstallPrompt)">
+        <text class="copy-block__code">{{ agentInstallPrompt }}</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
       <text class="step-text step-text--muted">
-        方式 B（手动）：克隆仓库后依次执行 marketplace 注册、插件安装、subagent 注册脚本。最后一行脚本会把 7 个 subagent 注册到 ~/.codex/config.toml（幂等，可重复执行）。
+        方式 B（手动）：克隆仓库后依次执行 marketplace 注册、插件安装、subagent 注册脚本。最后一行脚本会把 6 个 subagent 注册到 ~/.codex/config.toml（幂等，可重复执行）。
       </text>
       <view class="copy-block" @tap="copyText(manualInstallSnippet)">
         <text class="copy-block__code">{{ manualInstallSnippet }}</text>
@@ -114,11 +114,12 @@ const keyPrefixes = computed(
   () => keys.value.map((key) => key.key_prefix).join('、') || '暂无密钥',
 )
 
-const manualInstallSnippet = `git clone https://github.com/royalmorty/anbanwriter.git
-cd anbanwriter
-codex plugin marketplace add ./plugins
-codex plugin install anban
-bash plugins/install/install-subagents.sh`
+const agentInstallPrompt = '阅读 https://creator.anbanai.com/codex，帮我安装并配置 Anban Creator 插件。需要 ANBAN_API_KEY 时向我索取。'
+
+const manualInstallSnippet = `git clone --recurse-submodules https://github.com/anbanai/creator-skills.git "$HOME/.anban/creator-skills"
+codex plugin marketplace add "$HOME/.anban/creator-skills"
+codex plugin add anban@anbanai
+bash "$HOME/.anban/creator-skills/install/install-subagents.sh"`
 
 const envKeySnippet = `export ANBAN_API_KEY="你的完整 API Key"`
 
@@ -126,8 +127,7 @@ const naturalExample = `写一篇关于 AI Agent 的公众号文章
 种草笔记，主题是降噪耳机`
 
 const subagentExample = `use the article subagent to write a 3000-word article about Rust ownership
-use the seednote subagent for a 种草笔记 about 降噪耳机
-delegate to designer: colorize the line art at /path/to/lineart/ using a warm summer palette`
+use the seednote subagent for a 种草笔记 about 降噪耳机`
 
 function copyText(text: string) {
   uni.setClipboardData({

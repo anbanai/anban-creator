@@ -64,29 +64,24 @@ for (const path of [
   'src/api/agent-profiles.ts',
   'src/api/request.ts',
   'src/api/api-keys.ts',
-  'src/api/designer.ts',
   'src/api/image-capabilities.ts',
   'src/api/resources.ts',
   'src/api/topic-pool.ts',
-  'src/types/designer.ts',
   'src/types/imageCapability.ts',
   'src/types/agent-profile.ts',
   'src/types/resource.ts',
   'src/types/topic-pool.ts',
-  'src/pages/designer/index.vue',
   'src/pages/connect/claude-code.vue',
   'src/pages/settings/api-keys.vue',
   'src/pages/settings/password.vue',
   'src/components/business/ImageCapabilitySelector.vue',
   'src/components/business/ImageAspectRatioField.vue',
   'src/components/business/ImageGenerationToolbar.vue',
-  'src/components/business/DesignerGenerationToolbar.vue',
 ]) {
   assertFile(path)
 }
 
 assertContains('src/pages.json', [
-  '"path": "pages/designer/index"',
   '"path": "pages/connect/claude-code"',
   '"path": "pages/settings/api-keys"',
   '"path": "pages/settings/password"',
@@ -102,7 +97,6 @@ assertContains('src/api/index.ts', [
   "export const api",
   'agentProfiles',
   'apiKeys',
-  'designer',
   'imageCapabilities',
   'resources',
   'topicPool',
@@ -304,14 +298,13 @@ assertContains('src/types/viral-analysis.ts', [
 assertContains('src/types/index.ts', [
   "from './resource'",
   "from './topic-pool'",
-  "from './designer'",
 ])
 
 assertContains('src/api/image-capabilities.ts', ["'/image-capabilities'", 'ImageCapabilityListResponse'])
 assertContains('src/types/imageCapability.ts', [
   'export interface ImageCapabilityOption',
   'price_credits?: number',
-  'designer_features?: ImageCapabilityFeatures',
+  'generation_features?: ImageCapabilityFeatures',
   'size_presets: string[]',
   'max_reference_images: number',
 ])
@@ -339,40 +332,6 @@ assertContains('src/components/business/ImageGenerationToolbar.vue', [
   "emit('update:ratio'",
   "emit('update:capabilityKey'",
 ])
-assertContains('src/components/business/DesignerGenerationToolbar.vue', [
-  '固定规格',
-  '每张 {{ capability.credits.toLocaleString() }} 积分',
-  'designer-sheet',
-  "emit('update:capabilityKey'",
-  "emit('update:settings'",
-])
-
-assertContains('src/types/designer.ts', [
-  'capability_key: string',
-  'quality: string',
-  'size: string',
-  'n: number',
-  'output_format: string',
-  'capability_name?: string',
-])
-const designerRequestType = read('src/types/designer.ts').match(/export interface GenerateRequest \{[\s\S]*?\n\}/)?.[0] ?? ''
-const designerRequestLines = designerRequestType.split('\n').map((line) => line.trim())
-for (const optionalField of ['quality?: string', 'size?: string', 'n?: number', 'output_format?: string']) {
-  assert.equal(designerRequestLines.includes(optionalField), false, `GenerateRequest should not contain ${optionalField}`)
-}
-assertNotContains('src/types/designer.ts', ['provider_id', 'provider: string', 'model: string', 'getModelCapabilities'])
-
-for (const path of [
-  'src/api/designer.ts',
-  'src/types/designer.ts',
-  'src/pages/designer/index.vue',
-]) {
-  assertNotContains(path, [
-    'execution_profile',
-    'agentProfilesApi',
-    'ExecutionProfileSelector',
-  ])
-}
 
 assertContains('src/pages/projects/detail.vue', [
   "resourcesApi.list('themes'",
@@ -399,50 +358,10 @@ assertContains('src/pages/tasks/detail.vue', [
   '`execution_profile=${encodeURIComponent(t.execution_profile)}`',
 ])
 
-assertContains('src/pages/designer/index.vue', [
-  '<DesignerGenerationToolbar',
-  ':capability-key="selectedCapabilityKey"',
-  '@update:capability-key="selectCapability"',
-  ':settings="settings"',
-  'canInpaint',
-  'startEdit',
-  'mask_file_id',
-  'capability_key: selectedCapability.value.id',
-  'n: settings.n',
-  'quality: settings.quality',
-  'chooseMask',
-  'generateEdit',
-  'const usableCapabilities = computed(() => capabilities.value.filter((capability) => capability.enabled && capability.priceAvailable === true))',
-  'selectedCapability.value?.priceAvailable === true',
-])
-assertOccurrenceCount('src/pages/designer/index.vue', 'selectedCapability.value?.priceAvailable === true', 2)
 assertContains('src/components/business/ImageCapabilitySelector.vue', [
   "option.enabled !== true || option.price_available !== true",
   'capability-option--disabled',
 ])
-assertContains('src/api/designer.ts', ["'/designer/quote'", "'/designer/generate'", 'request_fingerprint'])
-assertContains('src/api/designer.ts', ["name: 'file'"])
-assertNotContains('src/api/designer.ts', ["name = 'file'"])
-assertNotContains('src/api/designer.ts', ["'/designer/providers'", 'getProviders'])
-assertContains('src/pages/designer/index.vue', [
-  'designerApi.uploadReference(sourcePath)',
-  'designerApi.uploadReference(maskFile.value.path)',
-])
-assertNotContains('src/pages/designer/index.vue', [
-  "designerApi.uploadReference(sourcePath, 'source')",
-  "designerApi.uploadReference(maskFile.value.path, 'mask')",
-])
-assertNotContains('src/pages/designer/index.vue', [
-  'class="capability-card"',
-  '<ImageCapabilitySelector',
-  '<AbSelect',
-  'selectedProvider',
-  'provider_id',
-  'item.provider',
-  'item.model',
-  '模型：',
-])
-
 assertContains('src/pages/tasks/create.vue', [
   'form.reference_image',
   "uploadImage(filePath, 'task_reference')",
@@ -568,9 +487,9 @@ for (const path of filesUnder(resolve(root, 'src'))) {
   assert.equal(body.includes('reference_image_url'), false, `${path} still uses the removed reference URL field`)
   assert.equal(body.includes('image_model_key'), false, `${path} still uses the removed image model field`)
   assert.equal(body.includes('/image-models'), false, `${path} still uses the removed image models endpoint`)
-  assert.equal(body.includes('/designer/providers'), false, `${path} still uses the removed designer providers endpoint`)
+  assert.equal(body.includes('/legacy-image/providers'), false, `${path} still uses the removed image providers endpoint`)
   assert.equal(body.includes('/model-config'), false, `${path} still uses the removed model config endpoint`)
-  assert.equal(body.includes('supportedSizes'), false, `${path} still filters task ratios through Designer sizes`)
+  assert.equal(body.includes('supportedSizes'), false, `${path} still filters task ratios through provider sizes`)
   assert.equal(body.includes('imageRatioUnsupported'), false, `${path} still rejects business ratios through capability presets`)
 }
 
@@ -652,10 +571,6 @@ assertContains('src/api/projects.ts', [
   'upload_url',
   'uni.request({',
 ])
-assertContains('src/api/designer.ts', [
-  'uploadUrl(',
-])
-
 assertContains('src/pages/projects/index.vue', [
   'onMounted',
   'fetchProjects(true)',
@@ -760,11 +675,6 @@ assertNotContains('src/pages/templates/index.vue', [
   'templatesApi.update',
   'templatesApi.remove',
   'template_id',
-])
-
-assertContains('src/pages/designer/index.vue', [
-  'copyImagePrompt',
-  'regenerateVariant',
 ])
 
 // OLD names must be GONE — no /channels API, no channel_id, no Channel type

@@ -62,8 +62,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.1.6" {
-		t.Fatalf("native manifest version = %q, want 4.1.6 for the Node-based Seednote completion gate contract", claudeManifest.Version)
+	if claudeManifest.Version != "4.1.8" {
+		t.Fatalf("native manifest version = %q, want 4.1.8 for the MVP plugin surface", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
@@ -87,7 +87,7 @@ func TestUnifiedPluginLayout(t *testing.T) {
 
 	markdownAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".md")
 	tomlAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".toml")
-	if len(markdownAgents) != 7 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
+	if len(markdownAgents) != 6 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ: Claude=%v Codex=%v", markdownAgents, tomlAgents)
 	}
 }

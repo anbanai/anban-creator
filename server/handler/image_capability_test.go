@@ -17,7 +17,7 @@ func handlerCapability(alias, tier, sku string, order int) config.ImageGeneratio
 		Alias: alias, Description: alias + " description", MinTier: tier, BillingSKU: sku,
 		Provider: "internal-provider", Model: "internal-model", BaseURL: "https://secret.example.com", APIKey: "secret",
 		Enabled: true, SortOrder: order, QualityRank: order,
-		DesignerFeatures: config.DesignerProviderCapabilities{DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"}},
+		GenerationFeatures: config.ImageGenerationFeatures{DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"}},
 	}
 }
 
@@ -25,7 +25,7 @@ func TestImageCapabilityOptionPublicContractOmitsInternalRouteFields(t *testing.
 	payload, err := json.Marshal(ImageCapabilityOption{
 		Key: "professional", DisplayName: "Professional", Description: "Detailed images", MinTier: "pro",
 		PriceCredits: 500, PriceAvailable: true, Enabled: true, SortOrder: 20,
-		DesignerFeatures: config.DesignerProviderCapabilities{SupportsReference: true, MaxReferenceImages: 4},
+		GenerationFeatures: config.ImageGenerationFeatures{SupportsReference: true, MaxReferenceImages: 4},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestImageCapabilitiesListFiltersByTierAndReturnsDefault(t *testing.T) {
 		"professional": handlerCapability("Professional", "pro", "image.professional", 20),
 	}}
 	standard := routes.Capabilities["standard"]
-	standard.DesignerFeatures.MaxBatch = 10
+	standard.GenerationFeatures.MaxBatch = 10
 	routes.Capabilities["standard"] = standard
 	h := NewImageCapabilityHandler(routes, repo, nil, nil)
 	app := fiber.New()
@@ -77,8 +77,8 @@ func TestImageCapabilitiesListFiltersByTierAndReturnsDefault(t *testing.T) {
 	if len(envelope.Data.Items) != 1 || envelope.Data.Items[0].Key != "standard" {
 		t.Fatalf("free catalog items = %#v", envelope.Data.Items)
 	}
-	if envelope.Data.Items[0].DesignerFeatures.MaxBatch != 1 {
-		t.Fatalf("public max_batch = %d, want 1", envelope.Data.Items[0].DesignerFeatures.MaxBatch)
+	if envelope.Data.Items[0].GenerationFeatures.MaxBatch != 1 {
+		t.Fatalf("public max_batch = %d, want 1", envelope.Data.Items[0].GenerationFeatures.MaxBatch)
 	}
 }
 

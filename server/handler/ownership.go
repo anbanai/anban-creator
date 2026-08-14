@@ -11,7 +11,7 @@ import "github.com/anbanai/anban-creator/server/storage"
 // is kept so existing user uploads remain accessible.
 //
 // Callers pass any additional user-scoped prefixes they also permit, e.g.
-// "{userID}/designer/" for designer-generated images or "{userID}/" for task
+// an additional user-owned generated-image prefix or "{userID}/" for task
 // workspace files. Centralizing the base set + legacy prefix here keeps the
 // ownership rules from drifting across the file/task/project handlers.
 func isUserOwnedStorageKey(userID, cleanKey string, extraPrefixes ...string) bool {

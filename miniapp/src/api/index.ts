@@ -3,7 +3,6 @@ import { agentProfilesApi } from './agent-profiles'
 import { authApi } from './auth'
 import { projectsApi } from './projects'
 import { billingApi } from './billing'
-import { designerApi } from './designer'
 import { imageCapabilitiesApi } from './image-capabilities'
 import { plansApi } from './plans'
 import { postersApi } from './posters'
@@ -23,7 +22,6 @@ export const api = {
   auth: authApi,
   projects: projectsApi,
   billing: billingApi,
-  designer: designerApi,
   imageCapabilities: imageCapabilitiesApi,
   plans: plansApi,
   posters: postersApi,

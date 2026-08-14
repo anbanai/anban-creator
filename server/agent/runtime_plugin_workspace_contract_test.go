@@ -50,7 +50,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, taskType := range []string{"article", "seednote", "moments", "ecommerce", "designer", "montage", "live-slicer"} {
+	for _, taskType := range []string{"article", "seednote", "moments", "ecommerce", "montage", "live-slicer"} {
 		if containsString(managedRequiredMCPTools(taskType), "prepare_workspace") {
 			t.Errorf("managed runtime policy for %s names forbidden prepare_workspace tool", taskType)
 		}
@@ -140,7 +140,6 @@ func TestParentPluginContractsDoNotRequireLegacyWorkspaceInstructions(t *testing
 		forbidden []string
 	}{
 		{path: "server/agent/moments_contract_test.go", forbidden: []string{`prepare_workspace(content_type="moments"`, `"$DIR"`}},
-		{path: "server/agent/designer_contract_test.go", forbidden: []string{"`prepare_workspace`", "prepare_workspace 返回的 path", "workspace_tools.go", "relative path rooted at the agent task workspace", "不能把 `download_image` 当作写入 `$DIR/colored_NN.png`", "下载 `download_url` 到 `$DIR/colored_NN.png`"}},
 		{path: "server/agent/seednote_context_contract_test.go", forbidden: []string{"$DIR/topic-analysis.md", "$DIR/source-analysis.md", "$DIR/viral-template.json", "$DIR/content.md", "$DIR/image-plan.md", "$DIR/image-review.md"}},
 		{path: "server/agent/article_skill_contract_test.go", forbidden: []string{"$DIR/03-article.md", "$DIR/01-research.md", "$DIR/02-outline.md", "$DIR/seo-result.md"}},
 		{path: "server/agent/claude_plugin_best_practices_test.go", forbidden: []string{"$DIR/draft.json"}},

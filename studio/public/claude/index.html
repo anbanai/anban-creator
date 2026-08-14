@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install Anban Creator for Claude Code</title>
+  <meta name="description" content="Agent-readable installation instructions for the Anban Creator Claude Code plugin.">
+</head>
+<body>
+  <main>
+    <h1>Install Anban Creator for Claude Code</h1>
+    <p>This page is written for Claude Code. Complete the installation on the user's machine.</p>
+
+    <h2>Safety</h2>
+    <ul>
+      <li>Never print, log, commit, or upload the user's ANBAN_API_KEY.</li>
+      <li>Ask the user for the key only when Claude Code requests the plugin configuration.</li>
+      <li>If an existing clone or plugin registration is present, inspect and update it instead of deleting unrelated user files.</li>
+    </ul>
+
+    <h2>Get the API key</h2>
+    <p>Ask the user to sign in at <a href="https://creator.anbanai.com/settings#api-key-settings">https://creator.anbanai.com/settings#api-key-settings</a>, create a platform key, and keep the full value. The full key is displayed only once.</p>
+
+    <h2>Install</h2>
+    <p>The plugin uses a fixed built-in service endpoint. Configure only the required sensitive <code>api_key</code> in the plugin user config.</p>
+    <ol>
+      <li>Clone <code>https://github.com/anbanai/creator-skills.git</code> into a stable user-owned directory, including nested submodules.</li>
+      <li>From any directory, register that clone as a Claude Code plugin marketplace.</li>
+      <li>Install <code>anban@anbanai</code> with user scope.</li>
+      <li>When Claude Code asks for the required sensitive <code>api_key</code> user configuration, ask the user for ANBAN_API_KEY and enter it without echoing it.</li>
+    </ol>
+    <pre><code>git clone --recurse-submodules https://github.com/anbanai/creator-skills.git "$HOME/.anban/creator-skills"
+claude plugin marketplace add "$HOME/.anban/creator-skills"
+claude plugin install --scope user anban@anbanai</code></pre>
+
+    <h2>Verify</h2>
+    <ol>
+      <li>Run <code>/anban:anban-setup</code>.</li>
+      <li>Fully restart Claude Code when setup requests it.</li>
+      <li>Run <code>/anban:anban-setup</code> again and confirm the MCP connection can list Anban projects.</li>
+    </ol>
+
+    <h2>Result</h2>
+    <p>Report the installed plugin version, whether setup verification passed, and any action still required from the user. Do not include the API key.</p>
+  </main>
+</body>
+</html>

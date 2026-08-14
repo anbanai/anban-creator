@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install Anban Creator for Codex</title>
+  <meta name="description" content="Agent-readable installation instructions for the Anban Creator Codex plugin.">
+</head>
+<body>
+  <main>
+    <h1>Install Anban Creator for Codex</h1>
+    <p>This page is written for Codex. Complete the installation on the user's machine.</p>
+
+    <h2>Safety</h2>
+    <ul>
+      <li>Never print, log, commit, or upload the user's ANBAN_API_KEY.</li>
+      <li>Ask the user for the key only when credentials are needed.</li>
+      <li>If an existing clone, config table, or Agent file is present, inspect and merge it instead of overwriting unrelated user configuration.</li>
+    </ul>
+
+    <h2>Get the API key</h2>
+    <p>Ask the user to sign in at <a href="https://creator.anbanai.com/settings#api-key-settings">https://creator.anbanai.com/settings#api-key-settings</a>, create a platform key, and keep the full value. The full key is displayed only once.</p>
+
+    <h2>Install</h2>
+    <p>The plugin uses a fixed built-in service endpoint. Configure only the <code>ANBAN_API_KEY</code> environment credential.</p>
+    <ol>
+      <li>Clone <code>https://github.com/anbanai/creator-skills.git</code> into a stable user-owned directory, including nested submodules.</li>
+      <li>Register the clone as a Codex plugin marketplace and add <code>anban@anbanai</code>.</li>
+      <li>Run the bundled subagent installer. It merges the Creator MCP server and six Anban subagents into Codex configuration.</li>
+      <li>Ask the user for ANBAN_API_KEY. Add it to the user's chosen shell profile and the current environment without printing it.</li>
+    </ol>
+    <pre><code>git clone --recurse-submodules https://github.com/anbanai/creator-skills.git "$HOME/.anban/creator-skills"
+codex plugin marketplace add "$HOME/.anban/creator-skills"
+codex plugin add anban@anbanai
+bash "$HOME/.anban/creator-skills/install/install-subagents.sh"</code></pre>
+
+    <h2>Credential configuration</h2>
+    <p>The MCP configuration uses <code>bearer_token_env_var = "ANBAN_API_KEY"</code>. Do not put the literal key in <code>~/.codex/config.toml</code>. Persist it in the user's selected shell profile, then restart Codex.</p>
+    <pre><code>export ANBAN_API_KEY="&lt;user-provided-key&gt;"</code></pre>
+
+    <h2>Verify</h2>
+    <ol>
+      <li>Restart Codex.</li>
+      <li>Run <code>/skills</code> and confirm Anban Creator skills are listed.</li>
+      <li>Run <code>/agents</code> and confirm article, seednote, moments, montage, live-slicer, and ecommerce are listed.</li>
+      <li>Run <code>$anban-setup</code> and confirm the MCP connection can list Anban projects.</li>
+    </ol>
+
+    <h2>Result</h2>
+    <p>Report the installed plugin version, whether setup verification passed, and any action still required from the user. Do not include the API key.</p>
+  </main>
+</body>
+</html>

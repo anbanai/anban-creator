@@ -100,7 +100,7 @@ describe('getApiErrorMessage', () => {
   })
 
   it('hides structured backend logs and provider internals from users', () => {
-    const raw = '{"level":"error","error":"[OpenAI] OpenAI 图片接口返回了 URL，但下载失败: https://files.example.com/a.png\\n提示: RevisedPrompt=\\"\\"","message":"designer: image generation failed"}<br/>{"level":"error"}'
+    const raw = '{"level":"error","error":"[OpenAI] OpenAI 图片接口返回了 URL，但下载失败: https://files.example.com/a.png\\n提示: RevisedPrompt=\\"\\"","message":"task image generation failed"}<br/>{"level":"error"}'
 
     const got = sanitizeUserFacingErrorMessage(raw, '图片生成失败，请稍后重试')
 
@@ -117,7 +117,7 @@ describe('getApiErrorMessage', () => {
     expect(got).not.toContain('模型')
   })
 
-  it('does not rewrite ordinary download errors as designer image save failures', () => {
+  it('does not rewrite ordinary download errors as image save failures', () => {
     expect(sanitizeUserFacingErrorMessage('文件下载失败，请稍后重试', '默认')).toBe('文件下载失败，请稍后重试')
   })
 })

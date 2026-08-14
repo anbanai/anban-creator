@@ -67,6 +67,18 @@ const chartColors = {
 }
 
 export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPanelProps) {
+  const queryClient = useQueryClient()
+  const [publicationIdentity, setPublicationIdentity] = useState('')
+  const bindMutation = useMutation({
+    mutationFn: (value: string) => api.seednoteAnalytics.bind(
+      taskId,
+      value.startsWith('http') ? { note_url: value } : { note_id: value },
+    ),
+    onSuccess: async () => {
+      setPublicationIdentity('')
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) })
+    },
+  })
   const { data, error, isLoading, isError } = useQuery({
     queryKey: queryKeys.tasks.seednoteAnalytics(taskId),
     queryFn: () => api.seednoteAnalytics.getByTask(taskId),
@@ -115,34 +127,48 @@ export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPane
         <CardHeader>
           <CardTitle>种草笔记数据</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          暂无公开数据，追踪尚未准备
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>填写可访问的公开笔记链接后开始每日采集。</p>
+          <SeednoteBindForm
+            value={publicationIdentity}
+            pending={bindMutation.isPending}
+            error={bindMutation.error}
+            onChange={setPublicationIdentity}
+            onSubmit={(value) => bindMutation.mutate(value)}
+          />
         </CardContent>
       </Card>
     )
   }
 
-  return <SeednoteAnalyticsContent analytics={data} taskId={taskId} />
+  return (
+    <SeednoteAnalyticsContent
+      analytics={data}
+      publicationIdentity={publicationIdentity}
+      bindPending={bindMutation.isPending}
+      bindError={bindMutation.error}
+      onIdentityChange={setPublicationIdentity}
+      onBind={(value) => bindMutation.mutate(value)}
+    />
+  )
 }
 
-function SeednoteAnalyticsContent({ analytics, taskId }: { analytics: SeednoteAnalytics; taskId: string }) {
+function SeednoteAnalyticsContent({
+  analytics,
+  publicationIdentity,
+  bindPending,
+  bindError,
+  onIdentityChange,
+  onBind,
+}: {
+  analytics: SeednoteAnalytics
+  publicationIdentity: string
+  bindPending: boolean
+  bindError: Error | null
+  onIdentityChange: (value: string) => void
+  onBind: (value: string) => void
+}) {
   const tracking = analytics.tracking!
-  const queryClient = useQueryClient()
-  const [publicationIdentity, setPublicationIdentity] = useState('')
-  const bindMutation = useMutation({
-    mutationFn: (value: string) => api.tasks.markPublished(
-      taskId,
-      true,
-      value.startsWith('http') ? { note_url: value } : { note_id: value },
-    ),
-    onSuccess: async () => {
-      setPublicationIdentity('')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) }),
-      ])
-    },
-  })
 
   const status = tracking.status as SeednoteTrackingStatus
   const statusText = statusCopy[status] ?? tracking.status
@@ -199,25 +225,13 @@ function SeednoteAnalyticsContent({ analytics, taskId }: { analytics: SeednoteAn
               </div>
             </div>
             {status === 'unresolved' && (
-              <form
-                className="flex flex-col gap-2 sm:flex-row"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const value = publicationIdentity.trim()
-                  if (value) bindMutation.mutate(value)
-                }}
-              >
-                <Input
-                  aria-label="公开笔记链接或 ID"
-                  placeholder="公开笔记链接或 ID"
-                  value={publicationIdentity}
-                  onChange={(event) => setPublicationIdentity(event.target.value)}
-                />
-                <Button type="submit" disabled={!publicationIdentity.trim() || bindMutation.isPending}>
-                  {bindMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                  {bindMutation.isPending ? '关联中' : '关联公开笔记'}
-                </Button>
-              </form>
+              <SeednoteBindForm
+                value={publicationIdentity}
+                pending={bindPending}
+                error={bindError}
+                onChange={onIdentityChange}
+                onSubmit={onBind}
+              />
             )}
             {tracking.last_error && status !== 'unresolved' && (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
@@ -268,6 +282,45 @@ function SeednoteAnalyticsContent({ analytics, taskId }: { analytics: SeednoteAn
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function SeednoteBindForm({
+  value,
+  pending,
+  error,
+  onChange,
+  onSubmit,
+}: {
+  value: string
+  pending: boolean
+  error: Error | null
+  onChange: (value: string) => void
+  onSubmit: (value: string) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <form
+        className="flex flex-col gap-2 sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const normalized = value.trim()
+          if (normalized) onSubmit(normalized)
+        }}
+      >
+        <Input
+          aria-label="公开笔记链接或 ID"
+          placeholder="公开笔记链接或 ID"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <Button type="submit" disabled={!value.trim() || pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+          {pending ? '验证中' : '关联公开笔记'}
+        </Button>
+      </form>
+      {error && <p className="text-xs text-destructive">链接无法读取，请确认笔记为公开状态。</p>}
+    </div>
   )
 }
 

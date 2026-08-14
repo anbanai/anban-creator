@@ -121,6 +121,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.seednoteAnalytics,
         getByTask: vi.fn(),
       },
+      wechatAnalytics: {
+        ...actual.api.wechatAnalytics,
+        getByTask: vi.fn(),
+      },
     },
   }
 })
@@ -240,7 +244,7 @@ describe('TaskDetailPage', () => {
       {
         key: 'standard', display_name: '标准图像', min_tier: 'free', enabled: true,
         price_available: true, price_credits: 500,
-        designer_features: {
+        generation_features: {
           quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
           max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
           output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
@@ -249,7 +253,7 @@ describe('TaskDetailPage', () => {
       {
         key: 'source-capability', display_name: '源图像', min_tier: 'pro', enabled: true,
         price_available: true, price_credits: 500,
-        designer_features: {
+        generation_features: {
           quality_levels: [], size_presets: ['1:1', '3:4', '16:9'], default_size: '1:1',
           max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false,
           output_formats: ['png'], has_background: false, has_compression: false, watermark: false,
@@ -258,6 +262,7 @@ describe('TaskDetailPage', () => {
       ],
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
+    vi.mocked(api.wechatAnalytics.getByTask).mockResolvedValue({ series: [] })
     uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
       uploadId: `upload-${file.name}`,
       key: `uploads/pending/user-1/upload-${file.name}/${file.name}`,
@@ -1116,11 +1121,11 @@ describe('TaskDetailPage', () => {
     expect(within(failedSection).queryByText('content.md')).not.toBeInTheDocument()
   })
 
-  it('places published Seednote analytics after generated deliverables', async () => {
+  it('places Seednote analytics after generated deliverables without requiring published state', async () => {
     mockTask(taskWith({
       type: 'seednote',
       status: 'completed',
-      published: true,
+      published: false,
       result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
@@ -1142,6 +1147,20 @@ describe('TaskDetailPage', () => {
     const context = screen.getByRole('region', { name: '任务上下文' })
     expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(analyticsHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shows WeChat link binding for a completed article without requiring published state', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      published: false,
+      result: null,
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('公众号文章数据')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '公众号文章链接' })).toBeInTheDocument()
   })
 
   it('keeps completed delivery controls available without a runtime balance lock', async () => {

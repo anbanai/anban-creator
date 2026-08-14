@@ -5,7 +5,6 @@ export type DirectUploadPurpose =
   | 'project_reference'
   | 'task_reference'
   | 'ecommerce_product_photo'
-  | 'designer_reference'
   | 'ai_entry_attachment'
   | 'montage_asset'
 

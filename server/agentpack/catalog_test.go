@@ -254,8 +254,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 7 {
-		t.Fatalf("Pack count = %d, want 7", len(catalog.Packs))
+	if len(catalog.Packs) != 6 {
+		t.Fatalf("Pack count = %d, want 6", len(catalog.Packs))
 	}
 
 	wantRoutes := map[string]struct {
@@ -284,8 +284,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if pack, ok := catalog.ForProjectPlatform("montage"); !ok || pack.ID != "montage" {
 		t.Fatalf("montage project Pack = %#v, %v", pack, ok)
 	}
-	if designer, ok := catalog.Pack("designer"); !ok || designer.Kind != KindPlugin || len(designer.Bindings.TaskTypes) != 0 {
-		t.Fatalf("designer Pack = %#v, %v", designer, ok)
+	if _, ok := catalog.Pack("designer"); ok {
+		t.Fatal("removed Designer Pack is still present")
 	}
 	for _, pack := range catalog.Packs {
 		for _, platform := range pack.Bindings.ProjectPlatforms {

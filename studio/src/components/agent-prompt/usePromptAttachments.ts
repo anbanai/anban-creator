@@ -215,8 +215,7 @@ export function usePromptAttachments(options: UsePromptAttachmentsOptions): Prom
       && attemptsRef.current.get(id) === attempt
       && attachmentsRef.current.some((item) => item.id === id)
     )
-    const purpose = adapterRef.current.purpose
-      ?? (mode === 'designer' ? 'designer_reference' : 'ai_entry_attachment')
+    const purpose = adapterRef.current.purpose ?? 'ai_entry_attachment'
 
     void uploadRef.current({
       purpose,

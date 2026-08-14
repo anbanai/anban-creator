@@ -9,7 +9,7 @@ import "github.com/anbanai/anban-creator/server/model"
 //
 // Stage names are extracted from plugins/agents/{article,seednote,moments}.md.
 // Agent-backed content pipelines go through TaskService.UpdateProgress; other
-// pipelines such as designer, live-slicer, and video have their own services.
+// pipelines such as live-slicer and video have their own services.
 var stagePercentByType = map[string]map[string]int{
 	model.ScopeArticle: {
 		"research":     10,

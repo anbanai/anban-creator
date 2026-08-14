@@ -52,10 +52,11 @@ describe('ProjectsPage layout contracts', () => {
     expect(pageSource).not.toContain('deleteMutation')
   })
 
-  it('keeps internal project platforms behind the admin gate', () => {
+  it('keeps only unfinished project platforms behind the admin gate', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce', 'montage'])")
+    expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce'])")
+    expect(source).toContain("case 'montage':")
     expect(source).toContain('user?.is_admin === true')
     expect(source).toContain('canViewPlatform(project.platform, isAdmin)')
     expect(source).toContain('canViewPlatform(opt.value, isAdmin)')

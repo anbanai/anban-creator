@@ -25,8 +25,9 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		filepath.Join(root, "plugins", "README.md"),
 		filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
 		filepath.Join(root, "deploy/docker/Dockerfile.server"),
-		filepath.Join(root, "studio", "src", "components", "connect", "ClaudeGuide.tsx"),
-		filepath.Join(root, "studio", "src", "components", "connect", "CodexGuide.tsx"),
+		filepath.Join(root, "studio", "src", "pages", "PluginsPage.tsx"),
+		filepath.Join(root, "studio", "public", "claude", "index.html"),
+		filepath.Join(root, "studio", "public", "codex", "index.html"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "claude-code.vue"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "codex.vue"),
 		filepath.Join(root, "plugins", "README.md"),
@@ -170,7 +171,6 @@ func TestConfigurableSetupEndpointGuidanceScanner(t *testing.T) {
 func TestPluginAgentCredentialDiagnosticsStayHostSpecific(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"plugins/agents/designer.md",
 		"plugins/agents/ecommerce.md",
 	} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
@@ -185,7 +185,6 @@ func TestPluginAgentCredentialDiagnosticsStayHostSpecific(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"plugins/agents/designer.toml",
 		"plugins/agents/ecommerce.toml",
 	} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
@@ -272,8 +271,8 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 		t.Fatalf("%s author name = %q, want %q", path, plugin.Author.Name, "anbanai")
 	}
 	for _, got := range []string{plugin.Homepage, plugin.Repository} {
-		if !strings.Contains(got, "github.com/royalmorty/anbanwriter") {
-			t.Fatalf("%s plugin URL = %q, want unified monorepo", path, got)
+		if !strings.Contains(got, "github.com/anbanai/creator-skills") {
+			t.Fatalf("%s plugin URL = %q, want canonical plugin repository", path, got)
 		}
 	}
 }

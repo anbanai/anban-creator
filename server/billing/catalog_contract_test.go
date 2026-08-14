@@ -483,15 +483,12 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 	return nil
 }
 
-func TestAgentProfileCatalogV7UsesOnlyNewIDsAndKeepsDesignerIsolated(t *testing.T) {
+func TestAgentProfileCatalogV7UsesOnlyNewIDs(t *testing.T) {
 	catalog := loadProductionBundle(t).Products
 	allowed := map[string]bool{"effective": true, "balanced": true, "quality": true}
 	for _, sku := range catalog.SKUs {
 		if strings.HasPrefix(sku.Operation, "task.") && sku.ExecutionProfile != "" && !allowed[sku.ExecutionProfile] {
 			t.Fatalf("task SKU %s uses profile %q", sku.ID, sku.ExecutionProfile)
-		}
-		if strings.HasPrefix(sku.Operation, "designer.") && sku.ExecutionProfile != "" {
-			t.Fatalf("Designer SKU %s has Agent profile %q", sku.ID, sku.ExecutionProfile)
 		}
 	}
 }

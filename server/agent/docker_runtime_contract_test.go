@@ -387,10 +387,14 @@ func TestServerDockerfileStagesLocalGoSDKModuleBeforeDependencyDownload(t *testi
 }
 
 func TestMontageRuntimeImageContract(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-montage")
-	body := readTextFile(t, path)
+	root := repositoryRoot(t)
+	runtimePath := filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage")
+	runtime := readTextFile(t, runtimePath)
 	for _, want := range []string{
-		"COPY third_party/OpenMontage/ /opt/montage-template/",
+		"ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git",
+		"ARG OPENMONTAGE_REF=4eab34c5cfcccaa4f1970554928feccce73ee930",
+		"git fetch --depth 1 origin \"$OPENMONTAGE_REF\"",
+		"test \"$(git rev-parse HEAD)\" = \"$OPENMONTAGE_REF\"",
 		"requirements.txt",
 		"remotion-composer/package-lock.json",
 		"npm ci",
@@ -398,13 +402,25 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 		"load_pipeline",
 		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
 	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("%s missing %q", path, want)
+		if !strings.Contains(runtime, want) {
+			t.Fatalf("%s missing %q", runtimePath, want)
 		}
 	}
-	for _, forbidden := range []string{"Agent-Reach", "MCPORTER_VERSION", "mcporter", "gh --version", " ca-certificates curl gh git", "OPENMONTAGE_REVISION", ".anban-source-revision", "ANBAN_MONTAGE_SUBMODULE_PATH=/app"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("%s must not contain Seednote-only dependency %q", path, forbidden)
+
+	agentPath := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
+	agent := readTextFile(t, agentPath)
+	for _, want := range []string{
+		"ARG OPENMONTAGE_RUNTIME_IMAGE=creator-openmontage-runtime:latest",
+		"FROM ${OPENMONTAGE_RUNTIME_IMAGE}",
+		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
+	} {
+		if !strings.Contains(agent, want) {
+			t.Fatalf("%s missing %q", agentPath, want)
+		}
+	}
+	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "git submodule", "OPENMONTAGE_REPO", "OPENMONTAGE_REF"} {
+		if strings.Contains(agent, forbidden) {
+			t.Fatalf("%s retains source-build dependency %q", agentPath, forbidden)
 		}
 	}
 }
@@ -685,7 +701,11 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			want: []string{"FROM node:bookworm-slim AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+			want: []string{"FROM node:bookworm-slim AS builder", "FROM ${OPENMONTAGE_RUNTIME_IMAGE}"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage"),
+			want: []string{"FROM ghcr.io/openhands/agent-server:latest-python"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
@@ -733,6 +753,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-article",
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.runtime-openmontage",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -876,20 +897,26 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
+		"OPENMONTAGE_RUNTIME_IMAGE ?= creator-openmontage-runtime:latest",
+		"OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git",
+		"OPENMONTAGE_SOURCE_REF ?= 4eab34c5cfcccaa4f1970554928feccce73ee930",
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
 		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",
 		"agent-test:",
 		"agent-build:",
 		"docker-seednote-agent-image:",
+		"docker-openmontage-runtime-image:",
 		"docker-montage-agent-image:",
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-openmontage-runtime-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.runtime-openmontage",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
+		"--build-arg OPENMONTAGE_RUNTIME_IMAGE=\"$(OPENMONTAGE_RUNTIME_IMAGE)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",

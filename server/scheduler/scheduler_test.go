@@ -63,6 +63,7 @@ func TestTaskProcessorDoesNotRegisterSeednoteDiscoveryAndCapturesMetrics(t *test
 			captured = append(captured, trackingID)
 			return nil
 		},
+		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -88,6 +89,7 @@ func TestTaskProcessorDoesNotRegisterLegacyViralAnalysisJob(t *testing.T) {
 		func(context.Context, string, string) error { return nil },
 		func(context.Context, string) error { return nil },
 		nil,
+		nil,
 		"127.0.0.1:6379", "", 0, 1, &logger,
 	)
 	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask("viral:"+"analyze", []byte(`{"analysis_id":"legacy"}`)))
@@ -105,6 +107,7 @@ func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
 			triggered = append(triggered, planID)
 			return nil
 		},
+		nil,
 		nil,
 		"127.0.0.1:6379",
 		"",
@@ -129,6 +132,7 @@ func TestTaskProcessor_PlanTriggerHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return wantErr },
 		nil,
+		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -149,6 +153,7 @@ func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context, taskID, userID string) error { return nil },
 		func(ctx context.Context, planID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return wantErr },
+		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -159,5 +164,26 @@ func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`)))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestTaskProcessor_WechatCaptureHandler(t *testing.T) {
+	logger := zerolog.Nop()
+	var captured string
+	processor := NewTaskProcessor(
+		func(context.Context, string, string) error { return nil },
+		func(context.Context, string) error { return nil },
+		nil,
+		func(_ context.Context, trackingID string) error {
+			captured = trackingID
+			return nil
+		},
+		"127.0.0.1:6379", "", 0, 1, &logger,
+	)
+	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeWechatCaptureMetrics, []byte(`{"tracking_id":"wechat-1"}`))); err != nil {
+		t.Fatal(err)
+	}
+	if captured != "wechat-1" {
+		t.Fatalf("captured = %q", captured)
 	}
 }

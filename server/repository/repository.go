@@ -24,11 +24,12 @@ type Repository interface {
 	Feedbacks() FeedbackRepository
 	SeednoteTrackings() SeednoteTrackingRepository
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
+	WechatTrackings() WechatTrackingRepository
+	WechatMetricSnapshots() WechatMetricSnapshotRepository
 	Templates() TemplateRepository
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
-	ImageGenerations() ImageGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
@@ -284,6 +285,21 @@ type SeednoteMetricSnapshotRepository interface {
 	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error)
 }
 
+type WechatTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.WechatArticleTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.WechatArticleTracking, error)
+	FindByID(ctx context.Context, id string) (*model.WechatArticleTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatArticleTracking, error)
+	Update(ctx context.Context, tracking *model.WechatArticleTracking) error
+}
+
+type WechatMetricSnapshotRepository interface {
+	Create(ctx context.Context, snapshot *model.WechatMetricSnapshot) error
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.WechatMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.WechatMetricSnapshot, error)
+	DeleteByTrackingID(ctx context.Context, trackingID string) error
+}
+
 // TopicPoolRepository provides access to the topic_pool table.
 type TopicPoolRepository interface {
 	Create(ctx context.Context, topic *model.TopicPool) error
@@ -302,12 +318,6 @@ type TopicPoolRepository interface {
 type AgentFeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.AgentFeedback) error
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
-}
-
-type ImageGenerationRepository interface {
-	Create(ctx context.Context, generation *model.ImageGeneration) error
-	FindByID(ctx context.Context, id string) (*model.ImageGeneration, error)
-	MarkFailed(ctx context.Context, id, message string, completedAt time.Time) error
 }
 
 // -----------------------------------------------------------------------------
@@ -329,11 +339,12 @@ type repository struct {
 	feedbacks               FeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
+	wechatTrackings         WechatTrackingRepository
+	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
-	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -355,11 +366,12 @@ func New(db *gorm.DB) Repository {
 	feedbacks := newFeedbackRepository(db)
 	seednoteTrackings := newSeednoteTrackingRepository(db)
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
+	wechatTrackings := newWechatTrackingRepository(db)
+	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
-	imageGenerations := newImageGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
@@ -380,11 +392,12 @@ func New(db *gorm.DB) Repository {
 		feedbacks:               feedbacks,
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
+		wechatTrackings:         wechatTrackings,
+		wechatMetricSnapshots:   wechatMetricSnapshots,
 		templates:               templates,
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
-		imageGenerations:        imageGenerations,
 		agentFeedbacks:          agentFeedbacks,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
@@ -407,14 +420,16 @@ func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.s
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
+func (r *repository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
+func (r *repository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
+	return r.wechatMetricSnapshots
+}
 func (r *repository) Templates() TemplateRepository           { return r.templates }
 func (r *repository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
 func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *repository) TopicPools() TopicPoolRepository             { return r.topicPools }
-func (r *repository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
-
+func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *repository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
 }
@@ -461,11 +476,12 @@ type txRepository struct {
 	feedbacks               FeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
+	wechatTrackings         WechatTrackingRepository
+	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
-	imageGenerations        ImageGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -488,11 +504,12 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		feedbacks:               newFeedbackRepository(tx),
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
+		wechatTrackings:         newWechatTrackingRepository(tx),
+		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
-		imageGenerations:        newImageGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
@@ -515,14 +532,16 @@ func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
+func (r *txRepository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
+func (r *txRepository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
+	return r.wechatMetricSnapshots
+}
 func (r *txRepository) Templates() TemplateRepository           { return r.templates }
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
 func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *txRepository) TopicPools() TopicPoolRepository             { return r.topicPools }
-func (r *txRepository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
-
+func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
 }

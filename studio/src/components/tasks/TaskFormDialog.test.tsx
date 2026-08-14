@@ -691,7 +691,7 @@ describe('TaskFormDialog', () => {
     }))
   })
 
-  it('does not filter task business ratios by Designer fixed-size presets', async () => {
+  it('does not filter task business ratios by generation fixed-size presets', async () => {
     vi.mocked(api.imageCapabilities.list).mockResolvedValue({
       tier: 'pro',
       default_capability: 'standard',
@@ -702,7 +702,7 @@ describe('TaskFormDialog', () => {
           display_name: '源图像',
           enabled: true,
           price_available: true,
-          designer_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: false, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
+          generation_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: false, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
         },
       ],
     })

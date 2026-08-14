@@ -328,7 +328,6 @@ billing_runtime:
   admin_api_key: "runtime-smoke-admin-key"
 montage:
   enabled: true
-  submodule_path: "/opt/montage-template"
   default_pipeline: "cinematic"
   allowed_pipelines: ["cinematic"]
   max_duration_seconds: 60
@@ -451,7 +450,7 @@ runtime_smoke_main() {
   [[ -n "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL"
   [[ -n "${ANBAN_DEEPSEEK_API_KEY:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_API_KEY"
   local command_name deadline registration catalog top_up_body top_up
-  for command_name in curl git jq mktemp; do
+  for command_name in curl jq mktemp; do
     require_command "$command_name"
   done
   docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
@@ -472,15 +471,18 @@ runtime_smoke_main() {
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
   ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
   SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
+  OPENMONTAGE_BASE_IMAGE=creator-openmontage-runtime:latest
   MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
   ARTICLE_DOCKERFILE=Dockerfile.agent-article
   SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
+  OPENMONTAGE_DOCKERFILE=Dockerfile.runtime-openmontage
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
-  git -C "$REPO_ROOT" submodule update --init --recursive \
-    third_party/OpenMontage
   docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$OPENMONTAGE_DOCKERFILE" -t "$OPENMONTAGE_BASE_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" \
+    --build-arg OPENMONTAGE_RUNTIME_IMAGE="$OPENMONTAGE_BASE_IMAGE" \
+    -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 
   SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anban-runtime-smoke.XXXXXX")"
   COMPOSE_PROJECT="anban-runtime-smoke-$(date +%s)-$$"

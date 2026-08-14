@@ -29,7 +29,7 @@ func TestImageCapabilityResolverIsStrictAndDoesNotAutoUpgradeReferences(t *testi
 			Provider: "volcengine", Model: "internal-image", BaseURL: "https://internal.invalid", APIKey: "secret",
 			Alias: "图像能力", Description: "图像能力说明", MinTier: tier, BillingSKU: sku,
 			Timeout: time.Minute, Enabled: true, QualityRank: 100,
-			DesignerFeatures: serverconfig.DesignerProviderCapabilities{
+			GenerationFeatures: serverconfig.ImageGenerationFeatures{
 				DefaultSize: "1:1", SizePresets: []string{"1:1"}, MaxBatch: 1, OutputFormats: []string{"png"},
 				SupportsReference: supportsReference, MaxReferenceImages: maxReferences,
 			},

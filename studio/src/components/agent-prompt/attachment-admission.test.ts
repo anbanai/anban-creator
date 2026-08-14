@@ -141,18 +141,18 @@ describe('admitPromptAttachments', () => {
   })
 
   it('applies per-type max byte overrides at the exact boundary', () => {
-    const atDesignerLimit = fileOf('allowed.png', 'image/png', 10 * MB)
-    const overDesignerLimit = fileOf('rejected.png', 'image/png', 10 * MB + 1)
+    const atImageLimit = fileOf('allowed.png', 'image/png', 10 * MB)
+    const overImageLimit = fileOf('rejected.png', 'image/png', 10 * MB + 1)
 
-    const result = admitPromptAttachments([], [atDesignerLimit, overDesignerLimit], {
+    const result = admitPromptAttachments([], [atImageLimit, overImageLimit], {
       allowedTypes: ['image'],
       maxCount: 2,
       maxBytes: { image: 10 * MB },
     })
 
-    expect(result.accepted).toEqual([{ file: atDesignerLimit, type: 'image' }])
+    expect(result.accepted).toEqual([{ file: atImageLimit, type: 'image' }])
     expect(result.rejected).toEqual([{
-      file: overDesignerLimit,
+      file: overImageLimit,
       reason: AttachmentRejectionReason.TooLarge,
     }])
   })

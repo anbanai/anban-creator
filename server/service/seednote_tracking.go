@@ -29,6 +29,7 @@ var (
 	ErrSeednotePublicationIDInvalid        = errors.New("invalid seednote publication note id")
 	ErrSeednotePublicationURLInvalid       = errors.New("invalid seednote publication note url")
 	ErrSeednotePublicationIdentityMismatch = errors.New("seednote publication identity mismatch")
+	ErrSeednotePublicationUnavailable      = errors.New("seednote publication is not readable")
 	seednotePublicationIDPattern           = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 )
 
@@ -133,10 +134,16 @@ func isSeednotePublicationHost(host string) bool {
 	return host == "xiaohongshu.com" || strings.HasSuffix(host, ".xiaohongshu.com")
 }
 
-func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
+// BindTask validates a public Seednote identity, synchronously captures the
+// first snapshot, and then schedules daily collection. Binding is independent
+// from the task's published flag.
+func (s *SeednoteTrackingService) BindTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
 	identity, err := NormalizeSeednotePublicationIdentity(identity)
 	if err != nil {
 		return err
+	}
+	if identity.NoteID == "" {
+		return ErrSeednotePublicationIDInvalid
 	}
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -146,7 +153,7 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		return fmt.Errorf("task does not belong to user")
 	}
 	if task.Type != model.PlatformSeednote {
-		return nil
+		return fmt.Errorf("task is not a seednote task")
 	}
 
 	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
@@ -156,16 +163,17 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 	if project.UserID != userID {
 		return fmt.Errorf("project does not belong to user")
 	}
+	if s.platform == nil {
+		return fmt.Errorf("%w: seednote platform unavailable", ErrSeednotePublicationUnavailable)
+	}
+	metrics, err := s.platform.FetchPostMetrics(ctx, identity.NoteURL)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrSeednotePublicationUnavailable, err)
+	}
 
 	now := time.Now()
-	status := model.SeednoteTrackingStatusUnresolved
-	lastError := unresolvedSeednoteTrackingMessage
-	var trackingStartedAt *time.Time
-	if identity.NoteID != "" {
-		status = model.SeednoteTrackingStatusTracking
-		lastError = ""
-		trackingStartedAt = &now
-	}
+	status := model.SeednoteTrackingStatusTracking
+	trackingStartedAt := &now
 	existing, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, taskID)
 	if err == nil {
 		existing.Status = status
@@ -187,14 +195,11 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		existing.MatchConfidence = 0
 		existing.MatchReason = ""
 		existing.StopReason = ""
-		existing.LastError = lastError
+		existing.LastError = ""
 		if updateErr := s.repo.SeednoteTrackings().Update(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update tracking: %w", updateErr)
 		}
-		if status == model.SeednoteTrackingStatusTracking {
-			return s.CaptureMetrics(ctx, existing.ID)
-		}
-		return nil
+		return s.persistFetchedMetrics(ctx, existing, metrics, now)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("find tracking: %w", err)
@@ -211,15 +216,11 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		NoteURL:           identity.NoteURL,
 		PublishedMarkedAt: now,
 		TrackingStartedAt: trackingStartedAt,
-		LastError:         lastError,
 	}
 	if err := s.repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
 		return fmt.Errorf("create tracking: %w", err)
 	}
-	if status == model.SeednoteTrackingStatusTracking {
-		return s.CaptureMetrics(ctx, tracking.ID)
-	}
-	return nil
+	return s.persistFetchedMetrics(ctx, tracking, metrics, now)
 }
 
 func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
@@ -256,6 +257,10 @@ func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID
 	if err != nil {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("fetch post metrics: %w", err))
 	}
+	return s.persistFetchedMetrics(ctx, tracking, metrics, now)
+}
+
+func (s *SeednoteTrackingService) persistFetchedMetrics(ctx context.Context, tracking *model.SeednotePostTracking, metrics *platform.SeednotePostMetrics, now time.Time) error {
 	raw, _ := json.Marshal(metrics)
 	snapshot := &model.SeednoteMetricSnapshot{
 		ID:           uuid.New().String(),
@@ -493,6 +498,32 @@ func (s *SeednoteTrackingService) enqueueCapture(trackingID string, delay time.D
 	}
 	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
 	return s.enqueuer.EnqueueIn(SeednoteCaptureMetricsTaskType, payload, delay)
+}
+
+// RecoverDue re-enqueues database-backed tracking records whose delayed Redis
+// task was lost or expired. A short lease prevents repeated recovery enqueues
+// while the worker is processing the task.
+func (s *SeednoteTrackingService) RecoverDue(ctx context.Context, limit int) error {
+	if s.enqueuer == nil {
+		return nil
+	}
+	now := time.Now()
+	trackings, err := s.repo.SeednoteTrackings().FindDue(ctx, now, limit)
+	if err != nil {
+		return err
+	}
+	for _, tracking := range trackings {
+		payload, _ := json.Marshal(map[string]string{"tracking_id": tracking.ID})
+		if err := s.enqueuer.Enqueue(SeednoteCaptureMetricsTaskType, payload); err != nil {
+			return err
+		}
+		lease := now.Add(15 * time.Minute)
+		tracking.NextRunAt = &lease
+		if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func metricInfoFromSnapshot(snapshot *model.SeednoteMetricSnapshot) *SeednoteMetricInfo {

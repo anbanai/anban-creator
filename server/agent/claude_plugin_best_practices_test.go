@@ -15,7 +15,6 @@ import (
 
 func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 	agents := []string{
-		"designer",
 		"ecommerce",
 		"live-slicer",
 		"moments",
@@ -40,7 +39,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 
 func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
 	agents := []string{
-		"designer", "ecommerce", "live-slicer", "moments", "montage",
+		"ecommerce", "live-slicer", "moments", "montage",
 		"article", "seednote",
 	}
 	allowedArgs := map[string]bool{
@@ -116,7 +115,7 @@ func TestDocumentedToolCallParserHandlesNestedValues(t *testing.T) {
 	body := "tool-list: submit_agent_feedback\n" +
 		"submit_agent_feedback \n(\n" +
 		"  task_id=$TASK_ID,\n" +
-		"  agent_name=\"designer\",\n" +
+		"  agent_name=\"sample-agent\",\n" +
 		"  scores='{\"quality\":8,\"completeness\":9,\"efficiency\":7}',\n" +
 		"  summary=\"checked (including commas, parentheses)\"\n" +
 		")"
@@ -301,25 +300,25 @@ func TestClaudeAgentFinalFeedbackMatching(t *testing.T) {
 	}{
 		{
 			name:      "exact multiline owner",
-			body:      "submit_agent_feedback(\n  task_id=$TASK_ID,\n  agent_name = \"designer\",\n  summary=\"done\"\n)",
+			body:      "submit_agent_feedback(\n  task_id=$TASK_ID,\n  agent_name = \"sample-agent\",\n  summary=\"done\"\n)",
 			wantCalls: 1,
 			wantOwned: 1,
 		},
 		{
 			name:      "owner suffix is not exact",
-			body:      `submit_agent_feedback(task_id=$TASK_ID, agent_name="designer-extra", summary="done")`,
+			body:      `submit_agent_feedback(task_id=$TASK_ID, agent_name="sample-agent-extra", summary="done")`,
 			wantCalls: 1,
 			wantOwned: 0,
 		},
 		{
 			name:      "extra mismatched call is still counted",
-			body:      "submit_agent_feedback(agent_name=\"designer\")\nsubmit_agent_feedback(agent_name=\"other\")",
+			body:      "submit_agent_feedback(agent_name=\"sample-agent\")\nsubmit_agent_feedback(agent_name=\"other\")",
 			wantCalls: 2,
 			wantOwned: 1,
 		},
 		{
 			name:      "tool list mention is ignored",
-			body:      "tools: submit_agent_feedback\nsubmit_agent_feedback(agent_name='designer')",
+			body:      "tools: submit_agent_feedback\nsubmit_agent_feedback(agent_name='sample-agent')",
 			wantCalls: 1,
 			wantOwned: 1,
 		},
@@ -327,7 +326,7 @@ func TestClaudeAgentFinalFeedbackMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			calls, ownedCalls := claudeAgentFeedbackCallCounts(tt.body, "designer")
+			calls, ownedCalls := claudeAgentFeedbackCallCounts(tt.body, "sample-agent")
 			if calls != tt.wantCalls || ownedCalls != tt.wantOwned {
 				t.Fatalf("call counts = (%d, %d), want (%d, %d)", calls, ownedCalls, tt.wantCalls, tt.wantOwned)
 			}
@@ -347,11 +346,6 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 			summaryTerms: []string{"所选模板", "草稿状态", "内容审核通过率"},
 		},
 		{
-			name:         "designer",
-			anchor:       "进度报告格式：",
-			summaryTerms: []string{"图片总数", "一致性状态", "人工复核数量"},
-		},
-		{
 			name:         "live-slicer",
 			anchor:       "若流程中断，报告要包含：",
 			summaryTerms: []string{"成功/失败切片数", "输出目录", "可恢复 warning"},
@@ -369,14 +363,14 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 }
 
 func TestClaudeAgentFeedbackContractRejectsMutations(t *testing.T) {
-	const valid = "FINAL REPORT\nsubmit_agent_feedback(agent_name=\"designer\", summary=\"image count, consistency, manual review\")"
+	const valid = "FINAL REPORT\nsubmit_agent_feedback(agent_name=\"sample-agent\", summary=\"image count, consistency, manual review\")"
 	tests := []struct {
 		name string
 		body string
 	}{
 		{
 			name: "feedback before report",
-			body: "submit_agent_feedback(agent_name=\"designer\", summary=\"image count, consistency, manual review\")\nFINAL REPORT",
+			body: "submit_agent_feedback(agent_name=\"sample-agent\", summary=\"image count, consistency, manual review\")\nFINAL REPORT",
 		},
 		{
 			name: "missing summary field",
@@ -384,12 +378,12 @@ func TestClaudeAgentFeedbackContractRejectsMutations(t *testing.T) {
 		},
 	}
 
-	if err := validateClaudeAgentFeedbackContract(valid, "designer", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err != nil {
+	if err := validateClaudeAgentFeedbackContract(valid, "sample-agent", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err != nil {
 		t.Fatalf("valid fixture rejected: %v", err)
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := validateClaudeAgentFeedbackContract(tt.body, "designer", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err == nil {
+			if err := validateClaudeAgentFeedbackContract(tt.body, "sample-agent", "FINAL REPORT", []string{"image count", "consistency", "manual review"}); err == nil {
 				t.Fatal("mutated feedback contract unexpectedly passed")
 			}
 		})

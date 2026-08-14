@@ -187,7 +187,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]config.ImageGenerationRouteConfig{
-			"standard": {Enabled: true, MinTier: "free", DesignerFeatures: config.DesignerProviderCapabilities{SizePresets: []string{"21:9"}}},
+			"standard": {Enabled: true, MinTier: "free", GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"21:9"}}},
 		},
 	})
 

@@ -107,14 +107,41 @@ func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (s
 		Status:    model.TaskStatusCompleted,
 		Title:     "早起效率翻倍的方法",
 		Prompt:    "早起效率",
-		Published: true,
+		Published: false,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	return userID, projectID, taskID
 }
 
-func TestEnsureTrackingForPublishedTaskUsesDeterministicIdentity(t *testing.T) {
+func TestSeednoteTrackingService_BindCapturesFirstSnapshotImmediately(t *testing.T) {
+	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := svc.platform.(*fakeSeednotePlatform)
+	viewCount := 321
+	platformFake.metrics = platform.SeednotePostMetrics{
+		LikeCount: 12, CollectCount: 8, CommentCount: 3, ShareCount: 2, ViewCount: &viewCount,
+	}
+
+	if err := svc.BindTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: "note-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if platformFake.metricsCalls != 1 {
+		t.Fatalf("metrics calls = %d, want 1 synchronous call", platformFake.metricsCalls)
+	}
+	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Latest == nil || analytics.Latest.LikeCount != 12 || analytics.Latest.ViewCount == nil || *analytics.Latest.ViewCount != viewCount {
+		t.Fatalf("latest metrics = %+v", analytics.Latest)
+	}
+	if analytics.Tracking == nil || analytics.Tracking.RunCount != 1 || analytics.Tracking.LastRunAt == nil {
+		t.Fatalf("tracking = %+v", analytics.Tracking)
+	}
+}
+
+func TestBindTaskUsesDeterministicIdentity(t *testing.T) {
 	tests := []struct {
 		name, noteID, noteURL, wantID, wantURL, wantStatus string
 		wantErr, wantEnqueue, wantMetrics                  bool
@@ -125,13 +152,13 @@ func TestEnsureTrackingForPublishedTaskUsesDeterministicIdentity(t *testing.T) {
 		{name: "conflicting identity", noteID: "note-2", noteURL: "https://www.xiaohongshu.com/explore/note-1", wantErr: true},
 		{name: "foreign host", noteURL: "https://example.com/explore/note-1", wantErr: true},
 		{name: "note id only in query", noteURL: "https://www.xiaohongshu.com/user/profile/user-1?next=/explore/note-1", wantErr: true},
-		{name: "missing identity", wantStatus: model.SeednoteTrackingStatusUnresolved},
+		{name: "missing identity", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, repo, enqueuer := setupSeednoteTrackingServiceTest(t)
 			userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
-			err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: tt.noteID, NoteURL: tt.noteURL})
+			err := svc.BindTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: tt.noteID, NoteURL: tt.noteURL})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected identity error")
@@ -158,9 +185,6 @@ func TestEnsureTrackingForPublishedTaskUsesDeterministicIdentity(t *testing.T) {
 			}
 			if (platformFake.metricsCalls > 0) != tt.wantMetrics {
 				t.Fatalf("metrics calls = %d", platformFake.metricsCalls)
-			}
-			if tt.wantStatus == model.SeednoteTrackingStatusUnresolved && (tracking.NextRunAt != nil || tracking.LastError == "") {
-				t.Fatalf("unresolved tracking = %#v", tracking)
 			}
 		})
 	}
@@ -393,19 +417,19 @@ func TestSeednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.
 		t.Fatalf("create snapshot: %v", err)
 	}
 
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{}); err != nil {
-		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
+	if err := svc.BindTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: "note-new"}); err != nil {
+		t.Fatalf("BindTask: %v", err)
 	}
 	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
 	if err != nil {
 		t.Fatalf("GetTaskAnalytics: %v", err)
 	}
-	if len(analytics.Series) != 0 || analytics.Latest != nil || analytics.Deltas != nil {
-		t.Fatalf("analytics includes old snapshots after reset: %+v", analytics)
+	if len(analytics.Series) != 1 || analytics.Latest == nil || analytics.Latest.LikeCount != 0 {
+		t.Fatalf("analytics does not contain only the fresh binding snapshot: %+v", analytics)
 	}
 }
 
-func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignProject(t *testing.T) {
+func TestSeednoteTrackingService_BindTaskRejectsForeignProject(t *testing.T) {
 	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
 	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	otherUserID := uuid.New().String()
@@ -421,7 +445,7 @@ func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignPro
 		t.Fatalf("update project: %v", err)
 	}
 
-	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID, SeednotePublicationIdentity{}); err == nil {
+	if err := svc.BindTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: "note-1"}); err == nil {
 		t.Fatal("expected project ownership error")
 	}
 	if _, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {

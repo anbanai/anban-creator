@@ -48,10 +48,6 @@ func validateAgentExecutionTarget(target string) error {
 	}
 }
 
-type PublishedTrackingService interface {
-	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error
-}
-
 type cloudDraftPublisher interface {
 	PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error)
 }
@@ -82,7 +78,6 @@ type TaskService struct {
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
-	seednoteTrackingSvc      PublishedTrackingService
 	montageCfg               srvconfig.MontageConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
@@ -236,10 +231,6 @@ func (s *TaskService) Close() {
 	if s.pubsubCancel != nil {
 		s.pubsubCancel()
 	}
-}
-
-func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingService) {
-	s.seednoteTrackingSvc = trackingSvc
 }
 
 func (s *TaskService) SetIlinkNotifier(n *IlinkNotifier) {
@@ -1618,8 +1609,9 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 	return stats, nil
 }
 
-// SetPublished toggles the published flag on a task.
-func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool, identity SeednotePublicationIdentity) error {
+// SetPublished toggles the published flag on a task. Analytics bindings are
+// managed independently by their platform-specific tracking services.
+func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
@@ -1627,28 +1619,7 @@ func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, p
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	if published && task.Type == model.PlatformSeednote {
-		identity, err = NormalizeSeednotePublicationIdentity(identity)
-		if err != nil {
-			return err
-		}
-	} else {
-		identity = SeednotePublicationIdentity{}
-	}
-	return s.setPublishedAndMaybeTrack(ctx, userID, task, published, identity)
-}
-
-func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool, identity SeednotePublicationIdentity) error {
-	if err := s.repo.Tasks().SetPublished(ctx, task.ID, published); err != nil {
-		return err
-	}
-	if !published || task.Type != model.PlatformSeednote || s.seednoteTrackingSvc == nil {
-		return nil
-	}
-	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID, identity); err != nil {
-		return fmt.Errorf("ensure seednote tracking: %w", err)
-	}
-	return nil
+	return s.repo.Tasks().SetPublished(ctx, task.ID, published)
 }
 
 // Delete permanently removes a task and its associated files.

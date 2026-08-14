@@ -116,11 +116,17 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	// Platform-specific validation.
 	pc := model.GetPlatformConfig(ch.Platform)
 	if pc != nil {
-		if ch.ImageRatio == "" && pc.DefaultImageRatio != "" {
-			ch.ImageRatio = pc.DefaultImageRatio
-		}
-		if !model.IsBusinessImageRatioAllowed(ch.Platform, ch.ImageRatio) {
-			return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+		if len(pc.SupportedImageRatios) == 0 {
+			if strings.TrimSpace(ch.ImageRatio) != "" {
+				return nil, fmt.Errorf("image_ratio is not supported for platform %s", ch.Platform)
+			}
+		} else {
+			if ch.ImageRatio == "" && pc.DefaultImageRatio != "" {
+				ch.ImageRatio = pc.DefaultImageRatio
+			}
+			if !model.IsBusinessImageRatioAllowed(ch.Platform, ch.ImageRatio) {
+				return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+			}
 		}
 	}
 	ch.ID = uuid.New().String()
@@ -271,15 +277,23 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.ReferenceImageSet {
 		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
 	}
-	// Empty update input preserves the persisted value; "auto" is the explicit
-	// user choice for semantic adaptation and is stored as-is.
-	if strings.TrimSpace(ch.ImageRatio) != "" {
-		if !model.IsBusinessImageRatioAllowed(existing.Platform, ch.ImageRatio) {
-			return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+	// Empty update input preserves the persisted value for image-capable
+	// platforms. Platforms without image settings always keep the field empty.
+	supportedImageRatios := model.SupportedImageRatios(existing.Platform)
+	if len(supportedImageRatios) == 0 {
+		if strings.TrimSpace(ch.ImageRatio) != "" {
+			return nil, fmt.Errorf("image_ratio is not supported for platform %s", existing.Platform)
 		}
-		existing.ImageRatio = ch.ImageRatio
-	} else if platformChanged || strings.TrimSpace(existing.ImageRatio) == "" {
-		existing.ImageRatio = model.DefaultImageRatio(existing.Platform)
+		existing.ImageRatio = ""
+	} else {
+		if strings.TrimSpace(ch.ImageRatio) != "" {
+			if !model.IsBusinessImageRatioAllowed(existing.Platform, ch.ImageRatio) {
+				return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+			}
+			existing.ImageRatio = ch.ImageRatio
+		} else if platformChanged || strings.TrimSpace(existing.ImageRatio) == "" {
+			existing.ImageRatio = model.DefaultImageRatio(existing.Platform)
+		}
 	}
 	if ch.InstructionsSet {
 		existing.Instructions = ch.Instructions

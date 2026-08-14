@@ -61,11 +61,11 @@ func TestAgentFeedbackCreateUpdatesLatestPayload(t *testing.T) {
 	ctx := context.Background()
 	taskID := "local-update-" + uuid.NewString()
 
-	first, err := svc.Create(ctx, taskID, "designer", `{"quality":5}`, "first error", "first optimization", "first summary")
+	first, err := svc.Create(ctx, taskID, "montage", `{"quality":5}`, "first error", "first optimization", "first summary")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.Create(ctx, taskID, "designer", `{"quality":9,"completeness":8,"efficiency":7}`, "", "latest optimization", "latest summary")
+	second, err := svc.Create(ctx, taskID, "montage", `{"quality":9,"completeness":8,"efficiency":7}`, "", "latest optimization", "latest summary")
 	if err != nil {
 		t.Fatal(err)
 	}

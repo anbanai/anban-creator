@@ -103,7 +103,7 @@ model_routes:
         timeout: 5m
         enabled: true
         quality_rank: 100
-        designer_features:
+        generation_features:
           quality_levels: ["auto"]
           size_presets: ["1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K"]
           default_size: "1:1:2K"
@@ -129,7 +129,7 @@ model_routes:
         enabled: true
         quality_rank: 200
         response_format: "url"
-        designer_features:
+        generation_features:
           quality_levels: ["auto", "low", "medium", "high"]
           size_presets: ["1:1:2K", "3:2:2K", "2:3:2K"]
           default_size: "1:1:2K"
@@ -145,18 +145,15 @@ model_routes:
 # 生产建议：
 # - 保持 enabled=true。
 # - execution_targets 只保留 cloud，避免生产任务依赖桌面本机执行器。
-# - claude.executor 使用 kubernetes 或 docker，并确保镜像内已初始化 third_party/OpenMontage。
+# - claude.executor 使用 kubernetes 或 docker，并确保 Montage Agent 镜像继承已发布的 OpenMontage runtime 镜像。
 montage:
   # 是否启用 Montage 平台。显式 false 会关闭任务/计划创建入口。
   enabled: true
-  # 上游 OpenMontage git submodule 路径。生产镜像构建时必须执行
-  # `git submodule update --init --recursive third_party/OpenMontage`。
-  submodule_path: "third_party/OpenMontage"
   # 未指定 pipeline_key 时使用的默认 OpenMontage pipeline；必须包含在 allowed_pipelines 中。
   # 生产建议选择已验证的上游 pipeline，例如 cinematic、talking-head、screen-demo、clip-factory。
   default_pipeline: "cinematic"
   # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test，
-  # 并确认 third_party/OpenMontage/pipeline_defs/<name>.yaml 存在。
+  # 并确认所选 OpenMontage runtime 镜像内的 pipeline_defs/<name>.yaml 存在。
   allowed_pipelines: ["cinematic", "talking-head", "screen-demo", "clip-factory"]
   # 单个 Montage 任务允许的最长成片时长，单位秒。
   max_duration_seconds: 600

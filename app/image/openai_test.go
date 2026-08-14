@@ -74,7 +74,7 @@ func TestOpenAIRequestSizeUsesProviderAutoForSemanticTaskGeneration(t *testing.T
 		t.Fatalf("semantic request size = %q, want auto", got)
 	}
 	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", false); got != "1024x1536" {
-		t.Fatalf("Designer request size = %q, want fixed provider size", got)
+		t.Fatalf("image generation request size = %q, want fixed provider size", got)
 	}
 }
 

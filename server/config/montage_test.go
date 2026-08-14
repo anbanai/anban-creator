@@ -16,9 +16,6 @@ func TestMontageConfigDefaults(t *testing.T) {
 	if !cfg.Enabled {
 		t.Fatal("Enabled = false, want true")
 	}
-	if cfg.SubmodulePath != "third_party/OpenMontage" {
-		t.Fatalf("SubmodulePath = %q, want %q", cfg.SubmodulePath, "third_party/OpenMontage")
-	}
 	if cfg.DefaultPipeline != "cinematic" {
 		t.Fatalf("DefaultPipeline = %q, want cinematic", cfg.DefaultPipeline)
 	}
@@ -53,7 +50,6 @@ func TestMontageConfigDefaults(t *testing.T) {
 func TestMontageConfigValidate(t *testing.T) {
 	cfg := MontageConfig{
 		Enabled:                true,
-		SubmodulePath:          "third_party/OpenMontage",
 		DefaultPipeline:        "cinematic",
 		AllowedPipelines:       []string{"cinematic", "social-short"},
 		MaxDurationSeconds:     600,
@@ -86,7 +82,6 @@ func TestMontageConfigValidate(t *testing.T) {
 func TestMontageConfigAcceptsArbitraryEnvKeys(t *testing.T) {
 	cfg := MontageConfig{
 		Enabled:                true,
-		SubmodulePath:          "third_party/OpenMontage",
 		DefaultPipeline:        "default",
 		AllowedPipelines:       []string{"default"},
 		MaxDurationSeconds:     600,
@@ -107,7 +102,6 @@ func TestMontageConfigAcceptsArbitraryEnvKeys(t *testing.T) {
 func TestMontageConfigRejectsMalformedEnvEntries(t *testing.T) {
 	base := MontageConfig{
 		Enabled:                true,
-		SubmodulePath:          "third_party/OpenMontage",
 		DefaultPipeline:        "default",
 		AllowedPipelines:       []string{"default"},
 		MaxDurationSeconds:     600,
@@ -172,9 +166,6 @@ func TestMontageConfigDefaultsPreserveExplicitDisabled(t *testing.T) {
 
 	if cfg.Montage.Enabled {
 		t.Fatal("Enabled = true, want explicit false preserved")
-	}
-	if cfg.Montage.SubmodulePath != "third_party/OpenMontage" {
-		t.Fatalf("SubmodulePath = %q, want default path", cfg.Montage.SubmodulePath)
 	}
 }
 

@@ -313,13 +313,6 @@ const workshopEntries = [
     action: () => goWorkshop('poster'),
   },
   {
-    key: 'designer',
-    icon: '设',
-    title: '设计师',
-    desc: '参考图与局部编辑',
-    action: () => uni.navigateTo({ url: '/pages/designer/index' }),
-  },
-  {
     key: 'template',
     icon: '模',
     title: '模板中心',
@@ -892,7 +885,6 @@ function goPlanTasks(planId: string) {
 
     &--viral { background-color: $ab-danger-bg; color: $ab-danger; }
     &--poster { background-color: $ab-warning-bg; color: $ab-warning; }
-    &--designer { background-color: $ab-info-bg; color: $ab-info; }
     &--template { background-color: $ab-success-bg; color: $ab-success; }
   }
 

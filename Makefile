@@ -8,6 +8,9 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+OPENMONTAGE_RUNTIME_IMAGE ?= creator-openmontage-runtime:latest
+OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
+OPENMONTAGE_SOURCE_REF ?= 4eab34c5cfcccaa4f1970554928feccce73ee930
 SERVER_IMAGE := anban-creator-server:latest
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
 SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
@@ -25,7 +28,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-openmontage-runtime-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke
 
@@ -180,11 +183,21 @@ docker-seednote-agent-image:
 	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
-# Build the dedicated Montage Agent image with its OpenMontage workspace template.
-docker-montage-agent-image:
-	@git submodule update --init --recursive third_party/OpenMontage
+# Build the pinned OpenMontage runtime source and dependencies independently.
+docker-openmontage-runtime-image:
+	@echo "Building $(OPENMONTAGE_RUNTIME_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.runtime-openmontage \
+		--build-arg OPENMONTAGE_REPO="$(OPENMONTAGE_SOURCE_REPO)" \
+		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
+		-t $(OPENMONTAGE_RUNTIME_IMAGE) . && \
+	echo "Image build complete: $(OPENMONTAGE_RUNTIME_IMAGE)"
+
+# Build the dedicated Montage Agent on the independently built runtime image.
+docker-montage-agent-image: docker-openmontage-runtime-image
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-montage \
+		--build-arg OPENMONTAGE_RUNTIME_IMAGE="$(OPENMONTAGE_RUNTIME_IMAGE)" \
+		-t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
 # The script owns its Docker availability check and all isolated smoke builds.
@@ -221,7 +234,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
+docker-images: docker-agent-image docker-seednote-agent-image docker-openmontage-runtime-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -268,6 +281,7 @@ help:
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
+	@echo "  make docker-openmontage-runtime-image - Build pinned external OpenMontage runtime image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"

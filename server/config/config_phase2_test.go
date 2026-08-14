@@ -80,7 +80,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d execution_profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
 	}
-	fixedDesignerSize := regexp.MustCompile(`^[1-9][0-9]*:[1-9][0-9]*:(1K|2K|4K)$`)
+	fixedImageGenerationSize := regexp.MustCompile(`^[1-9][0-9]*:[1-9][0-9]*:(1K|2K|4K)$`)
 	for key, capability := range cfg.ModelRoutes.ImageGeneration.Capabilities {
 		if !capability.Enabled {
 			continue
@@ -89,12 +89,12 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		if _, ok := cfg.BillingBundle.Costs.Models[modelID]; !ok {
 			t.Fatalf("enabled image capability %q uses %q, which is missing from billing costs.models", key, modelID)
 		}
-		if capability.DesignerFeatures.MaxBatch != 1 {
-			t.Fatalf("enabled image capability %q designer max_batch = %d, want 1 for fixed per-image billing", key, capability.DesignerFeatures.MaxBatch)
+		if capability.GenerationFeatures.MaxBatch != 1 {
+			t.Fatalf("enabled image capability %q max_batch = %d, want 1 for fixed per-image billing", key, capability.GenerationFeatures.MaxBatch)
 		}
-		for _, preset := range capability.DesignerFeatures.SizePresets {
-			if !fixedDesignerSize.MatchString(preset) {
-				t.Fatalf("enabled image capability %q exposes non-fixed Designer size %q", key, preset)
+		for _, preset := range capability.GenerationFeatures.SizePresets {
+			if !fixedImageGenerationSize.MatchString(preset) {
+				t.Fatalf("enabled image capability %q exposes non-fixed generation size %q", key, preset)
 			}
 		}
 	}

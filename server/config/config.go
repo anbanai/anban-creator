@@ -156,7 +156,6 @@ type MCPToolTimeoutsConfig struct {
 type MontageConfig struct {
 	Enabled                bool                                   `yaml:"enabled"`
 	enabledSet             bool                                   `yaml:"-"`
-	SubmodulePath          string                                 `yaml:"submodule_path"`
 	DefaultPipeline        string                                 `yaml:"default_pipeline"`
 	AllowedPipelines       []string                               `yaml:"allowed_pipelines"`
 	MaxDurationSeconds     int64                                  `yaml:"max_duration_seconds"`
@@ -196,9 +195,6 @@ func (c *MontageConfig) ApplyDefaults() {
 	if !c.enabledSet {
 		c.Enabled = true
 	}
-	if c.SubmodulePath == "" {
-		c.SubmodulePath = "third_party/OpenMontage"
-	}
 	if c.DefaultPipeline == "" {
 		c.DefaultPipeline = "cinematic"
 	}
@@ -234,9 +230,6 @@ func (c *MontageConfig) ApplyDefaults() {
 func (c MontageConfig) Validate() error {
 	if !c.Enabled {
 		return nil
-	}
-	if strings.TrimSpace(c.SubmodulePath) == "" {
-		return fmt.Errorf("montage.submodule_path is required")
 	}
 	if strings.TrimSpace(c.DefaultPipeline) == "" {
 		return fmt.Errorf("montage.default_pipeline is required")
@@ -322,20 +315,20 @@ type VideoUnderstandingRouteConfig struct {
 }
 
 type ImageGenerationRouteConfig struct {
-	Provider         string                       `yaml:"provider" json:"-"`
-	Model            string                       `yaml:"model" json:"-"`
-	Timeout          time.Duration                `yaml:"timeout" json:"-"`
-	MinTier          string                       `yaml:"min_tier" json:"min_tier"`
-	Alias            string                       `yaml:"alias"`
-	Description      string                       `yaml:"description"`
-	SortOrder        int                          `yaml:"sort_order" json:"sort_order"`
-	BillingSKU       string                       `yaml:"billing_sku" json:"-"`
-	Enabled          bool                         `yaml:"enabled"`
-	QualityRank      int                          `yaml:"quality_rank" json:"quality_rank"`
-	ResponseFormat   string                       `yaml:"response_format" json:"-"`
-	BaseURL          string                       `yaml:"base_url" json:"-"`
-	APIKey           string                       `yaml:"api_key" json:"-"`
-	DesignerFeatures DesignerProviderCapabilities `yaml:"designer_features" json:"designer_features"`
+	Provider           string                  `yaml:"provider" json:"-"`
+	Model              string                  `yaml:"model" json:"-"`
+	Timeout            time.Duration           `yaml:"timeout" json:"-"`
+	MinTier            string                  `yaml:"min_tier" json:"min_tier"`
+	Alias              string                  `yaml:"alias"`
+	Description        string                  `yaml:"description"`
+	SortOrder          int                     `yaml:"sort_order" json:"sort_order"`
+	BillingSKU         string                  `yaml:"billing_sku" json:"-"`
+	Enabled            bool                    `yaml:"enabled"`
+	QualityRank        int                     `yaml:"quality_rank" json:"quality_rank"`
+	ResponseFormat     string                  `yaml:"response_format" json:"-"`
+	BaseURL            string                  `yaml:"base_url" json:"-"`
+	APIKey             string                  `yaml:"api_key" json:"-"`
+	GenerationFeatures ImageGenerationFeatures `yaml:"generation_features" json:"generation_features"`
 }
 
 func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -344,7 +337,7 @@ func (c *ImageGenerationRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 		"min_tier": true, "alias": true,
 		"description": true, "sort_order": true, "billing_sku": true,
 		"enabled": true, "quality_rank": true, "response_format": true,
-		"base_url": true, "api_key": true, "designer_features": true,
+		"base_url": true, "api_key": true, "generation_features": true,
 	}); err != nil {
 		return err
 	}
@@ -368,7 +361,7 @@ func (c *ImageGenerationRoutesConfig) UnmarshalYAML(value *yaml.Node) error {
 	return value.Decode((*plain)(c))
 }
 
-type DesignerProviderCapabilities struct {
+type ImageGenerationFeatures struct {
 	QualityLevels      []string `yaml:"quality_levels" json:"quality_levels"`
 	SizePresets        []string `yaml:"size_presets" json:"size_presets"`
 	DefaultSize        string   `yaml:"default_size" json:"default_size"`
@@ -1280,7 +1273,7 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 	if route.QualityRank <= 0 {
 		errs = append(errs, path+".quality_rank must be positive")
 	}
-	if err := validateDesignerProviderCapabilities(path+".designer_features", route.DesignerFeatures); err != nil {
+	if err := validateImageGenerationFeatures(path+".generation_features", route.GenerationFeatures); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
@@ -1298,7 +1291,7 @@ func supportsSemanticTaskAspectRatioProvider(provider string) bool {
 	}
 }
 
-func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapabilities) error {
+func validateImageGenerationFeatures(path string, caps ImageGenerationFeatures) error {
 	var errs []string
 	defaultSize := strings.TrimSpace(caps.DefaultSize)
 	if defaultSize == "" {
@@ -1327,7 +1320,7 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 			errs = append(errs, "size_presets must not contain empty values")
 			continue
 		}
-		if !isDesignerFixedSizePreset(preset) {
+		if !isFixedImageGenerationSizePreset(preset) {
 			errs = append(errs, "size_presets must use width:height:1K|2K|4K format")
 		}
 		if strings.EqualFold(preset, defaultSize) {
@@ -1353,7 +1346,7 @@ func validateDesignerProviderCapabilities(path string, caps DesignerProviderCapa
 	return nil
 }
 
-func isDesignerFixedSizePreset(value string) bool {
+func isFixedImageGenerationSizePreset(value string) bool {
 	parts := strings.Split(strings.ToUpper(strings.TrimSpace(value)), ":")
 	if len(parts) != 3 {
 		return false

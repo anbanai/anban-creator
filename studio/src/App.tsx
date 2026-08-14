@@ -29,10 +29,7 @@ const BillingPage = React.lazy(() => import('@/pages/BillingPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
 const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
-
-const DesignerPage = React.lazy(() => import('@/pages/DesignerPage'))
-const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
-const CodexGuidePage = React.lazy(() => import('@/pages/CodexGuidePage'))
+const PluginsPage = React.lazy(() => import('@/pages/PluginsPage'))
 
 function LoadingSpinner() {
   return (
@@ -119,6 +116,9 @@ function AppRoutes() {
             </PublicRoute>
           }
         />
+        <Route path="/plugins" element={<LazyPage component={PluginsPage} />} />
+        <Route path="/connect/claude-code" element={<Navigate to="/plugins?client=claude" replace />} />
+        <Route path="/connect/codex" element={<Navigate to="/plugins?client=codex" replace />} />
         <Route
           element={
             <ProtectedRoute>
@@ -147,40 +147,9 @@ function AppRoutes() {
             )}
           />
 
-          <Route
-            path="designer"
-            element={(
-              <AdminRoute>
-                <LazyPage component={DesignerPage} />
-              </AdminRoute>
-            )}
-          />
           <Route path="billing" element={<LazyPage component={BillingPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
-          <Route
-            path="settings"
-            element={(
-              <AdminRoute>
-                <LazyPage component={SettingsPage} />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="connect/claude-code"
-            element={(
-              <AdminRoute>
-                <LazyPage component={ClaudeCodeGuidePage} />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="connect/codex"
-            element={(
-              <AdminRoute>
-                <LazyPage component={CodexGuidePage} />
-              </AdminRoute>
-            )}
-          />
+          <Route path="settings" element={<LazyPage component={SettingsPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

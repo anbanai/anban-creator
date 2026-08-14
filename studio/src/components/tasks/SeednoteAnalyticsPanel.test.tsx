@@ -11,13 +11,10 @@ vi.mock('@/lib/api', async () => {
     ...actual,
     api: {
       ...actual.api,
-      tasks: {
-        ...actual.api.tasks,
-        markPublished: vi.fn(),
-      },
       seednoteAnalytics: {
         ...actual.api.seednoteAnalytics,
         getByTask: vi.fn(),
+        bind: vi.fn(),
       },
     },
   }
@@ -45,7 +42,7 @@ describe('SeednoteAnalyticsPanel', () => {
       },
       series: [],
     })
-    vi.mocked(api.tasks.markPublished).mockResolvedValue({ published: true })
+    vi.mocked(api.seednoteAnalytics.bind).mockResolvedValue({ tracking: true })
 
     render(<SeednoteAnalyticsPanel taskId="task-1" />)
 
@@ -56,7 +53,7 @@ describe('SeednoteAnalyticsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '关联公开笔记' }))
 
     await waitFor(() => {
-      expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true, {
+      expect(api.seednoteAnalytics.bind).toHaveBeenCalledWith('task-1', {
         note_url: 'https://www.xiaohongshu.com/explore/note-1',
       })
     })

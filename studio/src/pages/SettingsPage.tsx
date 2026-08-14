@@ -260,7 +260,7 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold text-foreground">平台密钥</h2>
             <p className="text-xs text-muted-foreground mt-0.5">用于 Claude Code 插件或第三方工具访问你的账号。</p>
             <p className="text-xs text-muted-foreground mt-1">
-              不知道如何使用密钥？<Link to="/connect/claude-code" className="text-primary hover:underline">查看接入指南 →</Link>
+              不知道如何使用密钥？<Link to="/plugins" className="text-primary hover:underline">查看插件接入 →</Link>
             </p>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)} disabled={showCreate}>

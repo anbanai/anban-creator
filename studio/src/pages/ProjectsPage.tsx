@@ -50,7 +50,7 @@ const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'montage', label: 'Montage' },
 ]
 
-const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'montage'])
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce'])
 
 function canViewPlatform(platform: ProjectPlatform, isAdmin: boolean) {
   return isAdmin || !adminOnlyPlatforms.has(platform)
@@ -103,10 +103,10 @@ function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): 
   switch (type) {
     case 'article':
     case 'seednote':
+    case 'montage':
       return type
     case 'moments':
     case 'ecommerce':
-    case 'montage':
       return isAdmin ? type : CHANNEL_FORM_DEFAULTS.platform
     default:
       return CHANNEL_FORM_DEFAULTS.platform

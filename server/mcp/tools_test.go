@@ -90,7 +90,7 @@ func accountInfoImageCapabilityResolver() *service.ImageCapabilityResolver {
 	capability := func(sizes ...string) srvconfig.ImageGenerationRouteConfig {
 		return srvconfig.ImageGenerationRouteConfig{
 			Enabled: true, MinTier: "free",
-			DesignerFeatures: srvconfig.DesignerProviderCapabilities{SizePresets: sizes},
+			GenerationFeatures: srvconfig.ImageGenerationFeatures{SizePresets: sizes},
 		}
 	}
 	preferred := capability("1:1", "16:9")

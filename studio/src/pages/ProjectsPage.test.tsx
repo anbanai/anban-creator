@@ -116,7 +116,7 @@ describe('ProjectsPage', () => {
     window.history.pushState({}, '', '/projects')
   })
 
-  it('hides internal project platforms from ordinary users', async () => {
+  it('keeps Montage visible while hiding internal project platforms from ordinary users', async () => {
     authState.isAdmin = false
     vi.mocked(api.projects.list).mockResolvedValue([
       projectWithReference,
@@ -130,7 +130,7 @@ describe('ProjectsPage', () => {
     expect(await screen.findByText('测试项目')).toBeInTheDocument()
     expect(screen.queryByText('内部朋友圈')).not.toBeInTheDocument()
     expect(screen.queryByText('内部电商')).not.toBeInTheDocument()
-    expect(screen.queryByText('内部剪辑')).not.toBeInTheDocument()
+    expect(screen.getByText('内部剪辑')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
@@ -139,18 +139,18 @@ describe('ProjectsPage', () => {
     expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Montage' })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Montage' })).toBeInTheDocument()
   })
 
-  it('falls back from an internal project deep link for ordinary users', async () => {
+  it('opens Montage project creation from a deep link for ordinary users', async () => {
     authState.isAdmin = false
     window.history.pushState({}, '', '/projects?create=true&type=montage&intent=new')
 
     render(<ProjectsPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('公众号')
-    expect(within(dialog).queryByText('Montage 默认配置')).not.toBeInTheDocument()
+    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('Montage')
+    expect(within(dialog).getByText('Montage 默认配置')).toBeInTheDocument()
   })
 
   it('does not ask seednote projects for a publishing author', async () => {
@@ -166,8 +166,8 @@ describe('ProjectsPage', () => {
   it('constrains project ratios with the selected business platform', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'ProjectsPage.tsx'), 'utf8')
     expect(source).toContain('ratios={currentPlatformConfig?.supported_image_ratios ?? []}')
-    expect(source).not.toContain('designer_features')
-    expect(source).not.toContain('designerFeatures')
+    expect(source).not.toContain('generation_features')
+    expect(source).not.toContain('generationFeatures')
     expect(source).not.toContain('sizePresets')
     expect(source).not.toContain('imageRatioUnsupported')
     expect(source).toContain('该图像能力已停用，请重新选择')

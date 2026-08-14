@@ -78,7 +78,7 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 		if err := h.validatePendingFileAccess(c, userID, cleanKey); err != nil {
 			return err
 		}
-	} else if !isUserOwnedStorageKey(userID, cleanKey, userID+"/designer/") {
+	} else if !isUserOwnedStorageKey(userID, cleanKey) {
 		return Forbidden(c, "you do not have access to this file")
 	}
 
@@ -106,7 +106,6 @@ func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey st
 		service.DirectUploadPurposeTaskReference,
 		service.DirectUploadPurposeEcommercePhoto,
 		service.DirectUploadPurposeMontageAsset,
-		service.DirectUploadPurposeDesignerReference,
 		service.DirectUploadPurposeAIEntryAttachment,
 	}, cleanKey, time.Now())
 	if err != nil {

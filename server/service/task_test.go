@@ -262,8 +262,8 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"standard":     {Enabled: true, MinTier: "free", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
 		},
 	}}}
 	setter, ok := any(svc).(interface {
@@ -288,7 +288,7 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	}
 }
 
-func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfDesignerSpecs(t *testing.T) {
+func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfGenerationSpecs(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -299,8 +299,8 @@ func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfDesignerSpecs(t 
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", DesignerFeatures: serverconfig.DesignerProviderCapabilities{SizePresets: []string{"1:1"}}},
+			"standard":     {Enabled: true, MinTier: "free", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
+			"professional": {Enabled: true, MinTier: "enterprise", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
 		},
 	}}}
 	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
@@ -312,7 +312,7 @@ func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfDesignerSpecs(t 
 
 	task, err := svc.CreateFromPlan(ctx, plan)
 	if err != nil || task == nil || task.ImageRatio != "16:9" {
-		t.Fatalf("CreateFromPlan = task %#v, err %#v; want business ratio independent of Designer specs", task, err)
+		t.Fatalf("CreateFromPlan = task %#v, err %#v; want business ratio independent of generation specs", task, err)
 	}
 }
 
@@ -522,24 +522,6 @@ func (s *blockingTaskDeleteStorage) Delete(ctx context.Context, key string) erro
 		return ctx.Err()
 	}
 	return s.resumeTestStorage.Delete(ctx, key)
-}
-
-type fakePublishedTrackingService struct {
-	calls []struct {
-		userID   string
-		taskID   string
-		identity SeednotePublicationIdentity
-	}
-	err error
-}
-
-func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string, identity SeednotePublicationIdentity) error {
-	f.calls = append(f.calls, struct {
-		userID   string
-		taskID   string
-		identity SeednotePublicationIdentity
-	}{userID: userID, taskID: taskID, identity: identity})
-	return f.err
 }
 
 func TestTaskService_FinalizeTitleUpdatesCanonicalTitle(t *testing.T) {
@@ -2961,10 +2943,8 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	}
 }
 
-func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
+func TestTaskService_SetPublishedUpdatesFlagWithoutBindingAnalytics(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	trackingSvc := &fakePublishedTrackingService{}
-	svc.SetSeednoteTrackingService(trackingSvc)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2980,26 +2960,20 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	identity := SeednotePublicationIdentity{NoteID: "note-1"}
-	if err := svc.SetPublished(ctx, userID, task.ID, true, identity); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
 		t.Fatalf("SetPublished: %v", err)
 	}
-
-	if len(trackingSvc.calls) != 1 {
-		t.Fatalf("tracking calls = %d, want 1", len(trackingSvc.calls))
+	updated, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if trackingSvc.calls[0].userID != userID || trackingSvc.calls[0].taskID != task.ID {
-		t.Fatalf("tracking call = %+v", trackingSvc.calls[0])
-	}
-	if trackingSvc.calls[0].identity.NoteID != "note-1" || trackingSvc.calls[0].identity.NoteURL != "https://www.xiaohongshu.com/explore/note-1" {
-		t.Fatalf("tracking identity = %+v", trackingSvc.calls[0].identity)
+	if !updated.Published {
+		t.Fatal("task should be marked published")
 	}
 }
 
-func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testing.T) {
+func TestTaskService_SetPublishedCanClearFlag(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	trackingSvc := &fakePublishedTrackingService{}
-	svc.SetSeednoteTrackingService(trackingSvc)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -3010,19 +2984,21 @@ func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testi
 		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusCompleted,
+		Published: true,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := svc.SetPublished(ctx, userID, task.ID, true, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
-		t.Fatalf("SetPublished article: %v", err)
-	}
-	if err := svc.SetPublished(ctx, userID, task.ID, false, SeednotePublicationIdentity{NoteURL: "https://example.com/explore/note-1"}); err != nil {
+	if err := svc.SetPublished(ctx, userID, task.ID, false); err != nil {
 		t.Fatalf("SetPublished false: %v", err)
 	}
-	if len(trackingSvc.calls) != 0 {
-		t.Fatalf("tracking calls = %d, want 0", len(trackingSvc.calls))
+	updated, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Published {
+		t.Fatal("task should be marked unpublished")
 	}
 }
 

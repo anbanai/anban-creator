@@ -70,6 +70,15 @@ export type {
   SeednoteTrackingStatus,
 } from './seednote-analytics'
 
+export type {
+  WechatAnalytics,
+  WechatMetricDelta,
+  WechatMetricInfo,
+  WechatMetricSeriesItem,
+  WechatTrackingInfo,
+  WechatTrackingStatus,
+} from './wechat-analytics'
+
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'
 
@@ -142,17 +151,6 @@ export type {
   ViralTemplateMeta,
   ViralAnalysis,
 } from './viral-analysis'
-
-// Designer
-export type {
-  DesignerCapabilityFeatures,
-  DesignerCapability,
-  GenerateRequest,
-  GenerateImage,
-  ImageGeneration,
-  ImageGenerationResult,
-  HistoryResponse,
-} from './designer'
 
 // Shared input attachments
 export type { InputAttachment, InputAttachmentType } from './input-attachment'
