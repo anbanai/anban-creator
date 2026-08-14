@@ -8,6 +8,7 @@ import {
   Coins,
   LayoutGrid,
   PlugZap,
+  KeyRound,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -30,6 +31,7 @@ export const mvpNavItems: NavItem[] = [
 
 export const adminNavItems: NavItem[] = [
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
+  { to: '/admin/seednote', label: '小红书账号', icon: KeyRound, adminOnly: true },
 ]
 
 export const allNavItems: NavItem[] = [

@@ -62,4 +62,7 @@ export const queryKeys = {
       ['templates', filters] as const,
     detail: (id: string) => ['template', id] as const,
   },
+  seednoteAdmin: {
+    loginStatus: ['admin', 'seednote', 'login-status'] as const,
+  },
 } as const

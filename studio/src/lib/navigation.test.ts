@@ -27,6 +27,7 @@ describe('navigation IA', () => {
   it('defines administrator navigation in approved order', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
       '模板库',
+      '小红书账号',
     ])
     expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
   })
@@ -41,6 +42,7 @@ describe('navigation IA', () => {
       '/plugins',
       '/settings',
       '/templates',
+      '/admin/seednote',
     ])
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
     expect(visibleNavItems(allNavItems, true)).toEqual([

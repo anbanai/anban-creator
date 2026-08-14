@@ -888,12 +888,23 @@ type analyzeImageRequest struct {
 	ImageURL string `json:"image_url"`
 }
 
-// SeednoteLoginStatus handles GET /seednote/login-status.
-func (h *ProjectHandler) SeednoteLoginStatus(c fiber.Ctx) error {
+func requireProjectAdmin(c fiber.Ctx) (bool, error) {
 	userID := GetUserID(c)
 	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+		return false, Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
+	if !projectUserIsAdmin(c) {
+		return false, Forbidden(c, "administrator access required")
+	}
+	return true, nil
+}
+
+// AdminSeednoteLoginStatus handles GET /admin/seednote/login-status.
+func (h *ProjectHandler) AdminSeednoteLoginStatus(c fiber.Ctx) error {
+	if ok, err := requireProjectAdmin(c); !ok {
+		return err
+	}
+	c.Set(fiber.HeaderCacheControl, "no-store")
 
 	if h.seednoteClient == nil {
 		return Success(c, fiber.Map{
@@ -912,22 +923,61 @@ func (h *ProjectHandler) SeednoteLoginStatus(c fiber.Ctx) error {
 
 	loggedIn, err := h.seednoteClient.CheckLoginStatus(c.Context())
 	if err != nil {
+		h.logger.Error().Err(err).Msg("check Seednote login status failed")
 		return Success(c, fiber.Map{
-			"available": true,
+			"available": false,
 			"logged_in": false,
-			"message":   err.Error(),
+			"message":   "小红书登录状态检查失败",
 		})
 	}
 
 	msg := "已登录"
 	if !loggedIn {
-		msg = "未登录，请使用 get_seednote_login_qrcode 获取二维码扫描登录"
+		msg = "未登录，请获取二维码并使用小红书客户端扫码"
 	}
 	return Success(c, fiber.Map{
 		"available": true,
 		"logged_in": loggedIn,
 		"message":   msg,
 	})
+}
+
+// AdminSeednoteLoginQRCode handles GET /admin/seednote/login-qrcode.
+func (h *ProjectHandler) AdminSeednoteLoginQRCode(c fiber.Ctx) error {
+	if ok, err := requireProjectAdmin(c); !ok {
+		return err
+	}
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if ready, err := h.ensureSeednoteReady(c); !ready {
+		return err
+	}
+
+	qrcodeImage, err := h.seednoteClient.GetLoginQRCode(c.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get Seednote login qrcode failed")
+		return Error(c, fiber.StatusBadGateway, "获取小红书登录二维码失败")
+	}
+	if strings.TrimSpace(qrcodeImage) == "" {
+		return Error(c, fiber.StatusBadGateway, "小红书登录二维码为空")
+	}
+	return Success(c, fiber.Map{"qrcode_image": qrcodeImage})
+}
+
+// AdminSeednoteLogout handles DELETE /admin/seednote/login.
+func (h *ProjectHandler) AdminSeednoteLogout(c fiber.Ctx) error {
+	if ok, err := requireProjectAdmin(c); !ok {
+		return err
+	}
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if ready, err := h.ensureSeednoteReady(c); !ready {
+		return err
+	}
+
+	if err := h.seednoteClient.DeleteCookies(c.Context()); err != nil {
+		h.logger.Error().Err(err).Msg("delete Seednote login cookies failed")
+		return Error(c, fiber.StatusBadGateway, "退出小红书登录失败")
+	}
+	return Success(c, fiber.Map{"logged_in": false})
 }
 
 // AnalyzeImage handles POST /projects/analyze-image.

@@ -461,8 +461,6 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) 
 			body := string(data)
 
 			for _, want := range []string{
-				"check_seednote_login_status",
-				"get_seednote_login_qrcode",
 				"search_seednote_feeds",
 				"get_seednote_feed_detail",
 				"get_seednote_user_profile",
@@ -472,7 +470,6 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) 
 				"data_source=project_context",
 				"mcp_tools_used",
 				"available",
-				"logged_in",
 				"token_source",
 				"missing_fields",
 				"fallback_reason",
@@ -481,6 +478,7 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) 
 				"账号画像",
 				"不得生成虚构热门数据",
 				"output/failure-state.json",
+				"管理员在任务外维护",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing authenticated Seednote MCP contract term %q", path, want)
@@ -488,6 +486,9 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) 
 			}
 
 			for _, forbidden := range []string{
+				"check_seednote_login_status",
+				"get_seednote_login_qrcode",
+				"logged_in",
 				"Agent-Reach",
 				"agent-reach",
 				"active_backend",
@@ -532,8 +533,6 @@ func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *tes
 			}
 			body := string(data)
 			for _, want := range []string{
-				"check_seednote_login_status",
-				"get_seednote_login_qrcode",
 				"search_seednote_feeds",
 				"get_seednote_feed_detail",
 				"get_seednote_user_profile",
@@ -543,7 +542,6 @@ func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *tes
 				"data_source=project_context",
 				"mcp_tools_used",
 				"available",
-				"logged_in",
 				"token_source",
 				"missing_fields",
 				"fallback_reason",
@@ -554,12 +552,16 @@ func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *tes
 				"missing_fields=external_hot_data",
 				"无外部数据时不得套用 CES",
 				"这条失败规则不适用于原创模式",
+				"Admin 在 Anban 后台维护",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing authenticated Seednote MCP research contract term %q", path, want)
 				}
 			}
 			for _, forbidden := range []string{
+				"check_seednote_login_status",
+				"get_seednote_login_qrcode",
+				"logged_in",
 				"Agent-Reach",
 				"agent-reach",
 				"active_backend",
@@ -616,19 +618,22 @@ func TestSeednoteAgentsPreserveReadOnlyResearchBoundary(t *testing.T) {
 			body := string(data)
 			for _, want := range []string{
 				"seednote-research",
-				"check_seednote_login_status",
 				"search_seednote_feeds",
 				"get_seednote_feed_detail",
 				"get_seednote_user_profile",
 				"原创模式不得因此写",
 				"output/failure-state.json",
 				"只读",
+				"管理员在任务外维护",
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing Seednote MCP read-only term %q", path, want)
 				}
 			}
 			for _, forbidden := range []string{
+				"check_seednote_login_status",
+				"get_seednote_login_qrcode",
+				"logged_in",
 				"publish_seednote",
 				"delete_seednote",
 				"like_seednote",

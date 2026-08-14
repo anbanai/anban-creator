@@ -73,14 +73,19 @@ func (c *Client) DeleteCookies(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create delete cookies request: %w", err)
 	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
+	var result APIResponse[any]
+	if err := c.doRequest(req, &result); err != nil {
 		return fmt.Errorf("delete cookies request failed: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("delete cookies returned status %d: %s", resp.StatusCode, string(body))
+	if !result.Success {
+		message := result.Message
+		if message == "" {
+			message = result.Error
+		}
+		if message == "" {
+			message = "unknown error"
+		}
+		return fmt.Errorf("delete cookies failed: %s", message)
 	}
 	return nil
 }

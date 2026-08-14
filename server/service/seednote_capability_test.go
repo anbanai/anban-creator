@@ -12,14 +12,10 @@ type seednoteCapabilityReadiness bool
 func (r seednoteCapabilityReadiness) Ready() bool { return bool(r) }
 
 type fakeSeednoteCapabilityClient struct {
-	loginStatus bool
-	qrCode      string
-	feeds       []seednote.Feed
-	detail      *seednote.FeedDetail
-	profile     *seednote.UserProfile
+	feeds   []seednote.Feed
+	detail  *seednote.FeedDetail
+	profile *seednote.UserProfile
 
-	loginCalls   int
-	qrCalls      int
 	searchCalls  int
 	detailCalls  int
 	profileCalls int
@@ -27,16 +23,6 @@ type fakeSeednoteCapabilityClient struct {
 	detailReq    *seednote.FeedDetailRequest
 	profileUser  string
 	profileToken string
-}
-
-func (f *fakeSeednoteCapabilityClient) CheckLoginStatus(context.Context) (bool, error) {
-	f.loginCalls++
-	return f.loginStatus, nil
-}
-
-func (f *fakeSeednoteCapabilityClient) GetLoginQRCode(context.Context) (string, error) {
-	f.qrCalls++
-	return f.qrCode, nil
 }
 
 func (f *fakeSeednoteCapabilityClient) SearchFeeds(_ context.Context, req *seednote.SearchRequest) ([]seednote.Feed, error) {
@@ -76,23 +62,13 @@ func TestSeednoteCapabilityStopsBeforeRemoteCallWhenNotReady(t *testing.T) {
 
 func TestSeednoteCapabilityDelegatesEveryAtomicOperation(t *testing.T) {
 	client := &fakeSeednoteCapabilityClient{
-		loginStatus: true,
-		qrCode:      "png-base64",
-		feeds:       []seednote.Feed{{ID: "feed-1"}},
-		detail:      &seednote.FeedDetail{Note: seednote.FeedNote{NoteID: "feed-1"}},
-		profile:     &seednote.UserProfile{UserBasicInfo: seednote.UserBasicInfo{Nickname: "author"}},
+		feeds:   []seednote.Feed{{ID: "feed-1"}},
+		detail:  &seednote.FeedDetail{Note: seednote.FeedNote{NoteID: "feed-1"}},
+		profile: &seednote.UserProfile{UserBasicInfo: seednote.UserBasicInfo{Nickname: "author"}},
 	}
 	svc := NewSeednoteCapabilityService(client, seednoteCapabilityReadiness(true))
 	ctx := context.Background()
 
-	login, err := svc.LoginStatus(ctx, SeednoteLoginStatusRequest{})
-	if err != nil || !login.Available || !login.Value {
-		t.Fatalf("LoginStatus = %#v, %v", login, err)
-	}
-	qr, err := svc.LoginQRCode(ctx, SeednoteLoginQRCodeRequest{})
-	if err != nil || qr.Value != "png-base64" {
-		t.Fatalf("LoginQRCode = %#v, %v", qr, err)
-	}
 	feeds, err := svc.SearchFeeds(ctx, SeednoteSearchFeedsRequest{
 		Keyword: "tea", SortBy: "最新", NoteType: "图文", PublishTime: "一周内",
 	})
@@ -110,8 +86,8 @@ func TestSeednoteCapabilityDelegatesEveryAtomicOperation(t *testing.T) {
 		t.Fatalf("UserProfile = %#v, %v", profile, err)
 	}
 
-	if client.loginCalls != 1 || client.qrCalls != 1 || client.searchCalls != 1 || client.detailCalls != 1 || client.profileCalls != 1 {
-		t.Fatalf("remote calls = login:%d qr:%d search:%d detail:%d profile:%d", client.loginCalls, client.qrCalls, client.searchCalls, client.detailCalls, client.profileCalls)
+	if client.searchCalls != 1 || client.detailCalls != 1 || client.profileCalls != 1 {
+		t.Fatalf("remote calls = search:%d detail:%d profile:%d", client.searchCalls, client.detailCalls, client.profileCalls)
 	}
 	if client.searchReq.Keyword != "tea" || client.searchReq.Filters.SortBy != "最新" ||
 		client.searchReq.Filters.NoteType != "图文" || client.searchReq.Filters.PublishTime != "一周内" {
@@ -127,9 +103,9 @@ func TestSeednoteCapabilityDelegatesEveryAtomicOperation(t *testing.T) {
 
 func TestSeednoteCapabilityReportsMissingClient(t *testing.T) {
 	svc := NewSeednoteCapabilityService(nil, nil)
-	result, err := svc.LoginStatus(context.Background(), SeednoteLoginStatusRequest{})
+	result, err := svc.SearchFeeds(context.Background(), SeednoteSearchFeedsRequest{Keyword: "tea"})
 	if err != nil {
-		t.Fatalf("LoginStatus: %v", err)
+		t.Fatalf("SearchFeeds: %v", err)
 	}
 	if result.Available || result.Message == "" {
 		t.Fatalf("result = %#v, want unavailable missing-client result", result)

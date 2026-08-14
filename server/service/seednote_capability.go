@@ -8,8 +8,6 @@ import (
 )
 
 type seednoteCapabilityClient interface {
-	CheckLoginStatus(context.Context) (bool, error)
-	GetLoginQRCode(context.Context) (string, error)
 	SearchFeeds(context.Context, *seednote.SearchRequest) ([]seednote.Feed, error)
 	GetFeedDetail(context.Context, *seednote.FeedDetailRequest) (*seednote.FeedDetail, error)
 	GetUserProfile(context.Context, string, string) (*seednote.UserProfile, error)
@@ -20,9 +18,6 @@ type SeednoteCapabilityResult[T any] struct {
 	Message   string
 	Value     T
 }
-
-type SeednoteLoginStatusRequest struct{}
-type SeednoteLoginQRCodeRequest struct{}
 
 type SeednoteSearchFeedsRequest struct {
 	Keyword     string
@@ -49,22 +44,6 @@ type SeednoteCapabilityService struct {
 
 func NewSeednoteCapabilityService(client seednoteCapabilityClient, readiness Readiness) *SeednoteCapabilityService {
 	return &SeednoteCapabilityService{client: client, readiness: readiness}
-}
-
-func (s *SeednoteCapabilityService) LoginStatus(ctx context.Context, _ SeednoteLoginStatusRequest) (*SeednoteCapabilityResult[bool], error) {
-	if available, message := s.availability(); !available {
-		return &SeednoteCapabilityResult[bool]{Message: message}, nil
-	}
-	value, err := s.client.CheckLoginStatus(ctx)
-	return &SeednoteCapabilityResult[bool]{Available: true, Value: value}, err
-}
-
-func (s *SeednoteCapabilityService) LoginQRCode(ctx context.Context, _ SeednoteLoginQRCodeRequest) (*SeednoteCapabilityResult[string], error) {
-	if available, message := s.availability(); !available {
-		return &SeednoteCapabilityResult[string]{Message: message}, nil
-	}
-	value, err := s.client.GetLoginQRCode(ctx)
-	return &SeednoteCapabilityResult[string]{Available: true, Value: value}, err
 }
 
 func (s *SeednoteCapabilityService) SearchFeeds(ctx context.Context, req SeednoteSearchFeedsRequest) (*SeednoteCapabilityResult[[]seednote.Feed], error) {

@@ -51,12 +51,10 @@ describe("validateManagedInit", () => {
       tools: [
         "mcp__anban__analyze_image",
         "mcp__anban__claim_topic",
-        "mcp__anban__check_seednote_login_status",
         "mcp__anban__finalize_task_title",
         "mcp__anban__generate_image",
         "mcp__anban__get_project_profile",
         "mcp__anban__get_seednote_feed_detail",
-        "mcp__anban__get_seednote_login_qrcode",
         "mcp__anban__get_seednote_user_profile",
         "mcp__anban__list_project_titles",
         "mcp__anban__search_seednote_feeds",

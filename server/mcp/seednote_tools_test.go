@@ -1,106 +1,37 @@
 package mcp
 
 import (
-	"context"
-	"encoding/base64"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/anbanai/anban-creator/server/seednote"
-	"github.com/anbanai/anban-creator/server/service"
 )
 
-type seednoteReadiness bool
-
-func (r seednoteReadiness) Ready() bool { return bool(r) }
-
-func TestCheckSeednoteLoginStatusReportsUnavailableWhenSidecarNotReady(t *testing.T) {
-	old := svcs
-	svcs = &Services{
-		SeednoteCapabilitySvc: service.NewSeednoteCapabilityService(
-			seednote.NewClient("http://127.0.0.1:1", time.Second), seednoteReadiness(false),
-		),
-	}
-	t.Cleanup(func() { svcs = old })
-
-	result, err := checkSeednoteLoginStatusHandler(context.Background(), &mcp.CallToolRequest{})
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	payload := decodeMCPMap(t, result)
-	if payload["available"] != false || payload["logged_in"] != false {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	if msg, _ := payload["message"].(string); !strings.Contains(msg, "后台连接") {
-		t.Fatalf("message = %q, want background connection hint", msg)
-	}
-}
-
-func TestCheckSeednoteLoginStatusPreservesTransportError(t *testing.T) {
-	old := svcs
-	svcs = &Services{
-		SeednoteCapabilitySvc: service.NewSeednoteCapabilityService(
-			seednote.NewClient("http://127.0.0.1:1", 10*time.Millisecond), seednoteReadiness(true),
-		),
-	}
-	t.Cleanup(func() { svcs = old })
-
-	result, err := checkSeednoteLoginStatusHandler(context.Background(), &mcp.CallToolRequest{})
-	if err == nil {
-		t.Fatalf("result = %#v, want transport error", result)
-	}
-	if !strings.Contains(err.Error(), "check login status") {
-		t.Fatalf("error = %v, want original transport context", err)
-	}
-}
-
-func TestSeednoteLoginResultsContainStateWithoutCrossToolSequencing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/login/status":
-			_, _ = w.Write([]byte(`{"success":true,"logged_in":false}`))
-		case "/api/v1/login/qrcode":
-			png := base64.StdEncoding.EncodeToString([]byte("png"))
-			_, _ = w.Write([]byte(`{"success":true,"data":{"qrcode_image":"` + png + `"}}`))
-		default:
-			http.NotFound(w, r)
+func TestSeednoteAgentToolsExcludeLoginAdministration(t *testing.T) {
+	names := listToolNames(t, registerSeednoteTools)
+	for _, want := range []string{"search_seednote_feeds", "get_seednote_feed_detail", "get_seednote_user_profile"} {
+		if !names[want] {
+			t.Errorf("missing Seednote research tool %q", want)
 		}
-	}))
-	t.Cleanup(server.Close)
+	}
+	for _, forbidden := range []string{"check_seednote_login_status", "get_seednote_login_qrcode"} {
+		if names[forbidden] {
+			t.Errorf("Agent MCP exposes administrator login tool %q", forbidden)
+		}
+	}
+}
 
-	old := svcs
-	svcs = &Services{SeednoteCapabilitySvc: service.NewSeednoteCapabilityService(
-		seednote.NewClient(server.URL, time.Second), seednoteReadiness(true),
-	)}
-	t.Cleanup(func() { svcs = old })
+func TestSeednoteXsecTokenIsRedactedFromMCPLogs(t *testing.T) {
+	redacted := redactMCPLogValue(map[string]any{
+		"feed_id":    "feed-1",
+		"xsec_token": "secret-token",
+		"nested": map[string]any{
+			"xsec_token": "nested-secret",
+		},
+	}).(map[string]any)
 
-	status, err := checkSeednoteLoginStatusHandler(context.Background(), &mcp.CallToolRequest{})
-	if err != nil {
-		t.Fatal(err)
+	if redacted["xsec_token"] != "REDACTED" {
+		t.Fatalf("xsec_token = %v, want REDACTED", redacted["xsec_token"])
 	}
-	statusText := strings.ToLower(callToolText(status))
-	if strings.Contains(statusText, "get_seednote_login_qrcode") || strings.Contains(statusText, "二维码") {
-		t.Fatalf("login status contains QR workflow sequencing: %s", statusText)
-	}
-
-	qr, err := getSeednoteLoginQRCodeHandler(context.Background(), &mcp.CallToolRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(qr.Content) != 1 {
-		t.Fatalf("QR result content count = %d, want image state only", len(qr.Content))
-	}
-	image, ok := qr.Content[0].(*mcp.ImageContent)
-	if !ok {
-		t.Fatalf("QR result content = %T, want image", qr.Content[0])
-	}
-	if string(image.Data) != "png" {
-		t.Fatalf("QR image data = %q, want decoded PNG bytes", image.Data)
+	nested := redacted["nested"].(map[string]any)
+	if nested["xsec_token"] != "REDACTED" {
+		t.Fatalf("nested xsec_token = %v, want REDACTED", nested["xsec_token"])
 	}
 }

@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,24 +39,6 @@ func registerSeednoteTools(server *mcp.Server) {
 			"required": []any{"feed_id", "xsec_token"},
 		},
 	}, getSeednoteFeedDetailHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "check_seednote_login_status",
-		Description: "检查种草笔记 sidecar 是否已登录。返回登录状态信息。",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, checkSeednoteLoginStatusHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "get_seednote_login_qrcode",
-		Description: "获取种草笔记登录二维码，返回 base64 编码的 PNG 图片。",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, getSeednoteLoginQRCodeHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_seednote_user_profile",
@@ -171,44 +152,6 @@ func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest)
 		payload["comments"] = comments
 	}
 	return textResult(payload)
-}
-
-func checkSeednoteLoginStatusHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
-		return textResult(map[string]any{"available": false, "logged_in": false, "message": "Seednote sidecar 未配置"})
-	}
-	result, err := svcs.SeednoteCapabilitySvc.LoginStatus(ctx, service.SeednoteLoginStatusRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("检查登录状态失败: %w", err)
-	}
-	if !result.Available {
-		return textResult(map[string]any{"available": false, "logged_in": false, "message": result.Message})
-	}
-
-	return textResult(map[string]any{"available": true, "logged_in": result.Value})
-}
-
-func getSeednoteLoginQRCodeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.SeednoteCapabilitySvc == nil {
-		return seednoteUnavailable()
-	}
-	result, err := svcs.SeednoteCapabilitySvc.LoginQRCode(ctx, service.SeednoteLoginQRCodeRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("获取二维码失败: %w", err)
-	}
-	if !result.Available {
-		return seednoteUnavailableMessage(result.Message)
-	}
-	imageData, err := base64.StdEncoding.DecodeString(result.Value)
-	if err != nil {
-		return nil, fmt.Errorf("二维码数据不是有效的 base64 PNG: %w", err)
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.ImageContent{Data: imageData, MIMEType: "image/png"},
-		},
-	}, nil
 }
 
 func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

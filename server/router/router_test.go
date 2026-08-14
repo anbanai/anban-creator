@@ -303,6 +303,34 @@ func TestAgentPackCatalogRoute(t *testing.T) {
 	t.Fatal("GET /api/v1/agent-packs is not registered")
 }
 
+func TestSeednoteLoginRoutesAreAdminOnlySurface(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:         &config.Config{},
+		Logger:         &logger,
+		ProjectHandler: handler.NewProjectHandler(nil, &logger),
+	})
+	want := map[string]bool{
+		http.MethodGet + " /api/v1/admin/seednote/login-status": false,
+		http.MethodGet + " /api/v1/admin/seednote/login-qrcode": false,
+		http.MethodDelete + " /api/v1/admin/seednote/login":     false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if route.Path == "/api/v1/seednote/login-status" {
+			t.Fatalf("legacy user-facing Seednote login route remains registered: %s", key)
+		}
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing Seednote admin route %s", route)
+		}
+	}
+}
+
 func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

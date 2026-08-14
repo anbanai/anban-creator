@@ -247,11 +247,13 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Seednote login status
+	// Seednote account administration
 	// ---------------------------------------------------------------------------
 
 	if svc.ProjectHandler != nil {
-		apiV1.Get("/seednote/login-status", svc.ProjectHandler.SeednoteLoginStatus)
+		apiV1.Get("/admin/seednote/login-status", svc.ProjectHandler.AdminSeednoteLoginStatus)
+		apiV1.Get("/admin/seednote/login-qrcode", svc.ProjectHandler.AdminSeednoteLoginQRCode)
+		apiV1.Delete("/admin/seednote/login", svc.ProjectHandler.AdminSeednoteLogout)
 	}
 
 	// ---------------------------------------------------------------------------

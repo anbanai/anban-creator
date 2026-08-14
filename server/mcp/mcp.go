@@ -349,11 +349,19 @@ var mcpLogURLArgKeys = map[string]bool{
 	"download_url": true,
 }
 
+var mcpLogSensitiveArgKeys = map[string]bool{
+	"xsec_token": true,
+}
+
 func redactMCPLogValue(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, item := range x {
+			if mcpLogSensitiveArgKeys[k] {
+				out[k] = "REDACTED"
+				continue
+			}
 			if mcpLogURLArgKeys[k] {
 				if s, ok := item.(string); ok {
 					out[k] = redactURLQuery(s)

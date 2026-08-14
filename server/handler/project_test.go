@@ -449,38 +449,122 @@ func TestProjectHandler_RejectsMontageDefaultsForArticle(t *testing.T) {
 	}
 }
 
-func TestProjectHandler_SeednoteLoginStatusUnavailableWhenSidecarNotReady(t *testing.T) {
+func newSeednoteAdminTestApp(h *ProjectHandler) *fiber.App {
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		if userID := c.Get("X-User-ID"); userID != "" {
+			c.Locals("user_id", userID)
+			c.Locals("user", &model.User{ID: userID, IsAdmin: c.Get("X-Admin") == "true"})
+		}
+		return c.Next()
+	})
+	app.Get("/admin/seednote/login-status", h.AdminSeednoteLoginStatus)
+	app.Get("/admin/seednote/login-qrcode", h.AdminSeednoteLoginQRCode)
+	app.Delete("/admin/seednote/login", h.AdminSeednoteLogout)
+	return app
+}
+
+func TestProjectHandler_SeednoteAdministrationRequiresAdmin(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewProjectHandler(nil, &logger)
+	h.SetSeednoteClient(seednote.NewClient("http://127.0.0.1:1", time.Second))
+	app := newSeednoteAdminTestApp(h)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/admin/seednote/login-status"},
+		{http.MethodGet, "/admin/seednote/login-qrcode"},
+		{http.MethodDelete, "/admin/seednote/login"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("X-User-ID", "user-1")
+		req.Header.Set("X-Admin", "false")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+		}
+		if resp.StatusCode != fiber.StatusForbidden {
+			t.Errorf("%s %s status = %d, want 403", tc.method, tc.path, resp.StatusCode)
+		}
+		_ = resp.Body.Close()
+	}
+}
+
+func TestProjectHandler_AdminSeednoteLoginStatusUnavailableWhenSidecarNotReady(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewProjectHandler(nil, &logger)
 	h.SetSeednoteClient(seednote.NewClient("http://127.0.0.1:1", time.Second))
 	h.SetSeednoteReadiness(projectReadiness(false))
+	app := newSeednoteAdminTestApp(h)
 
-	app := fiber.New()
-	app.Get("/seednote/login-status", func(c fiber.Ctx) error {
-		c.Locals("user_id", "user-1")
-		return h.SeednoteLoginStatus(c)
-	})
-
-	req := httptest.NewRequest("GET", "/seednote/login-status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/seednote/login-status", nil)
+	req.Header.Set("X-User-ID", "admin-1")
+	req.Header.Set("X-Admin", "true")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	if got := resp.Header.Get(fiber.HeaderCacheControl); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	payload := decodeBody(t, resp)["data"].(map[string]any)
+	if payload["available"] != false || payload["logged_in"] != false || !strings.Contains(payload["message"].(string), "后台连接") {
+		t.Fatalf("unexpected response: %#v", payload)
+	}
+}
 
-	var payload struct {
-		Data struct {
-			Available bool   `json:"available"`
-			LoggedIn  bool   `json:"logged_in"`
-			Message   string `json:"message"`
-		} `json:"data"`
+func TestProjectHandler_AdminSeednoteLoginOperations(t *testing.T) {
+	var logoutCalled bool
+	sidecar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/login/status":
+			_, _ = w.Write([]byte(`{"success":true,"logged_in":false}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/login/qrcode":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"qrcode_image":"cG5n"}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/login/cookies":
+			logoutCalled = true
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(sidecar.Close)
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewProjectHandler(nil, &logger)
+	h.SetSeednoteClient(seednote.NewClient(sidecar.URL, time.Second))
+	h.SetSeednoteReadiness(projectReadiness(true))
+	app := newSeednoteAdminTestApp(h)
+
+	request := func(method, path string) *http.Response {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("X-User-ID", "admin-1")
+		req.Header.Set("X-Admin", "true")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		if got := resp.Header.Get(fiber.HeaderCacheControl); got != "no-store" {
+			t.Fatalf("%s %s Cache-Control = %q, want no-store", method, path, got)
+		}
+		return resp
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("decode response %q: %v", string(body), err)
+
+	status := decodeBody(t, request(http.MethodGet, "/admin/seednote/login-status"))["data"].(map[string]any)
+	if status["available"] != true || status["logged_in"] != false || !strings.Contains(status["message"].(string), "获取二维码") {
+		t.Fatalf("status = %#v", status)
 	}
-	if payload.Data.Available || payload.Data.LoggedIn || !strings.Contains(payload.Data.Message, "后台连接") {
-		t.Fatalf("unexpected response: %s", string(body))
+	qr := decodeBody(t, request(http.MethodGet, "/admin/seednote/login-qrcode"))["data"].(map[string]any)
+	if qr["qrcode_image"] != "cG5n" {
+		t.Fatalf("qrcode_image = %v", qr["qrcode_image"])
+	}
+	logout := decodeBody(t, request(http.MethodDelete, "/admin/seednote/login"))["data"].(map[string]any)
+	if logout["logged_in"] != false || !logoutCalled {
+		t.Fatalf("logout = %#v, called=%v", logout, logoutCalled)
 	}
 }
 

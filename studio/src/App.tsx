@@ -29,6 +29,7 @@ const BillingPage = React.lazy(() => import('@/pages/BillingPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
 const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
+const SeednoteAdminPage = React.lazy(() => import('@/pages/SeednoteAdminPage'))
 const PluginsPage = React.lazy(() => import('@/pages/PluginsPage'))
 
 function LoadingSpinner() {
@@ -143,6 +144,14 @@ function AppRoutes() {
             element={(
               <AdminRoute>
                 <LazyPage component={TemplatesPage} />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="admin/seednote"
+            element={(
+              <AdminRoute>
+                <LazyPage component={SeednoteAdminPage} />
               </AdminRoute>
             )}
           />
