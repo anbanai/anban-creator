@@ -5,12 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **Anban 智能创作助手** (anban-creator) is a content creation platform. Core components:
-- **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
+- **Agent** (`agent-ts/`): TypeScript runtime for containerized and local Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
 
 Client surfaces wrapping the same server API:
-- **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles the agent as a native sidecar to run tasks locally (local-execution client) on the user's machine; claims work by polling `POST /api/v1/agent/claim`
+- **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles Node plus the TypeScript Agent runtime to run tasks locally; claims work by polling `POST /api/v1/agent/claim`
 - **Miniapp** (`miniapp/`): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
 
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
@@ -19,8 +19,8 @@ Claude Code and Codex share one repository-owned plugin source at `plugins/`. Th
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
-- **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio + miniapp), Rust (desktop Tauri core)
-- **Logging**: Zerolog (all Go components — app library, server, agent); never mix with zap
+- **Language**: Go 1.26.0 (Server + app library), TypeScript (Agent + Studio + miniapp), Rust (desktop Tauri core)
+- **Logging**: Zerolog for Go components; never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 
 ## Build & Test Commands
@@ -48,7 +48,7 @@ from the repository-root context. Article, Seednote, and Montage use independent
 Agent Dockerfiles so their system dependencies and release lifecycles stay
 separate.
 
-> ⚠️ Never run `go build ./server` or `go build ./agent` from the repo root — Go tries to write the `server`/`agent` binary where same-named directories already exist and fails. Use `make server-build` or `go build -o /tmp/anban-creator-server ./server`.
+Never run `go build ./server` from the repo root; Go tries to write a binary over the same-named directory. Use `make server-build` or `go build -o /tmp/anban-creator-server ./server`.
 
 ### Go Tests
 
@@ -75,12 +75,19 @@ cd studio && bun run test     # Run vitest tests
 cd studio && bun run test:watch  # Watch mode tests
 ```
 
+### TypeScript Agent
+
+```bash
+cd agent-ts && npm ci
+make agent-test
+make agent-build
+```
+
 ### Desktop (Tauri v2)
 
 The `desktop/` shell wraps Studio with a Tauri v2 app and runs the agent locally (local-execution client). Resources must be populated before the first Rust build (see `reference_tauri_v2_build_gotchas`).
 
 ```bash
-make agent-build-native        # Build native agent binary used by desktop local-executor
 cd desktop && bash populate-resources.sh  # Populate Tauri resources before first cargo build
 cd desktop && bun install      # Install desktop JS deps
 cd desktop && bun run dev      # Run desktop app in development (tauri dev)
@@ -97,16 +104,16 @@ make docker-logs              # Follow container logs
 
 ## Architecture
 
-### Agent (`agent/`)
+### Agent (`agent-ts/`)
 
-Standalone Go binary that executes Claude Code tasks in Docker containers. The server dispatches tasks and selects one of three dependency profiles: `creator-agent-article`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
+TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes and through Desktop local execution. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-article`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
 
-- `main.go` — Entry point, orchestrates run lifecycle
-- `runner.go` — Creates and manages Claude Code CLI subprocess
-- `config.go` — Agent configuration parsing
-- `downloader.go` — Downloads workspace files from server
-- `reporter.go` — Reports task results back to server
-- `bootstrap.sh` / `install.sh` — Claude Code + plugin installation scripts
+- `src/main.ts` — Managed `job` lifecycle and terminal finalization
+- `src/local.ts` — Desktop `run` lifecycle and local prompt construction
+- `src/runner.ts` — Claude Agent SDK query and stream handling
+- `src/bootstrap.ts` / `src/workspace.ts` — Bootstrap validation and workspace materialization
+- `src/downloads.ts` / `src/artifacts.ts` — Generated image and final artifact transport
+- `src/reporter.ts` — Progress, heartbeat, artifact, and completion reporting
 
 ### Server (`server/`)
 
@@ -117,7 +124,7 @@ Key packages:
 - `router/` — `router.go` registers all `/api/v1` route groups, middleware, and the WS hub (the single source of truth for routes)
 - `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `ilink_*.go` (WeChat assistant binding, conversation, polling, and terminal notification outbox)
 - `wcf/` — HTTP client for the iLink sidecar transport used by the iLink channel; do not put product-level WeChat assistant behavior here
-- `agent/` — Agent execution layer using claude-agent-sdk-go, includes MCP server and tool definitions
+- `agent/` — Server-side execution policy, dispatch, and result contracts; this is distinct from the `agent-ts/` runtime
 - `scheduler/` — Asynq-based background task processing with `plan_checker.go`
 - `model/` — GORM models with auto-migration
 - `storage/` — File storage factory (local filesystem or Alibaba Cloud OSS)
@@ -129,7 +136,7 @@ Key packages:
 
 ### App Library (`app/`)
 
-Shared library for content creation, used by both server and agent:
+Shared Go library for content creation and server capabilities:
 - `converter/` — Markdown → WeChat HTML with theme system and AI mode
 - `writer/` — AI-powered styled writing with YAML-defined writing styles
 - `humanizer/` — AI trace detection and removal with quality scoring
@@ -211,12 +218,12 @@ Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinim
 ### Task Execution (server → agent)
 
 1. Server creates a task and selects the content, Seednote, or Montage runtime image
-2. Agent downloads workspace, runs Claude Code CLI subprocess
+2. TypeScript Agent validates Bootstrap inputs and starts a Claude Agent SDK session
 3. Claude Code executes skill-based workflows using the plugin system
 4. Agent reports results back to server
 5. Server streams progress to Studio via WebSocket/SSE
 
-Local-execution variant (desktop): instead of Docker, the bundled agent sidecar claims the task over `/api/v1/agent/claim` and runs Claude Code locally on the user's machine; the same progress/report protocol is reused.
+Local-execution variant (desktop): instead of Docker, bundled Node runs `agent-ts` after claiming the task over `/api/v1/agent/claim`; the same progress/report protocol is reused.
 
 ## Image Generation Providers
 

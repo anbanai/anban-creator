@@ -1,9 +1,10 @@
-import { chmod, cp, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { cleanBootstrapPath, preflightBootstrapFiles, readBoundedText, workspacePath, type BootstrapResponse } from "./bootstrap.js";
 
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
+const MAX_BOOTSTRAP_TOTAL_BYTES = 512 << 20;
 
 export async function prepareWorkspace(workspace: string, taskType: string, runtimeAdapter: BootstrapResponse["runtime_adapter"]): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
@@ -21,12 +22,27 @@ async function prepareMontageWorkspace(workspace: string): Promise<void> {
     const template = process.env.ANBAN_MONTAGE_TEMPLATE_PATH;
     if (!template) throw new Error("Montage template is unavailable; set ANBAN_MONTAGE_TEMPLATE_PATH");
     await ensureRealDirectory(template, "Montage template", false);
-    await cp(template, runtime, { recursive: true, dereference: false, filter: (path) => !path.endsWith("/.git") && !path.includes("/.git/") });
+    const stagingRoot = await mkdtemp(join(workspace, ".montage-init-"));
+    const staging = join(stagingRoot, "openmontage");
+    try {
+      await cp(template, staging, { recursive: true, dereference: false, filter: (path) => !path.endsWith("/.git") && !path.includes("/.git/") });
+      await makeWritableTree(staging);
+      await rename(staging, runtime);
+    } catch (copyError) {
+      try {
+        await ensureRealDirectory(runtime, "Montage workspace", false);
+      } catch {
+        throw copyError;
+      }
+    } finally {
+      await rm(stagingRoot, { recursive: true, force: true });
+    }
   }
   const outputLink = join(runtime, "output");
   try {
     const info = await lstat(outputLink);
     if (!info.isSymbolicLink()) throw new Error("Montage output must link to canonical output");
+    if (resolve(runtime, await readlink(outputLink)) !== resolve(workspace, "output")) throw new Error("Montage output must link to canonical output");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     await symlink(join(workspace, "output"), outputLink);
@@ -34,9 +50,8 @@ async function prepareMontageWorkspace(workspace: string): Promise<void> {
   for (const name of [".anban-creator", "montage-input.json", "montage-tool-policy.json", "montage-pipeline-defaults.json"]) {
     const source = join(workspace, name);
     try { await lstat(source); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
-    const target = join(runtime, name);
-    try { await lstat(target); throw new Error(`Montage task input conflicts with ${name}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    await rename(source, target);
+    await mergeWritableEntry(source, join(runtime, name));
+    await rm(source, { recursive: true, force: true });
   }
   const instructions = join(workspace, "CLAUDE.md");
   try {
@@ -52,21 +67,77 @@ async function prepareMontageWorkspace(workspace: string): Promise<void> {
   }
 }
 
+async function makeWritableTree(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) return;
+  if (info.isDirectory()) {
+    await chmod(path, (info.mode & 0o777) | 0o700);
+    for (const entry of await readdir(path)) await makeWritableTree(join(path, entry));
+    return;
+  }
+  if (info.isFile()) {
+    await chmod(path, (info.mode & 0o777) | 0o600);
+    return;
+  }
+  throw new Error(`unsupported file type ${path}`);
+}
+
 export async function materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
-  for (const file of preflightBootstrapFiles(files ?? [])) {
-    const target = workspacePath(workspace, file.path);
-    await ensureRealParent(workspace, dirname(target));
-    let contents: string;
-    if (file.text !== undefined) {
-      contents = file.text;
-    } else {
-      const response = await fetch(file.download_url!, { signal, redirect: "error" });
-      if (!response.ok) throw new Error(`download bootstrap file ${file.path} failed: HTTP ${response.status}`);
-      contents = await readBoundedText(response, Math.min(file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES, MAX_BOOTSTRAP_FILE_BYTES), `bootstrap file ${file.path}`);
+  const prepared = preflightBootstrapFiles(files ?? []);
+  const staging = await mkdtemp(join(workspace, ".anban-bootstrap-"));
+  const committed: string[] = [];
+  try {
+    let totalBytes = 0;
+    for (const file of prepared) {
+      signal?.throwIfAborted();
+      const staged = workspacePath(staging, file.path);
+      await mkdir(dirname(staged), { recursive: true, mode: 0o750 });
+      let contents: Uint8Array;
+      if (file.text !== undefined) {
+        contents = Buffer.from(file.text);
+      } else {
+        const response = await fetch(file.download_url!, { signal, redirect: "error" });
+        if (!response.ok) throw new Error(`download bootstrap file ${file.path} failed: HTTP ${response.status}`);
+        contents = await readBoundedBytes(response, Math.min(file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES, MAX_BOOTSTRAP_FILE_BYTES), `bootstrap file ${file.path}`);
+      }
+      totalBytes += contents.byteLength;
+      if (totalBytes > MAX_BOOTSTRAP_TOTAL_BYTES) throw new Error("bootstrap files exceed total size limit");
+      if (file.expected_size !== undefined && contents.byteLength !== file.expected_size) throw new Error(`bootstrap file ${file.path} size mismatch`);
+      await writeFile(staged, contents, { mode: file.mode, flag: "wx" });
+      await chmod(staged, file.mode);
     }
-    if (file.expected_size !== undefined && Buffer.byteLength(contents) !== file.expected_size) throw new Error(`bootstrap file ${file.path} size mismatch`);
-    await writeAtomicRegularFile(target, contents, file.mode);
+
+    for (const file of prepared) {
+      const target = workspacePath(workspace, file.path);
+      const staged = workspacePath(staging, file.path);
+      await ensureRealParent(workspace, dirname(target));
+      try {
+        const existing = await lstat(target);
+        if (existing.isSymbolicLink() || !existing.isFile()) throw new Error(`bootstrap target is not a regular file: ${target}`);
+        if (!(await filesEqual(staged, target))) throw new Error(`bootstrap target conflicts with existing file: ${target}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+
+    for (const file of prepared) {
+      signal?.throwIfAborted();
+      const target = workspacePath(workspace, file.path);
+      const staged = workspacePath(staging, file.path);
+      try {
+        await lstat(target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await rename(staged, target);
+        committed.push(target);
+      }
+    }
+  } catch (error) {
+    await Promise.all(committed.map((path) => rm(path, { force: true })));
+    throw error;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
 }
 
@@ -98,21 +169,55 @@ async function ensureRealParent(workspace: string, parent: string): Promise<void
   }
 }
 
-async function writeAtomicRegularFile(target: string, contents: string, mode: number): Promise<void> {
+async function readBoundedBytes(response: Response, limit: number, label: string): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) throw new Error(`${label} exceeds size limit`);
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function filesEqual(first: string, second: string): Promise<boolean> {
+  const [left, right] = await Promise.all([readFile(first), readFile(second)]);
+  return left.equals(right);
+}
+
+async function mergeWritableEntry(source: string, target: string): Promise<void> {
+  const sourceInfo = await lstat(source);
+  if (sourceInfo.isDirectory() && !sourceInfo.isSymbolicLink()) {
+    try {
+      const targetInfo = await lstat(target);
+      if (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()) throw new Error(`destination ${target} is not a real directory`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await mkdir(target, { mode: sourceInfo.mode | 0o700 });
+    }
+    for (const entry of await readdir(source)) await mergeWritableEntry(join(source, entry), join(target, entry));
+    return;
+  }
   try {
-    const existing = await lstat(target);
-    if (existing.isSymbolicLink() || !existing.isFile()) throw new Error(`bootstrap target is not a regular file: ${target}`);
-    throw new Error(`bootstrap target conflicts with existing file: ${target}`);
+    const targetInfo = await lstat(target);
+    if (sourceInfo.isFile() && targetInfo.isFile() && !sourceInfo.isSymbolicLink() && !targetInfo.isSymbolicLink() && await filesEqual(source, target)) return;
+    if (sourceInfo.isSymbolicLink() && targetInfo.isSymbolicLink() && await readlink(source) === await readlink(target)) return;
+    throw new Error(`destination ${target} conflicts with workspace input`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const staging = `${target}.anban-stage-${process.pid}-${crypto.randomUUID()}`;
-  try {
-    await writeFile(staging, contents, { mode, flag: "wx" });
-    await chmod(staging, mode);
-    await rename(staging, target);
-  } catch (error) {
-    await rm(staging, { force: true });
-    throw error;
+  if (sourceInfo.isFile() && !sourceInfo.isSymbolicLink()) {
+    await cp(source, target, { force: false, errorOnExist: true, preserveTimestamps: true });
+    await chmod(target, sourceInfo.mode | 0o600);
+    return;
   }
+  if (sourceInfo.isSymbolicLink()) {
+    await symlink(await readlink(source), target);
+    return;
+  }
+  throw new Error(`unsupported file type ${source}`);
 }

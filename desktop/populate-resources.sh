@@ -2,11 +2,10 @@
 #
 # Populate desktop/src-tauri/resources/ with the bundled runtime dependencies
 # the Tauri app needs to run Claude Code tasks locally. Run once before
-# `bun tauri build` (and again whenever the agent binary, Node, claude-code,
+# `bun tauri build` (and again whenever the TypeScript Agent, Node,
 # the unified Anban plugin, or ffmpeg change).
 #
 # macOS-only for now (matches the v1 target platform). Requires:
-#   - Go toolchain (for `make agent-build-native`)
 #   - Node.js (any recent LTS; bundled as-is — pin if claude-code demands it)
 #   - ffmpeg (brew install ffmpeg) — optional but needed for live-slicer
 #
@@ -21,23 +20,24 @@ RES_DIR="$REPO_ROOT/desktop/src-tauri/resources"
 BIN_DIR="$RES_DIR/bin"
 
 echo "==> Resource target: $RES_DIR"
-mkdir -p "$BIN_DIR" "$RES_DIR/claude" "$RES_DIR/anban"
+mkdir -p "$BIN_DIR" "$RES_DIR/anban"
+rm -rf "$RES_DIR/claude"
 
 # ---------------------------------------------------------------------------
-# 1. anban sidecar (native Go build for this host arch).
+# 1. TypeScript Agent and its production dependencies.
 # ---------------------------------------------------------------------------
-echo "==> Building anban (native)…"
-( cd "$REPO_ROOT" && make agent-build-native )
-HOST_OS="$(go env GOOS)"
-HOST_ARCH="$(go env GOARCH)"
-AGENT_BIN="$REPO_ROOT/bin/anban-$HOST_OS-$HOST_ARCH"
-if [[ ! -x "$AGENT_BIN" ]]; then
-  echo "ERROR: agent build produced no binary at $AGENT_BIN." >&2
-  exit 1
-fi
-cp "$AGENT_BIN" "$BIN_DIR/anban"
-chmod +x "$BIN_DIR/anban"
-echo "    -> $BIN_DIR/anban"
+echo "==> Building TypeScript Agent…"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/agent"
+cp "$REPO_ROOT/agent-ts/package.json" "$REPO_ROOT/agent-ts/package-lock.json" "$REPO_ROOT/agent-ts/tsconfig.json" "$STAGE/agent/"
+cp -R "$REPO_ROOT/agent-ts/src" "$STAGE/agent/src"
+( cd "$STAGE/agent" && npm ci && npm run build && npm prune --omit=dev )
+rm -rf "$RES_DIR/agent"
+mkdir -p "$RES_DIR/agent"
+cp "$STAGE/agent/package.json" "$RES_DIR/agent/"
+cp -R "$STAGE/agent/dist" "$STAGE/agent/node_modules" "$RES_DIR/agent/"
+echo "    -> $RES_DIR/agent"
 
 # ---------------------------------------------------------------------------
 # 2. Node runtime (copy the dev machine's node binary; PATH is overridden at
@@ -53,23 +53,7 @@ chmod +x "$BIN_DIR/node"
 echo "    -> $BIN_DIR/node  ($(node --version))"
 
 # ---------------------------------------------------------------------------
-# 3. @anthropic-ai/claude-code (the `claude` CLI the SDK spawns). Pack the
-#    installed package into resources/claude so it travels with the app.
-# ---------------------------------------------------------------------------
-echo "==> Bundling @anthropic-ai/claude-code…"
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
-( cd "$STAGE" && npm init -y >/dev/null 2>&1 && npm install "@anthropic-ai/claude-code" >/dev/null 2>&1 )
-if [[ ! -d "$STAGE/node_modules/@anthropic-ai/claude-code" ]]; then
-  echo "ERROR: could not install @anthropic-ai/claude-code." >&2
-  exit 1
-fi
-rm -rf "$RES_DIR/claude"
-cp -R "$STAGE/node_modules/@anthropic-ai/claude-code" "$RES_DIR/claude"
-echo "    -> $RES_DIR/claude"
-
-# ---------------------------------------------------------------------------
-# 4. Unified Anban plugin → CLAUDE_PLUGIN_ROOT.
+# 3. Unified Anban plugin → CLAUDE_PLUGIN_ROOT.
 # ---------------------------------------------------------------------------
 echo "==> Bundling Anban plugin…"
 if [[ ! -d "$REPO_ROOT/plugins/.claude-plugin" ]]; then
@@ -81,7 +65,7 @@ cp -R "$REPO_ROOT/plugins" "$RES_DIR/anban"
 echo "    -> $RES_DIR/anban"
 
 # ---------------------------------------------------------------------------
-# 5. ffmpeg (optional; needed only for live-slicer / video work).
+# 4. ffmpeg (optional; needed only for live-slicer / video work).
 # ---------------------------------------------------------------------------
 FF_BIN="$(command -v ffmpeg || true)"
 if [[ -n "$FF_BIN" ]]; then

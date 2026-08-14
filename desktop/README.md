@@ -14,7 +14,7 @@ Studio SPA (webview) ──(JWT + /api + SSE)──►  Cloud server (anbanai)
 Rust local executor ──(user API key)──► POST /api/v1/agent/claim ──► Cloud
       │  (claims the oldest pending local-target task)
       ▼  spawn sidecar
-anban + Node + claude-code + unified Anban plugin + ffmpeg
+Node + agent-ts + Claude Agent SDK + unified Anban plugin + ffmpeg
       │  (real local workspace + shell)
       └──(/agent/progress + /agent/upload)──► Cloud ──(SSE)──► Studio UI
 ```
@@ -56,7 +56,6 @@ desktop/
 - Rust toolchain (`rustup`) with the `aarch64-apple-darwin` /
   `x86_64-apple-darwin` target.
 - Bun + Node (for the Studio build).
-- Go (for the agent sidecar build).
 - Tauri system dependencies on macOS: Xcode command-line tools.
 
 ### 1. Populate bundled resources (once, and after dep changes)
@@ -65,8 +64,8 @@ desktop/
 bash desktop/populate-resources.sh
 ```
 
-Fills `src-tauri/resources/` with: `anban` (native), `node`,
-`@anthropic-ai/claude-code`, the unified Anban plugin, and `ffmpeg`.
+Fills `src-tauri/resources/` with the compiled TypeScript Agent and production
+dependencies, `node`, the unified Anban plugin, and `ffmpeg`.
 
 ### 2. Install + run
 
@@ -96,10 +95,9 @@ bun tauri build    # production .app / .dmg (builds Studio first)
   reports a ready executor). The server sets a 30s claim deadline and does
   **not** enqueue it to cloud Asynq.
 - The Rust executor polls `POST {api_base}/agent/claim` every ~2s; on a 200 it
-  gets the full task config and spawns `anban run` with the argv from
-  `server/agent/docker_executor.go::buildAgentCommand` (same flags the cloud
-  Docker executor uses), supplying the local workspace + bundled plugin dir.
-- The agent runs Claude Code locally (via `claude-agent-sdk-go`) and reports
+  gets the full task config and starts `node agent/dist/main.js run`, supplying
+  the local workspace and bundled plugin directory.
+- The agent runs Claude Code locally via `@anthropic-ai/claude-agent-sdk` and reports
   progress/results back to the cloud itself (`/agent/progress`, `/agent/upload`)
   — which flow through Redis pub/sub → SSE → Studio UI exactly like cloud runs.
 - If no desktop claims within 30s, the server's fallback worker flips the task

@@ -9,7 +9,7 @@ This file provides guidance to AI coding assistants when working in this reposit
 The current repository is not a standalone Cobra CLI. It has four main surfaces:
 
 - `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, and business services.
-- `agent/`: Go runner used for local or Docker-based agent execution.
+- `agent-ts/`: TypeScript runner used for local and one-shot managed agent execution.
 - `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
@@ -32,9 +32,8 @@ go test ./...
 go test ./server/mcp
 go test ./app/image
 
-# Build binaries without colliding with existing directories
+# Build the Server binary without colliding with its source directory
 go build -o /tmp/anban-creator-server ./server
-go build -o /tmp/anban ./agent
 
 # Repository Make targets
 make test
@@ -43,7 +42,16 @@ make vet
 make fmt
 ```
 
-Avoid `go build ./server` or `go build ./agent` from the repository root because Go will try to write `server` or `agent` binaries where same-named directories already exist.
+Avoid `go build ./server` from the repository root because Go will try to write a `server` binary where the same-named directory already exists.
+
+### Agent Runtime
+
+```bash
+cd agent-ts && npm ci
+cd agent-ts && bun run test
+cd agent-ts && bun run typecheck
+cd agent-ts && bun run build
+```
 
 ### Studio
 
@@ -118,15 +126,17 @@ Keep handlers thin. Put behavior in services, persistence in repositories, and c
 
 ### Agent Runner
 
-`agent/` is a standalone Go binary that downloads workspaces, runs the agent CLI process, and reports results back to the server.
+`agent-ts/` is the single Agent runtime. It supports both the managed `job`
+entrypoint used by Docker/Kubernetes and the local `run` entrypoint used by Desktop.
 
 Important files:
 
-- `agent/main.go`: run lifecycle entry point.
-- `agent/runner.go`: subprocess execution.
-- `agent/downloader.go`: workspace downloads.
-- `agent/reporter.go`: result reporting.
-- `agent/config.go`: environment/config parsing.
+- `agent-ts/src/main.ts`: managed job lifecycle entry point.
+- `agent-ts/src/local.ts`: Desktop/local execution entry point.
+- `agent-ts/src/runner.ts`: Claude Agent SDK execution and stream handling.
+- `agent-ts/src/bootstrap.ts`: managed Bootstrap validation.
+- `agent-ts/src/downloads.ts`: generated image materialization.
+- `agent-ts/src/reporter.ts`: progress, artifact, and completion reporting.
 
 ### App Library
 

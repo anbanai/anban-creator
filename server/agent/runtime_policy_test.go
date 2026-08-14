@@ -401,19 +401,22 @@ func TestValidateManagedPluginResultPreservesProtocolErrorsAndFailsClosed(t *tes
 }
 
 func TestStandaloneAgentRunnerUsesRuntimePolicy(t *testing.T) {
-	body := readRepoFile(t, "../../agent/runner.go")
+	body := readRepoFile(t, "../../agent-ts/src/runner.ts")
 	for _, want := range []string{
-		"WithManagedAgentRuntimePolicy()",
-		"claudecode.WithPermissionMode(claudecode.PermissionModeDefault)",
-		"client.ReceiveResponse(ctx)",
+		`permissionMode: "default"`,
+		`allowedTools: MANAGED_ALLOWED_TOOLS`,
+		`canUseTool: async (toolName)`,
+		`disallowedTools: ["Agent", "ScheduleWakeup", "AskUserQuestion"]`,
+		"strictMcpConfig: true",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("standalone Agent runner must retain managed runtime contract %q", want)
 		}
 	}
 	for _, forbidden := range []string{
-		"claudecode.PermissionModeBypassPermissions",
-		"client.ReceiveMessages(ctx)",
+		`permissionMode: "bypassPermissions"`,
+		`allowDangerouslySkipPermissions: true`,
+		`mcpServers: { anban: { command:`,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("standalone Agent runner retains forbidden runtime behavior %q", forbidden)

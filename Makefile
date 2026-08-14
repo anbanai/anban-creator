@@ -8,9 +8,6 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
-TS_AGENT_IMAGE ?= creator-agent-article-ts:latest
-TS_SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote-ts:latest
-TS_MONTAGE_AGENT_IMAGE ?= creator-agent-montage-ts:latest
 SERVER_IMAGE := anban-creator-server:latest
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
 SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
@@ -25,10 +22,10 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test git-sync-setup humanizer-update \
         agent-pack-new agent-pack-generate agent-pack-check \
-        agent-build-native \
+        agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-agent-ts-image docker-seednote-agent-ts-image docker-montage-agent-ts-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke
 
@@ -50,6 +47,7 @@ distclean: clean
 # Run all tests
 test:
 	@go test -v ./...
+	@cd agent-ts && bun run test
 
 # Code linting (requires golangci-lint)
 lint:
@@ -124,6 +122,20 @@ server-test:
 	@go test -v ./server/...
 
 # ---------------------------------------------------------------------------
+# Agent targets
+# ---------------------------------------------------------------------------
+
+agent-install:
+	@cd agent-ts && bun install --frozen-lockfile
+
+agent-test:
+	@cd agent-ts && bun run test
+	@cd agent-ts && bun run typecheck
+
+agent-build:
+	@cd agent-ts && bun run build
+
+# ---------------------------------------------------------------------------
 # Frontend targets
 # ---------------------------------------------------------------------------
 
@@ -158,42 +170,22 @@ docker-logs:
 
 # Build the minimal Article Agent image.
 docker-agent-image:
-	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) . && \
 	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the independent Seednote workflow image.
 docker-seednote-agent-image:
-	@git submodule update --init --recursive third_party/claude-agent-sdk-go
 	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
 # Build the dedicated Montage Agent image with its OpenMontage workspace template.
 docker-montage-agent-image:
-	@git submodule update --init --recursive third_party/claude-agent-sdk-go third_party/OpenMontage
+	@git submodule update --init --recursive third_party/OpenMontage
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
 	docker build -f deploy/docker/Dockerfile.agent-montage -t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
-
-# Build TypeScript runtime candidates. They are published under distinct tags;
-# Server runtime image mappings remain on the Go images until operational cutover.
-docker-agent-ts-image:
-	@echo "Building $(TS_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-article-ts -t $(TS_AGENT_IMAGE) . && \
-	echo "Image build complete: $(TS_AGENT_IMAGE)"
-
-docker-seednote-agent-ts-image:
-	@echo "Building $(TS_SEEDNOTE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-seednote-ts -t $(TS_SEEDNOTE_AGENT_IMAGE) . && \
-	echo "Image build complete: $(TS_SEEDNOTE_AGENT_IMAGE)"
-
-docker-montage-agent-ts-image:
-	@git submodule update --init --recursive third_party/OpenMontage
-	@echo "Building $(TS_MONTAGE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-montage-ts -t $(TS_MONTAGE_AGENT_IMAGE) . && \
-	echo "Image build complete: $(TS_MONTAGE_AGENT_IMAGE)"
 
 # The script owns its Docker availability check and all isolated smoke builds.
 docker-runtime-smoke:
@@ -235,29 +227,6 @@ docker-images: docker-agent-image docker-seednote-agent-image docker-montage-age
 docker-image: docker-agent-image
 
 # ---------------------------------------------------------------------------
-# Desktop (Tauri) targets
-# ---------------------------------------------------------------------------
-
-# Build the anban binary natively (no Docker) for the host platform.
-# The desktop app bundles this as a sidecar to claim & run tasks on the user's
-# machine via claude-agent-sdk-go (which spawns the local `claude` CLI).
-# Cross-compile the host-native variant; use ARCHES= to override, e.g.
-#   make agent-build-native ARCHES="darwin/arm64 darwin/amd64"
-ARCHES ?= $(shell go env GOOS)/$(shell go env GOARCH)
-PLUGIN_GOOS ?= $(shell go env GOOS)
-PLUGIN_GOARCH ?= $(shell go env GOARCH)
-
-agent-build-native:
-	@mkdir -p $(BINDIR)
-	@set -e; for arch in $(ARCHES); do \
-		os=$${arch%/*}; goarch=$${arch#*/}; \
-		out="$(BINDIR)/anban-$${os}-$${goarch}"; \
-		echo "Building anban for $${os}/$${goarch}..."; \
-		GOOS=$${os} GOARCH=$${goarch} CGO_ENABLED=0 go build -trimpath -o $${out} ./agent; \
-	done
-	@echo "Agent native build complete: $(ARCHES)"
-
-# ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
 
@@ -276,6 +245,9 @@ help:
 	@echo "  make agent-pack-new ARGS=... - Scaffold a canonical Agent Pack"
 	@echo "  make agent-pack-generate - Generate native Agents and Server Catalog"
 	@echo "  make agent-pack-check - Fail when generated Agent Pack assets drift"
+	@echo "  make agent-install  - Install TypeScript Agent dependencies"
+	@echo "  make agent-test     - Test and type-check the TypeScript Agent"
+	@echo "  make agent-build    - Compile the TypeScript Agent"
 	@echo "  make clean         - Remove build artifacts"
 	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""
@@ -297,9 +269,6 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
-	@echo "  make docker-agent-ts-image - Build TypeScript Article runtime candidate"
-	@echo "  make docker-seednote-agent-ts-image - Build TypeScript Seednote runtime candidate"
-	@echo "  make docker-montage-agent-ts-image - Build TypeScript Montage runtime candidate"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-sidecar-ilink-image - Build latest upstream iLink sidecar image"
@@ -307,6 +276,3 @@ help:
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
 	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"
-	@echo ""
-	@echo "Desktop (Tauri) targets:"
-	@echo "  make agent-build-native - Build anban natively (desktop sidecar)"

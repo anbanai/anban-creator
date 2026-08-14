@@ -312,10 +312,10 @@ pub async fn run_loop(
                 };
                 let server_url = derive_server_url(&snapshot.api_base);
                 let workspace = std::path::PathBuf::from(&snapshot.workspace_root);
-                let agent_bin = res.agent_bin.clone().unwrap_or_default();
+                let agent_entry = res.agent_entry.clone().unwrap_or_default();
                 if let Err(e) = sidecar::run_agent(
                     &app,
-                    &agent_bin,
+                    &agent_entry,
                     &env,
                     &workspace,
                     &server_url,

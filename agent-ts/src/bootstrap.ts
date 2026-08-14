@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import type { JobConfig } from "./config.js";
 
@@ -15,7 +15,7 @@ const MAX_EXECUTION_TOKEN_BYTES = 16 << 10;
 const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
-const AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
+const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "task_id", "task_type", "project_id", "prompt",
@@ -112,8 +112,21 @@ export interface AgentPackCatalog {
     digest: string;
     agent: { name: string };
     bindings: { task_types?: string[] };
-    runtime: { profile?: string; adapter?: string };
+    runtime: { profile?: string; adapter?: string; max_turns?: number };
   }>;
+}
+
+export interface BootstrapIdentity {
+  execution_token: string;
+  task_id: string;
+  project_id: string;
+}
+
+export class BootstrapResponseError extends Error {
+  constructor(message: string, readonly identity: BootstrapIdentity, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BootstrapResponseError";
+  }
 }
 
 export async function readWorkloadToken(path: string): Promise<string> {
@@ -145,20 +158,44 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
     throw new Error("bootstrap response is not valid JSON");
   }
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
-  const data = validateBootstrapResponse(config.executionID, envelope.data);
-  validateAgentPackCatalog(data, await readAgentPackCatalog());
-  return data;
+  try {
+    const data = validateBootstrapResponse(config.executionID, envelope.data);
+    validateAgentPackCatalog(data, await readAgentPackCatalog());
+    return data;
+  } catch (error) {
+    const identity = trustedBootstrapIdentity(config.executionID, envelope.data);
+    if (identity) {
+      throw new BootstrapResponseError(error instanceof Error ? error.message : "bootstrap response is invalid", identity, { cause: error });
+    }
+    throw error;
+  }
 }
 
-async function readAgentPackCatalog(): Promise<AgentPackCatalog> {
-  const info = await lstat(AGENT_PACK_CATALOG_PATH);
+export async function readAgentPackCatalog(path = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<AgentPackCatalog> {
+  const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_BOOTSTRAP_RESPONSE_BYTES) {
     throw new Error("Agent Pack Catalog is invalid");
   }
   try {
-    return JSON.parse(await readFile(AGENT_PACK_CATALOG_PATH, "utf8")) as AgentPackCatalog;
+    return JSON.parse(await readFile(path, "utf8")) as AgentPackCatalog;
   } catch {
     throw new Error("Agent Pack Catalog is not valid JSON");
+  }
+}
+
+function trustedBootstrapIdentity(executionID: string, input: unknown): BootstrapIdentity | undefined {
+  if (!isRecord(input)) return undefined;
+  const identity = {
+    execution_token: input.execution_token,
+    task_id: input.task_id,
+    project_id: input.project_id,
+  };
+  if (!cleanString(identity.execution_token) || !cleanString(identity.task_id) || !cleanString(identity.project_id)) return undefined;
+  try {
+    validateExecutionToken(executionID, identity as BootstrapResponse);
+    return identity as BootstrapIdentity;
+  } catch {
+    return undefined;
   }
 }
 
@@ -340,15 +377,16 @@ export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[]
 export function cleanBootstrapPath(raw: string): string {
   if (!cleanString(raw) || isAbsolute(raw) || raw.includes("\\") || /^[a-zA-Z]:/.test(raw)) throw new Error(`bootstrap path ${raw} must be clean and relative`);
   const components = raw.split("/");
-  if (components.some((part) => !part || part === "." || part === ".." || Buffer.byteLength(part) > 255 || /[\x00-\x1f<>:"\\|?*]/.test(part) || /[. ]$/.test(part))) throw new Error(`bootstrap path ${raw} escapes workspace or is not clean`);
+  if (components.some((part) => !part || part === "." || part === ".." || Buffer.byteLength(part) > 255 || /[\x00-\x1f<>:"\\|?*]/.test(part) || /[. ]$/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) throw new Error(`bootstrap path ${raw} escapes workspace or is not clean`);
   return raw;
 }
 
 export function workspacePath(workspace: string, relativePath: string): string {
-  const relative = cleanBootstrapPath(relativePath);
+  const clean = cleanBootstrapPath(relativePath);
   const root = resolve(workspace);
-  const target = resolve(root, relative);
-  if (!target.startsWith(`${root}/`)) throw new Error(`unsafe workspace path ${relativePath}`);
+  const target = resolve(root, clean);
+  const rel = relative(root, target);
+  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) throw new Error(`unsafe workspace path ${relativePath}`);
   return target;
 }
 

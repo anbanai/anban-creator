@@ -8,7 +8,7 @@ import (
 
 func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article-ts", "Dockerfile.agent-seednote-ts", "Dockerfile.agent-montage-ts"} {
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		data := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
 			"node:bookworm-slim",
@@ -16,7 +16,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 			"npm ci",
 			"@anthropic-ai/claude-agent-sdk",
 			"COPY plugins/ /anbanai/",
-			"COPY deploy/docker/anban-ts-launcher /usr/local/bin/anban",
+			"COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban",
 			"ENTRYPOINT [\"tini\", \"--\", \"anban\"]",
 			"USER 1000:1000",
 		} {
@@ -30,7 +30,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 			}
 		}
 	}
-	launcher := readTextFile(t, filepath.Join(root, "deploy", "docker", "anban-ts-launcher"))
+	launcher := readTextFile(t, filepath.Join(root, "deploy", "docker", "anban-agent-launcher"))
 	if !strings.Contains(launcher, "exec node /app/anban-agent/dist/main.js \"$@\"") {
 		t.Fatal("TypeScript anban launcher must exec the compiled Node entrypoint")
 	}
@@ -38,7 +38,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 
 func TestTypeScriptRuntimeDockerfilesShareLockedSDKWithOptionalPackages(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article-ts", "Dockerfile.agent-seednote-ts", "Dockerfile.agent-montage-ts"} {
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, required := range []string{
 			"COPY agent-ts/package.json agent-ts/package-lock.json ./",

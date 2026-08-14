@@ -26,7 +26,6 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: |
-          go build -o /tmp/anban ./agent
           go build -o /tmp/anban-creator-server ./server
 
       - name: Check formatting
@@ -43,6 +42,37 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+  agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-ts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent-ts/package-lock.json
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: bun run test
+
+      - name: Build
+        run: npm run build
 
   frontend:
     runs-on: ubuntu-latest

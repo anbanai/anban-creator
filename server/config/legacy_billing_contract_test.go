@@ -22,7 +22,7 @@ func TestProductionSourcesRejectLegacyDynamicBillingContracts(t *testing.T) {
 		"CreditService", "CreditTransaction", "CreditsBalance", `"/credits`, "model_prices:",
 		"recharge_tiers:", "credit_cost:",
 	}
-	roots := []string{"server", "agent", filepath.Join("studio", "src"), filepath.Join("miniapp", "src")}
+	roots := []string{"server", filepath.Join("agent-ts", "src"), filepath.Join("studio", "src"), filepath.Join("miniapp", "src")}
 	for _, relativeRoot := range roots {
 		walkRoot := filepath.Join(root, relativeRoot)
 		err := filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {

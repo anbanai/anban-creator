@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { cleanBootstrapPath, workspacePath } from "./bootstrap.js";
 
@@ -38,6 +38,8 @@ export async function materializeGeneratedImage(runtimeDirectory: string, server
   if (body.byteLength !== payload.file_size) throw new Error(`artifact size mismatch: downloaded ${body.byteLength}, expected ${payload.file_size}`);
   const hash = createHash("sha256").update(body).digest("hex");
   if (hash !== payload.content_hash) throw new Error("artifact SHA-256 mismatch");
+  const detected = detectImageMime(body);
+  if (detected !== payload.mime_type) throw new Error(`artifact MIME mismatch: bytes are ${detected ?? "unknown"}, expected ${payload.mime_type}`);
   await writeAtomic(target, body);
 }
 
@@ -113,9 +115,10 @@ async function readBoundedBytes(response: Response, limit: number, label: string
 
 async function ensureRealParents(root: string, parent: string): Promise<void> {
   const resolvedRoot = resolve(root);
-  if (!parent.startsWith(`${resolvedRoot}/`) && parent !== resolvedRoot) throw new Error("artifact parent escapes runtime workspace");
+  const rel = relative(resolvedRoot, parent);
+  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) throw new Error("artifact parent escapes runtime workspace");
   let current = resolvedRoot;
-  for (const component of parent.slice(resolvedRoot.length).split("/").filter(Boolean)) {
+  for (const component of rel.split(/[\\/]/).filter(Boolean)) {
     current = join(current, component);
     try {
       const info = await lstat(current);
@@ -130,11 +133,18 @@ async function ensureRealParents(root: string, parent: string): Promise<void> {
 async function writeAtomic(target: string, data: Uint8Array): Promise<void> {
   const staging = `${target}.anban-artifact-${process.pid}-${crypto.randomUUID()}`;
   try {
-    await writeFile(staging, data, { mode: 0o640, flag: "wx" });
-    await chmod(staging, 0o640);
+    await writeFile(staging, data, { mode: 0o644, flag: "wx" });
+    await chmod(staging, 0o644);
     await rename(staging, target);
   } catch (error) {
     await rm(staging, { force: true });
     throw error;
   }
+}
+
+function detectImageMime(data: Uint8Array): string | undefined {
+  if (data.length >= 8 && Buffer.from(data.subarray(0, 8)).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  if (data.length >= 12 && Buffer.from(data.subarray(0, 4)).toString("ascii") === "RIFF" && Buffer.from(data.subarray(8, 12)).toString("ascii") === "WEBP") return "image/webp";
+  return undefined;
 }

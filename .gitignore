@@ -1,7 +1,6 @@
 # Binaries (current directory only)
 /anban-creator
 /anban-creator.exe
-agent/agent
 
 # Ignore all binaries (anywhere in the repo)
 **/bin/

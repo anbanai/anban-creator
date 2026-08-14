@@ -470,27 +470,14 @@ runtime_smoke_main() {
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  case "${ANBAN_RUNTIME_SMOKE_CLIENT:-go}" in
-    go)
-      ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
-      SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
-      MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
-      ARTICLE_DOCKERFILE=Dockerfile.agent-article
-      SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
-      MONTAGE_DOCKERFILE=Dockerfile.agent-montage
-      ;;
-    ts)
-      ARTICLE_RUNTIME_IMAGE=creator-agent-article-ts:latest
-      SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote-ts:latest
-      MONTAGE_RUNTIME_IMAGE=creator-agent-montage-ts:latest
-      ARTICLE_DOCKERFILE=Dockerfile.agent-article-ts
-      SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote-ts
-      MONTAGE_DOCKERFILE=Dockerfile.agent-montage-ts
-      ;;
-    *) fail "ANBAN_RUNTIME_SMOKE_CLIENT must be go or ts" ;;
-  esac
+  ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
+  SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
+  MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
+  ARTICLE_DOCKERFILE=Dockerfile.agent-article
+  SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
+  MONTAGE_DOCKERFILE=Dockerfile.agent-montage
   git -C "$REPO_ROOT" submodule update --init --recursive \
-    third_party/claude-agent-sdk-go third_party/OpenMontage
+    third_party/OpenMontage
   docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"

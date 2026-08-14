@@ -1,8 +1,10 @@
 import { pathToFileURL } from "node:url";
 
 import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
-import { bootstrap, readWorkloadToken, type BootstrapResponse } from "./bootstrap.js";
+import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
+import { CompletionReportError, exitCodeForError } from "./errors.js";
+import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { runClaude, type RunnerReporter } from "./runner.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
@@ -26,23 +28,14 @@ export interface RunJobDependencies {
   bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<BootstrapResponse>;
   materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
   prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
-  createReporter(config: JobConfig, data: BootstrapResponse): JobReporter;
+  createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "task_id">): JobReporter;
   startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
   runClaude(config: JobConfig, data: BootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
   uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
   subscribeShutdown(onSignal: () => void): () => void;
 }
 
-export class CompletionReportError extends Error {
-  constructor(cause: Error) {
-    super(`failed to report completion: ${cause.message}`, { cause });
-    this.name = "CompletionReportError";
-  }
-}
-
-export function exitCodeForError(error: unknown): number {
-  return error instanceof CompletionReportError ? 2 : 1;
-}
+export { CompletionReportError, exitCodeForError } from "./errors.js";
 
 export function finalizationTimeouts(env: NodeJS.ProcessEnv = process.env): FinalizationTimeouts {
   return {
@@ -92,9 +85,26 @@ export async function runJob(
   let stopHeartbeat: (() => void) | undefined;
   try {
     const workloadToken = await dependencies.readWorkloadToken(config.workloadTokenFile);
-    const data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
-    await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
-    await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
+    let data: BootstrapResponse | undefined;
+    try {
+      data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
+      await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
+      await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
+    } catch (error) {
+      const identity: BootstrapIdentity | undefined = data ?? (error instanceof BootstrapResponseError ? error.identity : undefined);
+      if (identity) {
+        const reporter = dependencies.createReporter(config, identity);
+        const completionAbort = abortAfter(finalizationTimeouts().completion);
+        try {
+          await reporter.complete(failure(config.workspace, error), completionAbort.signal);
+        } catch (completeError) {
+          throw new CompletionReportError(completeError instanceof Error ? completeError : new Error("completion report failed"));
+        } finally {
+          completionAbort.abort();
+        }
+      }
+      throw error;
+    }
     const reporter = dependencies.createReporter(config, data);
     stopHeartbeat = dependencies.startHeartbeat(reporter, stderr, shutdown.signal);
     let result: ExecutionResult;
@@ -177,7 +187,9 @@ function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runJob(process.argv.slice(2))
+  const args = process.argv.slice(2);
+  const execute = args[0] === "run" ? runLocal(args) : runJob(args);
+  execute
     .then((result) => { if (!result.success) process.exitCode = 1; })
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : "agent job failed"}\n`);

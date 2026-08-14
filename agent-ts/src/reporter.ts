@@ -1,6 +1,9 @@
 import { createReadStream } from "node:fs";
 
-import type { JobConfig } from "./config.js";
+export interface ReporterConfig {
+  serverURL: string;
+  executionID: string;
+}
 
 export interface ExecutionResult {
   success: boolean;
@@ -79,7 +82,7 @@ export async function postJSONWithRetry(operation: () => Promise<void>, wait: Sl
 }
 
 export class Reporter {
-  constructor(private readonly config: JobConfig, private readonly token: string, private readonly taskID: string) {}
+  constructor(private readonly config: ReporterConfig, private readonly token: string, private readonly taskID: string) {}
 
   async progress(message: string, signal?: AbortSignal): Promise<void> {
     if (!message.trim()) return;
@@ -132,8 +135,8 @@ export class Reporter {
     if (!response.ok) throw new Error(`direct artifact upload returned HTTP ${response.status}`);
   }
 
-  private identity<T extends object>(body: T): T & { task_id: string; execution_id: string } {
-    return { ...body, task_id: this.taskID, execution_id: this.config.executionID };
+  private identity<T extends object>(body: T): T & { task_id: string; execution_id?: string } {
+    return { ...body, task_id: this.taskID, ...(this.config.executionID ? { execution_id: this.config.executionID } : {}) };
   }
 
   private async post(path: string, body: unknown, signal?: AbortSignal): Promise<void> { await this.postJSON(path, body, signal); }

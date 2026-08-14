@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +20,77 @@ describe("scanWorkspaceArtifacts", () => {
     await writeFile(join(root, "output", "a.md"), "one");
     await symlink("a.md", join(root, "output", "link.md"));
     expect((await scanWorkspaceArtifacts(root)).map((artifact) => artifact.relativePath)).toEqual(["output/a.md", "output/nested/b.txt"]);
+  });
+
+  test("preserves the legacy delivery filter for runtime and build files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
+    roots.push(root);
+    await mkdir(join(root, "output", "nested"), { recursive: true });
+    await mkdir(join(root, "output", ".custom"), { recursive: true });
+    for (const directory of [".anban-creator", ".anban-runtime-home", ".claude", ".git", "node_modules", "dist", "build", ".cache", ".vite"]) {
+      await mkdir(join(root, "output", directory), { recursive: true });
+      await writeFile(join(root, "output", directory, "ignored.txt"), "ignored");
+    }
+    for (const file of ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "tsconfig.json", "vite.config.ts", "vite.config.js", "eslint.config.js", "eslint.config.mjs", ".hidden"]) {
+      await writeFile(join(root, "output", file), "ignored");
+    }
+    await writeFile(join(root, "output", "nested", "content.md"), "kept");
+    await writeFile(join(root, "output", ".custom", "kept.txt"), "kept");
+
+    expect((await scanWorkspaceArtifacts(root)).map((artifact) => artifact.relativePath)).toEqual([
+      "output/.custom/kept.txt",
+      "output/nested/content.md",
+    ]);
+  });
+
+  test("detects image bytes and preserves the stream response content type", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
+    roots.push(root);
+    await mkdir(join(root, "output"), { recursive: true });
+    await writeFile(join(root, "output", "preview.bin"), Buffer.from("GIF89a", "ascii"));
+    let manifested: Array<{ content_type: string }> = [];
+    const reporter = {
+      progress: async () => {},
+      prepareArtifactUpload: async () => { throw new Error("unexpected direct upload"); },
+      streamArtifactContent: async (metadata: { content_type: string; size: number; sha256: string }) => {
+        expect(metadata.content_type).toBe("image/gif");
+        return { object_key: "artifacts/preview.bin", content_type: "image/gif; verified=true", size: metadata.size, sha256: metadata.sha256 };
+      },
+      reportArtifactManifest: async (files: Array<{ content_type: string }>) => { manifested = files; },
+    };
+    const bootstrap = { artifact_transport: { mode: "stream" } } as BootstrapResponse;
+
+    expect(await uploadWorkspaceArtifacts(root, bootstrap, reporter)).toBe(1);
+    expect(manifested).toEqual([{ content_type: "image/gif; verified=true", object_key: "artifacts/preview.bin", relative_path: "output/preview.bin", sha256: expect.any(String), size: 6 }]);
+  });
+
+  test("uploads from the hashed file handle when the visible path is replaced", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
+    roots.push(root);
+    const artifactPath = join(root, "output", "content.md");
+    const replacementPath = join(root, "replacement.md");
+    await mkdir(join(root, "output"), { recursive: true });
+    await writeFile(artifactPath, "first");
+    await writeFile(replacementPath, "second");
+    const uploaded: string[] = [];
+    let manifested: Array<{ sha256: string }> = [];
+    const reporter = {
+      progress: async () => {},
+      prepareArtifactUpload: async () => { throw new Error("unexpected direct upload"); },
+      streamArtifactContent: async (metadata: { content_type: string; size: number; sha256: string }, body: ReadableStream<Uint8Array>) => {
+        if (uploaded.length === 0) await rename(replacementPath, artifactPath);
+        const contents = await new Response(body).text();
+        uploaded.push(contents);
+        expect(createHash("sha256").update(contents).digest("hex")).toBe(metadata.sha256);
+        return { object_key: `artifacts/content-${uploaded.length}.md`, content_type: metadata.content_type, size: metadata.size, sha256: metadata.sha256 };
+      },
+      reportArtifactManifest: async (files: Array<{ sha256: string }>) => { manifested = files; },
+    };
+    const bootstrap = { artifact_transport: { mode: "stream" } } as BootstrapResponse;
+
+    expect(await uploadWorkspaceArtifacts(root, bootstrap, reporter)).toBe(1);
+    expect(uploaded).toEqual(["first", "second"]);
+    expect(manifested[0]?.sha256).toBe(createHash("sha256").update("second").digest("hex"));
   });
 
   test("rejects a scan that is already cancelled", async () => {

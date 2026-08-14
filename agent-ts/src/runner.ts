@@ -143,10 +143,28 @@ const CLAUDE_ENVIRONMENT_KEYS_TO_UNSET = new Set([
   ...CLAUDE_PROFILE_ENV_KEYS,
   ...CLAUDE_INHERITED_ENVIRONMENT_KEYS_TO_UNSET,
 ]);
+const MANAGED_ALLOWED_TOOLS = [
+  "Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill",
+  "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite",
+  "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*",
+];
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
-export interface ToolUseDiagnostics { tool_use_count: number; tool_use_summary: Record<string, number>; }
+export interface ToolUseDiagnostics {
+  tool_use_count: number;
+  tool_use_summary: Record<string, number>;
+  tool_error_count?: number;
+  last_tool_error_tool?: string;
+  last_tool_error?: string;
+}
 export type RunnerReporter = Pick<Reporter, "progress">;
+
+class RuntimeArtifactMaterializationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(`runtime_artifact_materialization_failed: ${message}`, options);
+    this.name = "RuntimeArtifactMaterializationError";
+  }
+}
 
 export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
@@ -156,21 +174,40 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   let logText = "";
   let initValidated = false;
   const toolCalls = new Map<string, TrackedToolCall>();
-  const toolUseDiagnostics: ToolUseDiagnostics = { tool_use_count: 0, tool_use_summary: {} };
-  for await (const message of query({ prompt: data.prompt, options })) {
-    const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
-    logText = consumed.logText;
-    if (message.type === "system" && message.subtype === "init") {
-      validateManagedInit(message, data.task_type);
-      initValidated = true;
+  const toolUseDiagnostics: ToolUseDiagnostics = { tool_use_count: 0, tool_use_summary: {}, tool_error_count: 0 };
+  try {
+    for await (const message of query({ prompt: data.prompt, options })) {
+      const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
+      logText = consumed.logText;
+      if (message.type === "system" && message.subtype === "init") {
+        validateManagedInit(message, data.task_type);
+        initValidated = true;
+      }
+      if (consumed.terminal) {
+        if (!consumed.terminal.success) {
+          consumed.terminal.terminal_reason = "provider_error";
+          if (!consumed.terminal.error) consumed.terminal.error = terminalFailureMessage(consumed.terminal, toolUseDiagnostics);
+        }
+        if (consumed.terminal.success && !initValidated) {
+          consumed.terminal = { ...consumed.terminal, success: false, terminal_reason: "provider_error", error: "managed plugin readiness failed: Claude Code did not emit system/init" };
+        }
+        if (consumed.terminal.success && toolUseDiagnostics.tool_use_count === 0) consumed.terminal.agent_likely_failed = true;
+        return consumed.terminal;
+      }
     }
-    if (consumed.terminal) {
-      if (!consumed.terminal.success && !consumed.terminal.error) consumed.terminal.error = `agent execution failed (subtype=${consumed.terminal.result_subtype ?? "unknown"})`;
-      if (consumed.terminal.success && !initValidated) consumed.terminal = { ...consumed.terminal, success: false, error: "managed plugin readiness failed: Claude Code did not emit system/init" };
-      return consumed.terminal;
-    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "agent execution failed",
+      terminal_reason: error instanceof RuntimeArtifactMaterializationError ? "platform_error" : "provider_error",
+      work_dir: cwd,
+      log_text: logText,
+      cost_status: "unreconciled",
+      cost_diagnostics: [{ code: "missing_terminal_model_usage" }],
+      ...toolUseDiagnostics,
+    };
   }
-  return { success: false, error: "managed agent stream ended without a result message", work_dir: workspace, log_text: logText, ...toolUseDiagnostics };
+  return { success: false, error: "managed agent stream ended without a result message", terminal_reason: "provider_error", work_dir: cwd, log_text: logText, cost_status: "unreconciled", cost_diagnostics: [{ code: "missing_terminal_model_usage" }], ...toolUseDiagnostics };
 }
 
 export function buildQueryOptions(
@@ -182,11 +219,12 @@ export function buildQueryOptions(
   controller = new AbortController(),
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
   const hooks: NonNullable<Options["hooks"]> = {
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
   };
   if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
-    hooks.Stop = [{ hooks: [createSeednoteStopGate(cwd, data.task_type)] }];
+    hooks.Stop = [{ hooks: [createSeednoteStopGate(cwd, data.task_type, pluginRoot)] }];
   }
   return {
     abortController: controller,
@@ -194,13 +232,16 @@ export function buildQueryOptions(
     maxTurns: data.max_turns,
     agent: data.agent_flag,
     resume: data.resume_session_id,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
+    permissionMode: "default",
+    allowedTools: MANAGED_ALLOWED_TOOLS,
     disallowedTools: ["Agent", "ScheduleWakeup", "AskUserQuestion"],
-    plugins: [{ type: "local", path: "/anbanai", skipMcpDiscovery: true }],
+    canUseTool: async (toolName) => ({ behavior: "deny", message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist` }),
+    plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
-    env: buildExecutionEnvironment(process.env, data, serverURL, token),
+    env: buildExecutionEnvironment(process.env, data, serverURL, token, workspace),
+    settings: data.auto_memory_directory ? { autoMemoryDirectory: data.auto_memory_directory } : undefined,
+    settingSources: ["user", "project"],
     includePartialMessages: false,
     stderr: (line) => void reporter.progress(line.trim()),
     hooks,
@@ -240,16 +281,19 @@ export function buildExecutionEnvironment(
   data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "execution_profile">,
   _serverURL: string,
   _token: string,
+  workspace = "/workspace",
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
   delete environment.ANBAN_API_KEY;
   delete environment.ANBAN_API_URL;
-  return {
+  const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
     ...data.execution_profile.envs,
   };
+  if (data.task_type === "montage") managed.ANBAN_MONTAGE_SUBMODULE_PATH = `${workspace}/openmontage`;
+  return managed;
 }
 
 export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills" | "tools">, taskType: string): void {
@@ -276,7 +320,7 @@ async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, log
       }
     }
   }
-  if (message.type === "user") await handleToolResults(message as unknown as { message: { content?: unknown } }, toolCalls, cwd, serverURL, token, signal);
+  if (message.type === "user") await handleToolResults(message as unknown as { message: { content?: unknown } }, toolCalls, toolUseDiagnostics, cwd, serverURL, token, signal);
   if (message.type === "result") {
     return { logText, terminal: terminalExecutionResult(message, cwd, logText, aliases, toolUseDiagnostics) };
   }
@@ -292,7 +336,7 @@ export function recordAssistantToolUses(content: ReadonlyArray<{ type: string; n
 }
 
 export function terminalExecutionResult(message: Extract<SDKMessage, { type: "result" }>, cwd: string, logText: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"], toolUseDiagnostics: ToolUseDiagnostics): ExecutionResult {
-  const error = message.subtype === "success" ? undefined : message.errors.join("\n");
+  const error = message.subtype === "success" ? undefined : message.errors.map(compactDiagnostic).filter(Boolean).join("; ") || undefined;
   const usage = terminalModelUsage(message.modelUsage ?? {}, aliases);
   return { success: message.subtype === "success", error, work_dir: cwd, session_id: message.session_id, result_subtype: message.subtype, num_turns: message.num_turns, duration_ms: message.duration_ms, duration_api_ms: message.duration_api_ms, log_text: logText, model_usage: usage.usage, cost_status: usage.cost_status, cost_diagnostics: usage.cost_diagnostics, ...toolUseDiagnostics };
 }
@@ -325,26 +369,61 @@ function isModelUsageTokens(value: unknown): value is Pick<ModelUsage, "inputTok
     .every((token) => Number.isSafeInteger(token) && (token as number) >= 0);
 }
 
-async function handleToolResults(message: { message: { content?: unknown } }, toolCalls: Map<string, TrackedToolCall>, cwd: string, serverURL: string, token: string, signal: AbortSignal): Promise<void> {
+async function handleToolResults(message: { message: { content?: unknown } }, toolCalls: Map<string, TrackedToolCall>, diagnostics: ToolUseDiagnostics, cwd: string, serverURL: string, token: string, signal: AbortSignal): Promise<void> {
   const content = message.message.content;
   if (!Array.isArray(content)) return;
   for (const block of content as Array<Record<string, unknown>>) {
     if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
     const call = toolCalls.get(block.tool_use_id);
     toolCalls.delete(block.tool_use_id);
-    if (!call || block.is_error) continue;
+    if (!call) continue;
+    if (block.is_error) {
+      diagnostics.tool_error_count = (diagnostics.tool_error_count ?? 0) + 1;
+      diagnostics.last_tool_error_tool = call.name;
+      diagnostics.last_tool_error = compactToolResult(block.content);
+      continue;
+    }
     if (toolBaseName(call.name) !== "generate_image") continue;
     const payloads = collectGeneratedImageDescriptors(block.content);
-    if (payloads.length !== 1) throw new Error(`runtime_artifact_materialization_failed: generate_image returned ${payloads.length} artifact descriptors, want exactly one`);
+    if (payloads.length !== 1) throw new RuntimeArtifactMaterializationError(`generate_image returned ${payloads.length} artifact descriptors, want exactly one`);
     const outputPath = typeof call.input.output_path === "string" ? call.input.output_path : "";
-    await materializeGeneratedImage(cwd, serverURL, token, outputPath, payloads[0], signal);
+    try {
+      await materializeGeneratedImage(cwd, serverURL, token, outputPath, payloads[0], signal);
+    } catch (error) {
+      throw new RuntimeArtifactMaterializationError(`materialize ${JSON.stringify(payloads[0].file_path)}: ${error instanceof Error ? error.message : "unknown error"}`, { cause: error });
+    }
   }
 }
 
-function createSeednoteStopGate(cwd: string, taskType: string) {
+function terminalFailureMessage(result: ExecutionResult, diagnostics: ToolUseDiagnostics): string {
+  const subtype = result.result_subtype ?? "unknown";
+  const turns = result.num_turns ?? 0;
+  const base = subtype === "error_max_turns"
+    ? `agent reached maximum turn budget (subtype=${subtype}, num_turns=${turns})`
+    : `agent execution failed (subtype=${subtype}, num_turns=${turns})`;
+  if (!diagnostics.last_tool_error) return base;
+  const tool = diagnostics.last_tool_error_tool ? ` (${diagnostics.last_tool_error_tool})` : "";
+  return `${base}; last tool failed${tool}: ${diagnostics.last_tool_error}`;
+}
+
+function compactDiagnostic(value: string): string {
+  const compact = value.trim().replace(/\s+/g, " ");
+  return compact.length > 2_000 ? `${compact.slice(0, 2_000)}...(truncated)` : compact;
+}
+
+function compactToolResult(value: unknown): string {
+  let text: string;
+  if (typeof value === "string") text = value;
+  else if (Array.isArray(value)) text = value.map((item) => typeof item === "string" ? item : typeof item?.text === "string" ? item.text : JSON.stringify(item)).join(" ");
+  else text = JSON.stringify(value);
+  const compact = (text ?? "").trim().replace(/\s+/g, " ");
+  return compact.length > 1_000 ? `${compact.slice(0, 1_000)}...(truncated)` : compact;
+}
+
+function createSeednoteStopGate(cwd: string, taskType: string, pluginRoot: string) {
   return async (_input: unknown, _toolUseID: string | undefined, hookOptions: { signal: AbortSignal }): Promise<HookJSONOutput> => {
     try {
-      const stdout = await runSeednoteGate(cwd, taskType, hookOptions.signal);
+      const stdout = await runSeednoteGate(cwd, taskType, pluginRoot, hookOptions.signal);
       if (!stdout.trim()) return {};
       return JSON.parse(stdout) as HookJSONOutput;
     } catch (error) {
@@ -357,9 +436,9 @@ export function seednoteGateInput(taskType: string) {
   return { agent_type: "anban:seednote", managed_main_session: true, task_type: taskType };
 }
 
-function runSeednoteGate(cwd: string, taskType: string, signal: AbortSignal): Promise<string> {
+function runSeednoteGate(cwd: string, taskType: string, pluginRoot: string, signal: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("/anbanai/hooks/seednote-quality-gate.sh", [], { cwd, signal, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(`${pluginRoot}/hooks/seednote-quality-gate.sh`, [], { cwd, signal, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (data: string) => { if (stdout.length <= 64 << 10) stdout += data; });

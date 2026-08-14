@@ -7,13 +7,12 @@ use tauri::{path::BaseDirectory, Manager};
 /// guide the user. See desktop/populate-resources.sh for how these are filled.
 #[derive(Clone, Debug, Default)]
 pub struct Resources {
-    /// `anban` sidecar binary (built via `make agent-build-native`).
-    pub agent_bin: Option<PathBuf>,
-    /// Bundled Node runtime executable (used by claude-agent-sdk-go to spawn
-    /// the `claude` CLI).
+    /// Compiled TypeScript Agent entrypoint executed by the bundled Node runtime.
+    pub agent_entry: Option<PathBuf>,
+    /// Bundled Node runtime executable used by the TypeScript Agent SDK.
     pub node_bin: Option<PathBuf>,
-    /// Bundled `@anthropic-ai/claude-code` package root / CLI entry.
-    pub claude_cli: Option<PathBuf>,
+    /// Bundled Claude Agent SDK package (which carries its Claude Code runtime).
+    pub claude_sdk: Option<PathBuf>,
     /// Bundled unified Anban plugin root, pointed at via CLAUDE_PLUGIN_ROOT.
     pub plugin_dir: Option<PathBuf>,
     /// Bundled ffmpeg binary (for live-slicer / video work).
@@ -24,9 +23,9 @@ pub struct Resources {
 /// debug) — provisioning surfaces a friendly status rather than crashing.
 pub fn resolve(app: &tauri::AppHandle) -> Resources {
     Resources {
-        agent_bin: resolve_one(app, "resources/bin/anban"),
+        agent_entry: resolve_one(app, "resources/agent/dist/main.js"),
         node_bin: resolve_one(app, "resources/bin/node"),
-        claude_cli: resolve_one(app, "resources/claude"),
+        claude_sdk: resolve_one(app, "resources/agent/node_modules/@anthropic-ai/claude-agent-sdk"),
         plugin_dir: resolve_one(app, "resources/anban"),
         ffmpeg: resolve_one(app, "resources/bin/ffmpeg"),
     }

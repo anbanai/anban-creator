@@ -91,6 +91,17 @@ function runJobHarness() {
 }
 
 describe("runJob finalization", () => {
+  test("reports a trusted pre-run workspace failure before exiting", async () => {
+    const harness = runJobHarness();
+    let completed: ExecutionResult | undefined;
+    harness.dependencies.materializeBootstrapFiles = async () => { throw new Error("workspace rejected"); };
+    harness.complete = async (result) => { completed = result; };
+
+    await expect(runJob(jobArgs, harness.stdout, harness.stderr, harness.dependencies)).rejects.toThrow("workspace rejected");
+    expect(harness.completeCalls).toBe(1);
+    expect(completed).toMatchObject({ success: false, terminal_reason: "platform_error", error: "workspace rejected" });
+  });
+
   test("gives completion a fresh budget after artifact timeout", async () => {
     process.env.ANBAN_JOB_ARTIFACT_TIMEOUT = "10ms";
     process.env.ANBAN_JOB_COMPLETION_TIMEOUT = "100ms";

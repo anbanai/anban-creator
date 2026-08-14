@@ -28,11 +28,13 @@ func repositoryRoot(t *testing.T) string {
 func TestReleaseBuildsAgentRunnerAssets(t *testing.T) {
 	body := readRepoFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "release.yml"))
 	for _, want := range []string{
-		"-o bin/anban-linux-amd64 ./agent",
-		"-o bin/anban-linux-arm64 ./agent",
-		"-o bin/anban-darwin-amd64 ./agent",
-		"-o bin/anban-darwin-arm64 ./agent",
-		"-o bin/anban-windows-amd64.exe ./agent",
+		"node-version: \"22\"",
+		"npm ci",
+		"npm run typecheck",
+		"npm run test",
+		"npm run build",
+		"anban-agent-runtime-${{ steps.version.outputs.VERSION }}.tar.gz",
+		"-C agent-ts package.json package-lock.json dist",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("release workflow missing %q", want)

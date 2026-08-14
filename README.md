@@ -90,6 +90,9 @@ cd studio && bun run test
 # Frontend production build
 cd studio && bun run build
 
+# TypeScript Agent runtime
+cd agent-ts && npm ci && bun run test && bun run typecheck && bun run build
+
 # Format and vet Go code
 make fmt
 make vet
@@ -225,8 +228,8 @@ drops legacy execution columns and cannot be rolled back by enabling old IDs;
 rollback means restoring the maintenance-window backup. Afterward, publish
 catalog `retail-2026-07-30-v7`, mount the new profile config and Secrets, start
 the Server, and verify `/api/v1/agent/execution-profiles` exposes only the three
-new IDs with the expected availability. Then deploy Studio, Miniapp, Go Agent,
-and TypeScript Agent images, verify Free/Pro/Enterprise creation, retry,
+new IDs with the expected availability. Then deploy Studio, Miniapp, and the
+TypeScript Agent images, verify Free/Pro/Enterprise creation, retry,
 billing detail, and total charge flows, and only then resume schedulers,
 consumers, and user traffic.
 
@@ -236,7 +239,7 @@ Users can configure per-account platform credentials and per-user model settings
 
 ```text
 server/       Go API server, MCP tools, scheduling, task execution, storage, publishing
-agent/        Standalone agent runner used by Docker/local execution
+agent-ts/     TypeScript Agent runtime used by Docker/Kubernetes and Desktop local execution
 app/          Shared Go packages for config, converter, writer, humanizer, image, WeChat draft helpers
 studio/       React Web Studio
 desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)

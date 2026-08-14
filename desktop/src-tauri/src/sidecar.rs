@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 /// inherits plus the cancellation token shared with the executor loop.
 pub struct SidecarEnv {
     /// Path to the bundled Node executable (its parent dir is prepended to PATH
-    /// so claude-agent-sdk-go can spawn the `claude` CLI).
+    /// so the TypeScript Agent and its SDK use the bundled runtime).
     pub node_bin: PathBuf,
     /// Bundled unified Anban plugin root → CLAUDE_PLUGIN_ROOT.
     pub plugin_dir: PathBuf,
@@ -50,7 +50,7 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
     );
 }
 
-/// Spawn the bundled `anban` for a claimed task and stream its output
+/// Spawn the bundled TypeScript Agent for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
 /// progress + results back to the cloud itself (using --api-key/--server-url,
 /// which the SDK surfaces as ANBAN_API_KEY/ANBAN_API_URL); we only observe.
@@ -60,10 +60,10 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
 /// background. Without this, the loop would block on `child.wait()` until the
 /// task finished on its own.
 ///
-/// Argv + env mirror `server/agent/docker_executor.go::buildAgentCommand`.
+/// Argv mirrors the Server's local claim contract.
 pub async fn run_agent(
     app: &AppHandle,
-    agent_bin: &Path,
+    agent_entry: &Path,
     env: &SidecarEnv,
     workspace_root: &Path,
     server_url: &str,
@@ -73,7 +73,8 @@ pub async fn run_agent(
     let task_workspace = workspace_root.join(&cfg.task_id);
     std::fs::create_dir_all(&task_workspace)?;
 
-    let mut cmd = Command::new(agent_bin);
+    let mut cmd = Command::new(&env.node_bin);
+    cmd.arg(agent_entry);
     for arg in agent_args(server_url, api_key, &task_workspace, cfg) {
         cmd.arg(arg);
     }
@@ -197,7 +198,7 @@ fn agent_args(
             args.push(model.clone());
         }
     }
-    // Bool flags mirror the Go flag defaults and server/agent/docker_executor.go.
+    // Bool flags mirror the Server local-claim defaults.
     args.extend([
         format!("--has-content-image={}", cfg.has_content_image),
         format!("--has-tail-image={}", cfg.has_tail_image),

@@ -151,14 +151,25 @@ describe("buildQueryOptions", () => {
     expect(runner.buildQueryOptions({ ...data, runtime_adapter: "openmontage" }, "/workspace").cwd).toBe("/workspace/openmontage");
   });
 
-  test("keeps unrestricted access within the managed session policy", () => {
+  test("loads project settings, auto memory, and the writable Montage root", () => {
+    const data = { ...validBootstrap(), task_type: "montage", runtime_adapter: "openmontage", auto_memory_directory: ".claude/memory" };
+    const options = runner.buildQueryOptions(data, "/tasks/task-1");
+    expect(options.settingSources).toEqual(["user", "project"]);
+    expect(options.settings).toEqual({ autoMemoryDirectory: ".claude/memory" });
+    expect(options.env?.ANBAN_MONTAGE_SUBMODULE_PATH).toBe("/tasks/task-1/openmontage");
+  });
+
+  test("keeps the managed tool allowlist fail-closed", async () => {
     const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
 
-    expect(options.permissionMode).toBe("bypassPermissions");
-    expect(options.allowDangerouslySkipPermissions).toBe(true);
-    expect(options).not.toHaveProperty("allowedTools");
+    expect(options.permissionMode).toBe("default");
+    expect(options.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(options.allowedTools).toEqual(expect.arrayContaining(["Read", "Write", "Bash", "WebFetch", "mcp__anban__*"]));
     expect(options.disallowedTools).toEqual(["Agent", "ScheduleWakeup", "AskUserQuestion"]);
-    expect(options).not.toHaveProperty("canUseTool");
+    expect(await options.canUseTool?.("UnknownTool", {}, { signal: new AbortController().signal, toolUseID: "tool-1", requestId: "request-1" })).toEqual({
+      behavior: "deny",
+      message: 'tool "UnknownTool" is outside the managed Agent SDK allowlist',
+    });
   });
 
   test("enforces the MCP boundary and Seednote stop gate for both Seednote task types", async () => {

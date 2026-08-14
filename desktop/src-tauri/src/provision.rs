@@ -58,9 +58,9 @@ pub fn status_with_runtime(
     running: bool,
     runtime: &RuntimeSnapshot,
 ) -> ProvisionStatus {
-    let agent_present = res.agent_bin.is_some();
+    let agent_present = res.agent_entry.is_some();
     let node_present = res.node_bin.is_some();
-    let claude_present = res.claude_cli.is_some();
+    let claude_present = res.claude_sdk.is_some();
     let plugin_present = res.plugin_dir.is_some();
     let ffmpeg_present = res.ffmpeg.is_some();
     let claude_authenticated = !cfg.claude_api_key.is_empty();
@@ -106,7 +106,7 @@ pub fn status_with_runtime(
     } else if !workspace_writable {
         "本地工作区不可写，请选择有写入权限的目录".to_string()
     } else if !agent_present {
-        "缺少内置 anban 二进制（请运行 populate-resources.sh）".to_string()
+        "缺少内置 TypeScript Agent（请运行 populate-resources.sh）".to_string()
     } else if !node_present || !claude_present {
         "缺少内置 Node / claude-code 运行时（请运行 populate-resources.sh）".to_string()
     } else if !plugin_present {
@@ -265,9 +265,9 @@ mod tests {
 
     fn ready_resources() -> Resources {
         Resources {
-            agent_bin: Some(PathBuf::from("/bundle/anban")),
+            agent_entry: Some(PathBuf::from("/bundle/agent/dist/main.js")),
             node_bin: Some(PathBuf::from("/bundle/node")),
-            claude_cli: Some(PathBuf::from("/bundle/claude")),
+            claude_sdk: Some(PathBuf::from("/bundle/agent/node_modules/@anthropic-ai/claude-agent-sdk")),
             plugin_dir: Some(PathBuf::from("/bundle/anban")),
             ffmpeg: Some(PathBuf::from("/bundle/ffmpeg")),
         }

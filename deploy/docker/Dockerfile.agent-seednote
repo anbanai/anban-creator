@@ -1,72 +1,37 @@
-FROM golang:alpine AS builder
+FROM node:bookworm-slim AS builder
 
-WORKDIR /src
-
-COPY go.mod go.sum ./
-COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/anban ./agent
+WORKDIR /app/anban-agent
+COPY agent-ts/package.json agent-ts/package-lock.json ./
+RUN npm ci
+COPY agent-ts/ ./
+RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
 
 FROM node:bookworm-slim
 
 USER root
-
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git jq tini; \
     getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
     getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban; \
     rm -rf /var/lib/apt/lists/*
 
-# Upgrade Claude Code and the Go Agent SDK together after an execution smoke test.
-ARG CLAUDE_CODE_VERSION=2.1.208
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
-    claude --version && \
-    npm cache clean --force && \
-    rm -rf /root/.npm
-
-COPY --from=builder /out/anban /usr/local/bin/anban
+COPY --from=builder /app/anban-agent/node_modules /app/anban-agent/node_modules
+COPY --from=builder /app/anban-agent/dist /app/anban-agent/dist
 COPY plugins/ /anbanai/
-
+COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
 RUN set -eux; \
-    if [ -n "$(find /anbanai -type l -print -quit)" ]; then \
-      echo >&2 "/anbanai must not contain symlinks"; \
-      exit 1; \
-    fi; \
-    chown -R root:root /anbanai; \
-    chmod -R a=rX /anbanai
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \
+    chown -R root:root /anbanai /app/anban-agent; \
+    chmod -R a=rX /anbanai /app/anban-agent; \
+    chmod 0755 /usr/local/bin/anban
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai
-ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template
 ENV HOME=/home/node
 
 USER 1000:1000
-RUN git config --global http.version HTTP/1.1
-RUN claude plugin marketplace add /anbanai && \
-    claude plugin install --scope user anban@anbanai
-
-USER root
-RUN set -eux; \
-    install -d -m 0700 "$ANBAN_HOME_TEMPLATE/.claude/skills" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache"; \
-    for file in known_marketplaces.json installed_plugins.json; do \
-      test -f "$HOME/.claude/plugins/$file"; \
-      cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"; \
-    done; \
-    test -d "$HOME/.claude/plugins/cache/anbanai"; \
-    cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"; \
-    if [ -n "$(find "$ANBAN_HOME_TEMPLATE" -type l -print -quit)" ]; then \
-      echo >&2 "home template must not contain symlinks"; \
-      exit 1; \
-    fi; \
-    chown -R root:root "$ANBAN_HOME_TEMPLATE"; \
-    chmod -R a=rX "$ANBAN_HOME_TEMPLATE"; \
-    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban
-
-USER 1000:1000
 WORKDIR /workspace
-
 ENTRYPOINT ["tini", "--", "anban"]
 CMD ["job"]

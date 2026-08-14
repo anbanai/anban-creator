@@ -167,8 +167,8 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
 			"COPY plugins/ /anbanai/",
-			"claude plugin install --scope user anban@anbanai",
-			`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
+			"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
+			"@anthropic-ai/claude-agent-sdk",
 		} {
 			if !strings.Contains(dockerfile, want) {
 				t.Fatalf("%s missing Humanizer injection boundary %q", name, want)

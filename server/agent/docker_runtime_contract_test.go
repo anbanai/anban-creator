@@ -317,12 +317,12 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	for _, want := range []string{
 		"FROM node:bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
-		"ARG CLAUDE_CODE_VERSION=2.1.208",
-		`npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"`,
-		"claude --version",
+		"COPY agent-ts/package.json agent-ts/package-lock.json ./",
+		"npm prune --omit=dev",
+		"@anthropic-ai/claude-agent-sdk",
 		"COPY plugins/",
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
-		"claude plugin install --scope user anban@anbanai",
+		"COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban",
 	} {
 		for _, runtime := range []struct {
 			path string
@@ -351,8 +351,8 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
-			"ARG CLAUDE_CODE_VERSION=2.1.208",
-			"COPY --from=builder /out/anban",
+			"COPY --from=builder /app/anban-agent/node_modules",
+			"COPY --from=builder /app/anban-agent/dist",
 			"COPY plugins/",
 			"ENTRYPOINT",
 		} {
@@ -363,12 +363,12 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 	}
 }
 
-func TestGoDockerfilesStageLocalSDKModuleBeforeDependencyDownload(t *testing.T) {
+func TestServerDockerfileStagesLocalGoSDKModuleBeforeDependencyDownload(t *testing.T) {
 	root := repositoryRoot(t)
 	const sdkModuleCopy = "COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod"
 	const dependencyDownload = "RUN go mod download"
 
-	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage", "deploy/docker/Dockerfile.server"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.server"} {
 		t.Run(name, func(t *testing.T) {
 			body := readTextFile(t, filepath.Join(root, name))
 			copyIndex := strings.Index(body, sdkModuleCopy)
@@ -499,7 +499,7 @@ func TestSeednoteRuntimeUsesContentPATHWithoutExternalRouter(t *testing.T) {
 	if got := containerRuntimePath(model.PlatformSeednote); got != ContainerContentRuntimePath {
 		t.Fatalf("seednote runtime PATH = %q, want %q", got, ContainerContentRuntimePath)
 	}
-	for _, name := range []string{"Dockerfile.agent-seednote", "Dockerfile.agent-seednote-ts"} {
+	for _, name := range []string{"Dockerfile.agent-seednote"} {
 		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, forbidden := range []string{"Agent-Reach", "AGENT_REACH", "python3", "pip", "venv", "mcporter"} {
 			if strings.Contains(body, forbidden) {
@@ -541,10 +541,9 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 			}
 		}
 		homeAt := strings.Index(body, "ENV HOME=/home/node")
-		userAt := strings.Index(body, "USER 1000:1000")
-		installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
-		if homeAt < 0 || userAt < homeAt || installAt < userAt {
-			t.Fatalf("%s HOME/numeric USER/install order is invalid: HOME=%d USER=%d install=%d", path, homeAt, userAt, installAt)
+		userAt := strings.LastIndex(body, "USER 1000:1000")
+		if homeAt < 0 || userAt < homeAt {
+			t.Fatalf("%s HOME/numeric USER order is invalid: HOME=%d USER=%d", path, homeAt, userAt)
 		}
 	}
 }
@@ -563,35 +562,26 @@ func TestDockerRuntimeAgentSourceUsesFixedOneShotIdentity(t *testing.T) {
 	}
 }
 
-func TestDockerRuntimeAgentImageSnapshotsInstalledHomeState(t *testing.T) {
+func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
-			"ENV ANBAN_HOME_TEMPLATE=/opt/anban-home-template",
-			`for file in known_marketplaces.json installed_plugins.json; do`,
-			`cp -a "$HOME/.claude/plugins/$file" "$ANBAN_HOME_TEMPLATE/.claude/plugins/$file"`,
-			`test -d "$HOME/.claude/plugins/cache/anbanai"`,
-			`cp -a "$HOME/.claude/plugins/cache/anbanai" "$ANBAN_HOME_TEMPLATE/.claude/plugins/cache/anbanai"`,
-			`find "$ANBAN_HOME_TEMPLATE" -type l -print -quit`,
-			`chown -R root:root "$ANBAN_HOME_TEMPLATE"`,
-			`chmod -R a=rX "$ANBAN_HOME_TEMPLATE"`,
+			"COPY plugins/ /anbanai/",
+			"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
+			`find /anbanai -type l -print -quit`,
+			`chown -R root:root /anbanai /app/anban-agent`,
+			`chmod -R a=rX /anbanai /app/anban-agent`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing immutable home-template contract %q", path, want)
 			}
 		}
-		installAt := strings.Index(body, "claude plugin install --scope user anban@anbanai")
-		snapshotAt := strings.Index(body, `for file in known_marketplaces.json installed_plugins.json; do`)
-		if installAt < 0 || snapshotAt < installAt {
-			t.Fatalf("%s home snapshot must occur after plugin installation: install=%d snapshot=%d", path, installAt, snapshotAt)
-		}
 		for _, forbidden := range []string{
-			`for entry in .claude .agents .claude.json; do`,
-			`cp -a "/home/node/.claude"`,
-			`cp -a "/home/node/.agents"`,
-			`cp -a "/home/node/.claude.json"`,
+			"ANBAN_HOME_TEMPLATE",
+			"claude plugin install",
+			"@anthropic-ai/claude-code",
 		} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s must not broadly snapshot user home via %q", path, forbidden)
@@ -648,10 +638,10 @@ func TestAgentDockerfilesAreCentralized(t *testing.T) {
 			t.Fatalf("deploy/docker/%s must exist: %v", name, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "agent", "Dockerfile")); err == nil {
-		t.Fatal("agent/Dockerfile must not exist; use deploy/docker Agent Dockerfiles")
+	if _, err := os.Stat(filepath.Join(root, "agent")); err == nil {
+		t.Fatal("legacy agent directory must not exist; use agent-ts and deploy/docker Agent Dockerfiles")
 	} else if !os.IsNotExist(err) {
-		t.Fatalf("stat agent/Dockerfile: %v", err)
+		t.Fatalf("stat legacy agent directory: %v", err)
 	}
 }
 
@@ -687,15 +677,15 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}{
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
-			want: []string{"FROM golang:alpine AS builder", "FROM node:bookworm-slim"},
+			want: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
-			want: []string{"FROM golang:alpine AS builder", "FROM node:bookworm-slim"},
+			want: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			want: []string{"FROM golang:alpine AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+			want: []string{"FROM node:bookworm-slim AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
@@ -741,11 +731,8 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	got := trackedDockerfiles(t, root)
 	want := []string{
 		"deploy/docker/Dockerfile.agent-article",
-		"deploy/docker/Dockerfile.agent-article-ts",
 		"deploy/docker/Dockerfile.agent-montage",
-		"deploy/docker/Dockerfile.agent-montage-ts",
 		"deploy/docker/Dockerfile.agent-seednote",
-		"deploy/docker/Dockerfile.agent-seednote-ts",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -892,12 +879,8 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
 		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",
-		"TS_AGENT_IMAGE ?= creator-agent-article-ts:latest",
-		"TS_SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote-ts:latest",
-		"TS_MONTAGE_AGENT_IMAGE ?= creator-agent-montage-ts:latest",
-		"docker-agent-ts-image:",
-		"docker-seednote-agent-ts-image:",
-		"docker-montage-agent-ts-image:",
+		"agent-test:",
+		"agent-build:",
 		"docker-seednote-agent-image:",
 		"docker-montage-agent-image:",
 		"docker-sidecar-ilink-image:",
@@ -907,9 +890,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
-		"docker build -f deploy/docker/Dockerfile.agent-article-ts -t $(TS_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-seednote-ts -t $(TS_SEEDNOTE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-montage-ts -t $(TS_MONTAGE_AGENT_IMAGE) .",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
