@@ -21,6 +21,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&SeednoteMetricSnapshot{},
 		&WechatArticleTracking{},
 		&WechatMetricSnapshot{},
+		&ChannelsVideoTracking{},
+		&ChannelsMetricSnapshot{},
 		&Template{},
 		&ViralAnalysis{},
 		&PosterTask{},

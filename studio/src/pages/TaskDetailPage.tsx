@@ -23,6 +23,7 @@ import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
+import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -1006,6 +1007,10 @@ export default function TaskDetailPage() {
 
       {task.type === 'article' && task.status === 'completed' && (
         <WechatAnalyticsPanel taskId={task.id} />
+      )}
+
+      {task.type === 'montage' && task.status === 'completed' && (
+        <ChannelsAnalyticsPanel taskId={task.id} />
       )}
 
       <TaskContextSummary

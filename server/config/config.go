@@ -44,6 +44,7 @@ type Config struct {
 	Email              EmailConfig                     `yaml:"email"`
 	Invitation         InvitationConfig                `yaml:"invitation"`
 	Seednote           SeednoteConfig                  `yaml:"seednote"`
+	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Memory             MemoryConfig                    `yaml:"memory"`
 }
@@ -78,6 +79,14 @@ func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceC
 type SeednoteConfig struct {
 	BaseURL string `yaml:"base_url"` // default "http://localhost:18060"
 	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
+}
+
+// WorldtreeConfig holds the server-only credentials for the third-party
+// WeChat Channels data API. The key is never exposed to agents or Studio.
+type WorldtreeConfig struct {
+	BaseURL string `yaml:"base_url"`
+	Key     string `yaml:"key"`
+	Timeout int    `yaml:"timeout"`
 }
 
 // IlinkConfig holds the ilink WeChat assistant channel configuration. The iLink
@@ -934,6 +943,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"email":           true,
 		"invitation":      true,
 		"seednote":        true,
+		"worldtree":       true,
 		"ilink":           true,
 		"memory":          true,
 	}
@@ -1093,6 +1103,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Seednote.Timeout == 0 {
 		c.Seednote.Timeout = 30
+	}
+	if c.Worldtree.BaseURL == "" {
+		c.Worldtree.BaseURL = "https://www.worldtreetech.cn"
+	}
+	if c.Worldtree.Timeout == 0 {
+		c.Worldtree.Timeout = 30
 	}
 
 	// ilink WeChat assistant channel defaults.

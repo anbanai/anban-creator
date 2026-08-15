@@ -26,6 +26,8 @@ type Repository interface {
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	WechatTrackings() WechatTrackingRepository
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
+	ChannelsTrackings() ChannelsTrackingRepository
+	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
 	Templates() TemplateRepository
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
@@ -300,6 +302,22 @@ type WechatMetricSnapshotRepository interface {
 	DeleteByTrackingID(ctx context.Context, trackingID string) error
 }
 
+type ChannelsTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.ChannelsVideoTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.ChannelsVideoTracking, error)
+	FindByID(ctx context.Context, id string) (*model.ChannelsVideoTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.ChannelsVideoTracking, error)
+	TryClaimCapture(ctx context.Context, id, token string, now, until time.Time) (bool, error)
+	ReleaseCaptureClaim(ctx context.Context, id, token string) error
+	Update(ctx context.Context, tracking *model.ChannelsVideoTracking) error
+}
+
+type ChannelsMetricSnapshotRepository interface {
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.ChannelsMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.ChannelsMetricSnapshot, error)
+	DeleteByTrackingID(ctx context.Context, trackingID string) error
+}
+
 // TopicPoolRepository provides access to the topic_pool table.
 type TopicPoolRepository interface {
 	Create(ctx context.Context, topic *model.TopicPool) error
@@ -341,6 +359,8 @@ type repository struct {
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	wechatTrackings         WechatTrackingRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
+	channelsTrackings       ChannelsTrackingRepository
+	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
@@ -368,6 +388,8 @@ func New(db *gorm.DB) Repository {
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
 	wechatTrackings := newWechatTrackingRepository(db)
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
+	channelsTrackings := newChannelsTrackingRepository(db)
+	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
@@ -394,6 +416,8 @@ func New(db *gorm.DB) Repository {
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
 		wechatTrackings:         wechatTrackings,
 		wechatMetricSnapshots:   wechatMetricSnapshots,
+		channelsTrackings:       channelsTrackings,
+		channelsMetricSnapshots: channelsMetricSnapshots,
 		templates:               templates,
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
@@ -423,6 +447,10 @@ func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository 
 func (r *repository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
 func (r *repository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
+}
+func (r *repository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
+func (r *repository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
+	return r.channelsMetricSnapshots
 }
 func (r *repository) Templates() TemplateRepository           { return r.templates }
 func (r *repository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
@@ -478,6 +506,8 @@ type txRepository struct {
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	wechatTrackings         WechatTrackingRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
+	channelsTrackings       ChannelsTrackingRepository
+	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
@@ -506,6 +536,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
 		wechatTrackings:         newWechatTrackingRepository(tx),
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
+		channelsTrackings:       newChannelsTrackingRepository(tx),
+		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
@@ -535,6 +567,10 @@ func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepositor
 func (r *txRepository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
 func (r *txRepository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
+}
+func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
+func (r *txRepository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
+	return r.channelsMetricSnapshots
 }
 func (r *txRepository) Templates() TemplateRepository           { return r.templates }
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }

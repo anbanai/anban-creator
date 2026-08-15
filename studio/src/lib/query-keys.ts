@@ -23,6 +23,7 @@ export const queryKeys = {
     detail: (id: string) => ['task', id] as const,
     files: (id: string) => ['task-files', id] as const,
     seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
+    channelsAnalytics: (id: string) => ['task', id, 'channels-analytics'] as const,
   },
   timeline: {
     range: (from: string, to: string, filters?: Record<string, string>) =>

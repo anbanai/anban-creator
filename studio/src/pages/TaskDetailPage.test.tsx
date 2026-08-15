@@ -125,6 +125,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.wechatAnalytics,
         getByTask: vi.fn(),
       },
+      channelsAnalytics: {
+        ...actual.api.channelsAnalytics,
+        getByTask: vi.fn(),
+      },
     },
   }
 })
@@ -263,6 +267,7 @@ describe('TaskDetailPage', () => {
     })
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
     vi.mocked(api.wechatAnalytics.getByTask).mockResolvedValue({ series: [] })
+    vi.mocked(api.channelsAnalytics.getByTask).mockResolvedValue({ series: [] })
     uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
       uploadId: `upload-${file.name}`,
       key: `uploads/pending/user-1/upload-${file.name}/${file.name}`,
@@ -1161,6 +1166,20 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findByText('公众号文章数据')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '公众号文章链接' })).toBeInTheDocument()
+  })
+
+  it('shows Channels link binding for a completed montage task', async () => {
+    mockTask(taskWith({
+      type: 'montage',
+      status: 'completed',
+      result: null,
+    }))
+    vi.mocked(api.channelsAnalytics.getByTask).mockResolvedValue({ series: [] })
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('视频号数据')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '视频号视频链接' })).toBeInTheDocument()
   })
 
   it('keeps completed delivery controls available without a runtime balance lock', async () => {
