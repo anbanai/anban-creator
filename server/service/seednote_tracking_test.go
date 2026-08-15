@@ -141,6 +141,28 @@ func TestSeednoteTrackingService_BindCapturesFirstSnapshotImmediately(t *testing
 	}
 }
 
+func TestSeednoteTrackingService_BindSucceedsWhenDelayedEnqueueFails(t *testing.T) {
+	svc, repo, enqueuer := setupSeednoteTrackingServiceTest(t)
+	userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := svc.platform.(*fakeSeednotePlatform)
+	platformFake.metrics = platform.SeednotePostMetrics{LikeCount: 12}
+	enqueuer.err = errors.New("queue temporarily unavailable")
+
+	if err := svc.BindTask(context.Background(), userID, taskID, SeednotePublicationIdentity{NoteID: "note-1"}); err != nil {
+		t.Fatal(err)
+	}
+	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Latest == nil || analytics.Latest.LikeCount != 12 {
+		t.Fatalf("latest metrics = %+v", analytics.Latest)
+	}
+	if analytics.Tracking == nil || analytics.Tracking.NextRunAt == nil || analytics.Tracking.LastError == "" {
+		t.Fatalf("tracking = %+v", analytics.Tracking)
+	}
+}
+
 func TestBindTaskUsesDeterministicIdentity(t *testing.T) {
 	tests := []struct {
 		name, noteID, noteURL, wantID, wantURL, wantStatus string
@@ -339,8 +361,8 @@ func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueue
 		t.Fatalf("create tracking: %v", err)
 	}
 
-	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err == nil {
-		t.Fatal("expected enqueue failure")
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("CaptureMetrics: %v", err)
 	}
 	afterFailure, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
