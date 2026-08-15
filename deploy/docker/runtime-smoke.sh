@@ -471,18 +471,13 @@ runtime_smoke_main() {
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
   ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
   SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
-  OPENMONTAGE_BASE_IMAGE=creator-openmontage-runtime:latest
   MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
   ARTICLE_DOCKERFILE=Dockerfile.agent-article
   SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
-  OPENMONTAGE_DOCKERFILE=Dockerfile.runtime-openmontage
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
   docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$OPENMONTAGE_DOCKERFILE" -t "$OPENMONTAGE_BASE_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" \
-    --build-arg OPENMONTAGE_RUNTIME_IMAGE="$OPENMONTAGE_BASE_IMAGE" \
-    -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 
   SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anban-runtime-smoke.XXXXXX")"
   COMPOSE_PROJECT="anban-runtime-smoke-$(date +%s)-$$"

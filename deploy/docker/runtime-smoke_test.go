@@ -604,8 +604,7 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 	required := []string{
 		"set -euo pipefail",
 		"docker compose", "up -d", "creator-agent-article:latest",
-		"creator-agent-seednote:latest", "creator-openmontage-runtime:latest", "creator-agent-montage:latest",
-		"Dockerfile.runtime-openmontage", `--build-arg OPENMONTAGE_RUNTIME_IMAGE="$OPENMONTAGE_BASE_IMAGE"`,
+		"creator-agent-seednote:latest", "creator-agent-montage:latest", "Dockerfile.agent-montage",
 		"/api/v1/auth/register", "/api/admin/billing/topups", "/api/v1/projects", "/api/v1/tasks",
 		"/resume", "runtime_workload", "runtime_image", "/workspace/output/runtime-smoke.txt",
 		"docker volume inspect", "docker container inspect",
@@ -626,7 +625,8 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 	for _, forbidden := range []string{
 		"DOCKER_" + "CLI", "Docker-" + "compatible", "ANBAN_RUNTIME_SMOKE_" + "SKIP_IMAGE_BUILD",
 		"create output/", `find /workspace -path "*/output/runtime-smoke.txt"`,
-		"third_party/OpenMontage", "git submodule update",
+		"third_party/OpenMontage", "git submodule update", "creator-openmontage-runtime",
+		"Dockerfile.runtime-openmontage", "OPENMONTAGE_RUNTIME_IMAGE",
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("runtime-smoke.sh contains unsupported portability contract %q", forbidden)

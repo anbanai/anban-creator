@@ -335,8 +335,8 @@ func TestMontageRuntimeSourceIsNotAParentSubmodule(t *testing.T) {
 	if strings.Contains(gitmodules, "third_party/OpenMontage") {
 		t.Fatal(".gitmodules retains third_party/OpenMontage submodule")
 	}
-	runtime := readRepoFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage"))
-	if !strings.Contains(runtime, "https://github.com/calesthio/OpenMontage.git") {
-		t.Fatal("runtime Dockerfile missing OpenMontage upstream URL")
+	dockerfile := readRepoFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"))
+	if !strings.Contains(dockerfile, "https://github.com/calesthio/OpenMontage.git") {
+		t.Fatal("Montage Dockerfile missing OpenMontage upstream URL")
 	}
 }

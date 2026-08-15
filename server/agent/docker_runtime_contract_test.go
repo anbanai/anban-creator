@@ -388,9 +388,11 @@ func TestServerDockerfileStagesLocalGoSDKModuleBeforeDependencyDownload(t *testi
 
 func TestMontageRuntimeImageContract(t *testing.T) {
 	root := repositoryRoot(t)
-	runtimePath := filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage")
-	runtime := readTextFile(t, runtimePath)
+	path := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
+	body := readTextFile(t, path)
 	for _, want := range []string{
+		"FROM node:bookworm-slim AS builder",
+		"FROM ghcr.io/openhands/agent-server:latest-python",
 		"ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git",
 		"ARG OPENMONTAGE_REF=4eab34c5cfcccaa4f1970554928feccce73ee930",
 		"git fetch --depth 1 origin \"$OPENMONTAGE_REF\"",
@@ -402,25 +404,13 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 		"load_pipeline",
 		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
 	} {
-		if !strings.Contains(runtime, want) {
-			t.Fatalf("%s missing %q", runtimePath, want)
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing %q", path, want)
 		}
 	}
-
-	agentPath := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
-	agent := readTextFile(t, agentPath)
-	for _, want := range []string{
-		"ARG OPENMONTAGE_RUNTIME_IMAGE=creator-openmontage-runtime:latest",
-		"FROM ${OPENMONTAGE_RUNTIME_IMAGE}",
-		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
-	} {
-		if !strings.Contains(agent, want) {
-			t.Fatalf("%s missing %q", agentPath, want)
-		}
-	}
-	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "git submodule", "OPENMONTAGE_REPO", "OPENMONTAGE_REF"} {
-		if strings.Contains(agent, forbidden) {
-			t.Fatalf("%s retains source-build dependency %q", agentPath, forbidden)
+	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "git submodule", "OPENMONTAGE_RUNTIME_IMAGE", "creator-openmontage-runtime"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("%s retains obsolete runtime dependency %q", path, forbidden)
 		}
 	}
 }
@@ -701,11 +691,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			want: []string{"FROM node:bookworm-slim AS builder", "FROM ${OPENMONTAGE_RUNTIME_IMAGE}"},
-		},
-		{
-			path: filepath.Join(root, "deploy/docker/Dockerfile.runtime-openmontage"),
-			want: []string{"FROM ghcr.io/openhands/agent-server:latest-python"},
+			want: []string{"FROM node:bookworm-slim AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
@@ -753,7 +739,6 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-article",
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-seednote",
-		"deploy/docker/Dockerfile.runtime-openmontage",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -897,7 +882,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"OPENMONTAGE_RUNTIME_IMAGE ?= creator-openmontage-runtime:latest",
 		"OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git",
 		"OPENMONTAGE_SOURCE_REF ?= 4eab34c5cfcccaa4f1970554928feccce73ee930",
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
@@ -906,17 +890,16 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"agent-test:",
 		"agent-build:",
 		"docker-seednote-agent-image:",
-		"docker-openmontage-runtime-image:",
 		"docker-montage-agent-image:",
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-openmontage-runtime-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.runtime-openmontage",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
-		"--build-arg OPENMONTAGE_RUNTIME_IMAGE=\"$(OPENMONTAGE_RUNTIME_IMAGE)\"",
+		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
+		"--build-arg OPENMONTAGE_REF=\"$(OPENMONTAGE_SOURCE_REF)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
@@ -929,6 +912,11 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	} {
 		if !strings.Contains(makefile, want) {
 			t.Fatalf("Makefile missing centralized Docker build contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{"OPENMONTAGE_RUNTIME_IMAGE", "docker-openmontage-runtime-image", "Dockerfile.runtime-openmontage"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Fatalf("Makefile retains obsolete Montage build dependency %q", forbidden)
 		}
 	}
 }
