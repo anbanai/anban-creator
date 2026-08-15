@@ -37,6 +37,7 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/anbanai/anban-creator/server/wcf"
+	"github.com/anbanai/anban-creator/server/worldtree"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -196,6 +197,8 @@ func main() {
 		HealthCheck: seednoteClient.HealthCheck,
 	}, log)
 	log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client configured")
+	worldtreeClient := worldtree.NewClient(cfg.Worldtree.BaseURL, cfg.Worldtree.Key, time.Duration(cfg.Worldtree.Timeout)*time.Second)
+	log.Info().Str("base_url", cfg.Worldtree.BaseURL).Bool("configured", worldtreeClient.Configured()).Msg("WorldTree Channels analytics client configured")
 
 	// 9.2 Create the iLink transport client. The iLink sidecar is the underlying
 	// HTTP transport, while ilink is the platform channel name.
@@ -328,6 +331,7 @@ func main() {
 	var publishingSvc *service.PublishingService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var wechatTrackingSvc *service.WechatTrackingService
+	var channelsTrackingSvc *service.ChannelsTrackingService
 	var templateSvc *service.TemplateService
 	var viralAnalysisHistorySvc *service.ViralAnalysisHistoryService
 	var posterSvc *service.PosterService
@@ -429,8 +433,10 @@ func main() {
 	if repo != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
 		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log), asynqClient, log)
+		channelsTrackingSvc = service.NewChannelsTrackingService(repo, worldtreeClient, asynqClient, log)
 		log.Info().Msg("SeedNote tracking service initialized")
 		log.Info().Msg("WeChat article tracking service initialized")
+		log.Info().Msg("WeChat Channels tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisHistorySvc = service.NewViralAnalysisHistoryService(repo)
 			log.Info().Msg("Viral analysis history service initialized")
@@ -472,6 +478,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
+	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
 	agentPackHandler := handler.NewAgentPackHandler()
@@ -507,6 +514,7 @@ func main() {
 		}
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
+		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
@@ -679,7 +687,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, wechatTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -691,7 +699,7 @@ func main() {
 	if asynqClient != nil {
 		analyticsRecoveryCtx, analyticsRecoveryCancel := context.WithCancel(context.Background())
 		defer analyticsRecoveryCancel()
-		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, log)
+		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, log)
 	}
 	var runtimeReconcilerDone <-chan struct{}
 	if runtimeReconciler != nil {
@@ -751,6 +759,7 @@ func main() {
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		WechatAnalyticsHandler:   wechatAnalyticsHandler,
+		ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		AgentProfileHandler:      agentProfileHandler,
 		AgentPackHandler:         agentPackHandler,
@@ -1060,7 +1069,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1073,6 +1082,12 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			return wechatTrackingSvc.CaptureMetrics(ctx, trackingID)
 		}
 	}
+	var channelsCaptureHandler scheduler.ChannelsTrackingHandler
+	if channelsTrackingSvc != nil {
+		channelsCaptureHandler = func(ctx context.Context, trackingID string) error {
+			return channelsTrackingSvc.CaptureMetrics(ctx, trackingID)
+		}
+	}
 
 	srv := scheduler.NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error {
@@ -1083,6 +1098,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		},
 		seednoteCaptureHandler,
 		wechatCaptureHandler,
+		channelsCaptureHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
@@ -1104,9 +1120,9 @@ type analyticsRecoveryService interface {
 	RecoverDue(ctx context.Context, limit int) error
 }
 
-func startAnalyticsRecovery(ctx context.Context, seednote, wechat analyticsRecoveryService, log *zerolog.Logger) {
+func startAnalyticsRecovery(ctx context.Context, seednote, wechat, channels analyticsRecoveryService, log *zerolog.Logger) {
 	run := func() {
-		for name, tracker := range map[string]analyticsRecoveryService{"seednote": seednote, "wechat": wechat} {
+		for name, tracker := range map[string]analyticsRecoveryService{"seednote": seednote, "wechat": wechat, "channels": channels} {
 			if tracker == nil {
 				continue
 			}

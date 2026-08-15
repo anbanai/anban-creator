@@ -79,6 +79,15 @@ export type {
   WechatTrackingStatus,
 } from './wechat-analytics'
 
+export type {
+  ChannelsAnalytics,
+  ChannelsMetricDelta,
+  ChannelsMetricInfo,
+  ChannelsMetricSeriesItem,
+  ChannelsTrackingInfo,
+  ChannelsTrackingStatus,
+} from './channels-analytics'
+
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'
 

@@ -397,6 +397,13 @@ seednote:
   base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://sidecar-seednote:18060}"
   timeout: 30
 
+# 视频号公开视频数据由世界树科技第三方 API 提供，并非微信官方接口。
+# 密钥仅由 Server 使用，不会下发给 Agent 或 Studio。
+worldtree:
+  base_url: "${ANBAN_WORLDTREE_BASE_URL:-https://www.worldtreetech.cn}"
+  key: "${ANBAN_WORLDTREE_API_KEY:-}"
+  timeout: 30
+
 ilink:
   enabled: ${ANBAN_ILINK_ENABLED:-true}
   base_url: "${ANBAN_ILINK_BASE_URL:-http://sidecar-ilink:18070}"

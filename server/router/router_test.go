@@ -65,12 +65,14 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planSvc := service.NewPlanService(repo, &logger)
 		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
+		channelsTrackingSvc := service.NewChannelsTrackingService(repo, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		seednoteAnalyticsHandler := handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, &logger)
+		channelsAnalyticsHandler := handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
 		svcs = &Services{
@@ -86,6 +88,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			PlanHandler:              planHandler,
 			TaskHandler:              taskHandler,
 			SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
+			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
 		}
 	} else {
@@ -146,6 +149,7 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 		{"GET", "/api/v1/plans"},
 		{"POST", "/api/v1/tasks"},
 		{"GET", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/seednote-analytics"},
+		{"GET", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/channels-analytics"},
 		{"GET", "/api/v1/timeline?from=2025-01-01&to=2025-12-31"},
 		{"GET", "/api/v1/credits/balance"},
 		{"GET", "/api/v1/credits/sign-in/status"},
