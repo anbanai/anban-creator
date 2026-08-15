@@ -86,6 +86,35 @@ func TestWechatTrackingService_BindCapturesFirstSnapshotImmediately(t *testing.T
 	}
 }
 
+func TestWechatTrackingService_BindSucceedsWhenDelayedEnqueueFails(t *testing.T) {
+	svc, repo, provider := setupWechatTrackingServiceTest(t)
+	userID, taskID := createWechatTrackingFixtures(t, repo)
+	now := time.Now()
+	provider.article = &platform.WechatPublishedArticle{
+		ArticleID: "article-1", ArticleURL: "https://mp.weixin.qq.com/s/article-1", ArticleTitle: "首次采集", PublishedAt: now,
+	}
+	provider.totals = []platform.WechatArticleTotal{{
+		MsgID: "article-1", Title: "首次采集",
+		Details: []platform.WechatArticleMetric{{StatDate: now.In(wechatAnalyticsLocation).Format("2006-01-02"), IntPageReadCount: 88}},
+	}}
+	enqueuer := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
+	svc.enqueuer = enqueuer
+
+	if err := svc.BindTask(context.Background(), userID, taskID, "https://mp.weixin.qq.com/s/article-1"); err != nil {
+		t.Fatal(err)
+	}
+	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Latest == nil || analytics.Latest.IntPageReadCount != 88 {
+		t.Fatalf("latest metrics = %+v", analytics.Latest)
+	}
+	if analytics.Tracking == nil || analytics.Tracking.NextRunAt == nil {
+		t.Fatalf("tracking = %+v", analytics.Tracking)
+	}
+}
+
 func TestWechatTrackingService_BindImmediatelyRecordsWaitingWhenOfficialDataIsNotReady(t *testing.T) {
 	svc, repo, provider := setupWechatTrackingServiceTest(t)
 	userID, taskID := createWechatTrackingFixtures(t, repo)

@@ -254,7 +254,10 @@ func (s *WechatTrackingService) scheduleNext(ctx context.Context, tracking *mode
 	if err := s.repo.WechatTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update tracking: %w", err)
 	}
-	return s.enqueueCapture(tracking.ID, 24*time.Hour)
+	if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
+		s.logEnqueueFailure(err, tracking.ID)
+	}
+	return nil
 }
 
 func (s *WechatTrackingService) recordFailure(ctx context.Context, tracking *model.WechatArticleTracking, cause error) error {
@@ -280,6 +283,12 @@ func (s *WechatTrackingService) enqueueCapture(trackingID string, delay time.Dur
 	}
 	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
 	return s.enqueuer.EnqueueIn(WechatCaptureMetricsTaskType, payload, delay)
+}
+
+func (s *WechatTrackingService) logEnqueueFailure(err error, trackingID string) {
+	if s.logger != nil {
+		s.logger.Warn().Err(err).Str("tracking_id", trackingID).Msg("enqueue WeChat analytics capture failed; database recovery will retry when due")
+	}
 }
 
 func (s *WechatTrackingService) RecoverDue(ctx context.Context, limit int) error {

@@ -239,7 +239,7 @@ func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID
 		if tracking.LastRunAt != nil && model.SeednoteCapturedDate(*tracking.LastRunAt) == snapshot.CapturedDate {
 			if tracking.LastError != "" && tracking.NextRunAt != nil {
 				if err := s.enqueueCapture(tracking.ID, delayUntil(*tracking.NextRunAt, now)); err != nil {
-					return s.recordEnqueueFailure(ctx, tracking, err)
+					return s.handleEnqueueFailure(ctx, tracking, err)
 				}
 				tracking.LastError = ""
 				if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
@@ -314,7 +314,7 @@ func (s *SeednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tr
 		return fmt.Errorf("update tracking after capture: %w", err)
 	}
 	if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
-		return s.recordEnqueueFailure(ctx, tracking, err)
+		return s.handleEnqueueFailure(ctx, tracking, err)
 	}
 	return nil
 }
@@ -479,17 +479,26 @@ func (s *SeednoteTrackingService) recordTrackingFailure(ctx context.Context, tra
 		return fmt.Errorf("update tracking failure: %w", err)
 	}
 	if tracking.Status == model.SeednoteTrackingStatusTracking {
-		return s.enqueueCapture(tracking.ID, 24*time.Hour)
+		if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
+			s.logSeednoteEnqueueFailure(err, tracking.ID)
+		}
 	}
 	return nil
 }
 
-func (s *SeednoteTrackingService) recordEnqueueFailure(ctx context.Context, tracking *model.SeednotePostTracking, cause error) error {
+func (s *SeednoteTrackingService) handleEnqueueFailure(ctx context.Context, tracking *model.SeednotePostTracking, cause error) error {
 	tracking.LastError = fmt.Sprintf("enqueue seednote capture: %s", cause.Error())
 	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("record enqueue failure: %w", err)
 	}
-	return cause
+	s.logSeednoteEnqueueFailure(cause, tracking.ID)
+	return nil
+}
+
+func (s *SeednoteTrackingService) logSeednoteEnqueueFailure(err error, trackingID string) {
+	if s.logger != nil {
+		s.logger.Warn().Err(err).Str("tracking_id", trackingID).Msg("enqueue Seednote capture failed; database recovery will retry when due")
+	}
 }
 
 func (s *SeednoteTrackingService) enqueueCapture(trackingID string, delay time.Duration) error {
