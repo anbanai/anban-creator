@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -410,6 +411,177 @@ func TestGenerateDSHRemovesStalePresetEntriesAndOnlyPresetRoot(t *testing.T) {
 	}
 }
 
+func TestGenerateDSHRejectsSymlinkedOutputComponents(t *testing.T) {
+	tests := []struct {
+		name      string
+		linkPath  func(string) string
+		external  func(string) string
+		wantClean func(string) string
+	}{
+		{
+			name:      "dsh",
+			linkPath:  func(out string) string { return filepath.Join(out, "dsh") },
+			external:  func(temp string) string { return filepath.Join(temp, "external-dsh") },
+			wantClean: func(external string) string { return filepath.Join(external, "presets") },
+		},
+		{
+			name:      "presets",
+			linkPath:  func(out string) string { return filepath.Join(out, "dsh", "presets") },
+			external:  func(temp string) string { return filepath.Join(temp, "external-presets") },
+			wantClean: func(external string) string { return filepath.Join(external, "demo") },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, validDSHFixtureManifest())
+			temp := t.TempDir()
+			out := filepath.Join(temp, "generated")
+			external := tt.external(temp)
+			if err := os.MkdirAll(external, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(external, "marker.txt")
+			if err := os.WriteFile(marker, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(tt.linkPath(out)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, tt.linkPath(out)); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := Generate(root, out); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("Generate error = %v, want symlink rejection", err)
+			}
+			assertFileContent(t, marker, "keep\n")
+			if _, err := os.Lstat(tt.wantClean(external)); !os.IsNotExist(err) {
+				t.Fatalf("external output was modified: %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateDSHAtomicallyReplacesDriftedFiles(t *testing.T) {
+	t.Run("read-only file", func(t *testing.T) {
+		root := writePackFixture(t, validDSHFixtureManifest())
+		out := filepath.Join(t.TempDir(), "generated")
+		if _, err := Generate(root, out); err != nil {
+			t.Fatalf("Generate initial: %v", err)
+		}
+		target := filepath.Join(out, "dsh", "presets", "demo", "agent.cordis.yml")
+		if err := os.WriteFile(target, []byte("drift\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(target, 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if result, err := Generate(root, out); err != nil || !result.Changed {
+			t.Fatalf("Generate replacement = %#v, %v", result, err)
+		}
+		assertFileContent(t, target, validDSHComposition)
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o644 {
+			t.Fatalf("replacement mode = %o, want 644", info.Mode().Perm())
+		}
+	})
+
+	t.Run("hard link", func(t *testing.T) {
+		root := writePackFixture(t, validDSHFixtureManifest())
+		out := filepath.Join(t.TempDir(), "generated")
+		if _, err := Generate(root, out); err != nil {
+			t.Fatalf("Generate initial: %v", err)
+		}
+		target := filepath.Join(out, "dsh", "presets", "demo", "agent.cordis.yml")
+		external := filepath.Join(t.TempDir(), "linked.yml")
+		if err := os.WriteFile(external, []byte("external drift\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(external, target); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Generate(root, out); err != nil {
+			t.Fatalf("Generate replacement: %v", err)
+		}
+		assertFileContent(t, target, validDSHComposition)
+		assertFileContent(t, external, "external drift\n")
+	})
+
+	t.Run("symlink", func(t *testing.T) {
+		root := writePackFixture(t, validDSHFixtureManifest())
+		out := filepath.Join(t.TempDir(), "generated")
+		if _, err := Generate(root, out); err != nil {
+			t.Fatalf("Generate initial: %v", err)
+		}
+		target := filepath.Join(out, "dsh", "presets", "demo", "agent.cordis.yml")
+		external := filepath.Join(t.TempDir(), "linked.yml")
+		if err := os.WriteFile(external, []byte("external\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(external, target); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Generate(root, out); err != nil {
+			t.Fatalf("Generate replacement: %v", err)
+		}
+		assertFileContent(t, target, validDSHComposition)
+		assertFileContent(t, external, "external\n")
+	})
+}
+
+func TestGenerateRejectsDSHSkillSymlinksAndNonRegularFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		create  func(t *testing.T, path string)
+		wantErr string
+	}{
+		{
+			name: "symlink",
+			create: func(t *testing.T, path string) {
+				t.Helper()
+				external := filepath.Join(t.TempDir(), "external.txt")
+				if err := os.WriteFile(external, []byte("external\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(external, path); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "symlink",
+		},
+		{
+			name: "named pipe",
+			create: func(t *testing.T, path string) {
+				t.Helper()
+				if err := syscall.Mkfifo(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "non-regular",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, validDSHFixtureManifest())
+			tt.create(t, filepath.Join(root, "skills", "demo-skill", "invalid"))
+			if _, err := Generate(root, filepath.Join(t.TempDir(), "generated")); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Generate error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadCatalogDigestIgnoresSkillGitMetadata(t *testing.T) {
 	root := writePackFixture(t, validFixtureManifest)
 	gitMetadata := filepath.Join(root, "skills", "demo-skill", ".git")
@@ -607,6 +779,33 @@ func TestCheckRepositoryDetectsDSHDrift(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "missing expected path",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(root, "dsh", "presets", "demo", "agent.cordis.yml")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "mode",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.Chmod(filepath.Join(root, "dsh", "presets", "demo", "preset.yml"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "unexpected empty directory",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(root, "dsh", "presets", "demo", "unexpected"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -622,6 +821,30 @@ func TestCheckRepositoryDetectsDSHDrift(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckRepositoryRejectsSymlinkedDSHDirectory(t *testing.T) {
+	root := writePackFixture(t, validDSHFixtureManifest())
+	catalogPath := filepath.Join(t.TempDir(), "catalog.generated.json")
+	if _, err := GenerateRepository(root, catalogPath); err != nil {
+		t.Fatalf("GenerateRepository: %v", err)
+	}
+	external := filepath.Join(t.TempDir(), "external-dsh")
+	if err := os.Rename(filepath.Join(root, "dsh"), external); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(external, "marker.txt")
+	if err := os.WriteFile(marker, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(root, "dsh")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CheckRepository(root, catalogPath); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("CheckRepository error = %v, want symlink rejection", err)
+	}
+	assertFileContent(t, marker, "keep\n")
 }
 
 func TestCheckRepositoryDetectsUnexpectedDSHRootWithoutSources(t *testing.T) {
