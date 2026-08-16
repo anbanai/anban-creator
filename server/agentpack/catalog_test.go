@@ -134,6 +134,8 @@ func TestLoadCatalogRejectsInvalidDSH(t *testing.T) {
 		{name: "mapping root", manifest: dshManifest, body: "persona:\n  name: '@deepseek-ai/dsh-persona'\n", want: "root must be a sequence"},
 		{name: "row without id", manifest: dshManifest, body: "- name: '@deepseek-ai/dsh-persona'\n", want: "id is required"},
 		{name: "row without name", manifest: dshManifest, body: "- id: persona\n", want: "name is required"},
+		{name: "duplicate id key", manifest: dshManifest, body: "- id: persona\n  id: persona-other\n  name: '@deepseek-ai/dsh-persona'\n", want: "duplicate id key"},
+		{name: "duplicate name key", manifest: dshManifest, body: "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n  name: '@deepseek-ai/dsh-persona-other'\n", want: "duplicate name key"},
 		{name: "duplicate row id", manifest: dshManifest, body: "- id: persona\n  name: first\n- id: persona\n  name: second\n", want: `duplicate id "persona"`},
 	}
 

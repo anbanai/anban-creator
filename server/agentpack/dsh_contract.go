@@ -39,6 +39,7 @@ func validateDSHAgentSource(path string, body []byte) error {
 			return fmt.Errorf("%s row %d must be a mapping", path, i+1)
 		}
 		id, name := "", ""
+		idSeen, nameSeen := false, false
 		for j := 0; j < len(row.Content); j += 2 {
 			key, value := row.Content[j], row.Content[j+1]
 			if key.Kind != yaml.ScalarNode {
@@ -46,10 +47,18 @@ func validateDSHAgentSource(path string, body []byte) error {
 			}
 			switch key.Value {
 			case "id":
+				if idSeen {
+					return fmt.Errorf("%s row %d has duplicate id key", path, i+1)
+				}
+				idSeen = true
 				if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
 					id = strings.TrimSpace(value.Value)
 				}
 			case "name":
+				if nameSeen {
+					return fmt.Errorf("%s row %d has duplicate name key", path, i+1)
+				}
+				nameSeen = true
 				if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
 					name = strings.TrimSpace(value.Value)
 				}
