@@ -1,7 +1,7 @@
 # DeepSeek Harness Article/Seednote Plugin Integration Design
 
 Date: 2026-08-16
-Status: Approved design, pending written-spec review
+Status: Revised design, pending written-spec approval
 
 ## 1. Context
 
@@ -62,8 +62,12 @@ plugins/dsh/presets/seednote/
         |              |          +--> official dsh-mcp-client
         |              |
         |              +--> host-plane Preset manager
+        |              |          |
+        |              |          +--> official ctx.commands
+        |              |
+        |              +--> agent-plane Skills provider export
         |                         |
-        |                         +--> official ctx.commands
+        |                         +--> official dsh-skill-filesystem
         |
         +--> anban-dsh CLI ------> shared Preset-management library
                                             |
@@ -82,22 +86,19 @@ plugins/
 │   ├── cordis.patch.yml                # Bundle patch
 │   ├── src/
 │   │   ├── anban-mcp.ts                # Credentials-to-official-MCP adapter
-│   │   └── preset-manager.ts           # Explicit DSH command registration
+│   │   ├── preset-manager.ts           # Explicit DSH command registration
+│   │   └── skills-provider.ts          # Bundle-owned official Skill adapter
 │   ├── lib/                             # Built JavaScript shipped in the Bundle
-│   ├── preset-support/
-│   │   └── skills-provider.mjs          # Preset-local official Skill adapter
 │   ├── bin/
 │   │   └── anban-dsh.js                 # Explicit install/remove/status commands
 │   └── presets/                         # Generated, never edited directly
 │       ├── article/
 │       │   ├── agent.cordis.yml
 │       │   ├── preset.yml
-│       │   ├── skills-provider.mjs
 │       │   └── skills/<declared skills>/
 │       └── seednote/
 │           ├── agent.cordis.yml
 │           ├── preset.yml
-│           ├── skills-provider.mjs
 │           └── skills/<declared skills>/
 ├── packs/
 │   ├── article/
@@ -152,7 +153,6 @@ No DSH configuration is inferred from Claude frontmatter or Codex TOML. Each hos
    - create `plugins/dsh/presets/<agent.name>/`;
    - copy the DSH source to `agent.cordis.yml`;
    - generate `preset.yml` from `display_name` and `description`;
-   - copy the shared `skills-provider.mjs` support module;
    - recursively copy only the Skill directories named by `agent.skills`.
 4. Remove stale generated DSH Preset entries that are no longer declared.
 5. Keep output ordering and file modes deterministic.
@@ -178,6 +178,21 @@ Each `agent.dsh.yml` is a native agent-plane composition. It uses official DSH p
 - Skill catalog and Skill loading;
 - ask-user and todo tools where the workflow needs them.
 
+Each composition also mounts the Bundle-owned Skill adapter by exported package
+subpath rather than by a relative Preset module:
+
+```yaml
+- id: anban-skills
+  name: '@anban/dsh-plugin/skills-provider'
+  config:
+    presetId: article
+    providerName: anban-article
+```
+
+`presetId` must equal the Pack agent name, and `providerName` must be unique for
+the mounted Preset. The Bundle must therefore be installed in every profile that
+uses an Anban Preset, which is already required for the Anban MCP tools.
+
 The Preset does not create another MCP connection. The Anban MCP client is a host-plane singleton contributed by the Bundle, so Article and Seednote sessions can coexist without violating the official MCP client's unique `serverName` requirement.
 
 The DSH persona is host-specific and includes only adapter guidance that cannot live in host-neutral Skills:
@@ -195,15 +210,25 @@ Business sequencing, retries, quality gates, artifact names, and stop/continue d
 
 DSH `customSkillDirs` values are resolved by the official provider against the process working directory, not the Preset directory. A published Preset therefore cannot safely use `./skills` directly.
 
-Each generated Preset includes a small relative plugin module named `skills-provider.mjs`. The `.mjs` suffix is required because an installed Preset lives outside the npm package and therefore has no enclosing `package.json` that declares `type: module`. DSH officially resolves relative plugin module paths from the Preset directory. That module:
+The Bundle exports `@anban/dsh-plugin/skills-provider`, implemented by
+`dsh/src/skills-provider.ts`. Keeping this adapter inside the npm package is
+required for reliable ESM dependency resolution: a module copied under
+`$DSH_HOME/.agent-presets/<id>/` would not find DSH's fallback dependencies in
+`$DSH_HOME/profiles/node_modules` through Node's normal parent-directory walk.
+The DSH loader's bare-module resolution guarantee applies to the composition
+row, so the Preset mounts the Bundle export by package subpath.
 
-1. resolves its sibling `skills/` directory through `import.meta.url`;
-2. delegates registration to `@deepseek-ai/dsh-skill-filesystem`;
-3. sets `includeDefaultRoots: false`;
-4. uses a unique provider name, `anban-article` or `anban-seednote`;
-5. enables the official watcher using the provider defaults.
+The adapter:
 
-The adapter does not parse Skills, implement discovery, or implement Skill tools. It only converts a Preset-relative asset location into the absolute path required by the official provider.
+1. validates `presetId` and `providerName` as bounded identifiers;
+2. resolves the absolute Skill root with
+   `dshHomePath('.agent-presets', presetId, 'skills')`;
+3. delegates registration to `@deepseek-ai/dsh-skill-filesystem`;
+4. sets `includeDefaultRoots: false`;
+5. passes the unique provider name, `anban-article` or `anban-seednote`;
+6. enables the official watcher using the provider defaults.
+
+The adapter does not parse Skills, implement discovery, or implement Skill tools. It only converts an installed Preset id into the absolute path required by the official provider. The official provider remains responsible for discovery, parsing, loading, watching, and disposal.
 
 Generated Skill copies preserve the complete directory, including `SKILL.md`, `references/`, `scripts/`, and assets. This keeps a copied DSH Preset self-contained while `plugins/skills/` remains the only editable source.
 
@@ -214,12 +239,12 @@ Generated Skill copies preserve the complete directory, including `SKILL.md`, `r
 - package name `@anban/dsh-plugin`;
 - ESM package type;
 - exact, pinned DSH/cordis peer dependency versions validated by this repository;
-- the built Host plugin entry points;
+- the built Host plugin entry points and the `./skills-provider` package export;
 - a `dsh.bundle.patch` pointing to `./dsh/cordis.patch.yml`;
 - an `anban-dsh` executable;
 - a strict `files` allowlist.
 
-The Bundle patch inserts two host-plane rows: the Anban MCP adapter and a Preset manager that registers explicit user commands through the official `ctx.commands` registry. It does not replace DSH's `agent-presets` service, default Preset, credentials provider, tool registry, model adapters, filesystem service, or Web/Desktop surface rows.
+The Bundle patch inserts two host-plane rows: the Anban MCP adapter and a Preset manager that registers explicit user commands through the official `ctx.commands` registry. The Skills provider is not inserted at the Host layer; each generated Preset mounts the exported package subpath with its own Preset id and provider name. The Bundle does not replace DSH's `agent-presets` service, default Preset, credentials provider, tool registry, model adapters, filesystem service, or Web/Desktop surface rows.
 
 Current DSH Bundle manifests do not expose a field for shipping additional Agent Preset roots, and the CLI launcher injects its own shipped root after profile/user patches. The integration therefore uses an explicit installer rather than replacing the official roster service or writing user files during DSH startup.
 
@@ -314,7 +339,9 @@ User selects Article or Seednote Preset
         v
 DSH mounts the generated agent.cordis.yml
         |
-        +--> local skills-provider.mjs
+        +--> @anban/dsh-plugin/skills-provider
+        |        |
+        |        +--> dshHomePath(.agent-presets/<id>/skills)
         |        |
         |        +--> official skill-filesystem --> generated skills/
         |
@@ -369,7 +396,7 @@ The Agent follows its Pack workflow using the capabilities that are actually pre
 
 - parse optional `dsh_source` with strict YAML known-field handling;
 - reject absolute paths, traversal, missing files, and malformed DSH list shape;
-- generate `agent.cordis.yml`, `preset.yml`, support module, and exact Skill trees;
+- generate `agent.cordis.yml`, `preset.yml`, and exact Skill trees;
 - skip DSH output for Packs without `dsh_source`;
 - remove stale generated DSH files;
 - detect all DSH drift categories in `CheckRepository`;
@@ -385,7 +412,8 @@ The Agent follows its Pack workflow using the capabilities that are actually pre
 - unrelated credential updates do nothing;
 - matching updates serialize disposal and remount;
 - logs and thrown errors do not contain fake secret values;
-- `skills-provider.mjs` resolves its sibling directory independently of process cwd and loads as ESM outside the npm package root;
+- the `./skills-provider` package export validates ids, resolves the installed Skill root independently of process cwd through `dshHomePath`, and delegates exactly once to the official provider;
+- a disposable profile resolves `@anban/dsh-plugin/skills-provider` from an installed Preset while the provider's own DSH peer imports resolve from the Bundle/profile installation;
 - installer handles fresh install, identical no-op, drift refusal, force replacement, safe removal, path validation, and interrupted atomic copy;
 - CLI and command entry points produce identical install/status/remove behavior.
 
@@ -396,7 +424,7 @@ Against the pinned DSH release:
 - install the local Bundle into a disposable Web profile;
 - run `dsh --profile <profile> --dump-config` and confirm the Anban Bundle layer and one Host MCP row;
 - install Presets into a temporary `DSH_HOME` and confirm official roster discovery lists `article` and `seednote` as healthy;
-- mount each Preset and confirm only its declared Anban Skills are discoverable through its provider;
+- mount each Preset through the installed Bundle export and confirm only its declared Anban Skills are discoverable through its provider;
 - confirm both Presets can coexist across sessions while only one `creator` MCP client exists;
 - check out DSH Desktop commit `4f68147091e585aaa1d815f99d30a657b3842d7c`, install the Bundle through its active-profile plugin mechanism, run `/anban-presets-install`, and repeat the configuration and Preset mount smoke without using Desktop-private services or a system Node.js installation.
 
@@ -426,7 +454,7 @@ The milestone is complete when all of the following are true:
 
 1. `@anban/dsh-plugin` installs as an official DSH Bundle into a clean profile.
 2. `article` and `seednote` install into the official user Preset root and appear as healthy selectable Presets.
-3. Each Preset loads its generated Persona, official tools, and exactly the Skills declared by its Pack.
+3. Each Preset loads its generated Persona, official tools, and exactly the Skills declared by its Pack through the installed Bundle's `./skills-provider` export.
 4. A configured `ANBAN_API_KEY` produces one live `creator` MCP connection and `mcp__creator__*` tools.
 5. Live smoke calls to `list_projects` and `get_project_profile` succeed with a user-supplied development key.
 6. Missing, invalid, and updated credentials follow the specified lifecycle without exposing secret material or preventing DSH boot.
