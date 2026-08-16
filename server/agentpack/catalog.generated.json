@@ -84,7 +84,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "2521d9e90628c95b30629c256a3ad6657cd41b02771d5ef2c0bdc47864ad26da"
+      "digest": "71e0f33f1dffe0902f920f7230c57770406e81382342ce4e620f094b0c2d7472"
     },
     {
       "id": "ecommerce",
@@ -484,7 +484,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "368dae5703c408d5d36a86b8bab23a9df6273f6ac764d64f320bdfcf46b4c836"
+      "digest": "df921b57c4400e0bc49247eb55ea33373c392413b8e49a92c9b589cc60f9ef6e"
     }
   ]
 }
