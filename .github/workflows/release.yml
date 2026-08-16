@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -35,12 +37,23 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
       - name: Run tests
         run: go test -v ./...
 
       - name: Set version
         id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          mkdir -p bin
+
+      - name: Pack DSH plugin
+        working-directory: plugins
+        run: pnpm install --frozen-lockfile && pnpm pack --pack-destination ../bin
 
       - name: Build server binaries and Agent package
         run: |
@@ -82,6 +95,7 @@ jobs:
             bin/anban-creator-server-darwin-arm64
             bin/anban-creator-server-windows-amd64.exe
             bin/anban-agent-runtime-*.tar.gz
+            bin/anban-dsh-plugin-*.tgz
             bin/version.txt
             bin/checksums.txt
           draft: false
