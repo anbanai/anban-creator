@@ -126,6 +126,19 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 	if err := validateNativeAgentSources(manifest); err != nil {
 		return err
 	}
+	if manifest.Agent.DSHSource != "" {
+		path, err := securePackFile(manifest.dir, manifest.Agent.DSHSource)
+		if err != nil {
+			return fmt.Errorf("invalid DSH Agent source %q: %w", manifest.Agent.DSHSource, err)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read DSH Agent source %q: %w", manifest.Agent.DSHSource, err)
+		}
+		if err := validateDSHAgentSource(path, body); err != nil {
+			return fmt.Errorf("DSH Agent source %q: %w", manifest.Agent.DSHSource, err)
+		}
+	}
 	for _, skill := range manifest.Agent.Skills {
 		if !kebabIDPattern.MatchString(skill) {
 			return fmt.Errorf("Skill %q must use kebab-case", skill)
@@ -258,7 +271,7 @@ func securePackFile(packDir, relative string) (string, error) {
 func digestManifest(pluginRoot string, manifest Manifest, manifestData []byte) (string, error) {
 	hash := sha256.New()
 	_, _ = hash.Write(manifestData)
-	paths := []string{manifest.Agent.ClaudeSource, manifest.Agent.CodexSource, manifest.SchemaFiles.ProjectConfig, manifest.SchemaFiles.TaskInput, manifest.SchemaFiles.UI, manifest.SchemaFiles.Output}
+	paths := []string{manifest.Agent.ClaudeSource, manifest.Agent.CodexSource, manifest.Agent.DSHSource, manifest.SchemaFiles.ProjectConfig, manifest.SchemaFiles.TaskInput, manifest.SchemaFiles.UI, manifest.SchemaFiles.Output}
 	for _, relative := range paths {
 		if relative == "" {
 			continue

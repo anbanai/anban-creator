@@ -93,6 +93,89 @@ func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogAllowsOptionalDSHSource(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest string
+	}{
+		{name: "omitted", manifest: validFixtureManifest},
+		{
+			name:     "valid composition",
+			manifest: strings.Replace(validFixtureManifest, "  skills: [demo-skill]", "  dsh_source: agent.dsh.yml\n  skills: [demo-skill]", 1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, tt.manifest)
+			catalog, err := LoadCatalog(root)
+			if err != nil {
+				t.Fatalf("LoadCatalog: %v", err)
+			}
+			_, ok := catalog.Pack("demo-pack")
+			if !ok {
+				t.Fatal("demo-pack missing")
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsInvalidDSH(t *testing.T) {
+	dshManifest := strings.Replace(validFixtureManifest, "  skills: [demo-skill]", "  dsh_source: agent.dsh.yml\n  skills: [demo-skill]", 1)
+	tests := []struct {
+		name     string
+		manifest string
+		body     string
+		want     string
+	}{
+		{name: "absolute path", manifest: strings.Replace(dshManifest, "agent.dsh.yml", "/tmp/agent.dsh.yml", 1), want: "path must be relative"},
+		{name: "traversal path", manifest: strings.Replace(dshManifest, "agent.dsh.yml", "../agent.dsh.yml", 1), want: "path escapes Pack directory"},
+		{name: "missing file", manifest: strings.Replace(dshManifest, "agent.dsh.yml", "missing.dsh.yml", 1), want: "no such file"},
+		{name: "mapping root", manifest: dshManifest, body: "persona:\n  name: '@deepseek-ai/dsh-persona'\n", want: "root must be a sequence"},
+		{name: "row without id", manifest: dshManifest, body: "- name: '@deepseek-ai/dsh-persona'\n", want: "id is required"},
+		{name: "row without name", manifest: dshManifest, body: "- id: persona\n", want: "name is required"},
+		{name: "duplicate row id", manifest: dshManifest, body: "- id: persona\n  name: first\n- id: persona\n  name: second\n", want: `duplicate id "persona"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, tt.manifest)
+			if tt.body != "" {
+				path := filepath.Join(root, "packs", "demo-pack", "agent.dsh.yml")
+				if err := os.WriteFile(path, []byte(tt.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := LoadCatalog(root)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogDSHSourceAffectsDigest(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "  skills: [demo-skill]", "  dsh_source: agent.dsh.yml\n  skills: [demo-skill]", 1)
+	root := writePackFixture(t, manifest)
+	first, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog first: %v", err)
+	}
+
+	path := filepath.Join(root, "packs", "demo-pack", "agent.dsh.yml")
+	changed := strings.Replace(validDSHComposition, "text: Demo", "text: Changed", 1)
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog second: %v", err)
+	}
+	if first.Packs[0].Digest == second.Packs[0].Digest {
+		t.Fatalf("Pack digest did not change after DSH source changed: %s", first.Packs[0].Digest)
+	}
+}
+
 func TestLoadCatalogRejectsDuplicateTaskTypeBindings(t *testing.T) {
 	root := writePackFixture(t, validFixtureManifest)
 	packDir := filepath.Join(root, "packs", "other-pack")
@@ -551,6 +634,16 @@ artifacts:
     required: true
 `
 
+const validDSHComposition = `
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: Demo
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+`
+
 func writePackFixture(t *testing.T, manifest string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -575,6 +668,9 @@ func writePackFixture(t *testing.T, manifest string) string {
   }
 }`,
 		filepath.Join(root, "skills", "demo-skill", "SKILL.md"): "---\nname: demo-skill\n---\n",
+	}
+	if strings.Contains(manifest, "dsh_source: agent.dsh.yml") {
+		files[filepath.Join(packDir, "agent.dsh.yml")] = validDSHComposition
 	}
 	for path, content := range files {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

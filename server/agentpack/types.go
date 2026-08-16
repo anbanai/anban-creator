@@ -36,6 +36,7 @@ type AgentSpec struct {
 	Name         string   `yaml:"name" json:"name"`
 	ClaudeSource string   `yaml:"claude_source" json:"-"`
 	CodexSource  string   `yaml:"codex_source" json:"-"`
+	DSHSource    string   `yaml:"dsh_source" json:"-"`
 	Skills       []string `yaml:"skills" json:"skills,omitempty"`
 	MaxTurns     int      `yaml:"max_turns" json:"max_turns,omitempty"`
 }
