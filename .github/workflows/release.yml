@@ -51,9 +51,27 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           mkdir -p bin
 
+      - name: Validate DSH package version
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          package_version=$(node -p "require('./plugins/package.json').version")
+          test "$TAG_VERSION" = "$package_version"
+
       - name: Pack DSH plugin
         working-directory: plugins
         run: pnpm install --frozen-lockfile && pnpm pack --pack-destination ../bin
+
+      - name: Verify DSH package tarball
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          expected_tarball="bin/anban-dsh-plugin-${TAG_VERSION}.tgz"
+          test -f "$expected_tarball"
+          tarball_count=$(find bin -maxdepth 1 -type f -name 'anban-dsh-plugin-*.tgz' | wc -l | tr -d ' ')
+          test "$tarball_count" = "1"
 
       - name: Build server binaries and Agent package
         run: |
