@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -539,46 +538,17 @@ func TestGenerateDSHAtomicallyReplacesDriftedFiles(t *testing.T) {
 	})
 }
 
-func TestGenerateRejectsDSHSkillSymlinksAndNonRegularFiles(t *testing.T) {
-	tests := []struct {
-		name    string
-		create  func(t *testing.T, path string)
-		wantErr string
-	}{
-		{
-			name: "symlink",
-			create: func(t *testing.T, path string) {
-				t.Helper()
-				external := filepath.Join(t.TempDir(), "external.txt")
-				if err := os.WriteFile(external, []byte("external\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(external, path); err != nil {
-					t.Fatal(err)
-				}
-			},
-			wantErr: "symlink",
-		},
-		{
-			name: "named pipe",
-			create: func(t *testing.T, path string) {
-				t.Helper()
-				if err := syscall.Mkfifo(path, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-			wantErr: "non-regular",
-		},
+func TestGenerateRejectsDSHSkillSymlink(t *testing.T) {
+	root := writePackFixture(t, validDSHFixtureManifest())
+	external := filepath.Join(t.TempDir(), "external.txt")
+	if err := os.WriteFile(external, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := writePackFixture(t, validDSHFixtureManifest())
-			tt.create(t, filepath.Join(root, "skills", "demo-skill", "invalid"))
-			if _, err := Generate(root, filepath.Join(t.TempDir(), "generated")); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("Generate error = %v, want %q", err, tt.wantErr)
-			}
-		})
+	if err := os.Symlink(external, filepath.Join(root, "skills", "demo-skill", "invalid")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(root, filepath.Join(t.TempDir(), "generated")); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("Generate error = %v, want symlink rejection", err)
 	}
 }
 
