@@ -280,6 +280,136 @@ func TestGenerateProducesDeterministicNativeAgentsAndCatalog(t *testing.T) {
 	}
 }
 
+func TestGenerateProducesDeterministicDSHPreset(t *testing.T) {
+	root := writePackFixture(t, validDSHFixtureManifest())
+	scriptDir := filepath.Join(root, "skills", "demo-skill", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "run.sh"), []byte("#!/bin/sh\necho demo\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(root, "skills", "demo-skill", ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nestedDir := filepath.Join(root, "skills", "demo-skill", "references", "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, ".git"), []byte("gitdir: /tmp/ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "generated")
+	first, err := Generate(root, out)
+	if err != nil {
+		t.Fatalf("Generate first: %v", err)
+	}
+	second, err := Generate(root, out)
+	if err != nil {
+		t.Fatalf("Generate second: %v", err)
+	}
+	if !first.Changed || second.Changed {
+		t.Fatalf("DSH generation changes: first=%#v second=%#v", first, second)
+	}
+
+	presetRoot := filepath.Join(out, "dsh", "presets", "demo")
+	assertFileContent(t, filepath.Join(presetRoot, "agent.cordis.yml"), validDSHComposition)
+	assertFileContent(t, filepath.Join(presetRoot, "preset.yml"), "name: Demo Pack\ndescription: Demo managed workflow\n")
+	assertFileContent(t, filepath.Join(presetRoot, "skills", "demo-skill", "SKILL.md"), "---\nname: demo-skill\n---\n")
+	scriptPath := filepath.Join(presetRoot, "skills", "demo-skill", "scripts", "run.sh")
+	assertFileContent(t, scriptPath, "#!/bin/sh\necho demo\n")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("generated script mode = %o, want 755", info.Mode().Perm())
+	}
+	for _, path := range []string{
+		filepath.Join(presetRoot, "skills", "demo-skill", ".git"),
+		filepath.Join(presetRoot, "skills", "demo-skill", "references", "nested", ".git"),
+	} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("generated .git metadata %s: %v", path, err)
+		}
+	}
+}
+
+func TestGenerateWithoutDSHSourceCreatesNoPreset(t *testing.T) {
+	root := writePackFixture(t, validFixtureManifest)
+	out := filepath.Join(t.TempDir(), "generated")
+	if _, err := Generate(root, out); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(out, "dsh", "presets")); !os.IsNotExist(err) {
+		t.Fatalf("DSH Preset root exists without dsh_source: %v", err)
+	}
+}
+
+func TestGenerateDSHRemovesStalePresetEntriesAndOnlyPresetRoot(t *testing.T) {
+	root := writePackFixture(t, validDSHFixtureManifest())
+	out := filepath.Join(t.TempDir(), "generated")
+	if _, err := Generate(root, out); err != nil {
+		t.Fatalf("Generate initial: %v", err)
+	}
+	presetsRoot := filepath.Join(out, "dsh", "presets")
+	stalePaths := []string{
+		filepath.Join(presetsRoot, "demo", "stale.txt"),
+		filepath.Join(presetsRoot, "removed", "nested", "stale.txt"),
+	}
+	for _, path := range stalePaths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Generate(root, out); err != nil {
+		t.Fatalf("Generate cleanup: %v", err)
+	}
+	for _, path := range stalePaths {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("stale path remains %s: %v", path, err)
+		}
+	}
+
+	for _, path := range []string{
+		filepath.Join(out, "dsh", "src", "index.ts"),
+		filepath.Join(out, "dsh", "bin", "anban-dsh.js"),
+		filepath.Join(out, "dsh", "cordis.patch.yml"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("keep\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifestPath := filepath.Join(root, "packs", "demo-pack", "agent-pack.yaml")
+	if err := os.WriteFile(manifestPath, []byte(validFixtureManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(root, out); err != nil {
+		t.Fatalf("Generate without DSH: %v", err)
+	}
+	if _, err := os.Lstat(presetsRoot); !os.IsNotExist(err) {
+		t.Fatalf("DSH Preset root remains: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(out, "dsh", "src", "index.ts"),
+		filepath.Join(out, "dsh", "bin", "anban-dsh.js"),
+		filepath.Join(out, "dsh", "cordis.patch.yml"),
+	} {
+		assertFileContent(t, path, "keep\n")
+	}
+}
+
 func TestLoadCatalogDigestIgnoresSkillGitMetadata(t *testing.T) {
 	root := writePackFixture(t, validFixtureManifest)
 	gitMetadata := filepath.Join(root, "skills", "demo-skill", ".git")
@@ -424,6 +554,87 @@ func TestCheckRepositoryDetectsRuntimeCatalogDrift(t *testing.T) {
 	}
 	if err := CheckRepository(root, catalogPath); err == nil || !strings.Contains(err.Error(), runtimeCatalog) {
 		t.Fatalf("CheckRepository error = %v, want runtime Catalog drift", err)
+	}
+}
+
+func TestCheckRepositoryDetectsDSHDrift(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, root string)
+	}{
+		{
+			name: "composition",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				path := filepath.Join(root, "packs", "demo-pack", "agent.dsh.yml")
+				body := strings.Replace(validDSHComposition, "text: Demo", "text: Changed", 1)
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "metadata",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				path := filepath.Join(root, "packs", "demo-pack", "agent-pack.yaml")
+				body := strings.Replace(validDSHFixtureManifest(), "display_name: Demo Pack", "display_name: Changed Pack", 1)
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "skill file",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				path := filepath.Join(root, "skills", "demo-skill", "SKILL.md")
+				if err := os.WriteFile(path, []byte("---\nname: demo-skill\n---\nChanged\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "unexpected file",
+			mutate: func(t *testing.T, root string) {
+				t.Helper()
+				path := filepath.Join(root, "dsh", "presets", "demo", "unexpected.txt")
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("unexpected\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, validDSHFixtureManifest())
+			catalogPath := filepath.Join(t.TempDir(), "catalog.generated.json")
+			if _, err := GenerateRepository(root, catalogPath); err != nil {
+				t.Fatalf("GenerateRepository: %v", err)
+			}
+			tt.mutate(t, root)
+			if err := CheckRepository(root, catalogPath); err == nil || !strings.Contains(err.Error(), "generated DSH Preset drift") {
+				t.Fatalf("CheckRepository DSH drift error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckRepositoryDetectsUnexpectedDSHRootWithoutSources(t *testing.T) {
+	root := writePackFixture(t, validFixtureManifest)
+	catalogPath := filepath.Join(t.TempDir(), "catalog.generated.json")
+	if _, err := GenerateRepository(root, catalogPath); err != nil {
+		t.Fatalf("GenerateRepository: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dsh", "presets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckRepository(root, catalogPath); err == nil || !strings.Contains(err.Error(), "generated DSH Preset drift") {
+		t.Fatalf("CheckRepository DSH root drift error = %v", err)
 	}
 }
 
@@ -645,6 +856,10 @@ const validDSHComposition = `
   name: '@deepseek-ai/dsh-tool-bash'
   disabled: !!js process.platform === 'win32'
 `
+
+func validDSHFixtureManifest() string {
+	return strings.Replace(validFixtureManifest, "  skills: [demo-skill]", "  dsh_source: agent.dsh.yml\n  skills: [demo-skill]", 1)
+}
 
 func writePackFixture(t *testing.T, manifest string) string {
 	t.Helper()

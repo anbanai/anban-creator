@@ -12,11 +12,21 @@ import (
 )
 
 func Generate(pluginRoot, outputRoot string) (GenerateResult, error) {
-	return generateTo(pluginRoot, filepath.Join(outputRoot, "agents"), filepath.Join(outputRoot, "catalog.generated.json"))
+	return generateTo(
+		pluginRoot,
+		filepath.Join(outputRoot, "agents"),
+		filepath.Join(outputRoot, "dsh", "presets"),
+		filepath.Join(outputRoot, "catalog.generated.json"),
+	)
 }
 
 func GenerateRepository(pluginRoot, catalogPath string) (GenerateResult, error) {
-	result, err := generateTo(pluginRoot, filepath.Join(pluginRoot, "agents"), catalogPath)
+	result, err := generateTo(
+		pluginRoot,
+		filepath.Join(pluginRoot, "agents"),
+		filepath.Join(pluginRoot, "dsh", "presets"),
+		catalogPath,
+	)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -32,7 +42,7 @@ func GenerateRepository(pluginRoot, catalogPath string) (GenerateResult, error) 
 	return result, nil
 }
 
-func generateTo(pluginRoot, agentsDir, catalogPath string) (GenerateResult, error) {
+func generateTo(pluginRoot, agentsDir, dshPresetsDir, catalogPath string) (GenerateResult, error) {
 	catalog, err := LoadCatalog(pluginRoot)
 	if err != nil {
 		return GenerateResult{}, err
@@ -54,6 +64,11 @@ func generateTo(pluginRoot, agentsDir, catalogPath string) (GenerateResult, erro
 			changed = changed || fileChanged
 		}
 	}
+	dshChanged, err := generateDSHPresets(pluginRoot, dshPresetsDir, catalog)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	changed = changed || dshChanged
 	catalogJSON, err := catalog.JSON()
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("encode generated Catalog: %w", err)
@@ -108,6 +123,9 @@ func CheckRepository(pluginRoot, catalogPath string) error {
 	if len(drift) > 0 {
 		sort.Strings(drift)
 		return fmt.Errorf("generated Agent drift: %s", strings.Join(drift, ", "))
+	}
+	if err := checkDSHPresets(pluginRoot, filepath.Join(pluginRoot, "dsh", "presets"), catalog); err != nil {
+		return err
 	}
 	catalogJSON, err := catalog.JSON()
 	if err != nil {
