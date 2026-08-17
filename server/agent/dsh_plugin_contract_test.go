@@ -166,7 +166,7 @@ func TestDSHPluginContract(t *testing.T) {
 			"dsh plugin --profile web exec anban-dsh remove-presets",
 			"dsh plugin --profile web approve-builds",
 			`ACTIVE_PROFILE="replace-with-desktop-profile-name"`,
-			`dsh plugin --profile "$ACTIVE_PROFILE" add @anban/dsh-plugin`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" add "@anban/dsh-plugin@${PUBLISHED_VERSION}"`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" remove @anban/dsh-plugin`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" approve-builds`,
@@ -185,6 +185,113 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 		if !strings.Contains(body, "only when") || !strings.Contains(body, "node_modules/.bin") {
 			t.Error("bare anban-dsh shorthand must be explicitly conditional on the active profile bin directory being on PATH")
+		}
+	})
+
+	t.Run("documentation defines exact supported surfaces and canonical ownership", func(t *testing.T) {
+		guide := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		readme := readRepoFile(t, filepath.Join(pluginRoot, "README.md"))
+		for _, body := range []string{guide, readme} {
+			for _, row := range []string{
+				"| Skills-only installer | Yes | No | No | No |",
+				"| Claude Code plugin | Yes | Claude Agent | Claude MCP adapter | No |",
+				"| Codex plugin | Yes | Codex subagent | Codex MCP adapter | No |",
+				"| Full DSH plugin | Article/Seednote generated copies | DSH composition | Official Bundle/MCP adapters | Article/Seednote only |",
+			} {
+				if !strings.Contains(body, row) {
+					t.Errorf("DSH documentation missing support row %q", row)
+				}
+			}
+		}
+		for _, want := range []string{
+			"DSH is not a separate Anban business workflow or Skill tree.",
+			"plugins/skills/**",
+			"Agent Pack generator copies the exact declared Skills",
+			"DSH-only code",
+			"only Article and Seednote",
+		} {
+			if !strings.Contains(guide, want) {
+				t.Errorf("DSH installation guide missing ownership boundary %q", want)
+			}
+		}
+		if regexp.MustCompile(`(?i)(?:ecommerce|live-slicer|moments|montage)[^.|\n]*(?:DSH Preset|Preset support)`).MatchString(guide) {
+			t.Error("DSH documentation claims an unsupported scenario or Preset")
+		}
+	})
+
+	t.Run("documentation limits installs to supported immutable artifacts", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		for _, want := range []string{
+			"public npm package (primary)",
+			`PUBLISHED_VERSION="replace-with-published-version"`,
+			`npm view "@anban/dsh-plugin@${PUBLISHED_VERSION}" version`,
+			"checksummed GitHub Release",
+			"anban-dsh-plugin-<published-version>.tgz.sha256",
+			"immutable Git tag or full commit",
+			"prepare build",
+			"pnpm pack --json",
+			"exact tarball path reported in the `filename` field",
+			`dsh plugin --profile web add "$PACKED_TARBALL"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("DSH installation guide missing supported artifact guidance %q", want)
+			}
+		}
+		fileInstall := regexp.MustCompile(`(?m)^\s*dsh plugin .*\badd\s+(?:["']?file:|["']?(?:\.\.?/|/)[^"'\n]*plugins/?["']?\s*$)`)
+		if fileInstall.MatchString(body) {
+			t.Error("DSH installation guide recommends a source-directory file install")
+		}
+	})
+
+	t.Run("documentation protects the global two-step lifecycle", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		normalized := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{
+			"Bundle is profile-local",
+			"Presets are global",
+			"shared by every profile using the same `DSH_HOME`",
+			"Bundle activation never installs, upgrades, or removes Presets",
+			"cross-profile",
+			"dsh plugin --profile web exec anban-dsh install-presets --force",
+			"ERR_RUNTIME_MISSING",
+			"ERR_PRESET_LOCK_INVALID",
+			"lock residue",
+		} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("DSH installation guide missing global lifecycle guidance %q", want)
+			}
+		}
+		status := strings.Index(body, "dsh plugin --profile web exec anban-dsh status")
+		force := strings.Index(body, "dsh plugin --profile web exec anban-dsh install-presets --force")
+		removePresets := strings.Index(body, "dsh plugin --profile web exec anban-dsh remove-presets")
+		removeBundle := strings.Index(body, "dsh plugin --profile web remove @anban/dsh-plugin")
+		if status < 0 || force < 0 || removePresets < 0 || removeBundle < 0 || status >= force || status >= removePresets || removePresets >= removeBundle {
+			t.Errorf("DSH lifecycle order is unsafe: status=%d force=%d presets=%d bundle=%d", status, force, removePresets, removeBundle)
+		}
+		if regexp.MustCompile(`rm\s+(?:-[^\s]*r[^\s]*\s+)?[^\n]*\.anban-dsh\.lock`).MatchString(body) {
+			t.Error("DSH lock recovery must not recommend deleting lock residue")
+		}
+	})
+
+	t.Run("documentation uses official credential precedence and path", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		normalized := strings.Join(strings.Fields(body), " ")
+		precedence := "inherited process environment (read-only, highest priority) -> `$DSH_HOME/.credentials.yaml` (managed, writable) -> invocation-project `.env` -> `$DSH_HOME/.env`"
+		if !strings.Contains(normalized, precedence) {
+			t.Errorf("DSH credential precedence must be exactly %q", precedence)
+		}
+		if got := strings.Count(body, "ANBAN_API_KEY: <value>"); got != 1 {
+			t.Errorf("DSH persistent credential placeholder count = %d, want 1", got)
+		}
+		for _, want := range []string{"temporary or CI override", "owner-only", "0700", "0600", "model onboarding", "does not configure arbitrary third-party credentials"} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("DSH credential guidance missing %q", want)
+			}
+		}
+		for _, forbidden := range []string{"~/.dsh/.credentials.yaml", "<harness-home>/.credentials.yaml", "<dsh-home>/.credentials.yaml"} {
+			if strings.Contains(strings.ToLower(body), forbidden) {
+				t.Errorf("DSH credential guidance contains generic path %q", forbidden)
+			}
 		}
 	})
 
