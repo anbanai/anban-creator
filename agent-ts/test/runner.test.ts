@@ -143,6 +143,16 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("builds the managed prompt with resume context", () => {
+    const data = {
+      ...validBootstrap(),
+      resume_session_id: "session-1",
+      resume_context_path: ".anban-creator/resume/executions/execution-1/latest.md",
+    };
+    expect(runner.buildManagedPrompt(data)).toContain(data.resume_context_path);
+    expect(runner.buildQueryOptions(data, "/workspace").resume).toBe("session-1");
+  });
+
   test("uses the frozen runtime adapter for the working directory", () => {
     const data = { ...validBootstrap(), task_type: "montage", runtime_adapter: "standard" };
     expect(runner.buildQueryOptions(data, "/workspace").cwd).toBe("/workspace");

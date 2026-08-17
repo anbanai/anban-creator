@@ -5,6 +5,7 @@ import { query, type HookJSONOutput, type ModelUsage, type Options, type SDKMess
 import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
+import { appendResumeContextToPrompt } from "./resume.js";
 
 // Keep this list aligned with server/agent/claude_runtime_env.go and the
 // authentication, provider-routing, and model inputs in SDK 0.3.220.
@@ -166,6 +167,10 @@ class RuntimeArtifactMaterializationError extends Error {
   }
 }
 
+export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "resume_context_path">): string {
+  return appendResumeContextToPrompt(data.prompt, data.resume_context_path);
+}
+
 export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
@@ -176,7 +181,7 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
   const toolCalls = new Map<string, TrackedToolCall>();
   const toolUseDiagnostics: ToolUseDiagnostics = { tool_use_count: 0, tool_use_summary: {}, tool_error_count: 0 };
   try {
-    for await (const message of query({ prompt: data.prompt, options })) {
+    for await (const message of query({ prompt: buildManagedPrompt(data), options })) {
       const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
       logText = consumed.logText;
       if (message.type === "system" && message.subtype === "init") {
