@@ -167,15 +167,18 @@ jobs:
       - name: Run portable profile command tests
         run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "portable profile-smoke commands"
 
-      - name: Execute the Windows pnpm.cmd probe
+      - name: Execute the Windows cmd shim test
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $version = (pnpm.cmd --version).Trim()
-          if ($version -ne "11.19.0") {
-            throw "pnpm.cmd version $version does not match 11.19.0"
-          }
+        run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "executes a cmd shim with spaces and metacharacters through cross-spawn"
 
       - name: Run the official public Desktop runtime fixture
         if: runner.os == 'macOS' || runner.os == 'Windows'
         run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "honors the pinned DSH Desktop public-runtime contract"
+
+      - name: Build DSH plugin for real profile smoke
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        run: pnpm run build
+
+      - name: Smoke-test real packaged fresh profile
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        run: pnpm run smoke:profile

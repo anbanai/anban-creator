@@ -222,77 +222,283 @@ func TestDSHPluginContract(t *testing.T) {
 }
 
 func TestDSHCIWorkflowRunsLockedChecksAndPortableRuntimeTests(t *testing.T) {
-	body := readWorkflowContract(t, ".github/workflows/ci.yml")
-	for _, want := range []string{
-		`node-version: "24"`,
-		"version: 11.19.0",
-		"working-directory: plugins",
-		"pnpm install --frozen-lockfile",
-		"pnpm run check",
-		"ubuntu-latest",
-		"macos-latest",
-		"windows-latest",
-		"dsh/tests/profile-smoke.test.ts",
-		"pnpm.cmd --version",
-		"runner.os == 'Windows'",
-		"runner.os == 'macOS' || runner.os == 'Windows'",
-		"honors the pinned DSH Desktop public-runtime contract",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("CI workflow missing DSH reliability contract %q", want)
-		}
-	}
-	if strings.Count(body, "pnpm run check") != 1 {
-		t.Errorf("CI workflow full DSH checks = %d, want exactly one Linux check", strings.Count(body, "pnpm run check"))
+	workflow := readWorkflowContract(t, ".github/workflows/ci.yml")
+	if err := validateDSHCIWorkflow(workflow); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
-	body := readWorkflowContract(t, ".github/workflows/release.yml")
-	for _, want := range []string{
-		"id-token: write",
-		`node-version: "24"`,
-		"version: 11.19.0",
-		"required: true",
-		"GITHUB_REF_TYPE",
-		"GITHUB_REF_NAME",
+	workflow := readWorkflowContract(t, ".github/workflows/release.yml")
+	if err := validateDSHReleaseWorkflow(workflow); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDSHWindowsCmdProbeUsesTheRealPlatformGate(t *testing.T) {
+	body := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "dsh", "tests", "profile-smoke.test.ts"))
+	gate := "it.runIf(process.platform === 'win32')"
+	probe := "executes a cmd shim with spaces and metacharacters through cross-spawn"
+	if !strings.Contains(body, gate) || !strings.Contains(body, probe) {
+		t.Fatalf("Windows cmd probe must use %q for %q", gate, probe)
+	}
+}
+
+func TestWorkflowContractStructureRejectsCommentsOtherJobsAndDisabledSteps(t *testing.T) {
+	workflow := parseWorkflowContract(t, `
+name: adversarial
+# pnpm run smoke:profile
+jobs:
+  unrelated:
+    runs-on: macos-latest
+    steps:
+      - name: Real profile smoke
+        run: pnpm run smoke:profile
+  target:
+    runs-on: windows-latest
+    steps:
+      - name: Real profile smoke
+        if: false
+        run: pnpm run smoke:profile
+`)
+	target := workflow.Jobs["target"]
+	if _, err := requireEnabledRunStep(target, "Real profile smoke", "pnpm run smoke:profile"); err == nil {
+		t.Fatal("disabled target step or unrelated job satisfied the structural command contract")
+	}
+}
+
+func TestWorkflowContractStructureRejectsWrongStepOrder(t *testing.T) {
+	workflow := parseWorkflowContract(t, `
+name: adversarial order
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify registry
+        run: npm view package version
+      - name: Publish package
+        run: npm publish package.tgz
+`)
+	if err := requireNamedStepOrder(
+		workflow.Jobs["release"],
+		[]string{"Publish package", "Verify registry"},
+	); err == nil {
+		t.Fatal("reversed publish and registry verification steps satisfied the order contract")
+	}
+}
+
+type workflowContract struct {
+	On struct {
+		WorkflowDispatch struct {
+			Inputs map[string]struct {
+				Required bool `yaml:"required"`
+			} `yaml:"inputs"`
+		} `yaml:"workflow_dispatch"`
+	} `yaml:"on"`
+	Permissions map[string]string      `yaml:"permissions"`
+	Jobs        map[string]workflowJob `yaml:"jobs"`
+}
+
+type workflowJob struct {
+	RunsOn   string `yaml:"runs-on"`
+	Defaults struct {
+		Run struct {
+			WorkingDirectory string `yaml:"working-directory"`
+		} `yaml:"run"`
+	} `yaml:"defaults"`
+	Strategy struct {
+		Matrix map[string][]string `yaml:"matrix"`
+	} `yaml:"strategy"`
+	Steps []workflowStep `yaml:"steps"`
+}
+
+type workflowStep struct {
+	Name string            `yaml:"name"`
+	ID   string            `yaml:"id"`
+	Uses string            `yaml:"uses"`
+	Run  string            `yaml:"run"`
+	If   any               `yaml:"if"`
+	With map[string]any    `yaml:"with"`
+	Env  map[string]string `yaml:"env"`
+}
+
+func readWorkflowContract(t *testing.T, relativePath string) workflowContract {
+	t.Helper()
+	path := filepath.Join(repoRoot(t), filepath.FromSlash(relativePath))
+	return parseWorkflowContract(t, readRepoFile(t, path))
+}
+
+func parseWorkflowContract(t *testing.T, body string) workflowContract {
+	t.Helper()
+	var workflow workflowContract
+	if err := yaml.Unmarshal([]byte(body), &workflow); err != nil {
+		t.Fatalf("parse workflow: %v", err)
+	}
+	return workflow
+}
+
+func validateDSHCIWorkflow(workflow workflowContract) error {
+	check, ok := workflow.Jobs["dsh-plugin"]
+	if !ok || check.RunsOn != "ubuntu-latest" || check.Defaults.Run.WorkingDirectory != "plugins" {
+		return fmt.Errorf("dsh-plugin must be an Ubuntu job with plugins as its working directory")
+	}
+	if err := requireActionInput(check, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+		return err
+	}
+	if err := requireActionInput(check, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+		return err
+	}
+	if _, err := requireEnabledRunStep(check, "Install DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
+		return err
+	}
+	if _, err := requireEnabledRunStep(check, "Check DSH plugin", "pnpm run check"); err != nil {
+		return err
+	}
+	fullChecks := 0
+	for _, job := range workflow.Jobs {
+		for _, step := range job.Steps {
+			if stepEnabled(step) && runHasCommand(step.Run, "pnpm run check") {
+				fullChecks++
+			}
+		}
+	}
+	if fullChecks != 1 {
+		return fmt.Errorf("enabled full DSH checks = %d, want exactly one", fullChecks)
+	}
+
+	portable, ok := workflow.Jobs["dsh-plugin-portability"]
+	if !ok || portable.RunsOn != "${{ matrix.os }}" || portable.Defaults.Run.WorkingDirectory != "plugins" {
+		return fmt.Errorf("dsh-plugin-portability must run its plugins commands on matrix.os")
+	}
+	gotOS := append([]string(nil), portable.Strategy.Matrix["os"]...)
+	sort.Strings(gotOS)
+	if strings.Join(gotOS, ",") != "macos-latest,ubuntu-latest,windows-latest" {
+		return fmt.Errorf("DSH portability OS matrix = %v", gotOS)
+	}
+	if err := requireActionInput(portable, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+		return err
+	}
+	if err := requireActionInput(portable, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+		return err
+	}
+	if _, err := requireEnabledRunStep(portable, "Install locked DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
+		return err
+	}
+	commandShape, err := requireEnabledStep(portable, "Run portable profile command tests")
+	if err != nil || !runHasCode(commandShape.Run, "dsh/tests/profile-smoke.test.ts") || !runHasCode(commandShape.Run, "portable profile-smoke commands") {
+		return fmt.Errorf("portable job must run the focused command-shape tests")
+	}
+	windowsProbe, err := requireEnabledStep(portable, "Execute the Windows cmd shim test")
+	if err != nil || !conditionContains(windowsProbe, "runner.os == 'Windows'") || !runHasCode(windowsProbe.Run, "executes a cmd shim with spaces and metacharacters through cross-spawn") {
+		return fmt.Errorf("portable job must execute the Windows-only it.runIf cmd shim test")
+	}
+	desktop, err := requireEnabledStep(portable, "Run the official public Desktop runtime fixture")
+	if err != nil || !macAndWindowsCondition(desktop) || !runHasCode(desktop.Run, "honors the pinned DSH Desktop public-runtime contract") {
+		return fmt.Errorf("portable job must run the public Desktop runtime fixture on macOS and Windows")
+	}
+	build, err := requireEnabledRunStep(portable, "Build DSH plugin for real profile smoke", "pnpm run build")
+	if err != nil || !macAndWindowsCondition(build) {
+		return fmt.Errorf("portable job must build the package on macOS and Windows before smoke")
+	}
+	smoke, err := requireEnabledRunStep(portable, "Smoke-test real packaged fresh profile", "pnpm run smoke:profile")
+	if err != nil || !macAndWindowsCondition(smoke) {
+		return fmt.Errorf("portable job must run the real profile smoke on macOS and Windows")
+	}
+	return requireNamedStepOrder(portable, []string{
+		"Install locked DSH plugin dependencies",
+		"Run portable profile command tests",
+		"Execute the Windows cmd shim test",
+		"Run the official public Desktop runtime fixture",
+		"Build DSH plugin for real profile smoke",
+		"Smoke-test real packaged fresh profile",
+	})
+}
+
+func validateDSHReleaseWorkflow(workflow workflowContract) error {
+	if workflow.Permissions["contents"] != "write" || workflow.Permissions["id-token"] != "write" {
+		return fmt.Errorf("release workflow must grant contents and id-token write")
+	}
+	input, ok := workflow.On.WorkflowDispatch.Inputs["version"]
+	if !ok || !input.Required {
+		return fmt.Errorf("workflow_dispatch version input must be required")
+	}
+	release, ok := workflow.Jobs["release"]
+	if !ok || release.RunsOn != "ubuntu-latest" {
+		return fmt.Errorf("release must be one Ubuntu job")
+	}
+	if err := requireActionInput(release, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+		return err
+	}
+	if err := requireActionInput(release, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+		return err
+	}
+	version, err := requireEnabledStep(release, "Validate release version contract")
+	if err != nil || !runHasCode(version.Run, "GITHUB_REF_TYPE") || !runHasCode(version.Run, "GITHUB_REF_NAME") {
+		return fmt.Errorf("release version step must validate its exact tag context")
+	}
+	versions, err := requireEnabledStep(release, "Validate every DSH plugin version location and changelog")
+	for _, path := range []string{
 		"plugins/package.json",
 		"plugins/.claude-plugin/plugin.json",
 		"plugins/.codex-plugin/plugin.json",
 		"plugins/.claude-plugin/marketplace.json",
 		"plugins/CHANGELOG.md",
-		"pnpm install --frozen-lockfile",
-		"pnpm run typecheck",
-		"pnpm run test",
-		"pnpm run build",
-		"pnpm run verify:source",
-		"pnpm pack --json --pack-destination",
-		"parsePackResult",
-		"inspectAndExtractArchive",
-		"smokeProfile",
-		"npm publish",
-		"--provenance",
-		"NPM_CONFIG_USERCONFIG",
-		"npm view",
-		`@anban/dsh-plugin@${VERSION}`,
-		"smoke-profile.mjs",
-		"createHash('sha256')",
-		"checksums.txt",
-		"softprops/action-gh-release",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("release workflow missing DSH registry contract %q", want)
+		if err != nil || !runHasCode(versions.Run, path) {
+			return fmt.Errorf("release version locations step missing executable validation for %s", path)
 		}
 	}
-	if strings.Count(body, "pnpm pack --json --pack-destination") != 1 {
-		t.Errorf("release workflow controlled pnpm packs = %d, want exactly one", strings.Count(body, "pnpm pack --json --pack-destination"))
+	if _, err := requireEnabledRunStep(release, "Install DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
+		return err
 	}
-	if strings.Contains(body, "NPM_TOKEN") || strings.Contains(body, "NODE_AUTH_TOKEN") {
-		t.Error("release workflow must use configured npm trusted publishing without embedded token surfaces")
+	if _, err := requireEnabledRunStep(release, "Verify DSH plugin source", "pnpm run verify:source"); err != nil {
+		return err
 	}
-
-	assertWorkflowMarkersInOrder(t, body, []string{
+	pack, err := requireEnabledStep(release, "Pack DSH plugin exactly once")
+	if err != nil || pack.ID != "pack" || !runHasCode(pack.Run, "pnpm pack --json --pack-destination") || !runHasCode(pack.Run, "parsePackResult") {
+		return fmt.Errorf("release must structurally capture one controlled pack result")
+	}
+	packCount := 0
+	for _, step := range release.Steps {
+		if stepEnabled(step) && runHasCode(step.Run, "pnpm pack --json --pack-destination") {
+			packCount++
+		}
+	}
+	if packCount != 1 {
+		return fmt.Errorf("release controlled pack steps = %d, want 1", packCount)
+	}
+	verify, err := requireEnabledStep(release, "Verify exact DSH package tarball")
+	if err != nil || verify.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || verify.Env["PACK_METADATA"] != "${{ steps.pack.outputs.metadata }}" || !runHasCode(verify.Run, "inspectAndExtractArchive") {
+		return fmt.Errorf("exact pack verification must consume the pack step outputs")
+	}
+	localSmoke, err := requireEnabledStep(release, "Smoke-test exact local DSH package")
+	if err != nil || localSmoke.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || localSmoke.Env["PACK_METADATA"] != "${{ steps.pack.outputs.metadata }}" || !runHasCode(localSmoke.Run, "smokeProfile") {
+		return fmt.Errorf("local profile smoke must consume the exact pack step outputs")
+	}
+	publish, err := requireEnabledRunStep(release, "Publish exact DSH package to npm", `npm publish "$TARBALL" --access public --provenance`)
+	if err != nil || publish.If != nil || publish.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" {
+		return fmt.Errorf("npm publication must be unconditional and consume the exact tarball")
+	}
+	view, err := requireEnabledStep(release, "Verify anonymous npm availability")
+	if err != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") {
+		return fmt.Errorf("anonymous npm view must require the exact published version")
+	}
+	registry, err := requireEnabledStep(release, "Smoke-test exact registry DSH package")
+	if err != nil || registry.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(registry.Run, `smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(registry.Run, "NPM_CONFIG_USERCONFIG") {
+		return fmt.Errorf("registry smoke must install the exact anonymous registry spec")
+	}
+	checksum, err := requireEnabledStep(release, "Generate checksums")
+	if err != nil || checksum.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || !runHasCode(checksum.Run, "createHash('sha256')") || !runHasCode(checksum.Run, "checksums.txt") {
+		return fmt.Errorf("checksum step must hash the exact tarball")
+	}
+	githubRelease, err := requireEnabledStep(release, "Create Release")
+	files := workflowScalar(githubRelease.With["files"])
+	if err != nil || githubRelease.If != nil || githubRelease.Uses != "softprops/action-gh-release@v2" || !strings.Contains(files, "${{ steps.pack.outputs.tarball }}") || !strings.Contains(files, "${{ steps.pack.outputs.tarball }}.sha256") {
+		return fmt.Errorf("GitHub Release must unconditionally attach the exact tarball and checksum")
+	}
+	return requireNamedStepOrder(release, []string{
 		"Validate release version contract",
+		"Validate every DSH plugin version location and changelog",
 		"Install DSH plugin dependencies",
 		"Verify DSH plugin source",
 		"Pack DSH plugin exactly once",
@@ -306,34 +512,108 @@ func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
 	})
 }
 
-func readWorkflowContract(t *testing.T, relativePath string) string {
-	t.Helper()
-	path := filepath.Join(repoRoot(t), filepath.FromSlash(relativePath))
-	body := readRepoFile(t, path)
-	var workflow map[string]any
-	if err := yaml.Unmarshal([]byte(body), &workflow); err != nil {
-		t.Fatalf("parse workflow %s: %v", relativePath, err)
+func requireActionInput(job workflowJob, name, uses, key, value string) error {
+	step, err := requireEnabledStep(job, name)
+	if err != nil {
+		return err
 	}
-	if len(workflow) == 0 {
-		t.Fatalf("workflow %s is empty", relativePath)
+	if step.Uses != uses || workflowScalar(step.With[key]) != value {
+		return fmt.Errorf("step %q must use %s with %s=%s", name, uses, key, value)
 	}
-	return body
+	return nil
 }
 
-func assertWorkflowMarkersInOrder(t *testing.T, body string, markers []string) {
-	t.Helper()
+func requireEnabledRunStep(job workflowJob, name, command string) (workflowStep, error) {
+	step, err := requireEnabledStep(job, name)
+	if err != nil {
+		return workflowStep{}, err
+	}
+	if !runHasCommand(step.Run, command) {
+		return workflowStep{}, fmt.Errorf("enabled step %q must execute %q", name, command)
+	}
+	return step, nil
+}
+
+func requireEnabledStep(job workflowJob, name string) (workflowStep, error) {
+	for _, step := range job.Steps {
+		if step.Name == name && stepEnabled(step) {
+			return step, nil
+		}
+	}
+	return workflowStep{}, fmt.Errorf("enabled workflow step %q not found", name)
+}
+
+func requireNamedStepOrder(job workflowJob, names []string) error {
 	previous := -1
-	for _, marker := range markers {
-		index := strings.Index(body, marker)
+	for _, name := range names {
+		index := -1
+		for candidate, step := range job.Steps {
+			if step.Name == name && stepEnabled(step) {
+				index = candidate
+				break
+			}
+		}
 		if index == -1 {
-			t.Errorf("workflow missing ordered marker %q", marker)
-			continue
+			return fmt.Errorf("enabled workflow step %q not found", name)
 		}
 		if index <= previous {
-			t.Errorf("workflow marker %q is out of order", marker)
+			return fmt.Errorf("workflow step %q is out of order", name)
 		}
 		previous = index
 	}
+	return nil
+}
+
+func stepEnabled(step workflowStep) bool {
+	switch condition := step.If.(type) {
+	case nil:
+		return true
+	case bool:
+		return condition
+	case string:
+		normalized := strings.ToLower(strings.TrimSpace(condition))
+		return normalized != "false" && normalized != "${{ false }}"
+	default:
+		return true
+	}
+}
+
+func runHasCommand(run, command string) bool {
+	for _, line := range strings.Split(run, "\n") {
+		if strings.TrimSpace(line) == command {
+			return true
+		}
+	}
+	return false
+}
+
+func runHasCode(run, fragment string) bool {
+	for _, line := range strings.Split(run, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		if strings.Contains(line, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func conditionContains(step workflowStep, fragment string) bool {
+	condition, ok := step.If.(string)
+	return ok && strings.Contains(condition, fragment)
+}
+
+func macAndWindowsCondition(step workflowStep) bool {
+	return conditionContains(step, "runner.os == 'macOS'") && conditionContains(step, "runner.os == 'Windows'")
+}
+
+func workflowScalar(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
 }
 
 func TestDSHYAMLPluginRowsAreStructural(t *testing.T) {
