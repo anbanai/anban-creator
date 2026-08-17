@@ -103,6 +103,9 @@ jobs:
 
   dsh-plugin:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -118,12 +121,61 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
 
       - name: Install DSH plugin dependencies
-        run: make dsh-plugin-install
+        run: pnpm install --frozen-lockfile
 
       - name: Check DSH plugin
-        run: make dsh-plugin-check
+        run: pnpm run check
 
-      - name: Smoke-test DSH Web profile
-        run: make dsh-plugin-smoke
+  dsh-plugin-portability:
+    name: DSH plugin portability (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    defaults:
+      run:
+        working-directory: plugins
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
+
+      - name: Install locked DSH plugin dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run portable profile command tests
+        run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "portable profile-smoke commands"
+
+      - name: Execute the Windows pnpm.cmd probe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (pnpm.cmd --version).Trim()
+          if ($version -ne "11.19.0") {
+            throw "pnpm.cmd version $version does not match 11.19.0"
+          }
+
+      - name: Run the official public Desktop runtime fixture
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "honors the pinned DSH Desktop public-runtime contract"

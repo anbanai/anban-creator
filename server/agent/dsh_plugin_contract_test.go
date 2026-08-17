@@ -221,25 +221,118 @@ func TestDSHPluginContract(t *testing.T) {
 	})
 }
 
-func TestDSHReleaseWorkflowValidatesTagAndTarballVersion(t *testing.T) {
-	body := readRepoFile(t, filepath.Join(repoRoot(t), ".github", "workflows", "release.yml"))
+func TestDSHCIWorkflowRunsLockedChecksAndPortableRuntimeTests(t *testing.T) {
+	body := readWorkflowContract(t, ".github/workflows/ci.yml")
 	for _, want := range []string{
-		`TAG_VERSION: ${{ steps.version.outputs.VERSION }}`,
-		`package_version=$(node -p "require('./plugins/package.json').version")`,
-		`test "$TAG_VERSION" = "$package_version"`,
-		`expected_tarball="bin/anban-dsh-plugin-${TAG_VERSION}.tgz"`,
-		`test -f "$expected_tarball"`,
-		`tarball_count=$(find bin -maxdepth 1 -type f -name 'anban-dsh-plugin-*.tgz' | wc -l | tr -d ' ')`,
-		`test "$tarball_count" = "1"`,
+		`node-version: "24"`,
+		"version: 11.19.0",
+		"working-directory: plugins",
+		"pnpm install --frozen-lockfile",
+		"pnpm run check",
+		"ubuntu-latest",
+		"macos-latest",
+		"windows-latest",
+		"dsh/tests/profile-smoke.test.ts",
+		"pnpm.cmd --version",
+		"runner.os == 'Windows'",
+		"runner.os == 'macOS' || runner.os == 'Windows'",
+		"honors the pinned DSH Desktop public-runtime contract",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("release workflow missing DSH version safeguard %q", want)
+			t.Errorf("CI workflow missing DSH reliability contract %q", want)
 		}
 	}
-	for _, forbidden := range []string{"npm publish", "NPM_TOKEN", "NODE_AUTH_TOKEN"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("release workflow contains forbidden npm publication surface %q", forbidden)
+	if strings.Count(body, "pnpm run check") != 1 {
+		t.Errorf("CI workflow full DSH checks = %d, want exactly one Linux check", strings.Count(body, "pnpm run check"))
+	}
+}
+
+func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
+	body := readWorkflowContract(t, ".github/workflows/release.yml")
+	for _, want := range []string{
+		"id-token: write",
+		`node-version: "24"`,
+		"version: 11.19.0",
+		"required: true",
+		"GITHUB_REF_TYPE",
+		"GITHUB_REF_NAME",
+		"plugins/package.json",
+		"plugins/.claude-plugin/plugin.json",
+		"plugins/.codex-plugin/plugin.json",
+		"plugins/.claude-plugin/marketplace.json",
+		"plugins/CHANGELOG.md",
+		"pnpm install --frozen-lockfile",
+		"pnpm run typecheck",
+		"pnpm run test",
+		"pnpm run build",
+		"pnpm run verify:source",
+		"pnpm pack --json --pack-destination",
+		"parsePackResult",
+		"inspectAndExtractArchive",
+		"smokeProfile",
+		"npm publish",
+		"--provenance",
+		"NPM_CONFIG_USERCONFIG",
+		"npm view",
+		`@anban/dsh-plugin@${VERSION}`,
+		"smoke-profile.mjs",
+		"createHash('sha256')",
+		"checksums.txt",
+		"softprops/action-gh-release",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("release workflow missing DSH registry contract %q", want)
 		}
+	}
+	if strings.Count(body, "pnpm pack --json --pack-destination") != 1 {
+		t.Errorf("release workflow controlled pnpm packs = %d, want exactly one", strings.Count(body, "pnpm pack --json --pack-destination"))
+	}
+	if strings.Contains(body, "NPM_TOKEN") || strings.Contains(body, "NODE_AUTH_TOKEN") {
+		t.Error("release workflow must use configured npm trusted publishing without embedded token surfaces")
+	}
+
+	assertWorkflowMarkersInOrder(t, body, []string{
+		"Validate release version contract",
+		"Install DSH plugin dependencies",
+		"Verify DSH plugin source",
+		"Pack DSH plugin exactly once",
+		"Verify exact DSH package tarball",
+		"Smoke-test exact local DSH package",
+		"Publish exact DSH package to npm",
+		"Verify anonymous npm availability",
+		"Smoke-test exact registry DSH package",
+		"Generate checksums",
+		"Create Release",
+	})
+}
+
+func readWorkflowContract(t *testing.T, relativePath string) string {
+	t.Helper()
+	path := filepath.Join(repoRoot(t), filepath.FromSlash(relativePath))
+	body := readRepoFile(t, path)
+	var workflow map[string]any
+	if err := yaml.Unmarshal([]byte(body), &workflow); err != nil {
+		t.Fatalf("parse workflow %s: %v", relativePath, err)
+	}
+	if len(workflow) == 0 {
+		t.Fatalf("workflow %s is empty", relativePath)
+	}
+	return body
+}
+
+func assertWorkflowMarkersInOrder(t *testing.T, body string, markers []string) {
+	t.Helper()
+	previous := -1
+	for _, marker := range markers {
+		index := strings.Index(body, marker)
+		if index == -1 {
+			t.Errorf("workflow missing ordered marker %q", marker)
+			continue
+		}
+		if index <= previous {
+			t.Errorf("workflow marker %q is out of order", marker)
+		}
+		previous = index
 	}
 }
 
