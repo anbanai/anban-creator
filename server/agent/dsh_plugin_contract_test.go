@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -16,7 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const dshPluginVersion = "4.1.11"
+const (
+	dshPluginVersion     = "4.1.12"
+	dshPluginReleaseDate = "2026-08-17"
+)
 
 type dshPackageManifest struct {
 	Version string   `json:"version"`
@@ -50,6 +54,16 @@ func TestDSHPluginContract(t *testing.T) {
 			t.Errorf("npm DSH bundle patch = %q, want ./dsh/cordis.patch.yml", npm.DSH.Bundle.Patch)
 		}
 
+		var lockfile struct {
+			Importers map[string]struct {
+				Version string `yaml:"version"`
+			} `yaml:"importers"`
+		}
+		readYAMLContractFile(t, filepath.Join(pluginRoot, "pnpm-lock.yaml"), &lockfile)
+		if rootImporter, ok := lockfile.Importers["."]; ok && rootImporter.Version != "" && rootImporter.Version != dshPluginVersion {
+			t.Errorf("pnpm root importer version = %q, want %s", rootImporter.Version, dshPluginVersion)
+		}
+
 		for name, path := range map[string]string{
 			"Claude": filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"),
 			"Codex":  filepath.Join(pluginRoot, ".codex-plugin", "plugin.json"),
@@ -75,6 +89,12 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 		if marketplace.Plugins[0].Version != dshPluginVersion {
 			t.Errorf("Claude marketplace version = %q, want %s", marketplace.Plugins[0].Version, dshPluginVersion)
+		}
+
+		changelog := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
+		wantReleaseHeading := fmt.Sprintf("## [%s] - %s", dshPluginVersion, dshPluginReleaseDate)
+		if !strings.Contains(changelog, wantReleaseHeading) {
+			t.Errorf("changelog missing release heading %q", wantReleaseHeading)
 		}
 
 		var patch []struct {
@@ -135,7 +155,7 @@ func TestDSHPluginContract(t *testing.T) {
 			if yamlPluginRowCount(t, presetAgent, "@anban/dsh-plugin/skills-provider") != 1 {
 				t.Errorf("generated Preset %s must contain the skills provider exactly once", pack.ID)
 			}
-			assertGeneratedPresetSkills(t, presetRoot, pack.Agent.Skills)
+			assertGeneratedPresetSkills(t, pluginRoot, presetRoot, pack.Agent.Skills)
 			assertGeneratedPresetHasNoHostAdapters(t, presetRoot)
 		}
 		sort.Strings(dshPacks)
@@ -404,25 +424,26 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
-	t.Run("documentation marks package publication as pending operator release", func(t *testing.T) {
+	t.Run("release notes keep package publication under operator control", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
-		start := strings.Index(body, "## [Unreleased]")
+		releaseHeading := fmt.Sprintf("## [%s] - %s", dshPluginVersion, dshPluginReleaseDate)
+		start := strings.Index(body, releaseHeading)
 		if start < 0 {
-			t.Fatal("DSH changelog missing Unreleased section")
+			t.Fatalf("DSH changelog missing release section %q", releaseHeading)
 		}
 		endOffset := strings.Index(body[start+1:], "\n## [")
 		end := len(body)
 		if endOffset >= 0 {
 			end = start + 1 + endOffset
 		}
-		unreleased := body[start:end]
-		for _, want := range []string{"The package is not yet published.", "release workflow", "release operator", "required"} {
-			if !strings.Contains(unreleased, want) {
-				t.Errorf("DSH Unreleased section missing publication boundary %q", want)
+		release := body[start:end]
+		for _, want := range []string{"Prepared", "does not claim npm publication", "release workflow", "release operator", "must"} {
+			if !strings.Contains(release, want) {
+				t.Errorf("DSH %s release section missing publication boundary %q", dshPluginVersion, want)
 			}
 		}
-		if regexp.MustCompile(`(?i)(?:package|version) (?:is|is now|has been) (?:published|available) (?:on|from) npm`).MatchString(unreleased) {
-			t.Error("DSH Unreleased section falsely claims current npm availability")
+		if regexp.MustCompile(`(?i)(?:package|version) (?:is|is now|has been) (?:published|available) (?:on|from) npm`).MatchString(release) {
+			t.Errorf("DSH %s release section falsely claims current npm availability", dshPluginVersion)
 		}
 	})
 
@@ -1335,7 +1356,7 @@ func readYAMLContractFile(t *testing.T, path string, target any) {
 	}
 }
 
-func assertGeneratedPresetSkills(t *testing.T, presetRoot string, want []string) {
+func assertGeneratedPresetSkills(t *testing.T, pluginRoot, presetRoot string, want []string) {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(presetRoot, "skills"))
 	if err != nil {
@@ -1353,6 +1374,65 @@ func assertGeneratedPresetSkills(t *testing.T, presetRoot string, want []string)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("generated Preset %s Skill directories = %v, want %v", filepath.Base(presetRoot), got, want)
 	}
+	for _, skill := range want {
+		assertDirectoryBytesEqual(
+			t,
+			filepath.Join(pluginRoot, "skills", skill),
+			filepath.Join(presetRoot, "skills", skill),
+		)
+	}
+}
+
+func assertDirectoryBytesEqual(t *testing.T, canonicalRoot, generatedRoot string) {
+	t.Helper()
+	canonicalFiles := directoryFilePaths(t, canonicalRoot)
+	generatedFiles := directoryFilePaths(t, generatedRoot)
+	if strings.Join(canonicalFiles, "\n") != strings.Join(generatedFiles, "\n") {
+		t.Errorf("generated Skill %s files = %v, want canonical files %v", filepath.Base(canonicalRoot), generatedFiles, canonicalFiles)
+		return
+	}
+	for _, relativePath := range canonicalFiles {
+		canonical, err := os.ReadFile(filepath.Join(canonicalRoot, filepath.FromSlash(relativePath)))
+		if err != nil {
+			t.Fatalf("read canonical Skill file %s: %v", relativePath, err)
+		}
+		generated, err := os.ReadFile(filepath.Join(generatedRoot, filepath.FromSlash(relativePath)))
+		if err != nil {
+			t.Fatalf("read generated Skill file %s: %v", relativePath, err)
+		}
+		if !bytes.Equal(generated, canonical) {
+			t.Errorf("generated Skill file %s/%s differs from its canonical source", filepath.Base(canonicalRoot), relativePath)
+		}
+	}
+}
+
+func directoryFilePaths(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Name() == ".git" {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(relative))
+		return nil
+	}); err != nil {
+		t.Fatalf("walk directory %s: %v", root, err)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func assertGeneratedPresetHasNoHostAdapters(t *testing.T, presetRoot string) {
