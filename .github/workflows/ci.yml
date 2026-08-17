@@ -130,8 +130,23 @@ jobs:
       - name: Check DSH plugin
         run: pnpm run check
 
+      - name: Pack exact DSH Desktop acceptance artifact
+        run: |
+          node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
+          pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12
+
+      - name: Upload exact DSH Desktop acceptance artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: anban-dsh-plugin
+          path: release/dsh/anban-dsh-plugin-4.1.12.tgz
+          if-no-files-found: error
+          retention-days: 1
+
   dsh-plugin-portability:
-    name: DSH plugin portability (${{ matrix.os }})
+    name: Packaged DSH Desktop acceptance (${{ matrix.os }})
+    needs: dsh-plugin
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -139,14 +154,28 @@ jobs:
         os:
           - macos-latest
           - windows-latest
-    defaults:
-      run:
-        working-directory: plugins
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+
+      - name: Checkout pinned DSH Desktop
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: anywhere-labs/deepseek-harness-desktop
+          ref: 4f68147091e585aaa1d815f99d30a657b3842d7c
+          path: _dsh-desktop
+          submodules: recursive
+
+      - name: Verify pinned DSH Desktop commit
+        run: node -e "const {execFileSync}=require('node:child_process'); const sha=execFileSync('git',['rev-parse','HEAD'],{cwd:'_dsh-desktop',encoding:'utf8'}).trim(); if(sha!=='4f68147091e585aaa1d815f99d30a657b3842d7c') process.exit(1)"
+
+      - name: Download exact DSH Desktop acceptance artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: anban-dsh-plugin
+          path: release/dsh
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -161,19 +190,40 @@ jobs:
           cache-dependency-path: plugins/pnpm-lock.yaml
 
       - name: Install locked DSH plugin dependencies
+        working-directory: plugins
         run: pnpm install --frozen-lockfile
 
+      - name: Install pinned DSH Desktop dependencies
+        working-directory: _dsh-desktop
+        run: corepack yarn install --immutable
+
+      - name: Build unsigned packaged DSH Desktop
+        working-directory: _dsh-desktop
+        run: corepack yarn package:dir
+
+      - name: Install exact plugin through public DSH
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.12.tgz
+        run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
+
+      - name: Launch packaged DSH Desktop application
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_DESKTOP_STATE_DIR: ${{ runner.temp }}/anban-dsh-desktop-state
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node scripts/dsh-desktop-acceptance.mjs launch
+
+      - name: Validate packaged Desktop profile exports and Skill catalogs
+        env:
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop
+
       - name: Run portable profile command tests
+        working-directory: plugins
         run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "portable profile-smoke commands"
 
       - name: Execute the Windows cmd shim test
+        working-directory: plugins
         run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "executes a cmd shim with spaces and metacharacters through cross-spawn"
-
-      - name: Run the official public Desktop runtime fixture
-        run: pnpm exec vitest run dsh/tests/profile-smoke.test.ts --testNamePattern "honors the pinned DSH Desktop public-runtime contract"
-
-      - name: Build DSH plugin for real profile smoke
-        run: pnpm run build
-
-      - name: Smoke-test real packaged fresh profile
-        run: pnpm run smoke:profile

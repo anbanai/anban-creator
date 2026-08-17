@@ -20,7 +20,88 @@ permissions:
   id-token: write
 
 jobs:
+  dsh-desktop-acceptance:
+    name: Packaged DSH Desktop release gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Checkout pinned DSH Desktop
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: anywhere-labs/deepseek-harness-desktop
+          ref: 4f68147091e585aaa1d815f99d30a657b3842d7c
+          path: _dsh-desktop
+          submodules: recursive
+
+      - name: Verify pinned DSH Desktop commit
+        run: node -e "const {execFileSync}=require('node:child_process'); const sha=execFileSync('git',['rev-parse','HEAD'],{cwd:'_dsh-desktop',encoding:'utf8'}).trim(); if(sha!=='4f68147091e585aaa1d815f99d30a657b3842d7c') process.exit(1)"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
+
+      - name: Install DSH plugin dependencies
+        working-directory: plugins
+        run: pnpm install --frozen-lockfile
+
+      - name: Build DSH plugin
+        working-directory: plugins
+        run: pnpm run build
+
+      - name: Install pinned DSH Desktop dependencies
+        working-directory: _dsh-desktop
+        run: corepack yarn install --immutable
+
+      - name: Build unsigned packaged DSH Desktop
+        working-directory: _dsh-desktop
+        run: corepack yarn package:dir
+
+      - name: Pack exact local DSH plugin
+        working-directory: plugins
+        run: |
+          node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
+          pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12
+
+      - name: Install exact plugin through public DSH
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.12.tgz
+        run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
+
+      - name: Launch packaged DSH Desktop application
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_DESKTOP_STATE_DIR: ${{ runner.temp }}/anban-dsh-desktop-state
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node scripts/dsh-desktop-acceptance.mjs launch
+
+      - name: Validate packaged Desktop profile exports and Skill catalogs
+        env:
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop
+
   release:
+    needs: dsh-desktop-acceptance
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

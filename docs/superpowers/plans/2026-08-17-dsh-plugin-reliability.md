@@ -319,7 +319,14 @@ export async function installPresets(options: InstallOptions = {}) {
 
 - [ ] **Step 4: Run Preset suites repeatedly**
 
-Run: `cd plugins && pnpm vitest run dsh/tests/preset-lock.test.ts dsh/tests/presets.test.ts dsh/tests/preset-manager.test.ts --repeat=3`
+Run with Vitest 4.1.8:
+
+```bash
+cd plugins
+for run in 1 2 3; do
+  pnpm vitest run dsh/tests/preset-lock.test.ts dsh/tests/presets.test.ts dsh/tests/preset-manager.test.ts
+done
+```
 
 Expected: PASS across all repetitions with no leftover `.anban-dsh.lock` except the explicit crash-residue fixture, which the next acquisition safely handles.
 

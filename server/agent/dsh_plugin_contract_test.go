@@ -447,6 +447,28 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
+	t.Run("4.1.12 release operators perform a real low privilege MCP check", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		normalized := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{
+			"4.1.12 release-operator checklist",
+			"after automated code gates and before public announcement",
+			"dedicated low-privilege",
+			"outside Git",
+			"list_projects",
+			"get_project_profile",
+			"account, environment, time, and result",
+			"without recording the key",
+			"rotate or revoke",
+			"missing valid key is an explicit manual release gate",
+			"automated missing-key and invalid-key tests remain required",
+		} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("DSH release-operator checklist missing %q", want)
+			}
+		}
+	})
+
 	t.Run("published adapter keeps credentials in memory", func(t *testing.T) {
 		source := readRepoFile(t, filepath.Join(pluginRoot, "dsh", "src", "anban-mcp.ts"))
 		for _, want := range []string{
@@ -768,6 +790,23 @@ func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
 	}
 }
 
+func TestDSHReliabilityPlanUsesExecutableVitestRepetition(t *testing.T) {
+	body := readRepoFile(t, filepath.Join(repoRoot(t), "docs", "superpowers", "plans", "2026-08-17-dsh-plugin-reliability.md"))
+	if strings.Contains(body, "--repeat=3") {
+		t.Fatal("Vitest 4.1.8 plan command uses unsupported --repeat=3")
+	}
+	for _, want := range []string{
+		"Vitest 4.1.8",
+		"for run in 1 2 3; do",
+		"pnpm vitest run dsh/tests/preset-lock.test.ts dsh/tests/presets.test.ts dsh/tests/preset-manager.test.ts",
+		"done",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("DSH reliability plan missing executable repetition fragment %q", want)
+		}
+	}
+}
+
 func TestDSHWindowsCmdProbeUsesTheRealPlatformGate(t *testing.T) {
 	body := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "dsh", "tests", "profile-smoke.test.ts"))
 	gate := "it.runIf(process.platform === 'win32')"
@@ -965,10 +1004,13 @@ func TestDSHReleaseVersionContractRejectsNonStableVersions(t *testing.T) {
 var dshStableReleaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 const (
-	actionsCheckoutV4SHA  = "11d5960a326750d5838078e36cf38b85af677262"
-	actionsSetupGoV5SHA   = "40f1582b2485089dde7abd97c1529aa768e1baff"
-	actionsSetupNodeV4SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
-	pnpmActionSetupV4SHA  = "b906affcce14559ad1aafd4ab0e942779e9f58b1"
+	actionsCheckoutV4SHA         = "11d5960a326750d5838078e36cf38b85af677262"
+	actionsDownloadArtifactV4SHA = "d3f86a106a0bac45b974a628896c90dbdf5c8093"
+	actionsSetupGoV5SHA          = "40f1582b2485089dde7abd97c1529aa768e1baff"
+	actionsSetupNodeV4SHA        = "49933ea5288caeca8642d1e84afbd3f7d6820020"
+	actionsUploadArtifactV4SHA   = "ea165f8d65b6e75b540449e92b4886f43607fa02"
+	dshDesktopCommit             = "4f68147091e585aaa1d815f99d30a657b3842d7c"
+	pnpmActionSetupV4SHA         = "b906affcce14559ad1aafd4ab0e942779e9f58b1"
 )
 
 type workflowContract struct {
@@ -990,6 +1032,7 @@ type workflowConcurrency struct {
 }
 
 type workflowJob struct {
+	Needs    any    `yaml:"needs"`
 	RunsOn   string `yaml:"runs-on"`
 	Defaults struct {
 		Run struct {
@@ -1003,13 +1046,14 @@ type workflowJob struct {
 }
 
 type workflowStep struct {
-	Name string            `yaml:"name"`
-	ID   string            `yaml:"id"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	If   any               `yaml:"if"`
-	With map[string]any    `yaml:"with"`
-	Env  map[string]string `yaml:"env"`
+	Name             string            `yaml:"name"`
+	ID               string            `yaml:"id"`
+	Uses             string            `yaml:"uses"`
+	Run              string            `yaml:"run"`
+	WorkingDirectory string            `yaml:"working-directory"`
+	If               any               `yaml:"if"`
+	With             map[string]any    `yaml:"with"`
+	Env              map[string]string `yaml:"env"`
 }
 
 func readWorkflowContract(t *testing.T, relativePath string) workflowContract {
@@ -1044,6 +1088,16 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if _, err := requireEnabledRunStep(check, "Check DSH plugin", "pnpm run check"); err != nil {
 		return err
 	}
+	pack, err := requireEnabledStep(check, "Pack exact DSH Desktop acceptance artifact")
+	if err != nil {
+		return err
+	}
+	if err := validateCrossPlatformDSHPackStep(pack); err != nil {
+		return err
+	}
+	if err := requireActionInput(check, "Upload exact DSH Desktop acceptance artifact", "actions/upload-artifact@"+actionsUploadArtifactV4SHA, "name", "anban-dsh-plugin"); err != nil {
+		return err
+	}
 	fullChecks := 0
 	for _, job := range workflow.Jobs {
 		for _, step := range job.Steps {
@@ -1057,7 +1111,7 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	}
 
 	portable, ok := workflow.Jobs["dsh-plugin-portability"]
-	if !ok || portable.RunsOn != "${{ matrix.os }}" || portable.Defaults.Run.WorkingDirectory != "plugins" {
+	if !ok || portable.RunsOn != "${{ matrix.os }}" {
 		return fmt.Errorf("dsh-plugin-portability must run its plugins commands on matrix.os")
 	}
 	gotOS := append([]string(nil), portable.Strategy.Matrix["os"]...)
@@ -1065,14 +1119,21 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if strings.Join(gotOS, ",") != "macos-latest,windows-latest" {
 		return fmt.Errorf("DSH portability OS matrix = %v", gotOS)
 	}
+	if !workflowJobNeeds(portable, "dsh-plugin") {
+		return fmt.Errorf("packaged Desktop acceptance must wait for the exact plugin artifact")
+	}
 	if err := requireActionInput(portable, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
 		return err
 	}
 	if err := requireActionInput(portable, "Set up Node", "actions/setup-node@"+actionsSetupNodeV4SHA, "node-version", "24"); err != nil {
 		return err
 	}
-	if _, err := requireEnabledRunStep(portable, "Install locked DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
+	pluginInstall, err := requireEnabledRunStep(portable, "Install locked DSH plugin dependencies", "pnpm install --frozen-lockfile")
+	if err != nil {
 		return err
+	}
+	if pluginInstall.WorkingDirectory != "plugins" {
+		return fmt.Errorf("portable DSH dependency install must run from plugins")
 	}
 	commandShape, err := requireEnabledStep(portable, "Run portable profile command tests")
 	if err != nil || !runHasCode(commandShape.Run, "dsh/tests/profile-smoke.test.ts") || !runHasCode(commandShape.Run, "portable profile-smoke commands") {
@@ -1082,26 +1143,67 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if err != nil || windowsProbe.If != nil || !runHasCode(windowsProbe.Run, "executes a cmd shim with spaces and metacharacters through cross-spawn") {
 		return fmt.Errorf("portable job must execute the Windows-only it.runIf cmd shim test")
 	}
-	desktop, err := requireEnabledStep(portable, "Run the official public Desktop runtime fixture")
-	if err != nil || desktop.If != nil || !runHasCode(desktop.Run, "honors the pinned DSH Desktop public-runtime contract") {
-		return fmt.Errorf("portable job must run the public Desktop runtime fixture on macOS and Windows")
-	}
-	build, err := requireEnabledRunStep(portable, "Build DSH plugin for real profile smoke", "pnpm run build")
-	if err != nil || build.If != nil {
-		return fmt.Errorf("portable job must build the package on macOS and Windows before smoke")
-	}
-	smoke, err := requireEnabledRunStep(portable, "Smoke-test real packaged fresh profile", "pnpm run smoke:profile")
-	if err != nil || smoke.If != nil {
-		return fmt.Errorf("portable job must run the real profile smoke on macOS and Windows")
+	if err := validatePackagedDSHDesktopJob(portable); err != nil {
+		return err
 	}
 	return requireNamedStepOrder(portable, []string{
+		"Checkout pinned DSH Desktop",
+		"Verify pinned DSH Desktop commit",
+		"Download exact DSH Desktop acceptance artifact",
 		"Install locked DSH plugin dependencies",
+		"Install pinned DSH Desktop dependencies",
+		"Build unsigned packaged DSH Desktop",
+		"Install exact plugin through public DSH",
+		"Launch packaged DSH Desktop application",
+		"Validate packaged Desktop profile exports and Skill catalogs",
 		"Run portable profile command tests",
 		"Execute the Windows cmd shim test",
-		"Run the official public Desktop runtime fixture",
-		"Build DSH plugin for real profile smoke",
-		"Smoke-test real packaged fresh profile",
 	})
+}
+
+func validatePackagedDSHDesktopJob(job workflowJob) error {
+	checkout, err := requireEnabledStep(job, "Checkout pinned DSH Desktop")
+	if err != nil || checkout.Uses != "actions/checkout@"+actionsCheckoutV4SHA || workflowScalar(checkout.With["repository"]) != "anywhere-labs/deepseek-harness-desktop" || workflowScalar(checkout.With["ref"]) != dshDesktopCommit || workflowScalar(checkout.With["path"]) != "_dsh-desktop" {
+		return fmt.Errorf("Desktop acceptance must checkout the exact public Desktop commit")
+	}
+	verify, err := requireEnabledStep(job, "Verify pinned DSH Desktop commit")
+	if err != nil || !runHasCode(verify.Run, "rev-parse") || !runHasCode(verify.Run, "HEAD") || !runHasCode(verify.Run, dshDesktopCommit) {
+		return fmt.Errorf("Desktop acceptance must verify the exact checked out commit")
+	}
+	if err := requireActionInput(job, "Download exact DSH Desktop acceptance artifact", "actions/download-artifact@"+actionsDownloadArtifactV4SHA, "name", "anban-dsh-plugin"); err != nil {
+		return err
+	}
+	install, err := requireEnabledRunStep(job, "Install pinned DSH Desktop dependencies", "corepack yarn install --immutable")
+	if err != nil || install.WorkingDirectory != "_dsh-desktop" {
+		return fmt.Errorf("Desktop acceptance must use the pinned immutable Yarn install")
+	}
+	build, err := requireEnabledRunStep(job, "Build unsigned packaged DSH Desktop", "corepack yarn package:dir")
+	if err != nil {
+		return err
+	}
+	if build.WorkingDirectory != "_dsh-desktop" {
+		return fmt.Errorf("Desktop package build must run from the pinned checkout")
+	}
+	publicInstall, err := requireEnabledStep(job, "Install exact plugin through public DSH")
+	if err != nil || !runHasCode(publicInstall.Run, "dsh-desktop-acceptance.mjs install") || !runHasCode(publicInstall.Run, "anban-dsh-plugin") {
+		return fmt.Errorf("Desktop acceptance must install the handed-off tarball through public DSH plugin commands")
+	}
+	launch, err := requireEnabledStep(job, "Launch packaged DSH Desktop application")
+	if err != nil || !runHasCode(launch.Run, "dsh-desktop-acceptance.mjs launch") {
+		return fmt.Errorf("Desktop acceptance must launch the packaged application")
+	}
+	profile, err := requireEnabledStep(job, "Validate packaged Desktop profile exports and Skill catalogs")
+	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop") {
+		return fmt.Errorf("Desktop acceptance must validate the installed Desktop profile and mounted catalogs")
+	}
+	for _, step := range job.Steps {
+		for _, forbidden := range []string{"ELECTRON_RUN_AS_NODE", "desktopRuntime", "desktopPnpmBootstrap", "public Desktop runtime fixture"} {
+			if runHasCode(step.Run, forbidden) {
+				return fmt.Errorf("packaged Desktop acceptance uses forbidden fixture/private path %q", forbidden)
+			}
+		}
+	}
+	return nil
 }
 
 func validateDSHReleaseWorkflow(workflow workflowContract) error {
@@ -1115,9 +1217,29 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if !ok || !input.Required {
 		return fmt.Errorf("workflow_dispatch version input must be required")
 	}
+	desktop, ok := workflow.Jobs["dsh-desktop-acceptance"]
+	if !ok || desktop.RunsOn != "${{ matrix.os }}" {
+		return fmt.Errorf("release workflow must gate on packaged Desktop acceptance")
+	}
+	gotOS := append([]string(nil), desktop.Strategy.Matrix["os"]...)
+	sort.Strings(gotOS)
+	if strings.Join(gotOS, ",") != "macos-latest,windows-latest" {
+		return fmt.Errorf("release packaged Desktop OS matrix = %v", gotOS)
+	}
+	if err := validateReleasePackagedDSHDesktopJob(desktop); err != nil {
+		return err
+	}
+	for _, step := range desktop.Steps {
+		if step.Uses != "" && !regexp.MustCompile(`^[^@]+@[0-9a-f]{40}$`).MatchString(step.Uses) {
+			return fmt.Errorf("release Desktop action %q is not pinned to an immutable commit", step.Uses)
+		}
+	}
 	release, ok := workflow.Jobs["release"]
 	if !ok || release.RunsOn != "ubuntu-latest" {
 		return fmt.Errorf("release must be one Ubuntu job")
+	}
+	if !workflowJobNeeds(release, "dsh-desktop-acceptance") {
+		return fmt.Errorf("npm and GitHub release must wait for both packaged Desktop matrix jobs")
 	}
 	if err := requireActionReference(release, "Checkout code", "actions/checkout@"+actionsCheckoutV4SHA); err != nil {
 		return err
@@ -1232,6 +1354,79 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		"Generate checksums",
 		"Create Release",
 	})
+}
+
+func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
+	checkout, err := requireEnabledStep(job, "Checkout pinned DSH Desktop")
+	if err != nil || checkout.Uses != "actions/checkout@"+actionsCheckoutV4SHA || workflowScalar(checkout.With["repository"]) != "anywhere-labs/deepseek-harness-desktop" || workflowScalar(checkout.With["ref"]) != dshDesktopCommit || workflowScalar(checkout.With["path"]) != "_dsh-desktop" {
+		return fmt.Errorf("release Desktop acceptance must checkout the exact public Desktop commit")
+	}
+	verify, err := requireEnabledStep(job, "Verify pinned DSH Desktop commit")
+	if err != nil || !runHasCode(verify.Run, "rev-parse") || !runHasCode(verify.Run, "HEAD") || !runHasCode(verify.Run, dshDesktopCommit) {
+		return fmt.Errorf("release Desktop acceptance must verify the exact checked out commit")
+	}
+	desktopInstall, err := requireEnabledRunStep(job, "Install pinned DSH Desktop dependencies", "corepack yarn install --immutable")
+	if err != nil {
+		return err
+	}
+	if desktopInstall.WorkingDirectory != "_dsh-desktop" {
+		return fmt.Errorf("release Desktop dependency install must run from the pinned checkout")
+	}
+	desktopBuild, err := requireEnabledRunStep(job, "Build unsigned packaged DSH Desktop", "corepack yarn package:dir")
+	if err != nil {
+		return err
+	}
+	if desktopBuild.WorkingDirectory != "_dsh-desktop" {
+		return fmt.Errorf("release Desktop package build must run from the pinned checkout")
+	}
+	pack, err := requireEnabledStep(job, "Pack exact local DSH plugin")
+	if err != nil || pack.WorkingDirectory != "plugins" || !runHasCode(pack.Run, "pnpm pack --json --pack-destination") {
+		return fmt.Errorf("release Desktop acceptance must consume one exact local plugin tarball")
+	}
+	if err := validateCrossPlatformDSHPackStep(pack); err != nil {
+		return err
+	}
+	publicInstall, err := requireEnabledStep(job, "Install exact plugin through public DSH")
+	if err != nil || !runHasCode(publicInstall.Run, "dsh-desktop-acceptance.mjs install") || !runHasCode(publicInstall.Run, "anban-dsh-plugin") {
+		return fmt.Errorf("release Desktop acceptance must install the exact tarball through public DSH")
+	}
+	launch, err := requireEnabledStep(job, "Launch packaged DSH Desktop application")
+	if err != nil || !runHasCode(launch.Run, "dsh-desktop-acceptance.mjs launch") {
+		return fmt.Errorf("release Desktop acceptance must launch the packaged application")
+	}
+	profile, err := requireEnabledStep(job, "Validate packaged Desktop profile exports and Skill catalogs")
+	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop") {
+		return fmt.Errorf("release Desktop acceptance must validate exports and mounted Skill catalogs")
+	}
+	for _, step := range job.Steps {
+		for _, forbidden := range []string{"ELECTRON_RUN_AS_NODE", "desktopRuntime", "desktopPnpmBootstrap", "public Desktop runtime fixture"} {
+			if runHasCode(step.Run, forbidden) {
+				return fmt.Errorf("release packaged Desktop acceptance uses forbidden path %q", forbidden)
+			}
+		}
+	}
+	return requireNamedStepOrder(job, []string{
+		"Checkout pinned DSH Desktop",
+		"Verify pinned DSH Desktop commit",
+		"Install pinned DSH Desktop dependencies",
+		"Build unsigned packaged DSH Desktop",
+		"Pack exact local DSH plugin",
+		"Install exact plugin through public DSH",
+		"Launch packaged DSH Desktop application",
+		"Validate packaged Desktop profile exports and Skill catalogs",
+	})
+}
+
+func validateCrossPlatformDSHPackStep(step workflowStep) error {
+	for _, forbidden := range []string{"<<'NODE'", "<<\"NODE\"", "parsePackResult"} {
+		if runHasCode(step.Run, forbidden) {
+			return fmt.Errorf("Desktop pack step contains shell-specific inline verifier %q", forbidden)
+		}
+	}
+	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12") {
+		return fmt.Errorf("Desktop pack step must use the cross-platform exact-pack verifier")
+	}
+	return nil
 }
 
 func requireActionInput(job workflowJob, name, uses, key, value string) error {
@@ -1422,6 +1617,20 @@ func workflowScalar(value any) string {
 		return ""
 	}
 	return fmt.Sprint(value)
+}
+
+func workflowJobNeeds(job workflowJob, name string) bool {
+	switch needs := job.Needs.(type) {
+	case string:
+		return needs == name
+	case []any:
+		for _, candidate := range needs {
+			if workflowScalar(candidate) == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestDSHYAMLPluginRowsAreStructural(t *testing.T) {
