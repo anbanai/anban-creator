@@ -71,6 +71,7 @@ export interface BootstrapFile {
   mode: number;
   expected_size?: number;
   max_bytes?: number;
+  replace_existing?: boolean;
 }
 
 export interface ExecutionProfile {
@@ -222,6 +223,10 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");
   if (data.resume_session_id && !data.resume_context_path) throw new Error("bootstrap resume session requires resume context");
+  if (data.resume_context_path !== undefined) {
+    const expected = `.anban-creator/resume/executions/${executionID}/latest.md`;
+    if (data.resume_context_path !== expected) throw new Error("bootstrap resume context path is invalid");
+  }
   if (data.task_type !== "montage" && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage tasks");
   for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, "Montage");
   preflightBootstrapFiles(data.files ?? []);
@@ -351,6 +356,12 @@ export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[]
   if (files.length > MAX_BOOTSTRAP_FILES) throw new Error("bootstrap file count exceeds limit");
   const seen = new Map<string, string>();
   for (const file of files) {
+    if (!isRecord(file) || !hasOnlyKeys(file, [
+      "path", "text", "download_url", "mode", "expected_size", "max_bytes", "replace_existing",
+    ])) throw new Error("bootstrap file contains unknown fields");
+    if (file.replace_existing !== undefined && typeof file.replace_existing !== "boolean") {
+      throw new Error("bootstrap file replace_existing must be boolean");
+    }
     const relative = cleanBootstrapPath(file.path);
     const key = relative.toLowerCase();
     if (seen.has(key)) throw new Error(`duplicate bootstrap path ${relative} conflicts with ${seen.get(key)}`);

@@ -6,6 +6,13 @@ import { cleanBootstrapPath, preflightBootstrapFiles, readBoundedText, workspace
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
 const MAX_BOOTSTRAP_TOTAL_BYTES = 512 << 20;
 
+type BootstrapCommit = {
+  kind: "create" | "replace";
+  target: string;
+  staged: string;
+  backup?: string;
+};
+
 export async function prepareWorkspace(workspace: string, taskType: string, runtimeAdapter: BootstrapResponse["runtime_adapter"]): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
   await ensureRealDirectory(join(workspace, "output"), "output", true);
@@ -85,13 +92,18 @@ async function makeWritableTree(path: string): Promise<void> {
 export async function materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
   const prepared = preflightBootstrapFiles(files ?? []);
-  const staging = await mkdtemp(join(workspace, ".anban-bootstrap-"));
-  const committed: string[] = [];
+  const stagingRoot = await mkdtemp(join(workspace, ".anban-bootstrap-"));
+  const incoming = join(stagingRoot, "incoming");
+  const backups = join(stagingRoot, "backups");
+  await mkdir(incoming, { mode: 0o700 });
+  await mkdir(backups, { mode: 0o700 });
+  const commits: BootstrapCommit[] = [];
+  const applied: BootstrapCommit[] = [];
   try {
     let totalBytes = 0;
     for (const file of prepared) {
       signal?.throwIfAborted();
-      const staged = workspacePath(staging, file.path);
+      const staged = workspacePath(incoming, file.path);
       await mkdir(dirname(staged), { recursive: true, mode: 0o750 });
       let contents: Uint8Array;
       if (file.text !== undefined) {
@@ -110,34 +122,59 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
 
     for (const file of prepared) {
       const target = workspacePath(workspace, file.path);
-      const staged = workspacePath(staging, file.path);
+      const staged = workspacePath(incoming, file.path);
       await ensureRealParent(workspace, dirname(target));
       try {
         const existing = await lstat(target);
         if (existing.isSymbolicLink() || !existing.isFile()) throw new Error(`bootstrap target is not a regular file: ${target}`);
-        if (!(await filesEqual(staged, target))) throw new Error(`bootstrap target conflicts with existing file: ${target}`);
+        if (await filesEqual(staged, target)) continue;
+        if (!file.replace_existing) throw new Error(`bootstrap target conflicts with existing file: ${target}`);
+        commits.push({ kind: "replace", target, staged, backup: join(backups, String(commits.length)) });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        commits.push({ kind: "create", target, staged });
       }
     }
 
-    for (const file of prepared) {
+    for (const commit of commits) {
       signal?.throwIfAborted();
-      const target = workspacePath(workspace, file.path);
-      const staged = workspacePath(staging, file.path);
-      try {
-        await lstat(target);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        await rename(staged, target);
-        committed.push(target);
+      if (commit.kind === "create") {
+        await rename(commit.staged, commit.target);
+      } else {
+        await rename(commit.target, commit.backup!);
+        try {
+          await rename(commit.staged, commit.target);
+        } catch (installError) {
+          try {
+            await rename(commit.backup!, commit.target);
+          } catch (restoreError) {
+            throw new AggregateError([installError, restoreError], "bootstrap replacement failed and rollback was incomplete");
+          }
+          throw installError;
+        }
       }
+      applied.push(commit);
     }
   } catch (error) {
-    await Promise.all(committed.map((path) => rm(path, { force: true })));
+    try {
+      await rollbackBootstrapCommits(applied);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "bootstrap materialization failed and rollback was incomplete");
+    }
     throw error;
   } finally {
-    await rm(staging, { recursive: true, force: true });
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+async function rollbackBootstrapCommits(commits: BootstrapCommit[]): Promise<void> {
+  for (const commit of [...commits].reverse()) {
+    if (commit.kind === "create") {
+      await rm(commit.target, { force: true });
+      continue;
+    }
+    await rm(commit.target, { force: true });
+    await rename(commit.backup!, commit.target);
   }
 }
 

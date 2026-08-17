@@ -34,6 +34,69 @@ describe("materializeBootstrapFiles", () => {
     ])).rejects.toThrow("conflicts");
     await expect(lstat(join(workspace, "new.txt"))).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  test("replaces a differing managed settings file", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    await mkdir(join(workspace, ".anban-creator"));
+    await writeFile(join(workspace, ".anban-creator", "settings.json"), "old", { mode: 0o600 });
+
+    await materializeBootstrapFiles(workspace, [{
+      path: ".anban-creator/settings.json", text: "new", mode: 0o600,
+      replace_existing: true,
+    }]);
+
+    expect(await readFile(join(workspace, ".anban-creator", "settings.json"), "utf8")).toBe("new");
+  });
+
+  test("does not replace managed settings when another target conflicts", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    await mkdir(join(workspace, ".anban-creator"));
+    await writeFile(join(workspace, ".anban-creator", "settings.json"), "old", { mode: 0o600 });
+    await writeFile(join(workspace, "immutable.txt"), "old");
+
+    await expect(materializeBootstrapFiles(workspace, [
+      { path: ".anban-creator/settings.json", text: "new", mode: 0o600, replace_existing: true },
+      { path: "immutable.txt", text: "different", mode: 0o644 },
+    ])).rejects.toThrow("conflicts");
+
+    expect(await readFile(join(workspace, ".anban-creator", "settings.json"), "utf8")).toBe("old");
+  });
+
+  test("refuses to replace a symlink target", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    await mkdir(join(workspace, ".anban-creator"));
+    await symlink(join(workspace, "outside.json"), join(workspace, ".anban-creator", "settings.json"));
+
+    await expect(materializeBootstrapFiles(workspace, [{
+      path: ".anban-creator/settings.json", text: "new", mode: 0o600,
+      replace_existing: true,
+    }])).rejects.toThrow("not a regular file");
+  });
+
+  test("rolls back a replacement when a later commit is aborted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    await mkdir(join(workspace, ".anban-creator"));
+    await writeFile(join(workspace, ".anban-creator", "settings.json"), "old", { mode: 0o600 });
+    let checks = 0;
+    const signal = {
+      throwIfAborted() {
+        checks += 1;
+        if (checks === 4) throw new Error("commit aborted");
+      },
+    } as AbortSignal;
+
+    await expect(materializeBootstrapFiles(workspace, [
+      { path: ".anban-creator/settings.json", text: "new", mode: 0o600, replace_existing: true },
+      { path: "created.txt", text: "created", mode: 0o644 },
+    ], signal)).rejects.toThrow("commit aborted");
+
+    expect(await readFile(join(workspace, ".anban-creator", "settings.json"), "utf8")).toBe("old");
+    await expect(lstat(join(workspace, "created.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 describe("prepareWorkspace", () => {

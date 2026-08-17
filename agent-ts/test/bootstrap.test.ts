@@ -156,6 +156,29 @@ describe("validateBootstrapResponse", () => {
     expect(validateBootstrapResponse("execution-1", response).execution_profile.profile_id).toBe("quality");
   });
 
+  test("validates the managed replacement flag", () => {
+    const accepted = validResponse();
+    accepted.files = [{ path: ".anban-creator/settings.json", text: "new", mode: 0o600, replace_existing: true }];
+    expect(validateBootstrapResponse("execution-1", accepted).files?.[0]?.replace_existing).toBe(true);
+
+    const rejected = validResponse();
+    rejected.files = [{ path: ".anban-creator/settings.json", text: "new", mode: 0o600 }];
+    (rejected.files[0] as unknown as Record<string, unknown>).replace_existing = "true";
+    expect(() => validateBootstrapResponse("execution-1", rejected)).toThrow("replace_existing");
+  });
+
+  test("requires an execution-scoped resume context path", () => {
+    const accepted = validResponse();
+    accepted.resume_session_id = "session-1";
+    accepted.resume_context_path = ".anban-creator/resume/executions/execution-1/latest.md";
+    expect(validateBootstrapResponse("execution-1", accepted).resume_context_path).toBe(accepted.resume_context_path);
+
+    const rejected = validResponse();
+    rejected.resume_session_id = "session-1";
+    rejected.resume_context_path = ".anban-creator/resume/executions/other/latest.md";
+    expect(() => validateBootstrapResponse("execution-1", rejected)).toThrow("resume context path");
+  });
+
   test("accepts Claude traffic and auto-memory controls", () => {
     const response = validResponse();
     response.execution_profile.envs.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
