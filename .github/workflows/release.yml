@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: dsh-release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   id-token: write
@@ -348,7 +352,7 @@ jobs:
           for (let attempt = 1; attempt <= 3; attempt += 1) {
             query = spawnSync(
               'npm',
-              ['view', spec, 'version', 'dist.integrity', '--json', '--registry=https://registry.npmjs.org'],
+              ['view', spec, 'version', 'dist.integrity', 'dist.attestations.provenance', '--json', '--registry=https://registry.npmjs.org'],
               { encoding: 'utf8', env: cleanEnvironment, maxBuffer: 1024 * 1024 },
             )
             if (query.error) throw query.error
@@ -369,14 +373,21 @@ jobs:
           const published = JSON.parse(query.stdout)
           const publishedVersion = published.version
           const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
           const localIntegrity = `sha512-${createHash('sha512')
             .update(readFileSync(process.env.TARBALL))
             .digest('base64')}`
           if (
             publishedVersion !== process.env.VERSION ||
-            publishedIntegrity !== localIntegrity
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
           ) {
-            throw new Error('existing npm version does not match the exact local tarball bytes')
+            throw new Error('existing npm version lacks exact tarball integrity or provenance')
           }
           appendFileSync(process.env.GITHUB_OUTPUT, 'publish_required=false\n')
           NODE
@@ -403,19 +414,26 @@ jobs:
             if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
               HOME="$attempt_root/home" \
               NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
-              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity --json \
+              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity dist.attestations.provenance --json \
               --registry=https://registry.npmjs.org > "$attempt_root/view.json" 2>/dev/null; then
               if VIEW_PATH="$attempt_root/view.json" VERSION="$VERSION" TARBALL="$TARBALL" node <<'NODE'
           const { createHash } = require('node:crypto')
           const { readFileSync } = require('node:fs')
           const published = JSON.parse(readFileSync(process.env.VIEW_PATH, 'utf8'))
           const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
           const localIntegrity = `sha512-${createHash('sha512')
             .update(readFileSync(process.env.TARBALL))
             .digest('base64')}`
           if (
             published.version !== process.env.VERSION ||
-            publishedIntegrity !== localIntegrity
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
           ) process.exit(1)
           NODE
               then
@@ -444,7 +462,7 @@ jobs:
             if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
               HOME="$attempt_root/home" \
               NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
-              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity --json \
+              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity dist.attestations.provenance --json \
               --registry=https://registry.npmjs.org > "$attempt_root/view.json" 2>/dev/null; then
               if VIEW_PATH="$attempt_root/view.json" VERSION="$VERSION" TARBALL="$TARBALL" node <<'NODE'
           const { createHash } = require('node:crypto')
@@ -452,12 +470,19 @@ jobs:
           const published = JSON.parse(readFileSync(process.env.VIEW_PATH, 'utf8'))
           const publishedVersion = published.version
           const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
           const localIntegrity = `sha512-${createHash('sha512')
             .update(readFileSync(process.env.TARBALL))
             .digest('base64')}`
           if (
             publishedVersion !== process.env.VERSION ||
-            publishedIntegrity !== localIntegrity
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
           ) process.exit(1)
           NODE
               then

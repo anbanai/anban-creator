@@ -820,6 +820,86 @@ jobs:
 	}
 }
 
+func TestDSHReleaseConcurrencyContractRejectsNonSerialReleaseKeys(t *testing.T) {
+	tests := []struct {
+		name        string
+		concurrency workflowConcurrency
+	}{
+		{name: "missing concurrency"},
+		{
+			name: "static group",
+			concurrency: workflowConcurrency{
+				Group:            "dsh-release",
+				CancelInProgress: dshBoolPointer(false),
+			},
+		},
+		{
+			name: "tag and manual runs use different keys",
+			concurrency: workflowConcurrency{
+				Group:            "dsh-release-${{ github.ref }}-${{ inputs.version }}",
+				CancelInProgress: dshBoolPointer(false),
+			},
+		},
+		{
+			name: "cancels active release",
+			concurrency: workflowConcurrency{
+				Group:            dshReleaseConcurrencyGroup,
+				CancelInProgress: dshBoolPointer(true),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateDSHReleaseConcurrency(test.concurrency); err == nil {
+				t.Fatal("non-serial release concurrency satisfied the workflow contract")
+			}
+		})
+	}
+}
+
+func TestDSHReleaseProvenanceContractRejectsMentionsWithoutEnforcement(t *testing.T) {
+	tests := []struct {
+		name string
+		run  string
+	}{
+		{
+			name: "query without validation",
+			run:  `npm view package version dist.integrity dist.attestations.provenance --json`,
+		},
+		{
+			name: "validation without registry query",
+			run: `
+
+const publishedProvenance = published['dist.attestations.provenance']
+if (typeof publishedProvenance !== 'object' || Array.isArray(publishedProvenance)) process.exit(1)
+`,
+		},
+		{
+			name: "commented validation",
+			run: `
+npm view package version dist.integrity dist.attestations.provenance --json
+// const publishedProvenance = published['dist.attestations.provenance']
+// if (typeof publishedProvenance !== 'object' || Array.isArray(publishedProvenance)) process.exit(1)
+`,
+		},
+		{
+			name: "object presence without SLSA provenance predicate",
+			run: `
+npm view package version dist.integrity dist.attestations.provenance --json
+const publishedProvenance = published['dist.attestations.provenance']
+if (typeof publishedProvenance !== 'object' || Array.isArray(publishedProvenance)) process.exit(1)
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateNpmProvenanceAcceptance(test.run); err == nil {
+				t.Fatal("non-enforcing provenance snippet satisfied the registry acceptance contract")
+			}
+		})
+	}
+}
+
 func TestWorkflowContractRejectsMutatingOrEmptyGitHubReleaseUpdates(t *testing.T) {
 	tests := []struct {
 		name string
@@ -899,8 +979,14 @@ type workflowContract struct {
 			} `yaml:"inputs"`
 		} `yaml:"workflow_dispatch"`
 	} `yaml:"on"`
+	Concurrency workflowConcurrency    `yaml:"concurrency"`
 	Permissions map[string]string      `yaml:"permissions"`
 	Jobs        map[string]workflowJob `yaml:"jobs"`
+}
+
+type workflowConcurrency struct {
+	Group            string `yaml:"group"`
+	CancelInProgress *bool  `yaml:"cancel-in-progress"`
 }
 
 type workflowJob struct {
@@ -1019,6 +1105,9 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 }
 
 func validateDSHReleaseWorkflow(workflow workflowContract) error {
+	if err := validateDSHReleaseConcurrency(workflow.Concurrency); err != nil {
+		return err
+	}
 	if workflow.Permissions["contents"] != "write" || workflow.Permissions["id-token"] != "write" {
 		return fmt.Errorf("release workflow must grant contents and id-token write")
 	}
@@ -1095,16 +1184,16 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		return fmt.Errorf("release asset staging must copy and byte-verify the exact tarball into bin")
 	}
 	preflight, err := requireEnabledStep(release, "Inspect exact npm registry version")
-	if err != nil || preflight.ID != "registry-preflight" || preflight.If != nil || preflight.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(preflight.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(preflight.Run, "dist.integrity") || !runHasCode(preflight.Run, "createHash('sha512')") || !runHasCode(preflight.Run, "E404") || !runHasCode(preflight.Run, "publish_required=") || !runHasCode(preflight.Run, "for (let attempt") {
-		return fmt.Errorf("registry preflight must briefly retry E404 and require exact existing SRI")
+	if err != nil || preflight.ID != "registry-preflight" || preflight.If != nil || preflight.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(preflight.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(preflight.Run, "dist.integrity") || !runHasCode(preflight.Run, "createHash('sha512')") || !runHasCode(preflight.Run, "E404") || !runHasCode(preflight.Run, "publish_required=") || !runHasCode(preflight.Run, "for (let attempt") || validateNpmProvenanceAcceptance(preflight.Run) != nil {
+		return fmt.Errorf("registry preflight must briefly retry E404 and require exact existing SRI with provenance")
 	}
 	publish, err := requireEnabledRunStep(release, "Publish exact DSH package to npm", `npm publish "$TARBALL" --access public --provenance`)
-	if err != nil || workflowScalar(publish.If) != "steps.registry-preflight.outputs.publish_required == 'true'" || publish.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(publish.Run, "publish_status=") || !runHasCode(publish.Run, "for attempt in") || !runHasCode(publish.Run, "dist.integrity") || !runHasCode(publish.Run, "createHash('sha512')") || !runHasCode(publish.Run, `exit "$publish_status"`) {
-		return fmt.Errorf("npm publication failure must recover only after the exact registry SRI appears")
+	if err != nil || workflowScalar(publish.If) != "steps.registry-preflight.outputs.publish_required == 'true'" || publish.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(publish.Run, "publish_status=") || !runHasCode(publish.Run, "for attempt in") || !runHasCode(publish.Run, "dist.integrity") || !runHasCode(publish.Run, "createHash('sha512')") || !runHasCode(publish.Run, `exit "$publish_status"`) || validateNpmProvenanceAcceptance(publish.Run) != nil {
+		return fmt.Errorf("npm publication failure must recover only after exact registry SRI with provenance appears")
 	}
 	view, err := requireEnabledStep(release, "Verify anonymous npm availability")
-	if err != nil || view.If != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || view.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "dist.integrity") || !runHasCode(view.Run, "createHash('sha512')") || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(view.Run, "for attempt in") || !runHasCode(view.Run, "sleep ") {
-		return fmt.Errorf("anonymous npm view must retry and verify the exact published version bytes")
+	if err != nil || view.If != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || view.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "dist.integrity") || !runHasCode(view.Run, "createHash('sha512')") || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(view.Run, "for attempt in") || !runHasCode(view.Run, "sleep ") || validateNpmProvenanceAcceptance(view.Run) != nil {
+		return fmt.Errorf("anonymous npm view must retry and verify exact published bytes with provenance")
 	}
 	registry, err := requireEnabledStep(release, "Smoke-test exact registry DSH package")
 	if err != nil || registry.If != nil || registry.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(registry.Run, `smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(registry.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(registry.Run, "for attempt in") || !runHasCode(registry.Run, "sleep ") {
@@ -1272,6 +1361,60 @@ func runHasCode(run, fragment string) bool {
 		}
 	}
 	return false
+}
+
+const dshReleaseConcurrencyGroup = "dsh-release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}"
+
+func validateDSHReleaseConcurrency(concurrency workflowConcurrency) error {
+	if concurrency.Group != dshReleaseConcurrencyGroup {
+		return fmt.Errorf("release concurrency must key tag and manual runs to the same release version")
+	}
+	if concurrency.CancelInProgress == nil || *concurrency.CancelInProgress {
+		return fmt.Errorf("release concurrency must explicitly serialize without cancellation")
+	}
+	return nil
+}
+
+func validateNpmProvenanceAcceptance(run string) error {
+	if !runHasAllCode(run, "view", "dist.attestations.provenance") {
+		return fmt.Errorf("registry acceptance must query npm provenance")
+	}
+	for _, fragment := range []string{
+		"publishedProvenance",
+		"published['dist.attestations.provenance']",
+		"typeof publishedProvenance !== 'object'",
+		"Array.isArray(publishedProvenance)",
+		"publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'",
+	} {
+		if !runHasCode(run, fragment) {
+			return fmt.Errorf("registry acceptance must fail closed on missing npm provenance")
+		}
+	}
+	return nil
+}
+
+func runHasAllCode(run string, fragments ...string) bool {
+	for _, line := range strings.Split(run, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		matched := true
+		for _, fragment := range fragments {
+			if !strings.Contains(line, fragment) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func dshBoolPointer(value bool) *bool {
+	return &value
 }
 
 func workflowScalar(value any) string {
