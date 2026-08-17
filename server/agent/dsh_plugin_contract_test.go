@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
@@ -265,23 +266,66 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
-	t.Run("documentation resolves DSH home before filesystem use", func(t *testing.T) {
+	t.Run("documentation normalizes DSH home before filesystem use", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
-		definition := `export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"`
-		definitionIndex := strings.Index(body, definition)
-		if got := strings.Count(body, "\nexport DSH_HOME="); got != 1 {
-			t.Errorf("DSH_HOME export definitions = %d, want 1", got)
+		sectionStart := strings.Index(body, "## Resolve DSH home")
+		sectionEndOffset := strings.Index(body[sectionStart+1:], "\n## ")
+		if sectionStart < 0 || sectionEndOffset < 0 {
+			t.Fatal("DSH installation guide missing bounded home normalization section")
 		}
-		if definitionIndex < 0 {
-			t.Fatalf("DSH installation guide missing official home fallback %q", definition)
+		section := body[sectionStart : sectionStart+1+sectionEndOffset]
+		scriptMatch := regexp.MustCompile(`(?s)node <<'NODE'\n(.*?)\nNODE`).FindStringSubmatch(section)
+		if scriptMatch == nil {
+			t.Fatal("DSH home normalization section missing quoted Node heredoc")
 		}
-		if strings.Contains(body[:definitionIndex], "$DSH_HOME") {
+		script := scriptMatch[1]
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		absoluteFixture := filepath.Join(t.TempDir(), "absolute-dsh-home")
+		for _, test := range []struct {
+			name     string
+			input    *string
+			expected string
+		}{
+			{name: "unset", expected: filepath.Join(home, ".dsh")},
+			{name: "whitespace", input: dshStringPointer("  \t "), expected: filepath.Join(home, ".dsh")},
+			{name: "tilde", input: dshStringPointer("~"), expected: home},
+			{name: "tilde child", input: dshStringPointer("~/custom"), expected: filepath.Join(home, "custom")},
+			{name: "relative", input: dshStringPointer("relative/dsh-home"), expected: filepath.Join(pluginRoot, "relative/dsh-home")},
+			{name: "absolute", input: &absoluteFixture, expected: absoluteFixture},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				cmd := exec.Command("node", "-e", script)
+				cmd.Dir = pluginRoot
+				cmd.Env = dshEnvironmentWithHome(os.Environ(), test.input)
+				output, err := cmd.Output()
+				if err != nil {
+					t.Fatalf("home normalizer failed: %v", err)
+				}
+				if got := string(output); got != test.expected {
+					t.Errorf("normalized home = %q, want %q", got, test.expected)
+				}
+			})
+		}
+		root := string(filepath.Separator)
+		rootCommand := exec.Command("node", "-e", script)
+		rootCommand.Dir = pluginRoot
+		rootCommand.Env = dshEnvironmentWithHome(os.Environ(), &root)
+		rootOutput, rootErr := rootCommand.CombinedOutput()
+		if rootErr == nil || !strings.Contains(strings.ToLower(string(rootOutput)), "filesystem root") {
+			t.Errorf("filesystem root was not rejected: err=%v output=%q", rootErr, rootOutput)
+		}
+
+		captureIndex := strings.Index(section, `NORMALIZED_DSH_HOME="$(`)
+		emptyGuardIndex := strings.Index(section, `[ -n "$NORMALIZED_DSH_HOME" ]`)
+		exportIndex := strings.Index(section, `export DSH_HOME="$NORMALIZED_DSH_HOME"`)
+		if captureIndex < 0 || emptyGuardIndex <= captureIndex || exportIndex <= emptyGuardIndex {
+			t.Errorf("unsafe DSH home normalization order: capture=%d guard=%d export=%d", captureIndex, emptyGuardIndex, exportIndex)
+		}
+		if strings.Contains(body[:sectionStart], "$DSH_HOME") {
 			t.Error("DSH installation guide uses DSH_HOME before resolving the effective home")
-		}
-		for _, forbidden := range []string{`DSH_HOME=""`, `DSH_HOME=''`, `DSH_HOME="$DSH_HOME"`, `DSH_HOME=$DSH_HOME`} {
-			if strings.Contains(body, forbidden) {
-				t.Errorf("DSH installation guide contains empty or unresolved home example %q", forbidden)
-			}
 		}
 		for _, want := range []string{
 			`install -d -m 700 "$DSH_HOME"`,
@@ -292,7 +336,7 @@ func TestDSHPluginContract(t *testing.T) {
 			index := strings.Index(body, want)
 			if index < 0 {
 				t.Errorf("DSH installation guide missing quoted home filesystem command %q", want)
-			} else if index <= definitionIndex {
+			} else if index <= sectionStart+exportIndex {
 				t.Errorf("DSH home filesystem command precedes effective home definition %q", want)
 			}
 		}
@@ -451,6 +495,13 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
 		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#main\"\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"file:/tmp/creator-skills\"\n```",
+		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
+		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#main\"\n```",
+		"```bash\nONE=1 TWO=2 wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/creator-skills\"\n```",
+		"```bash\nLABEL=\"two words\" dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/arbitrary-plugin-4.1.12.tgz\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \"unterminated\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) == 0 {
 			t.Errorf("prefixed or continued forbidden add was not classified:\n%s", source)
@@ -461,17 +512,22 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
 		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
+		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.12.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
 			t.Errorf("approved prefixed or continued add findings = %v:\n%s", findings, source)
 		}
 	}
+	if findings := dshDocumentationPluginAddFindings(`Run dsh plugin --profile web add "@anban/dsh-plugin" in a shell.`); len(findings) != 0 {
+		t.Errorf("prose outside shell fences was classified: %v", findings)
+	}
 }
 
 var dshShellFencePattern = regexp.MustCompile("(?s)```(?:bash|sh|shell)\\n(.*?)```")
-var dshShellWordPattern = regexp.MustCompile(`"[^"]*"|'[^']*'|[^\s]+`)
 var dshShellAssignmentPattern = regexp.MustCompile(`^([A-Z_][A-Z0-9_]*)=["']([^"']*)["']$`)
-var dshShellEnvironmentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
 var dshLocalTarballAddPattern = regexp.MustCompile(`(^|[/\\])anban-dsh-plugin-(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
 var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/royalmorty/anbanwriter/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
@@ -488,58 +544,65 @@ func dshDocumentationPluginAddFindings(source string) []string {
 				variables[assignment[1]] = assignment[2]
 				continue
 			}
-			matches := dshShellWordPattern.FindAllString(line, -1)
-			words := make([]string, len(matches))
-			for i, match := range matches {
-				words[i] = strings.Trim(match, `"'`)
-			}
-			commandIndex := 0
-			if commandIndex < len(words) && words[commandIndex] == "$" {
-				commandIndex++
-			}
-			for commandIndex < len(words) && (words[commandIndex] == "command" || words[commandIndex] == "env" || dshShellEnvironmentPattern.MatchString(words[commandIndex])) {
-				commandIndex++
-			}
-			if commandIndex+1 >= len(words) || words[commandIndex] != "dsh" || words[commandIndex+1] != "plugin" {
-				continue
-			}
-			addIndex := -1
-			for i := commandIndex + 2; i < len(words); i++ {
-				word := words[i]
-				if word == "add" {
-					addIndex = i
+			commandLine := strings.TrimPrefix(line, "$ ")
+			words, ambiguous := dshShellWords(commandLine)
+			sawAddSequence := false
+			for commandIndex := 0; commandIndex+1 < len(words); commandIndex++ {
+				if words[commandIndex] != "dsh" || words[commandIndex+1] != "plugin" {
+					continue
+				}
+				commandEnd := len(words)
+				for i := commandIndex + 2; i < len(words); i++ {
+					if dshShellOperator(words[i]) {
+						commandEnd = i
+						break
+					}
+				}
+				addIndex := -1
+				for i := commandIndex + 2; i < commandEnd; i++ {
+					if words[i] == "add" {
+						addIndex = i
+						break
+					}
+				}
+				if addIndex < 0 {
+					continue
+				}
+				sawAddSequence = true
+				if ambiguous {
+					findings = append(findings, line+": ambiguous shell tokenization")
 					break
 				}
-			}
-			if addIndex < 0 {
-				continue
-			}
-			if addIndex+1 >= len(words) {
-				findings = append(findings, line+": missing add specifier")
-				continue
-			}
-			specifier := os.Expand(words[addIndex+1], func(key string) string {
-				if value, ok := variables[key]; ok {
-					return value
+				if addIndex+1 >= commandEnd {
+					findings = append(findings, line+": missing add specifier")
+					continue
 				}
-				return "${" + key + "}"
-			})
-			npmPackage := dshNpmAddPattern.MatchString(specifier)
-			tarball := false
-			if strings.HasPrefix(specifier, "file:") {
-				tarball = dshLocalTarballAddPattern.MatchString(strings.TrimPrefix(specifier, "file:"))
-			} else if release := dshReleaseTarballAddPattern.FindStringSubmatch(specifier); release != nil {
-				tarball = release[1] == release[2]
-			} else if !strings.Contains(specifier, "://") {
-				tarball = dshLocalTarballAddPattern.MatchString(specifier)
+				specifier := os.Expand(words[addIndex+1], func(key string) string {
+					if value, ok := variables[key]; ok {
+						return value
+					}
+					return "${" + key + "}"
+				})
+				npmPackage := dshNpmAddPattern.MatchString(specifier)
+				tarball := false
+				if strings.HasPrefix(specifier, "file:") {
+					tarball = dshLocalTarballAddPattern.MatchString(strings.TrimPrefix(specifier, "file:"))
+				} else if release := dshReleaseTarballAddPattern.FindStringSubmatch(specifier); release != nil {
+					tarball = release[1] == release[2]
+				} else if !strings.Contains(specifier, "://") {
+					tarball = dshLocalTarballAddPattern.MatchString(specifier)
+				}
+				immutableGit := false
+				if git := dshGitAddPattern.FindStringSubmatch(specifier); git != nil {
+					ref := git[1]
+					immutableGit = ref == "replace-with-immutable-tag-or-full-40-character-commit" || dshGitTagPattern.MatchString(ref) || dshGitCommitPattern.MatchString(ref)
+				}
+				if !npmPackage && !tarball && !immutableGit {
+					findings = append(findings, fmt.Sprintf("%s: unsupported add specifier %s", line, specifier))
+				}
 			}
-			immutableGit := false
-			if git := dshGitAddPattern.FindStringSubmatch(specifier); git != nil {
-				ref := git[1]
-				immutableGit = ref == "replace-with-immutable-tag-or-full-40-character-commit" || dshGitTagPattern.MatchString(ref) || dshGitCommitPattern.MatchString(ref)
-			}
-			if !npmPackage && !tarball && !immutableGit {
-				findings = append(findings, fmt.Sprintf("%s: unsupported add specifier %s", line, specifier))
+			if ambiguous && !sawAddSequence && regexp.MustCompile(`\bdsh\s+plugin\b.*\badd\b`).MatchString(commandLine) {
+				findings = append(findings, line+": ambiguous shell tokenization")
 			}
 		}
 	}
@@ -567,6 +630,97 @@ func dshShellLogicalLines(block string) []string {
 		logicalLines = append(logicalLines, current)
 	}
 	return logicalLines
+}
+
+func dshShellWords(line string) ([]string, bool) {
+	var words []string
+	var word strings.Builder
+	wordStarted := false
+	var quote byte
+	ambiguous := false
+	flush := func() {
+		if wordStarted {
+			words = append(words, word.String())
+		}
+		word.Reset()
+		wordStarted = false
+	}
+	for index := 0; index < len(line); index++ {
+		character := line[index]
+		if quote != 0 {
+			if character == quote {
+				quote = 0
+			} else if quote == '"' && character == '\\' {
+				if index+1 >= len(line) {
+					ambiguous = true
+				} else {
+					index++
+					word.WriteByte(line[index])
+				}
+			} else {
+				word.WriteByte(character)
+			}
+			wordStarted = true
+			continue
+		}
+		if character == ' ' || character == '\t' || character == '\r' || character == '\n' {
+			flush()
+			continue
+		}
+		if character == '"' || character == '\'' {
+			quote = character
+			wordStarted = true
+			continue
+		}
+		if character == '\\' {
+			if index+1 >= len(line) {
+				ambiguous = true
+			} else {
+				index++
+				word.WriteByte(line[index])
+				wordStarted = true
+			}
+			continue
+		}
+		if character == ';' || character == '&' || character == '|' {
+			flush()
+			operator := string(character)
+			if character != ';' && index+1 < len(line) && line[index+1] == character {
+				operator += string(character)
+				index++
+			}
+			words = append(words, operator)
+			continue
+		}
+		word.WriteByte(character)
+		wordStarted = true
+	}
+	if quote != 0 {
+		ambiguous = true
+	}
+	flush()
+	return words, ambiguous
+}
+
+func dshShellOperator(word string) bool {
+	return word == ";" || word == "&" || word == "&&" || word == "|" || word == "||"
+}
+
+func dshStringPointer(value string) *string {
+	return &value
+}
+
+func dshEnvironmentWithHome(environment []string, home *string) []string {
+	filtered := make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		if !strings.HasPrefix(entry, "DSH_HOME=") {
+			filtered = append(filtered, entry)
+		}
+	}
+	if home != nil {
+		filtered = append(filtered, "DSH_HOME="+*home)
+	}
+	return filtered
 }
 
 func TestDSHCIWorkflowRunsLockedChecksAndPortableRuntimeTests(t *testing.T) {
