@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigRejectsLegacyTopLevelImagePresets(t *testing.T) {
@@ -79,6 +80,13 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	}
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d execution_profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
+	}
+	professional := cfg.ModelRoutes.ImageGeneration.Capabilities["professional"]
+	if professional.ResponseFormat != "b64_json" {
+		t.Fatalf("professional image response_format = %q, want b64_json", professional.ResponseFormat)
+	}
+	if professional.Timeout != 8*time.Minute {
+		t.Fatalf("professional image timeout = %s, want 8m", professional.Timeout)
 	}
 	fixedImageGenerationSize := regexp.MustCompile(`^[1-9][0-9]*:[1-9][0-9]*:(1K|2K|4K)$`)
 	for key, capability := range cfg.ModelRoutes.ImageGeneration.Capabilities {

@@ -301,8 +301,8 @@ func (p *OpenAIProvider) generateStandard(ctx context.Context, prompt string, op
 		Size:   openai.ImageGenerateParamsSize(size),
 	}
 
-	switch p.responseFormat {
-	case "url":
+	switch {
+	case p.responseFormat == "url" && !opts.SemanticAspectRatio:
 		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatURL
 	default:
 		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatB64JSON
@@ -569,8 +569,8 @@ func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, s
 	if opts.Background != "" {
 		params.Background = openai.ImageEditParamsBackground(opts.Background)
 	}
-	switch p.responseFormat {
-	case "url":
+	switch {
+	case p.responseFormat == "url" && !opts.SemanticAspectRatio:
 		params.ResponseFormat = openai.ImageEditParamsResponseFormatURL
 	default:
 		params.ResponseFormat = openai.ImageEditParamsResponseFormatB64JSON

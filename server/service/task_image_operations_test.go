@@ -89,6 +89,10 @@ type recordingCropStorage struct {
 	firstBlockOnce sync.Once
 }
 
+func (s *recordingCropStorage) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	return storage.ReadObject(ctx, s.Provider, key, maxBytes)
+}
+
 func (s *recordingCropStorage) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
 	if s.isCropOutput(key) {
 		s.mu.Lock()
@@ -300,6 +304,69 @@ func TestTaskImageOperationsUploadMaterializesCurrentExecutionTaskFile(t *testin
 	}
 	if _, err := os.Stat(images.uploadPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("materialized upload path still exists after Upload: %v", err)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeMaterializesCurrentExecutionTaskFile(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+
+	result, err := f.service.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: "output/source-a.png", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatalf("Analyze task-relative image: %v", err)
+	}
+	if result.Analysis != "analysis" || understanding.calls != 1 {
+		t.Fatalf("result=%#v understanding_calls=%d", result, understanding.calls)
+	}
+	if !strings.HasPrefix(understanding.source, "data:image/png;base64,") {
+		t.Fatalf("analysis source = %q, want PNG data URL", understanding.source)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeRejectsStaleExecution(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+
+	_, err := f.service.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: uuid.NewString(), ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: "output/source-a.png", Prompt: "inspect",
+	})
+	if err == nil || understanding.calls != 0 {
+		t.Fatalf("Analyze stale execution = %v, understanding_calls=%d; want rejection", err, understanding.calls)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeRejectsOversizedCurrentExecutionTaskFile(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+	data := make([]byte, maxAnalyzedTaskImageBytes+1)
+	copy(data, []byte("\x89PNG\r\n\x1a\n"))
+	const relPath = "output/oversized.png"
+	const key = "fixtures/oversized.png"
+	if _, err := f.store.Upload(context.Background(), key, bytes.NewReader(data), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.executionID, &model.TaskFile{
+		TaskID: f.task.ID, ExecutionID: f.executionID, Role: model.FileRoleImage,
+		FilePath: relPath, FileName: filepath.Base(relPath), MimeType: "image/png",
+		FileSize: int64(len(data)), ContentHash: hashTaskFileContent(data),
+		OSSKey: key, OSSURL: f.store.GetURL(key), StorageProvider: f.store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := f.service.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: relPath, Prompt: "inspect",
+	})
+	if !errors.Is(err, storage.ErrObjectExceedsMaxSize) || understanding.calls != 0 {
+		t.Fatalf("Analyze oversized task file = %v, understanding_calls=%d; want bounded-read rejection", err, understanding.calls)
 	}
 }
 

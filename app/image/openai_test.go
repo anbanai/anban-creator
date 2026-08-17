@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	neturl "net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -344,10 +345,16 @@ func TestOpenAIGenerateDownloadsURLOnlyResult(t *testing.T) {
 		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
 		0x00, 0x00, 0x00, 0x0D,
 	}
+	var gotResponseFormat any
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/images/generations":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			gotResponseFormat = body["response_format"]
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"created":1777599787,"data":[{"url":"` + srv.URL + "/generated.png" + `"}],"usage":{"input_tokens":1,"input_tokens_details":{"text_tokens":1,"image_tokens":0},"output_tokens":1,"total_tokens":2}}`))
 		case "/generated.png":
@@ -360,10 +367,11 @@ func TestOpenAIGenerateDownloadsURLOnlyResult(t *testing.T) {
 	defer srv.Close()
 
 	provider, err := NewOpenAIProvider(&config.ImageAPI{
-		Key:      "test-key",
-		BaseURL:  srv.URL,
-		Provider: "openai",
-		Model:    "gpt-image-2",
+		Key:            "test-key",
+		BaseURL:        srv.URL,
+		Provider:       "openai",
+		Model:          "gpt-image-2",
+		ResponseFormat: "url",
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
@@ -375,6 +383,9 @@ func TestOpenAIGenerateDownloadsURLOnlyResult(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("result is nil")
+	}
+	if gotResponseFormat != "url" {
+		t.Fatalf("non-semantic response_format = %v, want url", gotResponseFormat)
 	}
 	if result.URL == "" {
 		t.Fatal("result.URL is empty")
@@ -485,6 +496,73 @@ func TestOpenAIProviderUsesCustomBaseURLAndKey(t *testing.T) {
 	}
 	if gotResponseFormat != "b64_json" {
 		t.Fatalf("response_format = %v, want b64_json", gotResponseFormat)
+	}
+}
+
+func TestOpenAISemanticGenerationForcesInlineResponse(t *testing.T) {
+	var gotResponseFormat any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		gotResponseFormat = body["response_format"]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1777599787,"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(testGeneratedPNG()) + `"}]}`))
+	}))
+	defer srv.Close()
+
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key: "test-key", BaseURL: srv.URL, Provider: "openai", Model: "gpt-image-1",
+		ResponseFormat: "url",
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	result, err := provider.Generate(context.Background(), "a cat", &GenerateOptions{SemanticAspectRatio: true})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	defer os.Remove(result.URL)
+	if gotResponseFormat != "b64_json" {
+		t.Fatalf("semantic response_format = %v, want b64_json", gotResponseFormat)
+	}
+}
+
+func TestOpenAISemanticEditForcesInlineResponse(t *testing.T) {
+	var gotResponseFormat string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		gotResponseFormat = r.FormValue("response_format")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1777599787,"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(testGeneratedPNG()) + `"}]}`))
+	}))
+	defer srv.Close()
+
+	referencePath := filepath.Join(t.TempDir(), "reference.png")
+	if err := os.WriteFile(referencePath, testGeneratedPNG(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key: "test-key", BaseURL: srv.URL, Provider: "openai", Model: "gpt-image-1",
+		ResponseFormat: "url",
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	result, err := provider.Generate(context.Background(), "edit the cat", &GenerateOptions{
+		RefImagePath: referencePath, SemanticAspectRatio: true,
+	})
+	if err != nil {
+		t.Fatalf("Generate edit: %v", err)
+	}
+	defer os.Remove(result.URL)
+	if gotResponseFormat != "b64_json" {
+		t.Fatalf("semantic edit response_format = %q, want b64_json", gotResponseFormat)
 	}
 }
 

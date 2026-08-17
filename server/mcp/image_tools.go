@@ -65,13 +65,13 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_image",
-		Description: "Analyze an HTTPS image URL or server-local image file with the configured image-understanding model route. Returns the AI analysis and usage; file_path analysis is limited to 10MB.",
+		Description: "Analyze an HTTPS image URL, an absolute server-local image file, or a task-relative file owned by the current task execution with the configured image-understanding model route. Returns the AI analysis and usage; file_path analysis is limited to 10MB.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines model route context)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
-				"file_path":  map[string]any{"type": "string", "description": "Use file_path returned by download_image or another absolute server-local file path; file_path analysis is limited to 10MB"},
+				"file_path":  map[string]any{"type": "string", "description": "Absolute server-local path, or a task-relative path registered to the current execution when task_id is provided; limited to 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task ID to associate the image-understanding credit charge with"},
 			},
@@ -373,7 +373,7 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	}
 	args := parseArgs(req.Params.Arguments)
 	result, err := svcs.TaskImageOperationsSvc.Analyze(ctx, service.AnalyzeTaskImageRequest{
-		UserID: getUserID(ctx), ProjectID: stringArg(args, "project_id"), TaskID: stringArg(args, "task_id"),
+		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), ProjectID: stringArg(args, "project_id"), TaskID: stringArg(args, "task_id"),
 		ImageURL: stringArg(args, "image_url"), FilePath: stringArg(args, "file_path"), Prompt: stringArg(args, "prompt"),
 	})
 	if err != nil {

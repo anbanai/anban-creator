@@ -125,10 +125,10 @@ model_routes:
         model: "gpt-image-2-t"
         base_url: "http://18.141.196.64:18888/v1"
         api_key: "${WANGCAI_OPENAI_API_KEY}"
-        timeout: 5m
+        timeout: 8m
         enabled: true
         quality_rank: 200
-        response_format: "url"
+        response_format: "b64_json"
         generation_features:
           quality_levels: ["auto", "low", "medium", "high"]
           size_presets: ["1:1:2K", "3:2:2K", "2:3:2K"]
