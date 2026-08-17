@@ -265,6 +265,39 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
+	t.Run("documentation resolves DSH home before filesystem use", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		definition := `export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"`
+		definitionIndex := strings.Index(body, definition)
+		if got := strings.Count(body, "\nexport DSH_HOME="); got != 1 {
+			t.Errorf("DSH_HOME export definitions = %d, want 1", got)
+		}
+		if definitionIndex < 0 {
+			t.Fatalf("DSH installation guide missing official home fallback %q", definition)
+		}
+		if strings.Contains(body[:definitionIndex], "$DSH_HOME") {
+			t.Error("DSH installation guide uses DSH_HOME before resolving the effective home")
+		}
+		for _, forbidden := range []string{`DSH_HOME=""`, `DSH_HOME=''`, `DSH_HOME="$DSH_HOME"`, `DSH_HOME=$DSH_HOME`} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("DSH installation guide contains empty or unresolved home example %q", forbidden)
+			}
+		}
+		for _, want := range []string{
+			`install -d -m 700 "$DSH_HOME"`,
+			`chmod 700 "$DSH_HOME"`,
+			`chmod 600 "$DSH_HOME/.credentials.yaml"`,
+			`mv -- "$DSH_HOME/.agent-presets/.anban-dsh.lock" "$LOCK_QUARANTINE"`,
+		} {
+			index := strings.Index(body, want)
+			if index < 0 {
+				t.Errorf("DSH installation guide missing quoted home filesystem command %q", want)
+			} else if index <= definitionIndex {
+				t.Errorf("DSH home filesystem command precedes effective home definition %q", want)
+			}
+		}
+	})
+
 	t.Run("documentation protects the global two-step lifecycle", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
 		normalized := strings.Join(strings.Fields(body), " ")
@@ -379,6 +412,8 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, allowed := range []string{
 		`"@anban/dsh-plugin@4.1.12"`,
 		`"/tmp/anban-dsh-plugin-4.1.12.tgz"`,
+		`"file:/tmp/anban-dsh-plugin-4.1.12.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz"`,
 		`"git+https://github.com/anbanai/creator-skills.git#v4.1.12"`,
 		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
@@ -393,11 +428,42 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"./plugins",
 		"/tmp/creator-skills",
 		"file:../creator-skills",
+		"file:/tmp/creator-skills",
 		"file:/tmp/anban-dsh-plugin.tgz",
+		`"@anban/dsh-plugin"`,
+		`"@anban/dsh-plugin@latest"`,
+		`"@anban/dsh-plugin@^4.1.12"`,
+		`"@anban/dsh-plugin@01.2.3"`,
+		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
+		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.13.tgz"`,
 		`"git+https://github.com/anbanai/creator-skills.git#main"`,
+		`"git+https://github.com/anbanai/creator-skills.git#HEAD"`,
+		`"git+https://github.com/anbanai/creator-skills.git#v01.2.3"`,
+		`"git+https://github.com/anbanai/creator-skills.git"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(forbidden)); len(findings) == 0 {
 			t.Errorf("source-directory add %q was accepted", forbidden)
+		}
+	}
+	for _, source := range []string{
+		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
+		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#main\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"file:/tmp/creator-skills\"\n```",
+	} {
+		if findings := dshDocumentationPluginAddFindings(source); len(findings) == 0 {
+			t.Errorf("prefixed or continued forbidden add was not classified:\n%s", source)
+		}
+	}
+	for _, source := range []string{
+		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
+		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz\"\n```",
+	} {
+		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
+			t.Errorf("approved prefixed or continued add findings = %v:\n%s", findings, source)
 		}
 	}
 }
@@ -405,23 +471,21 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 var dshShellFencePattern = regexp.MustCompile("(?s)```(?:bash|sh|shell)\\n(.*?)```")
 var dshShellWordPattern = regexp.MustCompile(`"[^"]*"|'[^']*'|[^\s]+`)
 var dshShellAssignmentPattern = regexp.MustCompile(`^([A-Z_][A-Z0-9_]*)=["']([^"']*)["']$`)
-var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|v?[0-9]+\.[0-9]+\.[0-9]+)$`)
-var dshTarballAddPattern = regexp.MustCompile(`(^|[/\\])[^/\\]+\.tgz$`)
+var dshShellEnvironmentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
+var dshLocalTarballAddPattern = regexp.MustCompile(`(^|[/\\])anban-dsh-plugin-(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
+var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/royalmorty/anbanwriter/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
 var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/creator-skills\.git#(.+)$`)
-var dshGitTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+var dshGitTagPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
 var dshGitCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func dshDocumentationPluginAddFindings(source string) []string {
 	variables := make(map[string]string)
 	var findings []string
 	for _, block := range dshShellFencePattern.FindAllStringSubmatch(source, -1) {
-		for _, rawLine := range strings.Split(block[1], "\n") {
-			line := strings.TrimSpace(rawLine)
+		for _, line := range dshShellLogicalLines(block[1]) {
 			if assignment := dshShellAssignmentPattern.FindStringSubmatch(line); assignment != nil {
 				variables[assignment[1]] = assignment[2]
-				continue
-			}
-			if !strings.HasPrefix(line, "dsh plugin ") {
 				continue
 			}
 			matches := dshShellWordPattern.FindAllString(line, -1)
@@ -429,8 +493,19 @@ func dshDocumentationPluginAddFindings(source string) []string {
 			for i, match := range matches {
 				words[i] = strings.Trim(match, `"'`)
 			}
+			commandIndex := 0
+			if commandIndex < len(words) && words[commandIndex] == "$" {
+				commandIndex++
+			}
+			for commandIndex < len(words) && (words[commandIndex] == "command" || words[commandIndex] == "env" || dshShellEnvironmentPattern.MatchString(words[commandIndex])) {
+				commandIndex++
+			}
+			if commandIndex+1 >= len(words) || words[commandIndex] != "dsh" || words[commandIndex+1] != "plugin" {
+				continue
+			}
 			addIndex := -1
-			for i, word := range words {
+			for i := commandIndex + 2; i < len(words); i++ {
+				word := words[i]
 				if word == "add" {
 					addIndex = i
 					break
@@ -449,8 +524,15 @@ func dshDocumentationPluginAddFindings(source string) []string {
 				}
 				return "${" + key + "}"
 			})
-			npmPackage := specifier == "@anban/dsh-plugin" || dshNpmAddPattern.MatchString(specifier)
-			tarball := !strings.HasPrefix(specifier, "file:") && dshTarballAddPattern.MatchString(specifier)
+			npmPackage := dshNpmAddPattern.MatchString(specifier)
+			tarball := false
+			if strings.HasPrefix(specifier, "file:") {
+				tarball = dshLocalTarballAddPattern.MatchString(strings.TrimPrefix(specifier, "file:"))
+			} else if release := dshReleaseTarballAddPattern.FindStringSubmatch(specifier); release != nil {
+				tarball = release[1] == release[2]
+			} else if !strings.Contains(specifier, "://") {
+				tarball = dshLocalTarballAddPattern.MatchString(specifier)
+			}
 			immutableGit := false
 			if git := dshGitAddPattern.FindStringSubmatch(specifier); git != nil {
 				ref := git[1]
@@ -462,6 +544,29 @@ func dshDocumentationPluginAddFindings(source string) []string {
 		}
 	}
 	return findings
+}
+
+func dshShellLogicalLines(block string) []string {
+	var logicalLines []string
+	current := ""
+	for _, rawLine := range strings.Split(block, "\n") {
+		trimmed := strings.TrimSpace(rawLine)
+		continued := strings.HasSuffix(trimmed, `\`)
+		fragment := strings.TrimSpace(strings.TrimSuffix(trimmed, `\`))
+		if current == "" {
+			current = fragment
+		} else if fragment != "" {
+			current += " " + fragment
+		}
+		if !continued && current != "" {
+			logicalLines = append(logicalLines, current)
+			current = ""
+		}
+	}
+	if current != "" {
+		logicalLines = append(logicalLines, current)
+	}
+	return logicalLines
 }
 
 func TestDSHCIWorkflowRunsLockedChecksAndPortableRuntimeTests(t *testing.T) {
