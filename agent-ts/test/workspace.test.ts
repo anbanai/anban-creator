@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmodSync } from "node:fs";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -96,6 +97,40 @@ describe("materializeBootstrapFiles", () => {
 
     expect(await readFile(join(workspace, ".anban-creator", "settings.json"), "utf8")).toBe("old");
     await expect(lstat(join(workspace, "created.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("preserves the backup and continues rollback when restore is incomplete", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    const settingsDirectory = join(workspace, ".anban-creator");
+    const settingsPath = join(settingsDirectory, "settings.json");
+    await mkdir(settingsDirectory);
+    await writeFile(settingsPath, "old", { mode: 0o600 });
+    let checks = 0;
+    const signal = {
+      throwIfAborted() {
+        checks += 1;
+        if (checks === 5) chmodSync(settingsDirectory, 0o500);
+      },
+    } as AbortSignal;
+
+    try {
+      await expect(materializeBootstrapFiles(workspace, [
+        { path: "created.txt", text: "created", mode: 0o644 },
+        { path: ".anban-creator/settings.json", text: "new", mode: 0o600, replace_existing: true },
+      ], signal)).rejects.toThrow("recovery files preserved at");
+
+      await expect(lstat(join(workspace, "created.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+      const recoveryRoots = (await readdir(workspace)).filter((entry) => entry.startsWith(".anban-bootstrap-"));
+      expect(recoveryRoots).toHaveLength(1);
+      const backupDirectory = join(workspace, recoveryRoots[0]!, "backups");
+      const backupFiles = await readdir(backupDirectory);
+      expect(backupFiles).toHaveLength(1);
+      expect(await readFile(join(backupDirectory, backupFiles[0]!), "utf8")).toBe("old");
+    } finally {
+      chmodSync(settingsDirectory, 0o700);
+    }
   });
 });
 

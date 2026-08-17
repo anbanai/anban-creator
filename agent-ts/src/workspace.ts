@@ -99,6 +99,7 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
   await mkdir(backups, { mode: 0o700 });
   const commits: BootstrapCommit[] = [];
   const applied: BootstrapCommit[] = [];
+  let preserveStaging = false;
   try {
     let totalBytes = 0;
     for (const file of prepared) {
@@ -140,42 +141,42 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
       signal?.throwIfAborted();
       if (commit.kind === "create") {
         await rename(commit.staged, commit.target);
+        applied.push(commit);
       } else {
         await rename(commit.target, commit.backup!);
-        try {
-          await rename(commit.staged, commit.target);
-        } catch (installError) {
-          try {
-            await rename(commit.backup!, commit.target);
-          } catch (restoreError) {
-            throw new AggregateError([installError, restoreError], "bootstrap replacement failed and rollback was incomplete");
-          }
-          throw installError;
-        }
+        applied.push(commit);
+        signal?.throwIfAborted();
+        await rename(commit.staged, commit.target);
       }
-      applied.push(commit);
     }
   } catch (error) {
     try {
       await rollbackBootstrapCommits(applied);
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], "bootstrap materialization failed and rollback was incomplete");
+      preserveStaging = true;
+      throw new AggregateError([error, rollbackError], `bootstrap materialization failed and rollback was incomplete; recovery files preserved at ${stagingRoot}`);
     }
     throw error;
   } finally {
-    await rm(stagingRoot, { recursive: true, force: true });
+    if (!preserveStaging) await rm(stagingRoot, { recursive: true, force: true });
   }
 }
 
 async function rollbackBootstrapCommits(commits: BootstrapCommit[]): Promise<void> {
+  const errors: unknown[] = [];
   for (const commit of [...commits].reverse()) {
-    if (commit.kind === "create") {
+    try {
+      if (commit.kind === "create") {
+        await rm(commit.target, { force: true });
+        continue;
+      }
       await rm(commit.target, { force: true });
-      continue;
+      await rename(commit.backup!, commit.target);
+    } catch (error) {
+      errors.push(error);
     }
-    await rm(commit.target, { force: true });
-    await rename(commit.backup!, commit.target);
   }
+  if (errors.length > 0) throw new AggregateError(errors, "one or more bootstrap rollback operations failed");
 }
 
 async function ensureRealDirectory(path: string, label: string, create: boolean): Promise<void> {
