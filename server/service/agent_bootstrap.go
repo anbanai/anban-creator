@@ -25,12 +25,13 @@ import (
 )
 
 type BootstrapFile struct {
-	Path         string `json:"path"`
-	Text         string `json:"text,omitempty"`
-	DownloadURL  string `json:"download_url,omitempty"`
-	Mode         uint32 `json:"mode"`
-	ExpectedSize int64  `json:"expected_size,omitempty"`
-	MaxBytes     int64  `json:"max_bytes,omitempty"`
+	Path            string `json:"path"`
+	Text            string `json:"text,omitempty"`
+	DownloadURL     string `json:"download_url,omitempty"`
+	Mode            uint32 `json:"mode"`
+	ExpectedSize    int64  `json:"expected_size,omitempty"`
+	MaxBytes        int64  `json:"max_bytes,omitempty"`
+	ReplaceExisting bool   `json:"replace_existing,omitempty"`
 }
 
 const (
@@ -275,7 +276,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, fmt.Errorf("marshal runtime settings: %w", err)
 	}
-	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600})
+	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600, ReplaceExisting: true})
 	if instructions := strings.TrimSpace(effective.Instructions); instructions != "" {
 		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
 	}
@@ -742,6 +743,9 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 			if err := serveragent.ValidatePortableFilenameComponent(component); err != nil {
 				return fmt.Errorf("invalid bootstrap file path %q: %w", file.Path, err)
 			}
+		}
+		if file.ReplaceExisting && filepath.ToSlash(clean) != ".anban-creator/settings.json" {
+			return fmt.Errorf("bootstrap file %q cannot replace existing workspace content", clean)
 		}
 		portableKey := serveragent.PortableFilenameKey(filepath.ToSlash(clean))
 		if _, exists := seen[portableKey]; exists {

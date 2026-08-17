@@ -415,6 +415,15 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	for _, file := range first.Files {
 		paths[file.Path] = file
 	}
+	settings := paths[".anban-creator/settings.json"]
+	if !settings.ReplaceExisting {
+		t.Fatal("runtime settings must be replaceable across resumed executions")
+	}
+	for bootstrapPath, file := range paths {
+		if bootstrapPath != ".anban-creator/settings.json" && file.ReplaceExisting {
+			t.Fatalf("bootstrap path %q unexpectedly permits replacement", bootstrapPath)
+		}
+	}
 	resumeAttachmentPath, _ := serveragent.ExecutionResumeAttachmentPath(executionID, "foo.pdf")
 	for _, path := range []string{".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/03-key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
 		if _, ok := paths[path]; !ok {
@@ -835,6 +844,7 @@ func TestValidateBootstrapFilesRejectsUnsafeContracts(t *testing.T) {
 		{{Path: "world", Text: "x", Mode: 0666}},
 		{{Path: "setuid", Text: "x", Mode: 04644}},
 		{{Path: "unexpected-executable", Text: "x", Mode: 0755}},
+		{{Path: "attachments/input.txt", Text: "input", Mode: 0644, ReplaceExisting: true}},
 	} {
 		if err := ValidateBootstrapFiles(files); err == nil {
 			t.Fatalf("unsafe files accepted: %#v", files)
