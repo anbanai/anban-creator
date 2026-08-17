@@ -287,6 +287,29 @@ jobs:
 	}
 }
 
+func TestDSHReleaseVersionContractRejectsNonStableVersions(t *testing.T) {
+	tests := []struct {
+		version string
+		valid   bool
+	}{
+		{version: "4.1.12", valid: true},
+		{version: "0.0.0", valid: true},
+		{version: "4.1.12-rc.1", valid: false},
+		{version: "4.1.12+build.7", valid: false},
+		{version: "04.1.12", valid: false},
+		{version: "4.1", valid: false},
+	}
+	for _, test := range tests {
+		t.Run(test.version, func(t *testing.T) {
+			if got := dshStableReleaseVersion.MatchString(test.version); got != test.valid {
+				t.Fatalf("stable release version acceptance = %t, want %t", got, test.valid)
+			}
+		})
+	}
+}
+
+var dshStableReleaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
 type workflowContract struct {
 	On struct {
 		WorkflowDispatch struct {
@@ -372,7 +395,7 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	}
 	gotOS := append([]string(nil), portable.Strategy.Matrix["os"]...)
 	sort.Strings(gotOS)
-	if strings.Join(gotOS, ",") != "macos-latest,ubuntu-latest,windows-latest" {
+	if strings.Join(gotOS, ",") != "macos-latest,windows-latest" {
 		return fmt.Errorf("DSH portability OS matrix = %v", gotOS)
 	}
 	if err := requireActionInput(portable, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
@@ -389,19 +412,19 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 		return fmt.Errorf("portable job must run the focused command-shape tests")
 	}
 	windowsProbe, err := requireEnabledStep(portable, "Execute the Windows cmd shim test")
-	if err != nil || !conditionContains(windowsProbe, "runner.os == 'Windows'") || !runHasCode(windowsProbe.Run, "executes a cmd shim with spaces and metacharacters through cross-spawn") {
+	if err != nil || windowsProbe.If != nil || !runHasCode(windowsProbe.Run, "executes a cmd shim with spaces and metacharacters through cross-spawn") {
 		return fmt.Errorf("portable job must execute the Windows-only it.runIf cmd shim test")
 	}
 	desktop, err := requireEnabledStep(portable, "Run the official public Desktop runtime fixture")
-	if err != nil || !macAndWindowsCondition(desktop) || !runHasCode(desktop.Run, "honors the pinned DSH Desktop public-runtime contract") {
+	if err != nil || desktop.If != nil || !runHasCode(desktop.Run, "honors the pinned DSH Desktop public-runtime contract") {
 		return fmt.Errorf("portable job must run the public Desktop runtime fixture on macOS and Windows")
 	}
 	build, err := requireEnabledRunStep(portable, "Build DSH plugin for real profile smoke", "pnpm run build")
-	if err != nil || !macAndWindowsCondition(build) {
+	if err != nil || build.If != nil {
 		return fmt.Errorf("portable job must build the package on macOS and Windows before smoke")
 	}
 	smoke, err := requireEnabledRunStep(portable, "Smoke-test real packaged fresh profile", "pnpm run smoke:profile")
-	if err != nil || !macAndWindowsCondition(smoke) {
+	if err != nil || smoke.If != nil {
 		return fmt.Errorf("portable job must run the real profile smoke on macOS and Windows")
 	}
 	return requireNamedStepOrder(portable, []string{
@@ -433,8 +456,8 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		return err
 	}
 	version, err := requireEnabledStep(release, "Validate release version contract")
-	if err != nil || !runHasCode(version.Run, "GITHUB_REF_TYPE") || !runHasCode(version.Run, "GITHUB_REF_NAME") {
-		return fmt.Errorf("release version step must validate its exact tag context")
+	if err != nil || !runHasCode(version.Run, "GITHUB_REF_TYPE") || !runHasCode(version.Run, "GITHUB_REF_NAME") || !runHasCode(version.Run, `/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/`) {
+		return fmt.Errorf("release version step must validate a stable X.Y.Z tag context")
 	}
 	versions, err := requireEnabledStep(release, "Validate every DSH plugin version location and changelog")
 	for _, path := range []string{
@@ -475,26 +498,38 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if err != nil || localSmoke.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || localSmoke.Env["PACK_METADATA"] != "${{ steps.pack.outputs.metadata }}" || !runHasCode(localSmoke.Run, "smokeProfile") {
 		return fmt.Errorf("local profile smoke must consume the exact pack step outputs")
 	}
+	asset, err := requireEnabledStep(release, "Stage exact DSH package asset")
+	if err != nil || asset.ID != "asset" || asset.Env["SOURCE_TARBALL"] != "${{ steps.pack.outputs.tarball }}" || !runHasCode(asset.Run, "copyFile") || !runHasCode(asset.Run, "createHash('sha256')") || !runHasCode(asset.Run, "GITHUB_OUTPUT") {
+		return fmt.Errorf("release asset staging must copy and byte-verify the exact tarball into bin")
+	}
+	preflight, err := requireEnabledStep(release, "Inspect exact npm registry version")
+	if err != nil || preflight.ID != "registry-preflight" || preflight.If != nil || preflight.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(preflight.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(preflight.Run, "dist.integrity") || !runHasCode(preflight.Run, "createHash('sha512')") || !runHasCode(preflight.Run, "E404") || !runHasCode(preflight.Run, "publish_required=") {
+		return fmt.Errorf("registry preflight must distinguish E404 and require exact existing SRI")
+	}
 	publish, err := requireEnabledRunStep(release, "Publish exact DSH package to npm", `npm publish "$TARBALL" --access public --provenance`)
-	if err != nil || publish.If != nil || publish.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" {
-		return fmt.Errorf("npm publication must be unconditional and consume the exact tarball")
+	if err != nil || workflowScalar(publish.If) != "steps.registry-preflight.outputs.publish_required == 'true'" || publish.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" {
+		return fmt.Errorf("npm publication must run only after an anonymous E404 and consume the exact asset")
 	}
 	view, err := requireEnabledStep(release, "Verify anonymous npm availability")
-	if err != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") {
-		return fmt.Errorf("anonymous npm view must require the exact published version")
+	if err != nil || view.If != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || view.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "dist.integrity") || !runHasCode(view.Run, "createHash('sha512')") || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(view.Run, "for attempt in") || !runHasCode(view.Run, "sleep ") {
+		return fmt.Errorf("anonymous npm view must retry and verify the exact published version bytes")
 	}
 	registry, err := requireEnabledStep(release, "Smoke-test exact registry DSH package")
-	if err != nil || registry.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(registry.Run, `smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(registry.Run, "NPM_CONFIG_USERCONFIG") {
-		return fmt.Errorf("registry smoke must install the exact anonymous registry spec")
+	if err != nil || registry.If != nil || registry.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || !runHasCode(registry.Run, `smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(registry.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(registry.Run, "for attempt in") || !runHasCode(registry.Run, "sleep ") {
+		return fmt.Errorf("registry smoke must retry clean installs of the exact anonymous registry spec")
 	}
 	checksum, err := requireEnabledStep(release, "Generate checksums")
-	if err != nil || checksum.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || !runHasCode(checksum.Run, "createHash('sha256')") || !runHasCode(checksum.Run, "checksums.txt") {
-		return fmt.Errorf("checksum step must hash the exact tarball")
+	if err != nil || checksum.If != nil || checksum.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(checksum.Run, "process.chdir('bin')") || !runHasCode(checksum.Run, "createHash('sha256')") || !runHasCode(checksum.Run, "checksums.txt") || runHasCode(checksum.Run, "relative(") {
+		return fmt.Errorf("checksum step must emit flat basename hashes from bin including the exact tarball")
 	}
 	githubRelease, err := requireEnabledStep(release, "Create Release")
-	files := workflowScalar(githubRelease.With["files"])
-	if err != nil || githubRelease.If != nil || githubRelease.Uses != "softprops/action-gh-release@v2" || !strings.Contains(files, "${{ steps.pack.outputs.tarball }}") || !strings.Contains(files, "${{ steps.pack.outputs.tarball }}.sha256") {
-		return fmt.Errorf("GitHub Release must unconditionally attach the exact tarball and checksum")
+	if err != nil || githubRelease.If != nil || githubRelease.Uses != "" || githubRelease.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || !runHasCode(githubRelease.Run, "gh release view") || !runHasCode(githubRelease.Run, "gh release create") || !runHasCode(githubRelease.Run, "gh release upload") || !runHasCode(githubRelease.Run, "--clobber") || !runHasCode(githubRelease.Run, "bin/*") {
+		return fmt.Errorf("GitHub Release must idempotently create and upload only flat bin assets with gh")
+	}
+	for _, step := range release.Steps {
+		if step.Uses == "oven-sh/setup-bun@v2" || strings.HasPrefix(step.Uses, "softprops/action-gh-release@") {
+			return fmt.Errorf("release workflow contains an unused or mutable privileged action %q", step.Uses)
+		}
 	}
 	return requireNamedStepOrder(release, []string{
 		"Validate release version contract",
@@ -504,6 +539,9 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		"Pack DSH plugin exactly once",
 		"Verify exact DSH package tarball",
 		"Smoke-test exact local DSH package",
+		"Build server binaries and Agent package",
+		"Stage exact DSH package asset",
+		"Inspect exact npm registry version",
 		"Publish exact DSH package to npm",
 		"Verify anonymous npm availability",
 		"Smoke-test exact registry DSH package",
@@ -598,15 +636,6 @@ func runHasCode(run, fragment string) bool {
 		}
 	}
 	return false
-}
-
-func conditionContains(step workflowStep, fragment string) bool {
-	condition, ok := step.If.(string)
-	return ok && strings.Contains(condition, fragment)
-}
-
-func macAndWindowsCondition(step workflowStep) bool {
-	return conditionContains(step, "runner.os == 'macOS'") && conditionContains(step, "runner.os == 'Windows'")
 }
 
 func workflowScalar(value any) string {
