@@ -161,16 +161,13 @@ func TestDSHPluginContract(t *testing.T) {
 	t.Run("installation commands use official profile forwarding", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
 		for _, want := range []string{
-			"dsh plugin --profile web exec anban-dsh install-presets",
-			"dsh plugin --profile web exec anban-dsh status",
-			"dsh plugin --profile web exec anban-dsh remove-presets",
-			"dsh plugin --profile web approve-builds",
-			`ACTIVE_PROFILE="replace-with-desktop-profile-name"`,
+			`ACTIVE_PROFILE="replace-with-web-or-desktop-profile-name"`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" add "@anban/dsh-plugin@${PUBLISHED_VERSION}"`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh remove-presets`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" remove @anban/dsh-plugin`,
 			`dsh plugin --profile "$ACTIVE_PROFILE" approve-builds`,
-			"--profile <active-profile>",
 			"anban-dsh install-presets",
 		} {
 			if !strings.Contains(body, want) {
@@ -231,15 +228,40 @@ func TestDSHPluginContract(t *testing.T) {
 			"prepare build",
 			"pnpm pack --json",
 			"exact tarball path reported in the `filename` field",
-			`dsh plugin --profile web add "$PACKED_TARBALL"`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" add "$PACKED_TARBALL"`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("DSH installation guide missing supported artifact guidance %q", want)
 			}
 		}
-		fileInstall := regexp.MustCompile(`(?m)^\s*dsh plugin .*\badd\s+(?:["']?file:|["']?(?:\.\.?/|/)[^"'\n]*plugins/?["']?\s*$)`)
-		if fileInstall.MatchString(body) {
-			t.Error("DSH installation guide recommends a source-directory file install")
+		for _, finding := range dshDocumentationPluginAddFindings(body) {
+			t.Error(finding)
+		}
+	})
+
+	t.Run("documentation exposes both executable Preset management surfaces", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
+		normalized := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets --force`,
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh remove-presets`,
+			"/anban-presets-install",
+			"/anban-presets-status",
+			"/anban-presets-install force",
+			"/anban-presets-remove confirm",
+			"same Preset manager",
+		} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("DSH installation guide missing executable host surface %q", want)
+			}
+		}
+		if got := strings.Count(body, "\nACTIVE_PROFILE="); got != 1 {
+			t.Errorf("ACTIVE_PROFILE definitions = %d, want 1", got)
+		}
+		if regexp.MustCompile(`(?m)^dsh plugin --profile web (?:add|exec|remove)\b`).MatchString(body) {
+			t.Error("DSH lifecycle hard-codes web after active profile discovery")
 		}
 	})
 
@@ -252,7 +274,7 @@ func TestDSHPluginContract(t *testing.T) {
 			"shared by every profile using the same `DSH_HOME`",
 			"Bundle activation never installs, upgrades, or removes Presets",
 			"cross-profile",
-			"dsh plugin --profile web exec anban-dsh install-presets --force",
+			`dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets --force`,
 			"ERR_RUNTIME_MISSING",
 			"ERR_PRESET_LOCK_INVALID",
 			"lock residue",
@@ -261,10 +283,10 @@ func TestDSHPluginContract(t *testing.T) {
 				t.Errorf("DSH installation guide missing global lifecycle guidance %q", want)
 			}
 		}
-		status := strings.Index(body, "dsh plugin --profile web exec anban-dsh status")
-		force := strings.Index(body, "dsh plugin --profile web exec anban-dsh install-presets --force")
-		removePresets := strings.Index(body, "dsh plugin --profile web exec anban-dsh remove-presets")
-		removeBundle := strings.Index(body, "dsh plugin --profile web remove @anban/dsh-plugin")
+		status := strings.Index(body, `dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status`)
+		force := strings.Index(body, `dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets --force`)
+		removePresets := strings.Index(body, `dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh remove-presets`)
+		removeBundle := strings.Index(body, `dsh plugin --profile "$ACTIVE_PROFILE" remove @anban/dsh-plugin`)
 		if status < 0 || force < 0 || removePresets < 0 || removeBundle < 0 || status >= force || status >= removePresets || removePresets >= removeBundle {
 			t.Errorf("DSH lifecycle order is unsafe: status=%d force=%d presets=%d bundle=%d", status, force, removePresets, removeBundle)
 		}
@@ -292,6 +314,28 @@ func TestDSHPluginContract(t *testing.T) {
 			if strings.Contains(strings.ToLower(body), forbidden) {
 				t.Errorf("DSH credential guidance contains generic path %q", forbidden)
 			}
+		}
+	})
+
+	t.Run("documentation marks package publication as pending operator release", func(t *testing.T) {
+		body := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
+		start := strings.Index(body, "## [Unreleased]")
+		if start < 0 {
+			t.Fatal("DSH changelog missing Unreleased section")
+		}
+		endOffset := strings.Index(body[start+1:], "\n## [")
+		end := len(body)
+		if endOffset >= 0 {
+			end = start + 1 + endOffset
+		}
+		unreleased := body[start:end]
+		for _, want := range []string{"The package is not yet published.", "release workflow", "release operator", "required"} {
+			if !strings.Contains(unreleased, want) {
+				t.Errorf("DSH Unreleased section missing publication boundary %q", want)
+			}
+		}
+		if regexp.MustCompile(`(?i)(?:package|version) (?:is|is now|has been) (?:published|available) (?:on|from) npm`).MatchString(unreleased) {
+			t.Error("DSH Unreleased section falsely claims current npm availability")
 		}
 	})
 
@@ -326,6 +370,98 @@ func TestDSHPluginContract(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.T) {
+	fixture := func(specifier string) string {
+		return "```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add " + specifier + "\n```"
+	}
+	for _, allowed := range []string{
+		`"@anban/dsh-plugin@4.1.12"`,
+		`"/tmp/anban-dsh-plugin-4.1.12.tgz"`,
+		`"git+https://github.com/anbanai/creator-skills.git#v4.1.12"`,
+		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
+	} {
+		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
+			t.Errorf("approved add %q findings = %v", allowed, findings)
+		}
+	}
+	for _, forbidden := range []string{
+		".",
+		"..",
+		"../creator-skills",
+		"./plugins",
+		"/tmp/creator-skills",
+		"file:../creator-skills",
+		"file:/tmp/anban-dsh-plugin.tgz",
+		`"git+https://github.com/anbanai/creator-skills.git#main"`,
+	} {
+		if findings := dshDocumentationPluginAddFindings(fixture(forbidden)); len(findings) == 0 {
+			t.Errorf("source-directory add %q was accepted", forbidden)
+		}
+	}
+}
+
+var dshShellFencePattern = regexp.MustCompile("(?s)```(?:bash|sh|shell)\\n(.*?)```")
+var dshShellWordPattern = regexp.MustCompile(`"[^"]*"|'[^']*'|[^\s]+`)
+var dshShellAssignmentPattern = regexp.MustCompile(`^([A-Z_][A-Z0-9_]*)=["']([^"']*)["']$`)
+var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|v?[0-9]+\.[0-9]+\.[0-9]+)$`)
+var dshTarballAddPattern = regexp.MustCompile(`(^|[/\\])[^/\\]+\.tgz$`)
+var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/creator-skills\.git#(.+)$`)
+var dshGitTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+var dshGitCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func dshDocumentationPluginAddFindings(source string) []string {
+	variables := make(map[string]string)
+	var findings []string
+	for _, block := range dshShellFencePattern.FindAllStringSubmatch(source, -1) {
+		for _, rawLine := range strings.Split(block[1], "\n") {
+			line := strings.TrimSpace(rawLine)
+			if assignment := dshShellAssignmentPattern.FindStringSubmatch(line); assignment != nil {
+				variables[assignment[1]] = assignment[2]
+				continue
+			}
+			if !strings.HasPrefix(line, "dsh plugin ") {
+				continue
+			}
+			matches := dshShellWordPattern.FindAllString(line, -1)
+			words := make([]string, len(matches))
+			for i, match := range matches {
+				words[i] = strings.Trim(match, `"'`)
+			}
+			addIndex := -1
+			for i, word := range words {
+				if word == "add" {
+					addIndex = i
+					break
+				}
+			}
+			if addIndex < 0 {
+				continue
+			}
+			if addIndex+1 >= len(words) {
+				findings = append(findings, line+": missing add specifier")
+				continue
+			}
+			specifier := os.Expand(words[addIndex+1], func(key string) string {
+				if value, ok := variables[key]; ok {
+					return value
+				}
+				return "${" + key + "}"
+			})
+			npmPackage := specifier == "@anban/dsh-plugin" || dshNpmAddPattern.MatchString(specifier)
+			tarball := !strings.HasPrefix(specifier, "file:") && dshTarballAddPattern.MatchString(specifier)
+			immutableGit := false
+			if git := dshGitAddPattern.FindStringSubmatch(specifier); git != nil {
+				ref := git[1]
+				immutableGit = ref == "replace-with-immutable-tag-or-full-40-character-commit" || dshGitTagPattern.MatchString(ref) || dshGitCommitPattern.MatchString(ref)
+			}
+			if !npmPackage && !tarball && !immutableGit {
+				findings = append(findings, fmt.Sprintf("%s: unsupported add specifier %s", line, specifier))
+			}
+		}
+	}
+	return findings
 }
 
 func TestDSHCIWorkflowRunsLockedChecksAndPortableRuntimeTests(t *testing.T) {
