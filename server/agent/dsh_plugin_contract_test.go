@@ -291,8 +291,10 @@ func TestDSHPluginContract(t *testing.T) {
 		}{
 			{name: "unset", expected: filepath.Join(home, ".dsh")},
 			{name: "whitespace", input: dshStringPointer("  \t "), expected: filepath.Join(home, ".dsh")},
+			{name: "significant whitespace", input: dshStringPointer("  relative/dsh-home  "), expected: filepath.Join(pluginRoot, "  relative/dsh-home  ")},
 			{name: "tilde", input: dshStringPointer("~"), expected: home},
 			{name: "tilde child", input: dshStringPointer("~/custom"), expected: filepath.Join(home, "custom")},
+			{name: "tilde backslash child", input: dshStringPointer(`~\custom`), expected: filepath.Join(home, "custom")},
 			{name: "relative", input: dshStringPointer("relative/dsh-home"), expected: filepath.Join(pluginRoot, "relative/dsh-home")},
 			{name: "absolute", input: &absoluteFixture, expected: absoluteFixture},
 		} {
@@ -308,6 +310,14 @@ func TestDSHPluginContract(t *testing.T) {
 					t.Errorf("normalized home = %q, want %q", got, test.expected)
 				}
 			})
+		}
+		for _, want := range []string{`const configured = process.env.DSH_HOME ?? ''`, `configured.trim() === ''`} {
+			if !strings.Contains(script, want) {
+				t.Errorf("DSH home normalizer missing official configured-value semantics %q", want)
+			}
+		}
+		if strings.Contains(script, `(process.env.DSH_HOME ?? '').trim()`) {
+			t.Error("DSH home normalizer trims significant whitespace from a configured nonblank value")
 		}
 		root := string(filepath.Separator)
 		rootCommand := exec.Command("node", "-e", script)
