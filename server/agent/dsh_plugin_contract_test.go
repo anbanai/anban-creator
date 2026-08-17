@@ -287,6 +287,47 @@ jobs:
 	}
 }
 
+func TestWorkflowContractRejectsMutatingOrEmptyGitHubReleaseUpdates(t *testing.T) {
+	tests := []struct {
+		name string
+		run  string
+	}{
+		{
+			name: "clobber existing asset",
+			run:  `gh release upload "$RELEASE_TAG" bin/* --clobber`,
+		},
+		{
+			name: "create empty release before upload",
+			run: `
+gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+gh release upload "$RELEASE_TAG" bin/*
+`,
+		},
+		{
+			name: "upload missing assets before comparison",
+			run: `
+trap cleanup EXIT
+isDraft=false
+isPrerelease=false
+targetCommitish=main
+gh release create "$RELEASE_TAG" "${local_assets[@]}" --verify-tag
+missing_assets=(bin/plugin.tgz)
+gh release upload "$RELEASE_TAG" "${missing_assets[@]}"
+gh release download "$RELEASE_TAG"
+createHash('sha256')
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			step := workflowStep{Name: "Create Release", Run: test.run}
+			if err := validateGitHubReleaseAssetStep(step); err == nil {
+				t.Fatal("unsafe GitHub Release mutation satisfied the asset contract")
+			}
+		})
+	}
+}
+
 func TestDSHReleaseVersionContractRejectsNonStableVersions(t *testing.T) {
 	tests := []struct {
 		version string
@@ -309,6 +350,13 @@ func TestDSHReleaseVersionContractRejectsNonStableVersions(t *testing.T) {
 }
 
 var dshStableReleaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+const (
+	actionsCheckoutV4SHA  = "11d5960a326750d5838078e36cf38b85af677262"
+	actionsSetupGoV5SHA   = "40f1582b2485089dde7abd97c1529aa768e1baff"
+	actionsSetupNodeV4SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
+	pnpmActionSetupV4SHA  = "b906affcce14559ad1aafd4ab0e942779e9f58b1"
+)
 
 type workflowContract struct {
 	On struct {
@@ -365,10 +413,10 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if !ok || check.RunsOn != "ubuntu-latest" || check.Defaults.Run.WorkingDirectory != "plugins" {
 		return fmt.Errorf("dsh-plugin must be an Ubuntu job with plugins as its working directory")
 	}
-	if err := requireActionInput(check, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+	if err := requireActionInput(check, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
 		return err
 	}
-	if err := requireActionInput(check, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+	if err := requireActionInput(check, "Set up Node", "actions/setup-node@"+actionsSetupNodeV4SHA, "node-version", "24"); err != nil {
 		return err
 	}
 	if _, err := requireEnabledRunStep(check, "Install DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
@@ -398,10 +446,10 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if strings.Join(gotOS, ",") != "macos-latest,windows-latest" {
 		return fmt.Errorf("DSH portability OS matrix = %v", gotOS)
 	}
-	if err := requireActionInput(portable, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+	if err := requireActionInput(portable, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
 		return err
 	}
-	if err := requireActionInput(portable, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+	if err := requireActionInput(portable, "Set up Node", "actions/setup-node@"+actionsSetupNodeV4SHA, "node-version", "24"); err != nil {
 		return err
 	}
 	if _, err := requireEnabledRunStep(portable, "Install locked DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
@@ -449,11 +497,22 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if !ok || release.RunsOn != "ubuntu-latest" {
 		return fmt.Errorf("release must be one Ubuntu job")
 	}
-	if err := requireActionInput(release, "Set up pnpm", "pnpm/action-setup@v4", "version", "11.19.0"); err != nil {
+	if err := requireActionReference(release, "Checkout code", "actions/checkout@"+actionsCheckoutV4SHA); err != nil {
 		return err
 	}
-	if err := requireActionInput(release, "Set up Node", "actions/setup-node@v4", "node-version", "24"); err != nil {
+	if err := requireActionInput(release, "Set up Go", "actions/setup-go@"+actionsSetupGoV5SHA, "go-version", "1.26"); err != nil {
 		return err
+	}
+	if err := requireActionInput(release, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
+		return err
+	}
+	if err := requireActionInput(release, "Set up Node", "actions/setup-node@"+actionsSetupNodeV4SHA, "node-version", "24"); err != nil {
+		return err
+	}
+	for _, step := range release.Steps {
+		if step.Uses != "" && !regexp.MustCompile(`^[^@]+@[0-9a-f]{40}$`).MatchString(step.Uses) {
+			return fmt.Errorf("release action %q is not pinned to an immutable commit", step.Uses)
+		}
 	}
 	version, err := requireEnabledStep(release, "Validate release version contract")
 	if err != nil || !runHasCode(version.Run, "GITHUB_REF_TYPE") || !runHasCode(version.Run, "GITHUB_REF_NAME") || !runHasCode(version.Run, `/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/`) {
@@ -503,12 +562,12 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		return fmt.Errorf("release asset staging must copy and byte-verify the exact tarball into bin")
 	}
 	preflight, err := requireEnabledStep(release, "Inspect exact npm registry version")
-	if err != nil || preflight.ID != "registry-preflight" || preflight.If != nil || preflight.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(preflight.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(preflight.Run, "dist.integrity") || !runHasCode(preflight.Run, "createHash('sha512')") || !runHasCode(preflight.Run, "E404") || !runHasCode(preflight.Run, "publish_required=") {
-		return fmt.Errorf("registry preflight must distinguish E404 and require exact existing SRI")
+	if err != nil || preflight.ID != "registry-preflight" || preflight.If != nil || preflight.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(preflight.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(preflight.Run, "dist.integrity") || !runHasCode(preflight.Run, "createHash('sha512')") || !runHasCode(preflight.Run, "E404") || !runHasCode(preflight.Run, "publish_required=") || !runHasCode(preflight.Run, "for (let attempt") {
+		return fmt.Errorf("registry preflight must briefly retry E404 and require exact existing SRI")
 	}
 	publish, err := requireEnabledRunStep(release, "Publish exact DSH package to npm", `npm publish "$TARBALL" --access public --provenance`)
-	if err != nil || workflowScalar(publish.If) != "steps.registry-preflight.outputs.publish_required == 'true'" || publish.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" {
-		return fmt.Errorf("npm publication must run only after an anonymous E404 and consume the exact asset")
+	if err != nil || workflowScalar(publish.If) != "steps.registry-preflight.outputs.publish_required == 'true'" || publish.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(publish.Run, "publish_status=") || !runHasCode(publish.Run, "for attempt in") || !runHasCode(publish.Run, "dist.integrity") || !runHasCode(publish.Run, "createHash('sha512')") || !runHasCode(publish.Run, `exit "$publish_status"`) {
+		return fmt.Errorf("npm publication failure must recover only after the exact registry SRI appears")
 	}
 	view, err := requireEnabledStep(release, "Verify anonymous npm availability")
 	if err != nil || view.If != nil || view.Env["VERSION"] != "${{ steps.version.outputs.VERSION }}" || view.Env["TARBALL"] != "${{ steps.asset.outputs.tarball }}" || !runHasCode(view.Run, `npm view "@anban/dsh-plugin@${VERSION}"`) || !runHasCode(view.Run, "dist.integrity") || !runHasCode(view.Run, "createHash('sha512')") || !runHasCode(view.Run, "NPM_CONFIG_USERCONFIG") || !runHasCode(view.Run, "for attempt in") || !runHasCode(view.Run, "sleep ") {
@@ -523,8 +582,11 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 		return fmt.Errorf("checksum step must emit flat basename hashes from bin including the exact tarball")
 	}
 	githubRelease, err := requireEnabledStep(release, "Create Release")
-	if err != nil || githubRelease.If != nil || githubRelease.Uses != "" || githubRelease.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || !runHasCode(githubRelease.Run, "gh release view") || !runHasCode(githubRelease.Run, "gh release create") || !runHasCode(githubRelease.Run, "gh release upload") || !runHasCode(githubRelease.Run, "--clobber") || !runHasCode(githubRelease.Run, "bin/*") {
-		return fmt.Errorf("GitHub Release must idempotently create and upload only flat bin assets with gh")
+	if err != nil || githubRelease.If != nil || githubRelease.Uses != "" || githubRelease.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" {
+		return fmt.Errorf("GitHub Release step must be an unconditional built-in gh command")
+	}
+	if err := validateGitHubReleaseAssetStep(githubRelease); err != nil {
+		return err
 	}
 	for _, step := range release.Steps {
 		if step.Uses == "oven-sh/setup-bun@v2" || strings.HasPrefix(step.Uses, "softprops/action-gh-release@") {
@@ -557,6 +619,47 @@ func requireActionInput(job workflowJob, name, uses, key, value string) error {
 	}
 	if step.Uses != uses || workflowScalar(step.With[key]) != value {
 		return fmt.Errorf("step %q must use %s with %s=%s", name, uses, key, value)
+	}
+	return nil
+}
+
+func requireActionReference(job workflowJob, name, uses string) error {
+	step, err := requireEnabledStep(job, name)
+	if err != nil {
+		return err
+	}
+	if step.Uses != uses {
+		return fmt.Errorf("step %q must use immutable action %s", name, uses)
+	}
+	return nil
+}
+
+func validateGitHubReleaseAssetStep(step workflowStep) error {
+	for _, forbidden := range []string{"--clobber", `gh release create "$RELEASE_TAG" --verify-tag`} {
+		if runHasCode(step.Run, forbidden) {
+			return fmt.Errorf("GitHub Release step contains unsafe mutation %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"isDraft",
+		"isPrerelease",
+		"targetCommitish",
+		`gh release create "$RELEASE_TAG" "${local_assets[@]}"`,
+		"gh release download",
+		"createHash('sha256')",
+		"missing_assets",
+		`gh release upload "$RELEASE_TAG" "${missing_assets[@]}"`,
+		"trap cleanup EXIT",
+	} {
+		if !runHasCode(step.Run, required) {
+			return fmt.Errorf("GitHub Release asset step missing %q", required)
+		}
+	}
+	download := strings.Index(step.Run, "gh release download")
+	compare := strings.Index(step.Run, "createHash('sha256')")
+	upload := strings.Index(step.Run, `gh release upload "$RELEASE_TAG" "${missing_assets[@]}"`)
+	if !(download < compare && compare < upload) {
+		return fmt.Errorf("GitHub Release assets must be downloaded and compared before missing uploads")
 	}
 	return nil
 }
