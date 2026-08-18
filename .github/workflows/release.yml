@@ -15,14 +15,14 @@ concurrency:
   group: dsh-release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 jobs:
   dsh-desktop-acceptance:
     name: Packaged DSH Desktop release gate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -66,6 +66,12 @@ jobs:
         working-directory: plugins
         run: pnpm run build
 
+      - name: Validate release version contract
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: node -e "const {appendFileSync}=require('node:fs'); const event=process.env.GITHUB_EVENT_NAME; const ref=process.env.GITHUB_REF_NAME; const version=event==='workflow_dispatch'?process.env.REQUESTED_VERSION:ref.startsWith('v')?ref.slice(1):''; if(!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)||process.env.GITHUB_REF_TYPE!=='tag'||ref!=='v'+version) process.exit(1); appendFileSync(process.env.GITHUB_OUTPUT,'VERSION='+version+'\n')"
+
       - name: Install pinned DSH Desktop dependencies
         working-directory: _dsh-desktop
         run: corepack yarn install --immutable
@@ -79,13 +85,13 @@ jobs:
         run: |
           node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
           pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
-          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
 
       - name: Install exact plugin through public DSH
         env:
           DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.12.tgz
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz
         run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
 
       - name: Launch packaged DSH Desktop application
@@ -103,6 +109,9 @@ jobs:
   release:
     needs: dsh-desktop-acceptance
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
