@@ -687,6 +687,9 @@ func (s *TaskService) runClaimedLocalFinalization(ctx context.Context, task *mod
 				return err
 			}
 		}
+		if err := s.ensureLocalFinalizationAuthority(leaseCtx, task.ID, execution.ID); err != nil {
+			return err
+		}
 		renewed, err := s.renewFinalizationClaim(leaseCtx, execution.ID, token)
 		if err != nil {
 			return fmt.Errorf("renew local finalization before advancing to %s: %w", next, err)
