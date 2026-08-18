@@ -433,6 +433,10 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 }
 
 func setupExecutionScopedAgentAppForPack(t *testing.T, taskType, packID string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPackAndTarget(t, taskType, packID, "kubernetes")
+}
+
+func setupExecutionScopedAgentAppForPackAndTarget(t *testing.T, taskType, packID, target string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -444,12 +448,12 @@ func setupExecutionScopedAgentAppForPack(t *testing.T, taskType, packID string) 
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: taskType, Name: "P", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: taskType, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: taskType, Status: model.TaskStatusRunning, ExecutionTarget: target, CurrentExecutionID: &executionID}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}
+	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: target, Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}
 	if packID != "" {
 		pack, ok := agentpack.Default().Pack(packID)
 		if !ok {
@@ -542,6 +546,81 @@ func TestAgentStructuredProgressPersistsFrozenPackStage(t *testing.T) {
 	latest := persisted.LatestProgress.Data()
 	if persisted.LastHeartbeatAt == nil || persisted.Progress != 55 || latest.Stage != "writing" || latest.State != "complete" || latest.Title != "朋友圈正文" || latest.Description != "正文已生成" || latest.Percent != 55 {
 		t.Fatalf("persisted structured progress = heartbeat:%v progress:%d latest:%#v", persisted.LastHeartbeatAt, persisted.Progress, latest)
+	}
+}
+
+func TestAgentAPIKeyStructuredProgressRequiresCurrentLocalExecution(t *testing.T) {
+	tests := []struct {
+		name         string
+		executionID  func(current string) string
+		staleCurrent bool
+		wantStatus   int
+	}{
+		{name: "current", executionID: func(current string) string { return current }, wantStatus: fiber.StatusOK},
+		{name: "missing", executionID: func(string) string { return "" }, wantStatus: fiber.StatusBadRequest},
+		{name: "mismatched", executionID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
+		{name: "stale", executionID: func(current string) string { return current }, staleCurrent: true, wantStatus: fiber.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackAndTarget(t, model.PlatformMoments, "moments", model.ExecutionTargetLocalClaimed)
+			if tt.staleCurrent {
+				stale := uuid.NewString()
+				task.CurrentExecutionID = &stale
+			}
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+			requestedExecutionID := tt.executionID(executionID)
+			body := `{"task_id":"` + task.ID + `","execution_id":"` + requestedExecutionID + `","stage":"writing","state":"complete","title":"朋友圈正文","description":"正文已生成","progress_percent":55}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, responseBody, tt.wantStatus)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantStatus == fiber.StatusOK {
+				if persisted.Progress != 55 || persisted.LastHeartbeatAt == nil || persistedExecution.LastHeartbeatAt == nil {
+					t.Fatalf("progress/heartbeats = %d/%v/%v, want 55 and both heartbeats", persisted.Progress, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+				}
+			} else if persisted.Progress != 0 || persisted.LatestProgress.Data().Stage != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("rejected request caused side effects: progress=%d latest=%#v heartbeats=%v/%v", persisted.Progress, persisted.LatestProgress.Data(), persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+		})
+	}
+}
+
+func TestAgentExecutionJWTRejectsConflictingProgressBodyExecution(t *testing.T) {
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","stage":"writing","state":"complete","title":"朋友圈正文","progress_percent":55}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 403", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Progress != 0 || persisted.LastHeartbeatAt != nil {
+		t.Fatalf("conflicting JWT body caused side effects: progress=%d heartbeat=%v", persisted.Progress, persisted.LastHeartbeatAt)
 	}
 }
 
@@ -1014,7 +1093,8 @@ func TestAgentClaim_RequiresCurrentAgentPackContract(t *testing.T) {
 	app, _, rawKey, _, _ := setupAgentClaimApp(t)
 	for _, body := range []string{
 		`{"executor_info":{"hostname":"legacy"}}`,
-		`{"agent_pack_contract_version":2,"executor_info":{"hostname":"future"}}`,
+		`{"agent_pack_contract_version":1,"executor_info":{"hostname":"legacy-v1"}}`,
+		`{"agent_pack_contract_version":3,"executor_info":{"hostname":"future"}}`,
 	} {
 		req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+rawKey)
@@ -1037,7 +1117,7 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	taskID := seedClaimableLocalTask(t, repo, userID, projectID)
 
 	// First claim: should return 200 + config carrying the task id.
-	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1,"executor_info":{"hostname":"mbp"}}`))
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2,"executor_info":{"hostname":"mbp"}}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -1055,9 +1135,16 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	if !strings.Contains(string(body), `"agent_flag"`) {
 		t.Fatalf("response body missing agent_flag field: %s", body)
 	}
+	claimed, err := repo.Tasks().FindByID(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.CurrentExecutionID == nil || !strings.Contains(string(body), `"execution_id":"`+*claimed.CurrentExecutionID+`"`) {
+		t.Fatalf("response body does not carry current execution id %v: %s", claimed.CurrentExecutionID, body)
+	}
 
 	// Second claim: nothing claimable → 204 No Content.
-	req2 := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
+	req2 := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2}`))
 	req2.Header.Set("Authorization", "Bearer "+rawKey)
 	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := app.Test(req2)
@@ -1074,7 +1161,7 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 func TestAgentClaim_NoContentWhenEmpty(t *testing.T) {
 	app, _, rawKey, _, _ := setupAgentClaimApp(t)
 	// No task seeded.
-	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)

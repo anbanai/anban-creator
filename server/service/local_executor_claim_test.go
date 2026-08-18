@@ -163,6 +163,9 @@ func TestClaimLocalTaskAllowsLegacyUnprofiledTask(t *testing.T) {
 	if cfg == nil || cfg.TaskID != task.ID {
 		t.Fatalf("ClaimLocalTask config = %#v, want task %q", cfg, task.ID)
 	}
+	if cfg.ExecutionID == "" {
+		t.Fatal("ClaimLocalTask config execution_id is empty")
+	}
 
 	got, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
@@ -170,6 +173,9 @@ func TestClaimLocalTaskAllowsLegacyUnprofiledTask(t *testing.T) {
 	}
 	if got.Status != model.TaskStatusRunning || got.ExecutionTarget != model.ExecutionTargetLocalClaimed || got.CurrentExecutionID == nil {
 		t.Fatalf("claimed task = %#v", got)
+	}
+	if cfg.ExecutionID != *got.CurrentExecutionID {
+		t.Fatalf("config execution_id = %q, want current execution %q", cfg.ExecutionID, *got.CurrentExecutionID)
 	}
 }
 

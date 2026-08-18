@@ -52,6 +52,7 @@ const LocalClaimWindow = 30 * time.Second
 // echoed here (the desktop already holds them and echoing keys is unsafe).
 type LocalExecutionConfig struct {
 	TaskID                   string `json:"task_id"`
+	ExecutionID              string `json:"execution_id"`
 	TaskType                 string `json:"task_type"`
 	AgentPackID              string `json:"agent_pack_id"`
 	AgentPackVersion         string `json:"agent_pack_version"`
@@ -174,6 +175,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task, execution *mod
 		ProjectID:                task.ProjectID,
 	}
 	if execution != nil {
+		config.ExecutionID = execution.ID
 		config.AgentPackID = execution.AgentPackID
 		config.AgentPackVersion = execution.AgentPackVersion
 		config.AgentPackDigest = execution.AgentPackDigest

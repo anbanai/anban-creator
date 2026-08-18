@@ -15,6 +15,7 @@ export interface LocalConfig {
   serverURL: string;
   apiKey: string;
   taskID: string;
+  executionID: string;
   taskType: string;
   agentPackID: string;
   agentPackVersion: string;
@@ -56,7 +57,7 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     if (!value || value.startsWith("--")) throw new Error(`${flag} is required`);
     index += 1;
     if (flag === "--model-usage-alias") aliases.push(value);
-    else if (["--server-url", "--api-key", "--task-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--auto-memory-directory", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
+    else if (["--server-url", "--api-key", "--task-id", "--execution-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--auto-memory-directory", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
     else throw new Error(`unknown argument ${flag}`);
   }
 
@@ -92,6 +93,7 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     serverURL: server.origin,
     apiKey: required("--api-key"),
     taskID: required("--task-id"),
+    executionID: required("--execution-id"),
     taskType,
     agentPackID: pack.id,
     agentPackVersion: pack.version,
@@ -122,7 +124,7 @@ export async function runLocal(
   const config = await parseLocalConfig(args);
   await prepareWorkspace(config.workspace, config.taskType, config.runtimeAdapter);
   const data = localBootstrap(config);
-  const reporter = new Reporter({ serverURL: config.serverURL, executionID: "" }, config.apiKey, config.taskID);
+  const reporter = createLocalReporter(config);
   const shutdown = new AbortController();
   const onShutdown = () => shutdown.abort(new Error("agent shutdown: received termination signal"));
   process.once("SIGINT", onShutdown);
@@ -153,6 +155,10 @@ export async function runLocal(
     process.removeListener("SIGINT", onShutdown);
     process.removeListener("SIGTERM", onShutdown);
   }
+}
+
+export function createLocalReporter(config: Pick<LocalConfig, "serverURL" | "executionID" | "apiKey" | "taskID">): Reporter {
+  return new Reporter({ serverURL: config.serverURL, executionID: config.executionID }, config.apiKey, config.taskID);
 }
 
 function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {

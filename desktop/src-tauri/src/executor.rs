@@ -23,6 +23,7 @@ const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 #[serde(rename_all = "snake_case")]
 pub struct LocalExecutionConfig {
     pub task_id: String,
+    pub execution_id: String,
     pub task_type: String,
     pub agent_pack_id: String,
     pub agent_pack_version: String,
@@ -72,6 +73,18 @@ struct ClaimBody<'a> {
     executor_info: ExecutorInfo<'a>,
 }
 
+const AGENT_PACK_CONTRACT_VERSION: u8 = 2;
+
+fn claim_body() -> ClaimBody<'static> {
+    ClaimBody {
+        agent_pack_contract_version: AGENT_PACK_CONTRACT_VERSION,
+        executor_info: ExecutorInfo {
+            hostname: "desktop",
+            version: "0.1",
+        },
+    }
+}
+
 #[derive(Serialize)]
 struct CompleteBody<'a> {
     task_id: &'a str,
@@ -83,6 +96,17 @@ struct FailureResult<'a> {
     success: bool,
     error: &'a str,
     log_text: &'a str,
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[test]
+    fn claim_body_uses_execution_identity_contract_version() {
+        let body = claim_body();
+        assert_eq!(body.agent_pack_contract_version, 2);
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -117,13 +141,7 @@ async fn claim_once(
     let resp = client
         .post(&url)
         .bearer_auth(api_key)
-        .json(&ClaimBody {
-            agent_pack_contract_version: 1,
-            executor_info: ExecutorInfo {
-                hostname: "desktop",
-                version: "0.1",
-            },
-        })
+        .json(&claim_body())
         .send()
         .await
         .map_err(|e| format!("claim request failed: {e}"))?;

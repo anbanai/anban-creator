@@ -360,6 +360,7 @@ func isAgentTaskAccessError(err error) bool {
 
 type agentProgressRequest struct {
 	TaskID          string   `json:"task_id"`
+	ExecutionID     string   `json:"execution_id"`
 	Message         string   `json:"message"`
 	Logs            []string `json:"logs"`
 	Stage           string   `json:"stage"`
@@ -374,7 +375,7 @@ type agentCompleteRequest struct {
 	Result *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentPackContractVersion = 1
+const agentPackContractVersion = 2
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for
@@ -441,8 +442,26 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
+	userID := h.authenticatedUserID(c)
+	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, userID)
+	if err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
+	}
+	structuredIntent := req.Stage != "" || req.State != "" || req.Title != "" || req.Description != "" || req.ProgressPercent != 0
+	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
+	executionID := authenticatedExecutionID
+	if authenticatedExecutionID != "" {
+		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+	} else if requestedExecutionID != "" {
+		if err := h.taskSvc.ValidateLocalAgentExecutionAccess(c.Context(), task, userID, requestedExecutionID); err != nil {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+		executionID = requestedExecutionID
+	} else if structuredIntent {
+		return Error(c, fiber.StatusBadRequest, "execution_id is required for structured progress")
 	}
 
 	// Refresh the heartbeat on every progress report. This is the local-
@@ -451,12 +470,10 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
 	// refresh there. Without it, a long-running local task would be force-failed
 	// by reapStuckTasks (plan_checker.go) before it completes.
-	executionID := h.authenticatedExecutionID(c)
 	if err := h.taskSvc.UpdateAgentHeartbeat(c.Context(), req.TaskID, executionID); err != nil {
 		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
 		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
 	}
-	structuredIntent := req.Stage != "" || req.State != "" || req.Title != "" || req.Description != "" || req.ProgressPercent != 0
 	if structuredIntent {
 		req.Stage = strings.TrimSpace(req.Stage)
 		if req.Stage == "" {

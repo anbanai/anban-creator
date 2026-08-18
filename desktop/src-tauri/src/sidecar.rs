@@ -171,6 +171,8 @@ fn agent_args(
         api_key.to_string(),
         "--task-id".to_string(),
         cfg.task_id.clone(),
+        "--execution-id".to_string(),
+        cfg.execution_id.clone(),
         "--task-type".to_string(),
         cfg.task_type.clone(),
         "--agent-pack-id".to_string(),
@@ -219,6 +221,7 @@ mod tests {
     fn agent_args_include_article_image_switches() {
         let cfg = LocalExecutionConfig {
             task_id: "task-1".to_string(),
+            execution_id: "execution-local-1".to_string(),
             task_type: "article".to_string(),
             agent_pack_id: "article".to_string(),
             agent_pack_version: "1.0.0".to_string(),
@@ -244,9 +247,18 @@ mod tests {
         );
 
         assert_eq!(args.first().map(String::as_str), Some("run"));
-        assert!(args.windows(2).any(|pair| pair == ["--agent-pack-id", "article"]));
-        assert!(args.windows(2).any(|pair| pair == ["--runtime-adapter", "standard"]));
-        assert!(args.windows(2).any(|pair| pair == ["--runtime-profile", "article"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--execution-id", "execution-local-1"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--agent-pack-id", "article"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--runtime-adapter", "standard"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--runtime-profile", "article"]));
         assert!(args.iter().any(|arg| arg == "--article-with-cover=false"));
         assert!(args
             .iter()

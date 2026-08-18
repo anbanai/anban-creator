@@ -69,6 +69,28 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 	return nil
 }
 
+// ValidateLocalAgentExecutionAccess binds an API-key-authenticated desktop
+// request to the active local execution. API keys identify a user, not an
+// execution, so the requested execution ID must still match both the task's
+// current authority and a running local-claimed execution record.
+func (s *TaskService) ValidateLocalAgentExecutionAccess(ctx context.Context, task *model.Task, authenticatedUserID, executionID string) error {
+	if task == nil || task.ExecutionTarget != model.ExecutionTargetLocalClaimed {
+		return fmt.Errorf("task is not running on a local executor")
+	}
+	executionID = strings.TrimSpace(executionID)
+	if err := s.ValidateAgentExecutionAccess(ctx, authenticatedUserID, task.ProjectID, task.ID, executionID); err != nil {
+		return err
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("find local execution: %w", err)
+	}
+	if execution.Target != model.ExecutionTargetLocalClaimed {
+		return fmt.Errorf("execution is not a local claimed execution")
+	}
+	return nil
+}
+
 // UpdateHeartbeat refreshes a task's last_heartbeat_at, marking it as actively
 // working. Called by the agent /progress endpoint on every report so long-running
 // local-execution tasks are not force-failed by the stuck-task reaper
