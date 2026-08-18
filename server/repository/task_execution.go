@@ -404,6 +404,13 @@ func (r *taskExecutionRepository) LockActiveForProgress(ctx context.Context, id,
 	})
 }
 
+func (r *taskExecutionRepository) LockCurrentForArtifactMutation(ctx context.Context, id, taskID string) (bool, error) {
+	return lockActiveTaskExecutionFirst(ctx, r.db, id, taskID, activeTaskExecutionLock{
+		requireStarted:    true,
+		requireIncomplete: true,
+	})
+}
+
 // Cross-table lock-order invariant: lock an existing task_execution before its
 // task. Completion and structured progress use this locked validation; legacy
 // heartbeat acquires the same row first via its execution UPDATE. Artifact

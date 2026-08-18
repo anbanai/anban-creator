@@ -549,6 +549,15 @@ func (s *TaskService) uploadTaskFileFromReader(ctx context.Context, task *model.
 	}
 	var persisted *model.TaskFile
 	persist := func(repo repository.Repository) error {
+		if executionID != "" {
+			current, lockErr := repo.TaskExecutions().LockCurrentForArtifactMutation(ctx, executionID, taskID)
+			if lockErr != nil {
+				return lockErr
+			}
+			if !current {
+				return repository.ErrTaskFileExecutionNotCurrent
+			}
+		}
 		authoritative, lockErr := repo.Tasks().FindByIDForUpdate(ctx, taskID)
 		if lockErr != nil {
 			return lockErr

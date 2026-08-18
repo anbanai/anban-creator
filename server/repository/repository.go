@@ -232,6 +232,9 @@ type TaskExecutionRepository interface {
 	// code touches its task. Cross-table callers must preserve execution->task
 	// order to avoid deadlocks with legacy heartbeat reports.
 	LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error)
+	// LockCurrentForArtifactMutation validates and locks a running execution
+	// before service code locks its task and mutates execution-scoped artifacts.
+	LockCurrentForArtifactMutation(ctx context.Context, id, taskID string) (bool, error)
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
