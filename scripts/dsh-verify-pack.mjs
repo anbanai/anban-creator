@@ -2,7 +2,32 @@ import { readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parsePackResult } from '../plugins/dsh/scripts/package-integrity.mjs'
+function parsePackResult(source) {
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    throw new Error('pnpm pack metadata is not valid JSON')
+  }
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    typeof parsed.name !== 'string' ||
+    typeof parsed.version !== 'string' ||
+    typeof parsed.filename !== 'string' ||
+    !Array.isArray(parsed.files) ||
+    !parsed.files.every(
+      (file) =>
+        file !== null &&
+        typeof file === 'object' &&
+        typeof file.path === 'string',
+    )
+  ) {
+    throw new Error('pnpm pack metadata does not contain one complete result')
+  }
+  return parsed
+}
 
 export async function verifyPackResult(metadataPath, expectedVersion) {
   const absoluteMetadataPath = resolve(metadataPath)

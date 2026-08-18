@@ -1,12 +1,19 @@
-import { spawn } from 'node:child_process'
 import { access, readFile, readdir, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import {
+  runBoundedCommand,
+  spawnProcessTree,
+  terminateProcessTree,
+} from './dsh-process-supervisor.mjs'
 
 const COMMAND_TIMEOUT_MS = 180_000
 const LAUNCH_TIMEOUT_MS = 120_000
 const OUTPUT_LIMIT = 1024 * 1024
+const PROBE_TIMEOUT_MS = 2_000
 
 function requiredPath(name) {
   const value = process.env[name]
@@ -17,67 +24,20 @@ function requiredPath(name) {
 }
 
 async function run(command, args, options = {}) {
-  return new Promise((resolveResult, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    const finish = (error, result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (error === undefined) resolveResult(result)
-      else reject(error)
-    }
-    const append = (current, chunk) => {
-      const next = current + chunk.toString('utf8')
-      if (Buffer.byteLength(next, 'utf8') > OUTPUT_LIMIT) {
-        child.kill()
-        throw new Error('Desktop acceptance command exceeded output limit')
-      }
-      return next
-    }
-    child.stdout.on('data', (chunk) => {
-      try {
-        stdout = append(stdout, chunk)
-      } catch (error) {
-        finish(error)
-      }
-    })
-    child.stderr.on('data', (chunk) => {
-      try {
-        stderr = append(stderr, chunk)
-      } catch (error) {
-        finish(error)
-      }
-    })
-    child.once('error', (error) => finish(error))
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        finish(undefined, { stdout, stderr })
-      } else {
-        finish(
-          new Error(
-            `${options.label ?? basename(command)} exited ${String(code ?? signal ?? 1)}`,
-          ),
-        )
-      }
-    })
-    const timer = setTimeout(() => {
-      child.kill()
-      finish(
-        new Error(
-          `${options.label ?? basename(command)} timed out after ${String(options.timeoutMs ?? COMMAND_TIMEOUT_MS)}ms`,
-        ),
-      )
-    }, options.timeoutMs ?? COMMAND_TIMEOUT_MS)
+  const label = options.label ?? basename(command)
+  const result = await runBoundedCommand(command, args, {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    label,
+    maxBuffer: OUTPUT_LIMIT,
+    timeoutMs: options.timeoutMs ?? COMMAND_TIMEOUT_MS,
   })
+  if (result.status !== 0) {
+    throw new Error(
+      `${label} exited ${String(result.status ?? result.signal ?? 1)}`,
+    )
+  }
+  return result
 }
 
 async function resolveDshBin(desktopRoot) {
@@ -221,6 +181,16 @@ async function reservePort() {
   })
 }
 
+export function fetchWithDeadline(url, deadline, fetchImpl = fetch) {
+  const remainingMs = deadline - Date.now()
+  if (remainingMs <= 0) {
+    throw new DOMException('Desktop launch deadline expired', 'TimeoutError')
+  }
+  return fetchImpl(url, {
+    signal: AbortSignal.timeout(Math.min(remainingMs, PROBE_TIMEOUT_MS)),
+  })
+}
+
 async function waitForPackagedWindow(port, child, diagnostics) {
   const deadline = Date.now() + LAUNCH_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -230,7 +200,10 @@ async function waitForPackagedWindow(port, child, diagnostics) {
       )
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${String(port)}/json/list`)
+      const response = await fetchWithDeadline(
+        `http://127.0.0.1:${String(port)}/json/list`,
+        deadline,
+      )
       if (response.ok) {
         const targets = await response.json()
         const page = targets.find(
@@ -240,7 +213,7 @@ async function waitForPackagedWindow(port, child, diagnostics) {
             target.url.startsWith('http://127.0.0.1:'),
         )
         if (page !== undefined) {
-          const web = await fetch(page.url)
+          const web = await fetchWithDeadline(page.url, deadline)
           const html = await web.text()
           if (
             web.ok &&
@@ -260,15 +233,7 @@ async function waitForPackagedWindow(port, child, diagnostics) {
 }
 
 async function stopPackagedApp(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  child.kill()
-  const exited = await Promise.race([
-    new Promise((resolveExit) => child.once('exit', () => resolveExit(true))),
-    new Promise((resolveExit) => setTimeout(() => resolveExit(false), 10_000)),
-  ])
-  if (!exited && child.exitCode === null && child.signalCode === null) {
-    child.kill('SIGKILL')
-  }
+  await terminateProcessTree(child, { label: 'Packaged DSH Desktop' })
 }
 
 async function launchPackagedApp() {
@@ -277,7 +242,7 @@ async function launchPackagedApp() {
   const userData = requiredPath('DSH_DESKTOP_STATE_DIR')
   const executable = await findPackagedExecutable(desktopRoot)
   const port = await reservePort()
-  const child = spawn(
+  const child = spawnProcessTree(
     executable,
     [
       `--remote-debugging-port=${String(port)}`,
@@ -311,11 +276,14 @@ async function launchPackagedApp() {
   }
 }
 
-const action = process.argv[2]
-if (action === 'install') {
-  await installPlugin()
-} else if (action === 'launch') {
-  await launchPackagedApp()
-} else {
-  throw new Error('usage: dsh-desktop-acceptance.mjs <install|launch>')
+const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  const action = process.argv[2]
+  if (action === 'install') {
+    await installPlugin()
+  } else if (action === 'launch') {
+    await launchPackagedApp()
+  } else {
+    throw new Error('usage: dsh-desktop-acceptance.mjs <install|launch>')
+  }
 }

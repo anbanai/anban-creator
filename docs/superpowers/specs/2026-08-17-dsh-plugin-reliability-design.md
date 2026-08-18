@@ -81,7 +81,7 @@ profiles using the same DSH home.
 
 ### Versioning
 
-The repair is released as `4.1.12`. Because distributed plugin assets and
+The repair is released as `4.1.13`. Because distributed plugin assets and
 documentation change, the following versions move together:
 
 - `plugins/package.json`

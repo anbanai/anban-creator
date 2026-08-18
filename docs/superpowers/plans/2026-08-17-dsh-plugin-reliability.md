@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `@anban/dsh-plugin@4.1.12` installable, diagnosable, secret-safe, and race-safe in supported DSH Web/Desktop environments while preserving canonical Article/Seednote Skills and official DSH lifecycle boundaries.
+**Goal:** Make `@anban/dsh-plugin@4.1.13` installable, diagnosable, secret-safe, and race-safe in supported DSH Web/Desktop environments while preserving canonical Article/Seednote Skills and official DSH lifecycle boundaries.
 
 **Architecture:** Keep Agent Packs and `plugins/skills/**` as the only business-workflow source. Add focused DSH adapter modules for operational errors, package integrity, portable process invocation, and the global Preset mutation lock; keep status read-only and keep install/remove explicit. Treat npm publication and GitHub Release creation as operator-authorized release actions, while making repository gates prove the exact artifact is ready.
 
@@ -22,10 +22,10 @@
 - Modify `plugins/dsh/src/presets.ts`: typed failures and lock install/remove mutations after acquisition.
 - Modify `plugins/dsh/scripts/smoke-profile.mjs`: structured pack results, all-export imports, registry source support, and portable command construction.
 - Modify corresponding files in `plugins/dsh/tests/`: regression, lifecycle, package, portability, and two-process coverage.
-- Modify `plugins/package.json` and `plugins/pnpm-lock.yaml`: integrity/check scripts and `4.1.12` release metadata.
+- Modify `plugins/package.json` and `plugins/pnpm-lock.yaml`: integrity/check scripts and `4.1.13` release metadata.
 - Modify `.github/workflows/ci.yml` and `.github/workflows/release.yml`: package/OS/release/registry acceptance gates.
 - Modify `plugins/README.md`, `plugins/docs/dsh-installation.md`, and `plugins/CHANGELOG.md`: official install, credentials, support matrix, and global lifecycle guidance.
-- Modify both native manifests, the Claude marketplace manifest, and `server/agent/dsh_plugin_contract_test.go`: synchronized `4.1.12` contract.
+- Modify both native manifests, the Claude marketplace manifest, and `server/agent/dsh_plugin_contract_test.go`: synchronized `4.1.13` contract.
 
 ### Task 1: Authorization Redaction Corpus
 
@@ -500,7 +500,7 @@ git add server/agent/dsh_plugin_contract_test.go
 git commit -m "test: enforce DSH documentation contract"
 ```
 
-### Task 11: Version 4.1.12 And Canonical Agent Pack Drift
+### Task 11: Version 4.1.13 And Canonical Agent Pack Drift
 
 **Files:**
 - Modify: `plugins/package.json`
@@ -515,7 +515,7 @@ git commit -m "test: enforce DSH documentation contract"
 
 - [ ] **Step 1: Change the parent version contract first**
 
-Set `dshPluginVersion = "4.1.12"` and require all four plugin version locations plus changelog heading to match.
+Set `dshPluginVersion = "4.1.13"` and require all four plugin version locations plus changelog heading to match.
 
 - [ ] **Step 2: Confirm the contract fails against 4.1.11**
 
@@ -525,7 +525,7 @@ Expected: FAIL with version mismatch.
 
 - [ ] **Step 3: Bump all plugin metadata together**
 
-Change package, lockfile importer, Claude manifest, Codex manifest, Claude marketplace entry, and changelog to `4.1.12`. Do not change unrelated plugin content.
+Change package, lockfile importer, Claude manifest, Codex manifest, Claude marketplace entry, and changelog to `4.1.13`. Do not change unrelated plugin content.
 
 - [ ] **Step 4: Generate and prove canonical Skill reuse**
 
@@ -537,9 +537,9 @@ Expected: PASS. `git -C plugins diff --exit-code -- dsh/presets/article/skills d
 
 ```bash
 git -C plugins add package.json pnpm-lock.yaml .claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json CHANGELOG.md dsh/presets
-git -C plugins commit -m "chore: release DSH plugin 4.1.12"
+git -C plugins commit -m "chore: release DSH plugin 4.1.13"
 git add server/agent/dsh_plugin_contract_test.go
-git commit -m "test: require DSH plugin 4.1.12"
+git commit -m "test: require DSH plugin 4.1.13"
 ```
 
 ### Task 12: Full Verification, Reviews, Gitlink, And Local Main Merge
