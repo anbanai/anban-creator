@@ -437,6 +437,10 @@ func setupExecutionScopedAgentAppForPack(t *testing.T, taskType, packID string) 
 }
 
 func setupExecutionScopedAgentAppForPackAndTarget(t *testing.T, taskType, packID, target string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPackTargetAndStatus(t, taskType, packID, target, model.TaskExecutionRunning)
+}
+
+func setupExecutionScopedAgentAppForPackTargetAndStatus(t *testing.T, taskType, packID, target, executionStatus string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -453,7 +457,7 @@ func setupExecutionScopedAgentAppForPackAndTarget(t *testing.T, taskType, packID
 		t.Fatal(err)
 	}
 	now := time.Now()
-	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: target, Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}
+	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: target, Status: executionStatus, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}
 	if packID != "" {
 		pack, ok := agentpack.Default().Pack(packID)
 		if !ok {
@@ -551,19 +555,25 @@ func TestAgentStructuredProgressPersistsFrozenPackStage(t *testing.T) {
 
 func TestAgentAPIKeyStructuredProgressRequiresCurrentLocalExecution(t *testing.T) {
 	tests := []struct {
-		name         string
-		executionID  func(current string) string
-		staleCurrent bool
-		wantStatus   int
+		name            string
+		executionID     func(current string) string
+		staleCurrent    bool
+		executionStatus string
+		wantStatus      int
 	}{
 		{name: "current", executionID: func(current string) string { return current }, wantStatus: fiber.StatusOK},
 		{name: "missing", executionID: func(string) string { return "" }, wantStatus: fiber.StatusBadRequest},
 		{name: "mismatched", executionID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
 		{name: "stale", executionID: func(current string) string { return current }, staleCurrent: true, wantStatus: fiber.StatusForbidden},
+		{name: "non-running execution", executionID: func(current string) string { return current }, executionStatus: model.TaskExecutionFailed, wantStatus: fiber.StatusForbidden},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackAndTarget(t, model.PlatformMoments, "moments", model.ExecutionTargetLocalClaimed)
+			executionStatus := tt.executionStatus
+			if executionStatus == "" {
+				executionStatus = model.TaskExecutionRunning
+			}
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformMoments, "moments", model.ExecutionTargetLocalClaimed, executionStatus)
 			if tt.staleCurrent {
 				stale := uuid.NewString()
 				task.CurrentExecutionID = &stale
@@ -572,7 +582,7 @@ func TestAgentAPIKeyStructuredProgressRequiresCurrentLocalExecution(t *testing.T
 				t.Fatal(err)
 			}
 			requestedExecutionID := tt.executionID(executionID)
-			body := `{"task_id":"` + task.ID + `","execution_id":"` + requestedExecutionID + `","stage":"writing","state":"complete","title":"朋友圈正文","description":"正文已生成","progress_percent":55}`
+			body := `{"task_id":"` + task.ID + `","execution_id":"` + requestedExecutionID + `","message":"must not persist when rejected","logs":["must not persist when rejected"],"stage":"writing","state":"complete","title":"朋友圈正文","description":"正文已生成","progress_percent":55}`
 			req := agentJSONRequest("/agent/progress", body)
 			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
 			resp, err := app.Test(req)
@@ -591,12 +601,13 @@ func TestAgentAPIKeyStructuredProgressRequiresCurrentLocalExecution(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
+			latestProgress := persisted.LatestProgress.Data()
 			if tt.wantStatus == fiber.StatusOK {
 				if persisted.Progress != 55 || persisted.LastHeartbeatAt == nil || persistedExecution.LastHeartbeatAt == nil {
 					t.Fatalf("progress/heartbeats = %d/%v/%v, want 55 and both heartbeats", persisted.Progress, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
 				}
-			} else if persisted.Progress != 0 || persisted.LatestProgress.Data().Stage != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
-				t.Fatalf("rejected request caused side effects: progress=%d latest=%#v heartbeats=%v/%v", persisted.Progress, persisted.LatestProgress.Data(), persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			} else if persisted.Progress != 0 || persisted.ProgressSequence != 0 || latestProgress != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("rejected request caused side effects: progress=%d sequence=%d latest=%#v log=%q heartbeats=%v/%v", persisted.Progress, persisted.ProgressSequence, latestProgress, persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
 			}
 		})
 	}
