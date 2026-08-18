@@ -173,6 +173,13 @@ func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, pa
 		Update("latest_progress", datatypes.NewJSONType(payload)).Error
 }
 
+func (r *taskRepository) UpdateHeartbeatForExecution(ctx context.Context, id, executionID string, now time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND current_execution_id = ? AND status = ?", id, executionID, model.TaskStatusRunning).
+		Update("last_heartbeat_at", now)
+	return result.RowsAffected == 1, result.Error
+}
+
 // AdvanceStructuredProgress uses the declared stage/state sequence as its CAS
 // high-water mark. Numeric progress is retained independently as a maximum so
 // Pack stages with equal or zero percentages still advance deterministically.

@@ -174,8 +174,10 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 // It validates events against the immutable Agent Pack contract frozen on the
 // execution. State selects the declared percentage and ordinal transition;
 // client percent must match it. This path never consults the legacy host stage
-// fallback map used by UpdateProgress.
-func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, executionID, stage, state, title, description string, percent int) error {
+// fallback map used by UpdateProgress. Heartbeats, raw logs, and structured
+// state commit atomically for the current running execution. Duplicate/lower
+// sequence events are idempotent and refresh no heartbeat or log.
+func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, executionID, stage, state, title, description string, percent int, logs ...string) error {
 	if strings.TrimSpace(executionID) == "" {
 		return ErrAgentProgressExecutionMismatch
 	}
@@ -228,15 +230,63 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 		Description: description,
 		Percent:     expectedPercent,
 	}
-	advanced, persisted, err := s.repo.Tasks().AdvanceStructuredProgress(ctx, taskID, executionID, sequence, payload)
-	if err != nil {
-		return fmt.Errorf("advance structured progress: %w", err)
+	normalizedLogs := make([]string, 0, len(logs))
+	for _, line := range logs {
+		if line = strings.TrimSpace(line); line != "" {
+			normalizedLogs = append(normalizedLogs, line)
+		}
 	}
-	if advanced && s.pubsub != nil {
+	var advanced bool
+	var persisted model.ProgressPayload
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		now := time.Now()
+		matched, err := tx.Tasks().UpdateHeartbeatForExecution(ctx, taskID, executionID, now)
+		if err != nil {
+			return fmt.Errorf("update task heartbeat for structured progress: %w", err)
+		}
+		if !matched {
+			return ErrStaleTaskExecution
+		}
+		matched, err = tx.TaskExecutions().UpdateHeartbeatIfRunning(ctx, executionID, taskID, now)
+		if err != nil {
+			return fmt.Errorf("update execution heartbeat for structured progress: %w", err)
+		}
+		if !matched {
+			return ErrStaleTaskExecution
+		}
+		for _, line := range normalizedLogs {
+			if err := tx.Tasks().AppendProgressLog(ctx, taskID, line); err != nil {
+				return fmt.Errorf("append structured progress log: %w", err)
+			}
+		}
+		advanced, persisted, err = tx.Tasks().AdvanceStructuredProgress(ctx, taskID, executionID, sequence, payload)
+		if err != nil {
+			return fmt.Errorf("advance structured progress: %w", err)
+		}
+		if !advanced {
+			// Duplicate/lower-sequence reports are idempotent and refresh no
+			// heartbeats. Returning a sentinel forces the outer transaction to
+			// roll back the tentative heartbeat and raw-log writes.
+			return errDuplicateAgentProgress
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errDuplicateAgentProgress) {
+			return nil
+		}
+		return err
+	}
+	if s.pubsub != nil {
+		for _, line := range normalizedLogs {
+			s.pubsub.PublishProgress(ctx, taskID, line)
+		}
 		s.pubsub.PublishProgressStructured(ctx, taskID, persisted.Stage, persisted.State, persisted.Title, persisted.Description, persisted.Percent)
 	}
 	return nil
 }
+
+var errDuplicateAgentProgress = errors.New("duplicate agent structured progress")
 
 func (s *TaskService) persistStructuredProgress(ctx context.Context, taskID, stage, title, description string, percent, currentProgress int) error {
 

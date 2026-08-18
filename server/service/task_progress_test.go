@@ -40,6 +40,7 @@ func setupProgressFromAgentTest(t *testing.T, withPubSub bool, mutateExecution f
 	}
 	execution := &model.TaskExecution{
 		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning,
+		Started:     true,
 		AgentPackID: pack.ID, AgentPackVersion: pack.Version, AgentPackDigest: pack.Digest,
 		RuntimeAdapter: pack.Runtime.Adapter, RuntimeProfile: pack.Runtime.Profile,
 	}
@@ -81,7 +82,7 @@ func TestUpdateProgressFromAgentUsesFrozenExecutionPackAndPublishesSSE(t *testin
 	ctx := context.Background()
 	svc, repo, task, execution, subscriber, miniRedis := setupProgressFromAgentTest(t, true, nil)
 
-	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "正文已生成", 55); err != nil {
+	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "正文已生成", 55, "raw message", " raw log "); err != nil {
 		t.Fatalf("UpdateProgressFromAgent: %v", err)
 	}
 	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
@@ -92,28 +93,174 @@ func TestUpdateProgressFromAgentUsesFrozenExecutionPackAndPublishesSSE(t *testin
 	if persisted.Progress != 55 || latest.Stage != "writing" || latest.State != "complete" || latest.Title != "朋友圈正文" || latest.Description != "正文已生成" || latest.Percent != 55 {
 		t.Fatalf("persisted progress = %d/%#v", persisted.Progress, latest)
 	}
-	if !strings.Contains(persisted.ProgressLog, `"stage":"writing"`) {
+	if persisted.LastHeartbeatAt == nil || !strings.Contains(persisted.ProgressLog, `"stage":"writing"`) || strings.Count(persisted.ProgressLog, "raw message") != 1 || strings.Count(persisted.ProgressLog, "raw log") != 1 {
 		t.Fatalf("progress log = %q", persisted.ProgressLog)
 	}
-
-	select {
-	case message := <-subscriber.Events():
-		var event ProgressEvent
-		if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
-			t.Fatal(err)
-		}
-		if event.TaskID != task.ID || event.Stage != "writing" || event.State != "complete" || event.Title != "朋友圈正文" || event.Description != "正文已生成" || event.Percent != 55 {
-			t.Fatalf("progress event = %#v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for structured progress event")
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if persistedExecution.LastHeartbeatAt == nil {
+		t.Fatal("structured progress did not refresh execution heartbeat")
+	}
+
+	var rawEvents, structuredEvents int
+	for range 3 {
+		select {
+		case message := <-subscriber.Events():
+			var event ProgressEvent
+			if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Message != "" {
+				rawEvents++
+			} else {
+				structuredEvents++
+				if event.TaskID != task.ID || event.Stage != "writing" || event.State != "complete" || event.Title != "朋友圈正文" || event.Description != "正文已生成" || event.Percent != 55 {
+					t.Fatalf("progress event = %#v", event)
+				}
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for progress event")
+		}
+	}
+	if rawEvents != 2 || structuredEvents != 1 {
+		t.Fatalf("published events raw=%d structured=%d, want 2/1", rawEvents, structuredEvents)
+	}
+
+	beforeDuplicateTask := persisted
+	beforeDuplicateExecution := persistedExecution
 	commandsBeforeStale := miniRedis.CommandCount()
-	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "active", "朋友圈正文", "迟到的 active 事件", 35); err != nil {
-		t.Fatalf("stale UpdateProgressFromAgent: %v", err)
+	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "duplicate", 55, "duplicate raw"); err != nil {
+		t.Fatalf("duplicate UpdateProgressFromAgent: %v", err)
 	}
 	if commandsAfterStale := miniRedis.CommandCount(); commandsAfterStale != commandsBeforeStale {
-		t.Fatalf("stale progress published Redis command: before=%d after=%d", commandsBeforeStale, commandsAfterStale)
+		t.Fatalf("duplicate progress published Redis command: before=%d after=%d", commandsBeforeStale, commandsAfterStale)
+	}
+	afterDuplicateTask, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterDuplicateExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterDuplicateTask.ProgressLog != beforeDuplicateTask.ProgressLog || !afterDuplicateTask.LastHeartbeatAt.Equal(*beforeDuplicateTask.LastHeartbeatAt) || !afterDuplicateExecution.LastHeartbeatAt.Equal(*beforeDuplicateExecution.LastHeartbeatAt) {
+		t.Fatalf("duplicate caused side effects: log before/after=%q/%q heartbeats=%v/%v -> %v/%v", beforeDuplicateTask.ProgressLog, afterDuplicateTask.ProgressLog, beforeDuplicateTask.LastHeartbeatAt, beforeDuplicateExecution.LastHeartbeatAt, afterDuplicateTask.LastHeartbeatAt, afterDuplicateExecution.LastHeartbeatAt)
+	}
+}
+
+type structuredProgressFailureRepository struct {
+	repository.Repository
+	step string
+}
+
+func (r *structuredProgressFailureRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&structuredProgressFailureTx{Repository: tx, step: r.step})
+	})
+}
+
+type structuredProgressFailureTx struct {
+	repository.Repository
+	step string
+}
+
+func (r *structuredProgressFailureTx) Tasks() repository.TaskRepository {
+	return &structuredProgressFailureTasks{TaskRepository: r.Repository.Tasks(), step: r.step}
+}
+
+func (r *structuredProgressFailureTx) TaskExecutions() repository.TaskExecutionRepository {
+	return &structuredProgressFailureExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), step: r.step}
+}
+
+type structuredProgressFailureTasks struct {
+	repository.TaskRepository
+	step string
+}
+
+func (r *structuredProgressFailureTasks) UpdateHeartbeatForExecution(ctx context.Context, id, executionID string, now time.Time) (bool, error) {
+	if r.step == "task heartbeat error" {
+		return false, errors.New("injected task heartbeat failure")
+	}
+	if r.step == "task heartbeat CAS loss" {
+		return false, nil
+	}
+	return r.TaskRepository.UpdateHeartbeatForExecution(ctx, id, executionID, now)
+}
+
+func (r *structuredProgressFailureTasks) AppendProgressLog(ctx context.Context, id, message string) error {
+	if r.step == "raw log error" {
+		return errors.New("injected raw log failure")
+	}
+	return r.TaskRepository.AppendProgressLog(ctx, id, message)
+}
+
+func (r *structuredProgressFailureTasks) AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (bool, model.ProgressPayload, error) {
+	if r.step == "structured update error" {
+		return false, model.ProgressPayload{}, errors.New("injected structured update failure")
+	}
+	if r.step == "structured update CAS loss" {
+		return false, model.ProgressPayload{}, nil
+	}
+	return r.TaskRepository.AdvanceStructuredProgress(ctx, id, executionID, sequence, payload)
+}
+
+type structuredProgressFailureExecutions struct {
+	repository.TaskExecutionRepository
+	step string
+}
+
+func (r *structuredProgressFailureExecutions) UpdateHeartbeatIfRunning(ctx context.Context, id, taskID string, now time.Time) (bool, error) {
+	if r.step == "execution heartbeat error" {
+		return false, errors.New("injected execution heartbeat failure")
+	}
+	if r.step == "execution heartbeat CAS loss" {
+		return false, nil
+	}
+	return r.TaskExecutionRepository.UpdateHeartbeatIfRunning(ctx, id, taskID, now)
+}
+
+func TestUpdateProgressFromAgentRollsBackEveryTransactionalFailure(t *testing.T) {
+	for _, tt := range []struct {
+		step      string
+		wantStale bool
+		wantNil   bool
+	}{
+		{step: "task heartbeat error"},
+		{step: "task heartbeat CAS loss", wantStale: true},
+		{step: "execution heartbeat error"},
+		{step: "execution heartbeat CAS loss", wantStale: true},
+		{step: "raw log error"},
+		{step: "structured update error"},
+		{step: "structured update CAS loss", wantNil: true},
+	} {
+		t.Run(tt.step, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution, subscriber, _ := setupProgressFromAgentTest(t, true, nil)
+			svc.repo = &structuredProgressFailureRepository{Repository: repo, step: tt.step}
+			err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must roll back", 55, "raw message", "raw log")
+			switch {
+			case tt.wantStale && !errors.Is(err, ErrStaleTaskExecution):
+				t.Fatalf("error = %v, want ErrStaleTaskExecution", err)
+			case tt.wantNil && err != nil:
+				t.Fatalf("duplicate CAS loss error = %v, want nil", err)
+			case !tt.wantStale && !tt.wantNil && err == nil:
+				t.Fatal("injected repository error unexpectedly succeeded")
+			}
+			persisted, findErr := repo.Tasks().FindByID(ctx, task.ID)
+			if findErr != nil {
+				t.Fatal(findErr)
+			}
+			persistedExecution, findErr := repo.TaskExecutions().FindByID(ctx, execution.ID)
+			if findErr != nil {
+				t.Fatal(findErr)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("failed transaction caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoProgressEvent(t, subscriber)
+		})
 	}
 }
 
@@ -147,16 +294,20 @@ func TestUpdateProgressFromAgentRejectsStaleExecutionOrTerminalTaskWithoutPublis
 				t.Fatal(err)
 			}
 
-			if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must be rejected", 55); err != nil {
-				t.Fatalf("UpdateProgressFromAgent: %v", err)
+			if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must be rejected", 55, "raw message", "raw log"); !errors.Is(err, ErrStaleTaskExecution) {
+				t.Fatalf("UpdateProgressFromAgent error = %v, want ErrStaleTaskExecution", err)
 			}
 			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" {
-				t.Fatalf("rejected progress mutated task: sequence=%d progress=%d latest=%#v log=%q",
-					persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog)
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("rejected progress mutated task: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v",
+					persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
 			}
 			assertNoProgressEvent(t, subscriber)
 		})

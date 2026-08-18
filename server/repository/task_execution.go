@@ -397,6 +397,14 @@ func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string
 		Update("last_heartbeat_at", now).Error
 }
 
+func (r *taskExecutionRepository) UpdateHeartbeatIfRunning(ctx context.Context, id, taskID string, now time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskExecution{}).
+		Where("id = ? AND task_id = ? AND status = ? AND started = ? AND completed_at IS NULL", id, taskID, model.TaskExecutionRunning, true).
+		Update("last_heartbeat_at", now)
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *taskExecutionRepository) Transition(
 	ctx context.Context,
 	id string,

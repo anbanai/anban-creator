@@ -363,11 +363,11 @@ type agentProgressRequest struct {
 	ExecutionID     string   `json:"execution_id"`
 	Message         string   `json:"message"`
 	Logs            []string `json:"logs"`
-	Stage           string   `json:"stage"`
-	State           string   `json:"state"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	ProgressPercent int      `json:"progress_percent"`
+	Stage           *string  `json:"stage"`
+	State           *string  `json:"state"`
+	Title           *string  `json:"title"`
+	Description     *string  `json:"description"`
+	ProgressPercent *int     `json:"progress_percent"`
 }
 
 type agentCompleteRequest struct {
@@ -448,7 +448,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	if err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
-	structuredIntent := req.Stage != "" || req.State != "" || req.Title != "" || req.Description != "" || req.ProgressPercent != 0
+	structuredIntent := req.Stage != nil || req.State != nil || req.Title != nil || req.Description != nil || req.ProgressPercent != nil
 	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
 	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
 	executionID := authenticatedExecutionID
@@ -465,7 +465,50 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "execution_id is required for structured progress")
 	}
 
-	// Refresh the heartbeat on every progress report. This is the local-
+	if structuredIntent {
+		stage, state, title, description, percent := "", "", "", "", 0
+		if req.Stage != nil {
+			stage = strings.TrimSpace(*req.Stage)
+		}
+		if stage == "" {
+			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
+		}
+		if req.State != nil {
+			state = strings.TrimSpace(*req.State)
+		}
+		if state != "active" && state != "complete" {
+			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
+		}
+		if req.Title != nil {
+			title = *req.Title
+		}
+		if req.Description != nil {
+			description = *req.Description
+		}
+		if req.ProgressPercent != nil {
+			percent = *req.ProgressPercent
+		}
+		logs := append([]string(nil), req.Logs...)
+		if req.Message != "" {
+			logs = append(logs, req.Message)
+		}
+		if err := h.taskSvc.UpdateProgressFromAgent(c.Context(), req.TaskID, executionID, stage, state, title, description, percent, logs...); err != nil {
+			switch {
+			case errors.Is(err, service.ErrAgentProgressUnknownStage), errors.Is(err, service.ErrAgentProgressStateMismatch), errors.Is(err, service.ErrAgentProgressTitleMismatch), errors.Is(err, service.ErrAgentProgressPercentMismatch):
+				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
+			case errors.Is(err, service.ErrStaleTaskExecution):
+				return Error(c, fiber.StatusConflict, "task execution is no longer current")
+			case errors.Is(err, service.ErrAgentProgressExecutionMismatch), errors.Is(err, service.ErrAgentProgressPackMismatch):
+				return Error(c, fiber.StatusConflict, "structured progress contract conflict")
+			default:
+				h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist structured agent progress")
+				return Error(c, fiber.StatusInternalServerError, "failed to persist structured progress")
+			}
+		}
+		return Success(c, fiber.Map{"ok": true})
+	}
+
+	// Refresh the heartbeat on every legacy progress report. This is the local-
 	// execution keep-alive: a desktop agent reports progress per turn/line, and
 	// each report resets the 5-min stuck-task reaper. Cloud tasks are also kept
 	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
@@ -475,17 +518,6 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
 		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
 	}
-	if structuredIntent {
-		req.Stage = strings.TrimSpace(req.Stage)
-		if req.Stage == "" {
-			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
-		}
-		req.State = strings.TrimSpace(req.State)
-		if req.State != "active" && req.State != "complete" {
-			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
-		}
-	}
-
 	if req.Message != "" {
 		req.Logs = append(req.Logs, req.Message)
 	}
@@ -495,20 +527,6 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "failed to persist progress")
 		}
 	}
-	if structuredIntent {
-		if err := h.taskSvc.UpdateProgressFromAgent(c.Context(), req.TaskID, executionID, req.Stage, req.State, req.Title, req.Description, req.ProgressPercent); err != nil {
-			switch {
-			case errors.Is(err, service.ErrAgentProgressUnknownStage), errors.Is(err, service.ErrAgentProgressStateMismatch), errors.Is(err, service.ErrAgentProgressTitleMismatch), errors.Is(err, service.ErrAgentProgressPercentMismatch):
-				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
-			case errors.Is(err, service.ErrAgentProgressExecutionMismatch), errors.Is(err, service.ErrAgentProgressPackMismatch):
-				return Error(c, fiber.StatusConflict, "structured progress contract conflict")
-			default:
-				h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist structured agent progress")
-				return Error(c, fiber.StatusInternalServerError, "failed to persist structured progress")
-			}
-		}
-	}
-
 	return Success(c, fiber.Map{"ok": true})
 }
 

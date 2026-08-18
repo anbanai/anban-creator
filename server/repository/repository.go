@@ -101,6 +101,9 @@ type TaskRepository interface {
 	// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
 	// so Studio can render the current stage without parsing progress_log.
 	UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error
+	// UpdateHeartbeatForExecution refreshes the task heartbeat only while the
+	// supplied execution is still current and the task is running.
+	UpdateHeartbeatForExecution(ctx context.Context, id, executionID string, now time.Time) (bool, error)
 	// AdvanceStructuredProgress atomically advances the structured progress sequence
 	// and its latest payload/log for the current running execution. Lower,
 	// duplicate, stale-execution, and terminal-task events are ignored.
@@ -229,6 +232,9 @@ type TaskExecutionRepository interface {
 	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
 	SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
+	// UpdateHeartbeatIfRunning refreshes an execution heartbeat only while the
+	// execution is still active and belongs to the supplied task.
+	UpdateHeartbeatIfRunning(ctx context.Context, id, taskID string, now time.Time) (bool, error)
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
