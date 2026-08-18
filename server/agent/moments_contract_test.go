@@ -92,6 +92,8 @@ func TestMomentsProgressHookContract(t *testing.T) {
 				"TaskUpdate status=completed",
 				"anban_progress_stage",
 				"Runner Hooks",
+				"保存每次返回的 Task id",
+				"对同一 Task id",
 				"不得依赖任务标题推断阶段",
 				"不得省略 TaskUpdate 的 metadata",
 			} {
