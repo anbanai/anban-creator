@@ -318,6 +318,19 @@ type structuredProgressFailureTasks struct {
 	step string
 }
 
+var errInjectedProgressCASLookup = errors.New("injected progress CAS lookup failure")
+
+func (r *structuredProgressFailureTasks) FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error) {
+	switch r.step {
+	case "CAS lookup error":
+		return nil, errInjectedProgressCASLookup
+	case "CAS lookup not found":
+		return nil, gorm.ErrRecordNotFound
+	default:
+		return r.TaskRepository.FindByIDForUpdate(ctx, id)
+	}
+}
+
 func (r *structuredProgressFailureTasks) UpdateHeartbeat(ctx context.Context, id string) error {
 	if r.step == "task heartbeat error" {
 		return errors.New("injected task heartbeat failure")
@@ -336,7 +349,7 @@ func (r *structuredProgressFailureTasks) AdvanceStructuredProgress(ctx context.C
 	if r.step == "structured update error" {
 		return false, model.ProgressPayload{}, errors.New("injected structured update failure")
 	}
-	if r.step == "structured update CAS loss" {
+	if r.step == "structured update CAS loss" || strings.HasPrefix(r.step, "CAS lookup ") {
 		return false, model.ProgressPayload{}, nil
 	}
 	return r.TaskRepository.AdvanceStructuredProgress(ctx, id, executionID, sequence, payload)
@@ -394,6 +407,45 @@ func TestUpdateProgressFromAgentRollsBackEveryTransactionalFailure(t *testing.T)
 			}
 			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
 				t.Fatalf("failed transaction caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoProgressEvent(t, subscriber)
+		})
+	}
+}
+
+func TestUpdateProgressFromAgentClassifiesCASLookupErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		step      string
+		wantStale bool
+	}{
+		{name: "ordinary database error", step: "CAS lookup error"},
+		{name: "record not found", step: "CAS lookup not found", wantStale: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution, subscriber, _ := setupProgressFromAgentTest(t, true, nil)
+			svc.repo = &structuredProgressFailureRepository{Repository: repo, step: tt.step}
+			err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must roll back", 55, "raw message", "raw log")
+			if tt.wantStale {
+				if !errors.Is(err, ErrStaleTaskExecution) {
+					t.Fatalf("error = %v, want ErrStaleTaskExecution", err)
+				}
+			} else {
+				if !errors.Is(err, errInjectedProgressCASLookup) || errors.Is(err, ErrStaleTaskExecution) {
+					t.Fatalf("error = %v, want wrapped database error and not stale", err)
+				}
+			}
+			persisted, findErr := repo.Tasks().FindByID(ctx, task.ID)
+			if findErr != nil {
+				t.Fatal(findErr)
+			}
+			persistedExecution, findErr := repo.TaskExecutions().FindByID(ctx, execution.ID)
+			if findErr != nil {
+				t.Fatal(findErr)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("CAS lookup failure caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
 			}
 			assertNoProgressEvent(t, subscriber)
 		})

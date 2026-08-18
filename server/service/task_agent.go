@@ -12,6 +12,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/gorm"
 )
 
 const missingExecutionResultDiagnostic = "agent returned no execution result"
@@ -275,7 +276,13 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 		}
 		if !advanced {
 			task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
-			if err != nil || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrStaleTaskExecution
+				}
+				return fmt.Errorf("load task after structured progress CAS miss: %w", err)
+			}
+			if task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
 				return ErrStaleTaskExecution
 			}
 			if task.ProgressSequence >= sequence {

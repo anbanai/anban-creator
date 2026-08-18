@@ -690,6 +690,38 @@ type beforeStructuredProgressTxRepository struct {
 	before func()
 }
 
+var errInjectedHandlerProgressCASLookup = errors.New("injected handler progress CAS lookup failure")
+
+type progressCASLookupErrorRepository struct {
+	repository.Repository
+}
+
+func (r *progressCASLookupErrorRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&progressCASLookupErrorTx{Repository: tx})
+	})
+}
+
+type progressCASLookupErrorTx struct {
+	repository.Repository
+}
+
+func (r *progressCASLookupErrorTx) Tasks() repository.TaskRepository {
+	return &progressCASLookupErrorTasks{TaskRepository: r.Repository.Tasks()}
+}
+
+type progressCASLookupErrorTasks struct {
+	repository.TaskRepository
+}
+
+func (r *progressCASLookupErrorTasks) AdvanceStructuredProgress(context.Context, string, string, int, model.ProgressPayload) (bool, model.ProgressPayload, error) {
+	return false, model.ProgressPayload{}, nil
+}
+
+func (r *progressCASLookupErrorTasks) FindByIDForUpdate(context.Context, string) (*model.Task, error) {
+	return nil, errInjectedHandlerProgressCASLookup
+}
+
 func newAgentProgressTestPubSub(t *testing.T) (*service.RedisPubSub, *miniredis.Miniredis) {
 	t.Helper()
 	miniRedis := miniredis.RunT(t)
@@ -806,6 +838,40 @@ func TestAgentStructuredProgressRejectsExecutionThatBecomesStaleAfterAuthorizati
 			assertNoAgentProgressEvent(t, subscriber)
 		})
 	}
+}
+
+func TestAgentStructuredProgressCASLookupErrorReturns500WithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	pubsub, miniRedis := newAgentProgressTestPubSub(t)
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
+		func(base repository.Repository) repository.Repository {
+			return &progressCASLookupErrorRepository{Repository: base}
+		}, pubsub,
+	)
+	subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"raw message","logs":["raw log"],"stage":"writing","state":"complete","title":"朋友圈正文","progress_percent":55}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 500", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("CAS lookup error caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	assertNoAgentProgressEvent(t, subscriber)
 }
 
 func TestAgentProgressRefreshesTaskAndExecutionHeartbeats(t *testing.T) {
