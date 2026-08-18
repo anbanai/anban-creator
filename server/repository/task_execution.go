@@ -404,10 +404,10 @@ func (r *taskExecutionRepository) LockActiveForProgress(ctx context.Context, id,
 	})
 }
 
-// activeTaskExecutionLock defines the path-specific identity predicates added
-// to the common execution-first row lock. Completion and structured progress
-// use this locked validation; legacy heartbeat acquires the same row first via
-// its execution UPDATE. All three paths touch tasks only afterward.
+// Cross-table lock-order invariant: lock an existing task_execution before its
+// task. Completion and structured progress use this locked validation; legacy
+// heartbeat acquires the same row first via its execution UPDATE. Artifact
+// mutations enforce the same order in lockCurrentArtifactExecution.
 type activeTaskExecutionLock struct {
 	target            string
 	requireStarted    bool
