@@ -40,10 +40,11 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	}
 
 	type manifest struct {
-		Name      string `json:"name"`
-		Version   string `json:"version"`
-		Skills    string `json:"skills"`
-		Interface any    `json:"interface"`
+		Name      string          `json:"name"`
+		Version   string          `json:"version"`
+		Skills    string          `json:"skills"`
+		Hooks     json.RawMessage `json:"hooks"`
+		Interface any             `json:"interface"`
 	}
 	readManifest := func(path string) manifest {
 		t.Helper()
@@ -67,6 +68,16 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
+	}
+	var codexHooks []json.RawMessage
+	if len(codexManifest.Hooks) == 0 {
+		t.Fatal("Codex manifest must explicitly override default plugin hook discovery")
+	}
+	if err := json.Unmarshal(codexManifest.Hooks, &codexHooks); err != nil {
+		t.Fatalf("Codex manifest hooks must be an array: %v", err)
+	}
+	if len(codexHooks) != 0 {
+		t.Fatalf("Codex manifest hooks = %s, want an explicit empty array until a validated reporter adapter exists", codexManifest.Hooks)
 	}
 
 	for _, path := range []string{

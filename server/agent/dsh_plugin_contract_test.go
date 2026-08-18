@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.12"
-	dshPluginReleaseDate = "2026-08-17"
+	dshPluginVersion     = "4.1.13"
+	dshPluginReleaseDate = "2026-08-18"
 )
 
 type dshPackageManifest struct {
@@ -60,8 +60,36 @@ func TestDSHPluginContract(t *testing.T) {
 			} `yaml:"importers"`
 		}
 		readYAMLContractFile(t, filepath.Join(pluginRoot, "pnpm-lock.yaml"), &lockfile)
-		if rootImporter, ok := lockfile.Importers["."]; ok && rootImporter.Version != "" && rootImporter.Version != dshPluginVersion {
-			t.Errorf("pnpm root importer version = %q, want %s", rootImporter.Version, dshPluginVersion)
+		rootImporter, ok := lockfile.Importers["."]
+		if !ok || rootImporter.Version != dshPluginVersion {
+			t.Errorf("pnpm root importer version = %q (present=%t), want %s", rootImporter.Version, ok, dshPluginVersion)
+		}
+
+		for name, path := range map[string]string{
+			"Claude": filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"),
+			"Codex":  filepath.Join(pluginRoot, ".codex-plugin", "plugin.json"),
+		} {
+			var manifest struct {
+				Version string `json:"version"`
+			}
+			readJSONContractFile(t, path, &manifest)
+			if manifest.Version != dshPluginVersion {
+				t.Errorf("%s version = %q, want %s", name, manifest.Version, dshPluginVersion)
+			}
+		}
+
+		var marketplace struct {
+			Plugins []struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"plugins"`
+		}
+		readJSONContractFile(t, filepath.Join(pluginRoot, ".claude-plugin", "marketplace.json"), &marketplace)
+		if len(marketplace.Plugins) != 1 || marketplace.Plugins[0].Name != "anban" {
+			t.Fatalf("Claude marketplace plugins = %+v, want only anban", marketplace.Plugins)
+		}
+		if marketplace.Plugins[0].Version != dshPluginVersion {
+			t.Errorf("Claude marketplace version = %q, want %s", marketplace.Plugins[0].Version, dshPluginVersion)
 		}
 
 		changelog := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
@@ -420,11 +448,11 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
-	t.Run("4.1.12 release operators perform a real low privilege MCP check", func(t *testing.T) {
+	t.Run("current release operators perform a real low privilege MCP check", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
 		normalized := strings.Join(strings.Fields(body), " ")
 		for _, want := range []string{
-			"4.1.12 release-operator checklist",
+			"4.1.13 release-operator checklist",
 			"after automated code gates and before public announcement",
 			"dedicated low-privilege",
 			"outside Git",
@@ -480,11 +508,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		return "```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add " + specifier + "\n```"
 	}
 	for _, allowed := range []string{
-		`"@anban/dsh-plugin@4.1.12"`,
-		`"/tmp/anban-dsh-plugin-4.1.12.tgz"`,
-		`"file:/tmp/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz"`,
-		`"git+https://github.com/anbanai/creator-skills.git#v4.1.12"`,
+		`"@anban/dsh-plugin@4.1.13"`,
+		`"/tmp/anban-dsh-plugin-4.1.13.tgz"`,
+		`"file:/tmp/anban-dsh-plugin-4.1.13.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz"`,
+		`"git+https://github.com/anbanai/creator-skills.git#v4.1.13"`,
 		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
@@ -502,11 +530,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"file:/tmp/anban-dsh-plugin.tgz",
 		`"@anban/dsh-plugin"`,
 		`"@anban/dsh-plugin@latest"`,
-		`"@anban/dsh-plugin@^4.1.12"`,
+		`"@anban/dsh-plugin@^4.1.13"`,
 		`"@anban/dsh-plugin@01.2.3"`,
 		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
 		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.13.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.14.tgz"`,
 		`"git+https://github.com/anbanai/creator-skills.git#main"`,
 		`"git+https://github.com/anbanai/creator-skills.git#HEAD"`,
 		`"git+https://github.com/anbanai/creator-skills.git#v01.2.3"`,
@@ -534,14 +562,14 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		}
 	}
 	for _, source := range []string{
-		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
-		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
+		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
 		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz\"\n```",
-		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
-		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz\"\n```",
+		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
+		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
 		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.13.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
 			t.Errorf("approved prefixed or continued add findings = %v:\n%s", findings, source)
@@ -842,12 +870,12 @@ func TestReleaseDesktopArtifactContractSupportsFutureVersionsAndRejectsLiterals(
 	}
 
 	tarball := "${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz"
-	resolved := strings.ReplaceAll(tarball, dynamicVersion, "4.1.13")
-	if resolved != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.13.tgz" {
+	resolved := strings.ReplaceAll(tarball, dynamicVersion, "4.1.14")
+	if resolved != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.14.tgz" {
 		t.Fatalf("future release tarball = %q", resolved)
 	}
 
-	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12`
+	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.13`
 	if err := validateReleaseCrossPlatformDSHPackStep(step); err == nil {
 		t.Fatal("hardcoded release version satisfied the Desktop pack contract")
 	}
@@ -1421,7 +1449,7 @@ func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
 		return fmt.Errorf("release Desktop acceptance must validate exports and mounted Skill catalogs")
 	}
 	for _, step := range job.Steps {
-		if strings.Contains(step.Run+step.Env["DSH_PLUGIN_TARBALL"], "4.1.12") {
+		if strings.Contains(step.Run+step.Env["DSH_PLUGIN_TARBALL"], dshPluginVersion) {
 			return fmt.Errorf("release Desktop acceptance must not hardcode the current plugin version")
 		}
 		for _, forbidden := range []string{"ELECTRON_RUN_AS_NODE", "desktopRuntime", "desktopPnpmBootstrap", "public Desktop runtime fixture"} {
@@ -1464,7 +1492,7 @@ func validateCrossPlatformDSHPackStep(step workflowStep) error {
 			return fmt.Errorf("Desktop pack step contains shell-specific inline verifier %q", forbidden)
 		}
 	}
-	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12") {
+	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "+dshPluginVersion) {
 		return fmt.Errorf("Desktop pack step must use the cross-platform exact-pack verifier")
 	}
 	return nil
