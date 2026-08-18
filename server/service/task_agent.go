@@ -9,6 +9,7 @@ import (
 	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -142,12 +143,84 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 			percent = p
 		}
 	}
+	return s.persistStructuredProgress(ctx, taskID, stage, title, description, percent, currentProgress)
+}
+
+// UpdateProgressFromAgent validates a structured progress event against the
+// immutable Agent Pack identity recorded on the execution. State selects the
+// declared percentage and ordinal transition; client percent must match it.
+func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, executionID, stage, state, title, description string, percent int) error {
+	if strings.TrimSpace(executionID) == "" {
+		return ErrAgentProgressExecutionMismatch
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("load agent progress execution: %w", err)
+	}
+	if execution.TaskID != taskID {
+		return ErrAgentProgressExecutionMismatch
+	}
+	progressContract, err := resolveFrozenExecutionProgressContract(execution)
+	if err != nil {
+		return err
+	}
+	var declaredStage agentpack.ProgressStage
+	stageOrdinal := -1
+	stageID := strings.TrimSpace(stage)
+	for ordinal, candidate := range progressContract {
+		if candidate.ID == stageID {
+			declaredStage = candidate
+			stageOrdinal = ordinal
+			break
+		}
+	}
+	if declaredStage.ID == "" {
+		return ErrAgentProgressUnknownStage
+	}
+	if title != declaredStage.Title {
+		return ErrAgentProgressTitleMismatch
+	}
+	state = strings.TrimSpace(state)
+	var expectedPercent, sequence int
+	switch state {
+	case "active":
+		expectedPercent = declaredStage.ActivePercent
+		sequence = stageOrdinal*2 + 1
+	case "complete":
+		expectedPercent = declaredStage.CompletePercent
+		sequence = stageOrdinal*2 + 2
+	default:
+		return ErrAgentProgressStateMismatch
+	}
+	if percent != expectedPercent {
+		return ErrAgentProgressPercentMismatch
+	}
+	payload := model.ProgressPayload{
+		Stage:       declaredStage.ID,
+		State:       state,
+		Title:       declaredStage.Title,
+		Description: description,
+		Percent:     expectedPercent,
+	}
+	advanced, persisted, err := s.repo.Tasks().AdvanceStructuredProgress(ctx, taskID, sequence, payload)
+	if err != nil {
+		return fmt.Errorf("advance structured progress: %w", err)
+	}
+	if advanced && s.pubsub != nil {
+		s.pubsub.PublishProgressStructured(ctx, taskID, persisted.Stage, persisted.State, persisted.Title, persisted.Description, persisted.Percent)
+	}
+	return nil
+}
+
+func (s *TaskService) persistStructuredProgress(ctx context.Context, taskID, stage, title, description string, percent, currentProgress int) error {
 
 	// Monotonic guard: never roll progress backward. Stages may fire out of
 	// order (retry, parallel branches); the bar should only advance.
 	if percent > currentProgress {
 		if err := s.repo.Tasks().UpdateProgressColumn(ctx, taskID, percent); err != nil {
-			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("persist progress column")
+			if s.logger != nil {
+				s.logger.Warn().Err(err).Str("task_id", taskID).Msg("persist progress column")
+			}
 		}
 	}
 
@@ -174,10 +247,12 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 	// (which also carries "Using tool: ..." noise from the agent executor).
 	// Failure is non-fatal — same precedence as the progress column write above.
 	if err := s.repo.Tasks().UpdateLatestProgress(ctx, taskID, payload); err != nil {
-		s.logger.Warn().Err(err).Str("task_id", taskID).Msg("persist latest_progress")
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("persist latest_progress")
+		}
 	}
 	if s.pubsub != nil {
-		s.pubsub.PublishProgressStructured(ctx, taskID, payload.Stage, payload.Title, payload.Description, payload.Percent)
+		s.pubsub.PublishProgressStructured(ctx, taskID, payload.Stage, payload.State, payload.Title, payload.Description, payload.Percent)
 	}
 	return nil
 }

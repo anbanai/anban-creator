@@ -2573,11 +2573,16 @@ func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusFailed,
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		ProjectID:        projectID,
+		Type:             model.PlatformArticle,
+		Status:           model.TaskStatusFailed,
+		Progress:         88,
+		ProgressSequence: 10,
+		LatestProgress: datatypes.NewJSONType(
+			model.ProgressPayload{Stage: "delivery", State: "complete", Percent: 88},
+		),
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -2603,6 +2608,9 @@ func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T
 	}
 	if found.Status != model.TaskStatusPending {
 		t.Fatalf("status = %q, want pending", found.Status)
+	}
+	if found.Progress != 0 || found.ProgressSequence != 0 || found.LatestProgress.Data().Stage != "" {
+		t.Fatalf("progress reset = percent:%d sequence:%d latest:%#v", found.Progress, found.ProgressSequence, found.LatestProgress.Data())
 	}
 }
 

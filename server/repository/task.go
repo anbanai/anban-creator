@@ -170,6 +170,50 @@ func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, pa
 		Update("latest_progress", datatypes.NewJSONType(payload)).Error
 }
 
+// AdvanceStructuredProgress uses the declared stage/state sequence as its CAS
+// high-water mark. Numeric progress is retained independently as a maximum so
+// Pack stages with equal or zero percentages still advance deterministically.
+func (r *taskRepository) AdvanceStructuredProgress(ctx context.Context, id string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Task{}).
+			Where("id = ? AND progress_sequence < ?", id, sequence).
+			Updates(map[string]any{
+				"progress_sequence": sequence,
+				"progress": gorm.Expr(
+					"CASE WHEN progress < ? THEN ? ELSE progress END",
+					payload.Percent,
+					payload.Percent,
+				),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		var finalProgress int
+		if err := tx.Model(&model.Task{}).Select("progress").Where("id = ?", id).Scan(&finalProgress).Error; err != nil {
+			return err
+		}
+		payload.Percent = finalProgress
+		message, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal structured progress: %w", err)
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", id).Updates(map[string]any{
+			"latest_progress": datatypes.NewJSONType(payload),
+			"progress_log":    gorm.Expr("CONCAT(COALESCE(progress_log, ''), ?)", string(message)+"\n"),
+		}).Error; err != nil {
+			return err
+		}
+		advanced = true
+		persisted = payload
+		return nil
+	})
+	return advanced, persisted, err
+}
+
 // GetTypeAndProgress loads only the type and progress columns for a task,
 // avoiding the longtext progress_log transfer on hot paths.
 func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (string, int, error) {
@@ -683,6 +727,7 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 			"terminal_model_usage":   datatypes.NewJSONType([]model.ModelTokenUsage{}),
 			"cost_status":            "",
 			"progress":               0,
+			"progress_sequence":      0,
 			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
 			"workflow_status":        nil,
 			"publish_approval_state": "",

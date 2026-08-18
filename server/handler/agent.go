@@ -359,9 +359,14 @@ func isAgentTaskAccessError(err error) bool {
 }
 
 type agentProgressRequest struct {
-	TaskID  string   `json:"task_id"`
-	Message string   `json:"message"`
-	Logs    []string `json:"logs"`
+	TaskID          string   `json:"task_id"`
+	Message         string   `json:"message"`
+	Logs            []string `json:"logs"`
+	Stage           string   `json:"stage"`
+	State           string   `json:"state"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	ProgressPercent int      `json:"progress_percent"`
 }
 
 type agentCompleteRequest struct {
@@ -451,6 +456,17 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
 		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
 	}
+	structuredIntent := req.Stage != "" || req.State != "" || req.Title != "" || req.Description != "" || req.ProgressPercent != 0
+	if structuredIntent {
+		req.Stage = strings.TrimSpace(req.Stage)
+		if req.Stage == "" {
+			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
+		}
+		req.State = strings.TrimSpace(req.State)
+		if req.State != "active" && req.State != "complete" {
+			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
+		}
+	}
 
 	if req.Message != "" {
 		req.Logs = append(req.Logs, req.Message)
@@ -459,6 +475,19 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		if err := h.taskSvc.AppendProgressLog(c.Context(), req.TaskID, line); err != nil {
 			h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("failed to append agent progress")
 			return Error(c, fiber.StatusInternalServerError, "failed to persist progress")
+		}
+	}
+	if structuredIntent {
+		if err := h.taskSvc.UpdateProgressFromAgent(c.Context(), req.TaskID, executionID, req.Stage, req.State, req.Title, req.Description, req.ProgressPercent); err != nil {
+			switch {
+			case errors.Is(err, service.ErrAgentProgressUnknownStage), errors.Is(err, service.ErrAgentProgressStateMismatch), errors.Is(err, service.ErrAgentProgressTitleMismatch), errors.Is(err, service.ErrAgentProgressPercentMismatch):
+				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
+			case errors.Is(err, service.ErrAgentProgressExecutionMismatch), errors.Is(err, service.ErrAgentProgressPackMismatch):
+				return Error(c, fiber.StatusConflict, "structured progress contract conflict")
+			default:
+				h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist structured agent progress")
+				return Error(c, fiber.StatusInternalServerError, "failed to persist structured progress")
+			}
 		}
 	}
 

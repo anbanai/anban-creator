@@ -67,6 +67,7 @@ type ProgressEvent struct {
 	TaskID      string `json:"task_id"`
 	Message     string `json:"message"`
 	Stage       string `json:"stage,omitempty"`
+	State       string `json:"state,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Percent     int    `json:"percent,omitempty"`
@@ -186,13 +187,14 @@ func (ps *RedisPubSub) PublishProgress(ctx context.Context, taskID, message stri
 // title, description, and numeric percent. Used by UpdateProgress when an
 // MCP-driven progress update is reported. SSE clients render title and
 // description directly; no separate message payload is needed.
-func (ps *RedisPubSub) PublishProgressStructured(ctx context.Context, taskID, stage, title, description string, percent int) {
+func (ps *RedisPubSub) PublishProgressStructured(ctx context.Context, taskID, stage, state, title, description string, percent int) {
 	if ps.rdb == nil {
 		return
 	}
 	event := ProgressEvent{
 		TaskID:      taskID,
 		Stage:       stage,
+		State:       state,
 		Title:       title,
 		Description: description,
 		Percent:     percent,

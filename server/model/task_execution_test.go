@@ -30,6 +30,9 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 	if !db.Migrator().HasColumn(&Task{}, "CurrentExecutionID") {
 		t.Fatal("current_execution_id missing")
 	}
+	if !db.Migrator().HasColumn(&Task{}, "ProgressSequence") {
+		t.Fatal("progress_sequence missing")
+	}
 	if !db.Migrator().HasColumn(&Project{}, "AgentConfig") || !db.Migrator().HasColumn(&Plan{}, "AgentInput") || !db.Migrator().HasColumn(&Task{}, "AgentInput") {
 		t.Fatal("Agent Pack extension JSON columns missing")
 	}
@@ -37,7 +40,7 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 		!db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimedAt") {
 		t.Fatal("dispatch lease columns missing")
 	}
-	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "AgentPackID", "AgentPackVersion", "AgentPackDigest", "RuntimeAdapter", "RuntimeProfile", "RuntimeImage", "ManifestSealed", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupToken", "CleanupNextAt", "PublishingStatus", "PublishingResult", "Result"} {
+	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "AgentPackID", "AgentPackVersion", "AgentPackDigest", "AgentPackProgressContract", "RuntimeAdapter", "RuntimeProfile", "RuntimeImage", "ManifestSealed", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupToken", "CleanupNextAt", "PublishingStatus", "PublishingResult", "Result"} {
 		if !db.Migrator().HasColumn(&TaskExecution{}, column) {
 			t.Fatalf("task execution durability column %s missing", column)
 		}
