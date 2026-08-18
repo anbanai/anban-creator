@@ -550,8 +550,8 @@ func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testin
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, oldExecutionID, &agent.ExecutionResult{Success: false, Error: "stale result"}); err != nil {
-		t.Fatalf("CompleteLocalTask stale result: %v", err)
+	if err := svc.CompleteLocalTask(ctx, taskID, oldExecutionID, &agent.ExecutionResult{Success: false, Error: "stale result"}); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("CompleteLocalTask stale result error = %v, want ErrStaleTaskExecution", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -700,10 +700,8 @@ func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
 	}
 }
 
-// TestCompleteLocalTask_GuardedToNonLocal confirms a cloud (or already-terminal)
-// task is a no-op — so the shared agent binary calling /complete in cloud mode
-// cannot double-finalize. This is the safety property that lets one endpoint
-// serve both execution modes.
+// TestCompleteLocalTask_GuardedToNonLocal confirms the local completion method
+// rejects a task owned by another execution mode without changing it.
 func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -723,8 +721,8 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 		t.Fatalf("create cloud task: %v", err)
 	}
 
-	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, "", &agent.ExecutionResult{Success: true}); err != nil {
-		t.Fatalf("CompleteLocalTask on cloud task: %v", err)
+	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, uuid.NewString(), &agent.ExecutionResult{Success: true}); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("CompleteLocalTask on cloud task error = %v, want ErrStaleTaskExecution", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, cloudTask.ID)
 	if err != nil {
@@ -735,9 +733,9 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 	}
 }
 
-// TestCompleteLocalTask_Idempotent confirms a second complete call on an already
-// terminal task is a no-op (no error, status stable).
-func TestCompleteLocalTask_Idempotent(t *testing.T) {
+// TestCompleteLocalTask_RejectsTerminalDuplicate confirms execution-scoped
+// retries cannot silently acknowledge a terminal task.
+func TestCompleteLocalTask_RejectsTerminalDuplicate(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -748,9 +746,8 @@ func TestCompleteLocalTask_Idempotent(t *testing.T) {
 	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true}); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
-	// Second call must not error and must not flip status.
-	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); err != nil {
-		t.Fatalf("second complete: %v", err)
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("second complete error = %v, want ErrStaleTaskExecution", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -797,10 +794,20 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				result := result
 				go func() { errCh <- completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, result) }()
 			}
+			var successCount, staleCount int
 			for range results {
-				if err := <-errCh; err != nil {
+				err := <-errCh
+				switch {
+				case err == nil:
+					successCount++
+				case errors.Is(err, ErrStaleTaskExecution):
+					staleCount++
+				default:
 					t.Fatalf("concurrent CompleteLocalTask: %v", err)
 				}
+			}
+			if successCount != 1 || staleCount != 1 {
+				t.Fatalf("completion results = success:%d stale:%d, want 1/1", successCount, staleCount)
 			}
 
 			got, err := baseRepo.Tasks().FindByID(ctx, taskID)
@@ -831,8 +838,8 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "late", InputTokens: 99}},
 				CostStatus: agent.CostStatusUnreconciled,
 			}
-			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); err != nil {
-				t.Fatalf("idempotent retry: %v", err)
+			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); !errors.Is(err, ErrStaleTaskExecution) {
+				t.Fatalf("terminal retry error = %v, want ErrStaleTaskExecution", err)
 			}
 			retried, err := baseRepo.Tasks().FindByID(ctx, taskID)
 			if err != nil {

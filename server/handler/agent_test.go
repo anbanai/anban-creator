@@ -363,49 +363,106 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 }
 
 func TestAgentAPIKeyCompletionRequiresCurrentExecutionWithoutSideEffects(t *testing.T) {
-	app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
-
 	for _, tt := range []struct {
-		name string
-		body string
+		name        string
+		target      string
+		requestedID func(string) string
+		mutate      func(t *testing.T, repo repository.Repository, task *model.Task, executionID string)
+		wantStatus  int
 	}{
-		{name: "missing", body: `{"task_id":"` + task.ID + `","result":{"success":false,"error":"late"}}`},
-		{name: "stale", body: `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","result":{"success":false,"error":"late"}}`},
-		{name: "replaced", body: `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"late"}}`},
+		{name: "missing identity", requestedID: func(string) string { return "" }, wantStatus: fiber.StatusBadRequest},
+		{name: "unknown identity", requestedID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
+		{name: "replaced task execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			replacement := uuid.NewString()
+			task.CurrentExecutionID = &replacement
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "terminal task", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			task.Status = model.TaskStatusFailed
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "completed execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, _ *model.Task, executionID string) {
+			transitioned, err := repo.TaskExecutions().Transition(context.Background(), executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "already terminal"})
+			if err != nil || !transitioned {
+				t.Fatalf("terminal execution transition = %v/%v", transitioned, err)
+			}
+		}},
+		{name: "wrong target", target: "kubernetes", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden},
+		{name: "missing execution record", requestedID: func(string) string { return "missing-execution" }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			missing := "missing-execution"
+			task.CurrentExecutionID = &missing
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "replaced" {
-				replacement := uuid.NewString()
-				task.CurrentExecutionID = &replacement
-				if err := repo.Tasks().Update(context.Background(), task); err != nil {
-					t.Fatal(err)
-				}
+			target := tt.target
+			if target == "" {
+				target = model.ExecutionTargetLocalClaimed
 			}
-			req := agentJSONRequest("/agent/complete", tt.body)
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", target, model.TaskExecutionRunning)
+			if tt.mutate != nil {
+				tt.mutate(t, repo, task, executionID)
+			}
+			beforeTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestedID := tt.requestedID(executionID)
+			body := `{"task_id":"` + task.ID + `"`
+			if requestedID != "" {
+				body += `,"execution_id":"` + requestedID + `"`
+			}
+			body += `,"result":{"success":false,"error":"late"}}`
+			req := agentJSONRequest("/agent/complete", body)
 			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if resp.StatusCode < fiber.StatusBadRequest || resp.StatusCode >= fiber.StatusInternalServerError {
-				t.Fatalf("status = %d, want client error", resp.StatusCode)
+			if resp.StatusCode != tt.wantStatus {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, responseBody, tt.wantStatus)
 			}
 			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if persisted.Status != model.TaskStatusRunning || persisted.Result != nil || persisted.CompletedAt != nil {
-				t.Fatalf("rejected completion changed task: status=%q result=%v completed_at=%v", persisted.Status, persisted.Result, persisted.CompletedAt)
+			if persisted.Status != beforeTask.Status || !sameStringPointer(persisted.Result, beforeTask.Result) || !sameTimePointer(persisted.CompletedAt, beforeTask.CompletedAt) || persisted.ErrorMessage != beforeTask.ErrorMessage || persisted.BillingTerminalReason != beforeTask.BillingTerminalReason || !sameStringPointer(persisted.CurrentExecutionID, beforeTask.CurrentExecutionID) {
+				t.Fatalf("rejected completion changed task: before=%#v after=%#v", beforeTask, persisted)
 			}
 			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if persistedExecution.Status != model.TaskExecutionRunning || persistedExecution.CompletedAt != nil {
-				t.Fatalf("rejected completion changed execution: status=%q completed_at=%v", persistedExecution.Status, persistedExecution.CompletedAt)
+			if persistedExecution.Status != beforeExecution.Status || !sameTimePointer(persistedExecution.CompletedAt, beforeExecution.CompletedAt) || string(persistedExecution.Result) != string(beforeExecution.Result) || persistedExecution.FinalizationStatus != beforeExecution.FinalizationStatus {
+				t.Fatalf("rejected completion changed execution: before=%#v after=%#v", beforeExecution, persistedExecution)
 			}
 		})
 	}
+}
+
+func sameStringPointer(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameTimePointer(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 func TestAgentExecutionJWTRejectsConflictingCompletionBodyExecution(t *testing.T) {

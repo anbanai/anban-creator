@@ -240,14 +240,9 @@ func (s *TaskService) ReclaimExpiredLocalTasks(ctx context.Context) (int, error)
 // did not publish and the project requires publishing, it logs a warning for the
 // operator instead of silently skipping.
 //
-// Guarded + idempotent: finalizes ONLY when the task is still
-// execution_target=local_claimed AND status=running (CAS). A repeat /complete
-// call, a task already reaped/terminal, or a cloud task that happens to call
-// /complete is a no-op — so the shared anban binary (used by both cloud
-// Docker and the desktop) can call this endpoint in both modes without
-// double-finalizing cloud tasks, whose authoritative finalization remains the
-// server-side HandleExecution.
-// CompleteLocalTask finalizes a local execution identified by executionID.
+// The execution ID is part of the finalization CAS. A repeated, reaped,
+// replaced, terminal, or non-local completion returns ErrStaleTaskExecution;
+// only the current running local claim may win terminal ownership.
 func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID string, result *agent.ExecutionResult) error {
 	executionID = strings.TrimSpace(executionID)
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
@@ -255,13 +250,12 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		return fmt.Errorf("find task: %w", err)
 	}
 	if task == nil {
-		return nil
+		return ErrStaleTaskExecution
 	}
 	// Only finalize live local tasks. Anything else (cloud task, already
-	// terminal, cancelled) is a no-op — keeps the endpoint idempotent and safe
-	// for the shared agent binary.
+	// terminal, cancelled) is stale for an execution-scoped local completion.
 	if task.ExecutionTarget != model.ExecutionTargetLocalClaimed || task.Status != model.TaskStatusRunning {
-		return nil
+		return ErrStaleTaskExecution
 	}
 	if executionID == "" {
 		return ErrStaleTaskExecution
@@ -350,7 +344,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		return fmt.Errorf("finalize local task as completed: %w", err)
 	}
 	if !swapped {
-		return nil // already terminal (e.g. reaped as failed meanwhile)
+		return ErrStaleTaskExecution
 	}
 	s.recordTerminalProviderCost(ctx, task, result)
 	// Task-admission charges remain posted on success. Provider usage is recorded
@@ -447,7 +441,7 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 		return fmt.Errorf("finalize local task as failed: %w", err)
 	}
 	if !swapped {
-		return nil // already terminal (e.g. reaped meanwhile)
+		return ErrStaleTaskExecution
 	}
 	s.recordTerminalProviderCost(ctx, task, result)
 	s.releaseSlotAndDispatch(ctx, task)

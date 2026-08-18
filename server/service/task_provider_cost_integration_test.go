@@ -59,8 +59,8 @@ func TestCompleteLocalTaskRecordsTerminalProviderCostOnce(t *testing.T) {
 	if err != nil || terminalExecution.Status != model.TaskExecutionSucceeded || terminalExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || terminalExecution.CleanupStatus != model.TaskExecutionCleanupDone || len(terminalExecution.Result) == 0 {
 		t.Fatalf("local execution terminal state = %#v err=%v", terminalExecution, err)
 	}
-	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); err != nil {
-		t.Fatal(err)
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("duplicate completion error = %v, want ErrStaleTaskExecution", err)
 	}
 	events, err := costRepo.ListEventsByExecution(ctx, executionID)
 	if err != nil || len(events) != 2 {

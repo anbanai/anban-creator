@@ -82,6 +82,26 @@ describe("postJSONWithRetry", () => {
     }
   });
 
+  test("reports completion with task and execution identity", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return new Response("{}", { status: 200 });
+    };
+    try {
+      const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
+      const result = { success: false, error: "agent failed", log_text: "terminal log" };
+      await reporter.complete(result);
+      expect(requests).toEqual([{
+        url: "https://creator.example.com/api/v1/agent/complete",
+        body: { task_id: "task-1", execution_id: "execution-1", result },
+      }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("retries structured stage progress twice before succeeding", async () => {
     let attempts = 0;
     const originalFetch = globalThis.fetch;

@@ -160,7 +160,11 @@ async fn claim_once(
     Ok(envelope.data)
 }
 
-fn failure_complete_payload<'a>(task_id: &'a str, execution_id: &'a str, error: &'a str) -> CompleteBody<'a> {
+fn failure_complete_payload<'a>(
+    task_id: &'a str,
+    execution_id: &'a str,
+    error: &'a str,
+) -> CompleteBody<'a> {
     CompleteBody {
         task_id,
         execution_id,
@@ -176,15 +180,18 @@ async fn complete_failed_task(
     client: &reqwest::Client,
     api_base: &str,
     api_key: &str,
-    task_id: &str,
-    execution_id: &str,
+    task: &LocalExecutionConfig,
     error: &str,
 ) -> Result<(), String> {
     let url = format!("{}/agent/complete", api_base.trim_end_matches('/'));
     let resp = client
         .post(&url)
         .bearer_auth(api_key)
-        .json(&failure_complete_payload(task_id, execution_id, error))
+        .json(&failure_complete_payload(
+            &task.task_id,
+            &task.execution_id,
+            error,
+        ))
         .send()
         .await
         .map_err(|e| format!("complete request failed: {e}"))?;
@@ -366,8 +373,7 @@ pub async fn run_loop(
                         &client,
                         &snapshot.api_base,
                         &snapshot.api_key,
-                        &task_cfg.task_id,
-                        &task_cfg.execution_id,
+                        &task_cfg,
                         &error,
                     )
                     .await
@@ -436,6 +442,30 @@ pub async fn run_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn test_local_execution_config() -> LocalExecutionConfig {
+        LocalExecutionConfig {
+            task_id: "task-1".to_string(),
+            execution_id: "execution-1".to_string(),
+            task_type: "article".to_string(),
+            agent_pack_id: "article".to_string(),
+            agent_pack_version: "1.0.0".to_string(),
+            agent_pack_digest: "digest".to_string(),
+            runtime_profile: "article".to_string(),
+            runtime_adapter: "default".to_string(),
+            topic: "topic".to_string(),
+            agent_flag: "--agent".to_string(),
+            max_turns: 10,
+            model: None,
+            has_content_image: false,
+            has_tail_image: false,
+            article_with_cover: true,
+            article_with_content_images: true,
+            project_id: "project-1".to_string(),
+        }
+    }
 
     #[test]
     fn failure_complete_payload_marks_local_task_failed() {
@@ -446,5 +476,62 @@ mod tests {
         assert_eq!(json["execution_id"], "execution-1");
         assert_eq!(json["result"]["success"], false);
         assert_eq!(json["result"]["error"], "spawn failed");
+    }
+
+    #[tokio::test]
+    async fn complete_failed_task_posts_claimed_execution_identity() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let address = listener.local_addr().expect("mock server address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept request");
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            loop {
+                let count = stream.read(&mut chunk).await.expect("read request");
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let headers = String::from_utf8_lossy(&bytes[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(str::trim)
+                                .map(str::to_string)
+                        })
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .expect("content length");
+                    if bytes.len() >= header_end + 4 + content_length {
+                        let body = bytes[header_end + 4..header_end + 4 + content_length].to_vec();
+                        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.expect("write response");
+                        return serde_json::from_slice::<serde_json::Value>(&body)
+                            .expect("decode request body");
+                    }
+                }
+            }
+            panic!("request ended before body was complete");
+        });
+
+        let client = reqwest::Client::new();
+        let config = test_local_execution_config();
+        complete_failed_task(
+            &client,
+            &format!("http://{address}"),
+            "api-key",
+            &config,
+            "spawn failed",
+        )
+        .await
+        .expect("complete failed task");
+        let body = server.await.expect("mock server task");
+        assert_eq!(body["task_id"], config.task_id);
+        assert_eq!(body["execution_id"], config.execution_id);
+        assert_eq!(body["result"]["error"], "spawn failed");
     }
 }

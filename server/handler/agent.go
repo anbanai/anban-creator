@@ -516,9 +516,9 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 //
 // A desktop local executor calls this once when anban finishes, with
 // the final ExecutionResult. The service finalizes the task (status → completed
-// or failed, slot release, dispatch, refund-on-failure) — guarded to
-// local_claimed tasks and idempotent, so a cloud task or a repeat call is a
-// no-op. This is the terminal half of the local-execution path; without it a
+// or failed, slot release, dispatch, refund-on-failure) — guarded to the
+// current running local_claimed execution. Stale and repeated local completion
+// is rejected. This is the terminal half of the local-execution path; without it a
 // local task could never reach a terminal state (the agent binary is shared with
 // cloud, whose authoritative finalization is server-side HandleExecution).
 func (h *AgentHandler) Complete(c fiber.Ctx) error {
