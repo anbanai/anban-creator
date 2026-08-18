@@ -321,13 +321,13 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID,
 	var won bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, result, usage, costStatus)
 		return err
 	})
 	return won, err
 }
 
-func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
 	locked, err := lockActiveTaskExecutionFirst(ctx, r.db, executionID, id, activeTaskExecutionLock{
 		target: model.ExecutionTargetLocalClaimed,
 	})
@@ -342,7 +342,7 @@ func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executio
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
 		Updates(map[string]any{
-			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+			"status": status, "error_message": errorMsg, "completed_at": now, "result": taskResult,
 			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
 		})
 	if res.Error != nil {
@@ -357,12 +357,16 @@ func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executio
 	} else if status == model.TaskStatusCancelled {
 		executionStatus = model.TaskExecutionCancelled
 	}
-	executionResult := datatypes.JSON([]byte(result))
+	fullExecutionResult := datatypes.JSON([]byte(executionResult))
+	finalizationStatus := model.TaskExecutionFinalizationTerminal
+	if status == model.TaskStatusCancelled {
+		finalizationStatus = model.TaskExecutionFinalizationDone
+	}
 	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
 		Updates(map[string]any{
-			"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
-			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
+			"status": executionStatus, "terminal_reason": errorMsg, "result": fullExecutionResult,
+			"completed_at": now, "finalization_status": finalizationStatus,
 			"cleanup_status": model.TaskExecutionCleanupDone,
 		})
 	if execRes.Error != nil {

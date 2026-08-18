@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,12 @@ type executionResultOverrideRepository struct {
 	result      []byte
 }
 
+func (r *executionResultOverrideRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&executionResultOverrideRepository{Repository: tx, executionID: r.executionID, result: r.result})
+	})
+}
+
 func (r *executionResultOverrideRepository) TaskExecutions() repository.TaskExecutionRepository {
 	return &executionResultOverrideTaskExecutions{
 		TaskExecutionRepository: r.Repository.TaskExecutions(),
@@ -60,6 +67,16 @@ type executionResultOverrideTaskExecutions struct {
 
 func (r *executionResultOverrideTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
 	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || id != r.executionID {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append([]byte(nil), r.result...)
+	return &cloned, nil
+}
+
+func (r *executionResultOverrideTaskExecutions) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByIDForUpdate(ctx, id)
 	if err != nil || id != r.executionID {
 		return execution, err
 	}
@@ -116,17 +133,19 @@ func newLocalCompletionRaceRepository(base repository.Repository, loseWithCASErr
 }
 
 func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, usage, costStatus)
+	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, result, usage, costStatus)
 }
 
-func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, result, usage, costStatus)
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
 }
 
-func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	finalize := r.TaskRepository.FinalizeLocalTask
-	if inTx {
-		finalize = r.TaskRepository.FinalizeLocalTaskInTx
+func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	finalize := func() (bool, error) {
+		if inTx {
+			return r.TaskRepository.FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+		}
+		return r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, taskResult, usage, costStatus)
 	}
 	switch r.race.finalizeCalls.Add(1) {
 	case 1:
@@ -134,7 +153,7 @@ func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Contex
 			r.race.winnerModel = usage[0].Model
 		}
 		<-r.race.secondFinalize
-		won, err := finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		won, err := finalize()
 		r.winner = won
 		return won, err
 	case 2:
@@ -145,7 +164,7 @@ func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Contex
 		}
 		return false, nil
 	}
-	return finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+	return finalize()
 }
 
 func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { return r.tasks }
@@ -902,6 +921,62 @@ func TestCompleteLocalTask_AcknowledgesSameTerminalDuplicateAndRejectsConflict(t
 	}
 	if got.Status != model.TaskStatusCompleted || got.Result == nil || !strings.Contains(*got.Result, `"log_text":"done"`) {
 		t.Fatalf("terminal retry changed task: status=%q result=%v", got.Status, got.Result)
+	}
+}
+
+func TestCompleteLocalTaskStoresFullExecutionEvidenceAndPublicTaskResult(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	claimed, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || claimed.CurrentExecutionID == nil {
+		t.Fatalf("claimed task = %#v, %v", claimed, err)
+	}
+	executionID := *claimed.CurrentExecutionID
+	result := &agent.ExecutionResult{
+		Success: true, LogText: "done", Model: "claude-opus-4-1",
+		ModelUsage:      []agent.ModelTokenUsage{{Provider: "anthropic", Model: "claude-opus-4-1", InputTokens: 17}},
+		CostStatus:      agent.CostStatusUnreconciled,
+		CostDiagnostics: []agent.CostDiagnostic{{Code: "provider_usage_delayed"}},
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.Result == nil {
+		t.Fatalf("terminal task = %#v, %v", task, err)
+	}
+	execution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var publicResult, fullResult agent.ExecutionResult
+	if err := json.Unmarshal([]byte(*task.Result), &publicResult); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(execution.Result, &fullResult); err != nil {
+		t.Fatal(err)
+	}
+	if publicResult.Model != "" || len(publicResult.ModelUsage) != 0 || publicResult.CostStatus != "" || len(publicResult.CostDiagnostics) != 0 {
+		t.Fatalf("public result leaked private evidence: %#v", publicResult)
+	}
+	if fullResult.Model != result.Model || !reflect.DeepEqual(fullResult.ModelUsage, result.ModelUsage) || fullResult.CostStatus != result.CostStatus || !reflect.DeepEqual(fullResult.CostDiagnostics, result.CostDiagnostics) {
+		t.Fatalf("full execution result = %#v, want %#v", fullResult, *result)
+	}
+
+	changedModel := *result
+	changedModel.Model = "claude-sonnet-4"
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &changedModel); !errors.Is(err, ErrTaskCompletionConflict) {
+		t.Fatalf("model-only retry = %v, want ErrTaskCompletionConflict", err)
+	}
+	changedDiagnostics := *result
+	changedDiagnostics.CostDiagnostics = []agent.CostDiagnostic{{Code: "different"}}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &changedDiagnostics); !errors.Is(err, ErrTaskCompletionConflict) {
+		t.Fatalf("diagnostics-only retry = %v, want ErrTaskCompletionConflict", err)
 	}
 }
 

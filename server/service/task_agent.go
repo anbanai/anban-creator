@@ -17,7 +17,14 @@ import (
 
 const missingExecutionResultDiagnostic = "agent returned no execution result"
 
-var ErrTaskDeleting = errors.New("task is being deleted")
+var (
+	ErrTaskDeleting      = errors.New("task is being deleted")
+	ErrAgentAccessDenied = errors.New("agent access denied")
+)
+
+func agentAccessDenied(message string) error {
+	return fmt.Errorf("%w: %s", ErrAgentAccessDenied, message)
+}
 
 func normalizeTerminalExecutionResult(result *serveragent.ExecutionResult) *serveragent.ExecutionResult {
 	if result != nil {
@@ -52,15 +59,18 @@ func cloneTerminalExecutionResult(result *serveragent.ExecutionResult) (*servera
 // may act on its behalf. Empty authenticatedUserID means system/admin mode.
 func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authenticatedUserID string) (*model.Task, error) {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, agentAccessDenied("task not found")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
 	}
 
 	if authenticatedUserID != "" && authenticatedUserID != "system" && task.UserID != authenticatedUserID {
-		return nil, fmt.Errorf("task does not belong to authenticated user")
+		return nil, agentAccessDenied("task does not belong to authenticated user")
 	}
 	if task.DeletingAt != nil {
-		return nil, ErrTaskDeleting
+		return nil, fmt.Errorf("%w: %w", ErrAgentAccessDenied, ErrTaskDeleting)
 	}
 	return task, nil
 }
@@ -90,6 +100,9 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 // This lets a response-loss retry reach the idempotent completion finalizer.
 func (s *TaskService) ValidateAgentCompletionAccess(ctx context.Context, userID, projectID, taskID, executionID string) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return agentAccessDenied("task not found")
+	}
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
 	}
@@ -97,14 +110,17 @@ func (s *TaskService) ValidateAgentCompletionAccess(ctx context.Context, userID,
 	if task.DeletingAt != nil || task.UserID != userID || task.ProjectID != projectID ||
 		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
 		task.ExecutionTarget == model.ExecutionTargetLocalClaimed {
-		return fmt.Errorf("execution token does not match current cloud task execution")
+		return agentAccessDenied("execution token does not match current cloud task execution")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return agentAccessDenied("execution not found")
+	}
 	if err != nil {
 		return fmt.Errorf("find execution: %w", err)
 	}
 	if execution.TaskID != taskID || execution.Target == model.ExecutionTargetLocalClaimed {
-		return fmt.Errorf("execution token does not match cloud execution identity")
+		return agentAccessDenied("execution token does not match cloud execution identity")
 	}
 	return nil
 }
@@ -138,14 +154,17 @@ func (s *TaskService) ValidateLocalAgentCompletionAccess(ctx context.Context, ta
 	if task == nil || task.DeletingAt != nil || task.UserID != authenticatedUserID ||
 		task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
 		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
-		return fmt.Errorf("task does not match current local execution identity")
+		return agentAccessDenied("task does not match current local execution identity")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return agentAccessDenied("execution not found")
+	}
 	if err != nil {
 		return fmt.Errorf("find local execution: %w", err)
 	}
 	if execution.TaskID != task.ID || execution.Target != model.ExecutionTargetLocalClaimed {
-		return fmt.Errorf("execution is not the current local claimed execution")
+		return agentAccessDenied("execution is not the current local claimed execution")
 	}
 	return nil
 }
@@ -469,26 +488,20 @@ func (s *TaskService) updateExecutionResultForExecution(ctx context.Context, tas
 	return nil
 }
 
-func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) {
+func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *model.Task, result *serveragent.ExecutionResult) error {
 	if s == nil || s.providerCostSvc == nil || task == nil {
-		return
+		return nil
 	}
 	if task.CurrentExecutionID == nil || strings.TrimSpace(*task.CurrentExecutionID) == "" {
 		s.logger.Error().Str("task_id", task.ID).Msg("terminal provider cost evidence has no durable execution identity")
-		return
+		return fmt.Errorf("terminal provider cost evidence has no durable execution identity")
 	}
 	executionID := strings.TrimSpace(*task.CurrentExecutionID)
 	if result == nil || len(result.ModelUsage) == 0 {
-		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonMissingTerminalModelUsage); err != nil {
-			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark terminal provider cost unreconciled")
-		}
-		return
+		return s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonMissingTerminalModelUsage)
 	}
 	if result.CostStatus != serveragent.CostStatusReconciled {
-		if err := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage); err != nil {
-			s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark invalid terminal provider cost evidence")
-		}
-		return
+		return s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage)
 	}
 	entries := make([]ExecutionTokenCostEntry, 0, len(result.ModelUsage))
 	for _, usage := range result.ModelUsage {
@@ -499,12 +512,13 @@ func (s *TaskService) recordTerminalProviderCost(ctx context.Context, task *mode
 			Source:         string(model.BillingProviderCostSourceClaudeResult),
 		})
 	}
-	if _, err := s.providerCostSvc.FinalizeExecutionTokenCosts(ctx, FinalizeExecutionTokenCostsRequest{
+	_, err := s.providerCostSvc.FinalizeExecutionTokenCosts(ctx, FinalizeExecutionTokenCostsRequest{
 		ExecutionID: executionID, TaskID: task.ID, CatalogID: s.providerCostSvc.catalogID, Entries: entries,
-	}); err != nil {
-		s.logger.Error().Err(err).Str("task_id", task.ID).Str("execution_id", executionID).Msg("record terminal provider cost; typed evidence remains retryable")
+	})
+	if err != nil {
 		if markErr := s.providerCostSvc.MarkExecutionUnreconciled(ctx, executionID, model.BillingExecutionCostReasonInvalidTerminalModelUsage); markErr != nil {
-			s.logger.Error().Err(markErr).Str("task_id", task.ID).Str("execution_id", executionID).Msg("mark failed terminal provider cost unreconciled")
+			return errors.Join(err, fmt.Errorf("mark failed terminal provider cost unreconciled: %w", markErr))
 		}
 	}
+	return err
 }

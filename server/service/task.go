@@ -67,6 +67,7 @@ type TaskService struct {
 	finalizationLease        time.Duration
 	finalizationRenewEvery   time.Duration
 	finalizationRenewClaim   func(context.Context, string, string) (bool, error)
+	localFinalizationLocks   sync.Map
 	cleanupRetryBackoff      time.Duration
 	projectConcurrencyCap    int
 	logger                   *zerolog.Logger

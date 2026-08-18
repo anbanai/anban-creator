@@ -112,7 +112,7 @@ type TaskRepository interface {
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
 	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
@@ -224,6 +224,7 @@ type TaskExecutionRepository interface {
 	CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
 	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error

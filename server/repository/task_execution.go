@@ -232,6 +232,14 @@ func (r *taskExecutionRepository) FindByID(ctx context.Context, id string) (*mod
 	return &execution, nil
 }
 
+func (r *taskExecutionRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	var execution model.TaskExecution
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&execution).Error; err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
 func (r *taskExecutionRepository) FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error) {
 	var execution model.TaskExecution
 	err := r.db.WithContext(ctx).

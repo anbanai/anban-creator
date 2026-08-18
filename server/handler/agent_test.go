@@ -585,6 +585,12 @@ type completionCorruptResultRepository struct {
 	corrupt bool
 }
 
+func (r *completionCorruptResultRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&completionCorruptResultRepository{Repository: tx, suffix: r.suffix, corrupt: r.corrupt})
+	})
+}
+
 func (r *completionCorruptResultRepository) TaskExecutions() repository.TaskExecutionRepository {
 	return &completionCorruptResultTaskExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), parent: r}
 }
@@ -596,6 +602,16 @@ type completionCorruptResultTaskExecutions struct {
 
 func (r *completionCorruptResultTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
 	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || !r.parent.corrupt {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append(append([]byte(nil), execution.Result...), r.parent.suffix...)
+	return &cloned, nil
+}
+
+func (r *completionCorruptResultTaskExecutions) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByIDForUpdate(ctx, id)
 	if err != nil || !r.parent.corrupt {
 		return execution, err
 	}

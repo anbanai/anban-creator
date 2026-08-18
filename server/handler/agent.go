@@ -693,7 +693,11 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 
 	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
 	if err != nil {
-		return Error(c, fiber.StatusForbidden, "task access denied")
+		if errors.Is(err, service.ErrAgentAccessDenied) {
+			return Error(c, fiber.StatusForbidden, "task access denied")
+		}
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("validate agent task completion access")
+		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
 
 	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
@@ -705,14 +709,22 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		}
 		projectID, _ := c.Locals(agentProjectIDContextKey).(string)
 		if err := h.taskSvc.ValidateAgentCompletionAccess(c.Context(), h.authenticatedUserID(c), projectID, req.TaskID, authenticatedExecutionID); err != nil {
-			return Error(c, fiber.StatusForbidden, "execution access denied")
+			if errors.Is(err, service.ErrAgentAccessDenied) {
+				return Error(c, fiber.StatusForbidden, "execution access denied")
+			}
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", authenticatedExecutionID).Msg("validate cloud completion access")
+			return Error(c, fiber.StatusInternalServerError, "complete failed")
 		}
 	} else {
 		if requestedExecutionID == "" {
 			return Error(c, fiber.StatusBadRequest, "execution_id is required")
 		}
 		if err := h.taskSvc.ValidateLocalAgentCompletionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
-			return Error(c, fiber.StatusForbidden, "execution access denied")
+			if errors.Is(err, service.ErrAgentAccessDenied) {
+				return Error(c, fiber.StatusForbidden, "execution access denied")
+			}
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", requestedExecutionID).Msg("validate local completion access")
+			return Error(c, fiber.StatusInternalServerError, "complete failed")
 		}
 		executionID = requestedExecutionID
 	}

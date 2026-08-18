@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -299,7 +300,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		}
 	}
 
-	resultJSON, err := marshalExecutionEvidence(result)
+	resultJSON, executionResultJSON, err := marshalLocalCompletionEvidence(result)
 	if err != nil {
 		return err
 	}
@@ -307,7 +308,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, result.ModelUsage, result.CostStatus)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}
@@ -319,12 +320,13 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	if err != nil || !swapped {
 		return s.confirmLocalCompletionAfterCASLoss(ctx, taskID, executionID, outcome)
 	}
-	s.recordTerminalProviderCost(ctx, task, result)
-	// Task-admission charges remain posted on success. Provider usage is recorded
-	// separately as internal cost evidence and never becomes a retail deduction.
-	s.releaseSlotAndDispatch(ctx, task)
 	task.Status = model.TaskStatusCompleted
-	s.notifyTerminal(ctx, task, model.TaskStatusCompleted, "")
+	execution.Target = model.ExecutionTargetLocalClaimed
+	execution.Result = []byte(executionResultJSON)
+	execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+	if err := s.finalizeLocalTaskFromExecution(ctx, task, execution); err != nil {
+		return err
+	}
 	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
 	return nil
 }
@@ -388,40 +390,60 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 }
 
 func (s *TaskService) confirmLocalCompletionRetry(ctx context.Context, task *model.Task, executionID string, outcome *localCompletionOutcome) error {
-	if task == nil || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
-		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+	_ = task
+	unlock := s.lockLocalFinalization(executionID)
+	defer unlock()
+	task, execution, err := s.localCompletionSnapshot(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	if err := validateLocalCompletionSnapshot(task, execution, outcome, false); err != nil {
+		return err
+	}
+	if execution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+		if err := s.finalizeLocalTaskFromExecutionLocked(ctx, task, execution); err != nil {
+			return err
+		}
+		task, execution, err = s.localCompletionSnapshot(ctx, executionID)
+		if err != nil {
+			return err
+		}
+	}
+	return validateLocalCompletionSnapshot(task, execution, outcome, true)
+}
+
+func validateLocalCompletionSnapshot(task *model.Task, execution *model.TaskExecution, outcome *localCompletionOutcome, requireDone bool) error {
+	if task == nil || execution == nil || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
+		task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID || execution.TaskID != task.ID ||
+		execution.Target != model.ExecutionTargetLocalClaimed {
 		return ErrStaleTaskExecution
 	}
 	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed {
 		return ErrTaskCompletionConflict
 	}
-	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrStaleTaskExecution
-	}
-	if err != nil {
-		return fmt.Errorf("find terminal local execution: %w", err)
-	}
-	if execution.TaskID != task.ID || execution.Target != model.ExecutionTargetLocalClaimed {
-		return ErrStaleTaskExecution
-	}
 	if execution.Status != outcome.executionStatus || task.Status != outcome.taskStatus ||
 		execution.CompletedAt == nil || task.CompletedAt == nil ||
-		execution.FinalizationStatus != model.TaskExecutionFinalizationDone ||
 		execution.CleanupStatus != model.TaskExecutionCleanupDone ||
 		execution.TerminalReason != outcome.errorMessage || task.ErrorMessage != outcome.errorMessage ||
 		task.BillingTerminalReason != outcome.billingReason {
+		return ErrTaskCompletionConflict
+	}
+	if requireDone && execution.FinalizationStatus != model.TaskExecutionFinalizationDone {
 		return ErrTaskCompletionConflict
 	}
 	publicResult, err := marshalExecutionEvidence(outcome.result)
 	if err != nil {
 		return err
 	}
+	fullResult, err := json.Marshal(outcome.result)
+	if err != nil {
+		return err
+	}
 	if task.Result == nil {
 		return ErrTaskCompletionConflict
 	}
-	for _, stored := range [][]byte{execution.Result, []byte(*task.Result)} {
-		equal, err := semanticJSONEqual(stored, []byte(publicResult))
+	for _, pair := range [][2][]byte{{execution.Result, fullResult}, {[]byte(*task.Result), []byte(publicResult)}} {
+		equal, err := semanticJSONEqual(pair[0], pair[1])
 		if err != nil {
 			return ErrTaskCompletionConflict
 		}
@@ -433,6 +455,28 @@ func (s *TaskService) confirmLocalCompletionRetry(ctx context.Context, task *mod
 		return ErrTaskCompletionConflict
 	}
 	return nil
+}
+
+func (s *TaskService) localCompletionSnapshot(ctx context.Context, executionID string) (task *model.Task, execution *model.TaskExecution, err error) {
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		var lockErr error
+		execution, lockErr = tx.TaskExecutions().FindByIDForUpdate(ctx, executionID)
+		if errors.Is(lockErr, gorm.ErrRecordNotFound) {
+			return ErrStaleTaskExecution
+		}
+		if lockErr != nil {
+			return fmt.Errorf("lock terminal local execution: %w", lockErr)
+		}
+		task, lockErr = tx.Tasks().FindByIDForUpdate(ctx, execution.TaskID)
+		if errors.Is(lockErr, gorm.ErrRecordNotFound) {
+			return ErrStaleTaskExecution
+		}
+		if lockErr != nil {
+			return fmt.Errorf("lock terminal local task: %w", lockErr)
+		}
+		return nil
+	})
+	return task, execution, err
 }
 
 func (s *TaskService) confirmLocalCompletionAfterCASLoss(ctx context.Context, taskID, executionID string, outcome *localCompletionOutcome) error {
@@ -450,12 +494,13 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 	if task == nil || execution == nil || task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
 		return ErrStaleTaskExecution
 	}
-	resultJSON, err := marshalExecutionEvidence(&agent.ExecutionResult{
+	cancelResult := &agent.ExecutionResult{
 		Success:         false,
 		Error:           "用户取消",
 		TerminalReason:  model.TaskBillingTerminalUserCancelled,
 		RemoteArtifacts: true,
-	})
+	}
+	resultJSON, executionResultJSON, err := marshalLocalCompletionEvidence(cancelResult)
 	if err != nil {
 		return err
 	}
@@ -478,7 +523,7 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 		if current.Target != model.ExecutionTargetLocalClaimed {
 			return fmt.Errorf("local cancellation requires local_claimed execution")
 		}
-		swapped, err = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消", resultJSON, nil, "")
+		swapped, err = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消", resultJSON, executionResultJSON, nil, "")
 		if err != nil || !swapped {
 			return err
 		}
@@ -511,7 +556,7 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 	result.Success = false
 	result.Error = errMsg
 	result.TerminalReason = reason
-	resultJSON, err := marshalExecutionEvidence(result)
+	resultJSON, executionResultJSON, err := marshalLocalCompletionEvidence(result)
 	if err != nil {
 		return err
 	}
@@ -526,7 +571,7 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, result.ModelUsage, result.CostStatus)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}
@@ -538,12 +583,168 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 	if err != nil || !swapped {
 		return s.confirmLocalCompletionAfterCASLoss(ctx, task.ID, executionID, outcome)
 	}
-	s.recordTerminalProviderCost(ctx, task, result)
-	s.releaseSlotAndDispatch(ctx, task)
 	task.Status = model.TaskStatusFailed
 	task.ErrorMessage = errMsg
-	s.notifyTerminal(ctx, task, model.TaskStatusFailed, errMsg)
+	execution.Target = model.ExecutionTargetLocalClaimed
+	execution.Result = []byte(executionResultJSON)
+	execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+	if err := s.finalizeLocalTaskFromExecution(ctx, task, execution); err != nil {
+		return err
+	}
 	s.logger.Warn().Str("task_id", task.ID).Str("error", errMsg).Msg("local task failed")
+	return nil
+}
+
+func marshalLocalCompletionEvidence(result *agent.ExecutionResult) (string, string, error) {
+	publicResult, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return "", "", err
+	}
+	fullResult, err := json.Marshal(result)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal full execution result: %w", err)
+	}
+	return publicResult, string(fullResult), nil
+}
+
+func (s *TaskService) finalizeLocalTaskFromExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
+	if execution == nil {
+		return ErrStaleTaskExecution
+	}
+	unlock := s.lockLocalFinalization(execution.ID)
+	defer unlock()
+	return s.finalizeLocalTaskFromExecutionLocked(ctx, task, execution)
+}
+
+func (s *TaskService) finalizeLocalTaskFromExecutionLocked(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
+	if task == nil || execution == nil {
+		return ErrStaleTaskExecution
+	}
+	for {
+		if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
+			return s.ensureLocalFinalizationAuthority(ctx, task.ID, execution.ID)
+		}
+		token := uuid.NewString()
+		won, claimErr := s.repo.TaskExecutions().ClaimFinalization(ctx, execution.ID, token, s.cloudFinalizationLease())
+		if claimErr != nil {
+			return fmt.Errorf("claim local execution finalization: %w", claimErr)
+		}
+		if won {
+			return s.runClaimedLocalFinalization(ctx, task, execution, token)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+		var reloadErr error
+		task, execution, reloadErr = s.localCompletionSnapshot(ctx, execution.ID)
+		if reloadErr != nil {
+			return reloadErr
+		}
+	}
+}
+
+func (s *TaskService) lockLocalFinalization(executionID string) func() {
+	value, _ := s.localFinalizationLocks.LoadOrStore(executionID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func (s *TaskService) runClaimedLocalFinalization(ctx context.Context, task *model.Task, execution *model.TaskExecution, token string) (err error) {
+	leaseCtx, stopLease, leaseLost := s.renewFinalizationLease(ctx, execution.ID, token)
+	defer func() {
+		stopLease()
+		if releaseErr := s.repo.TaskExecutions().ReleaseFinalization(context.WithoutCancel(ctx), execution.ID, token); err == nil && releaseErr != nil {
+			err = releaseErr
+		}
+	}()
+	var result *agent.ExecutionResult
+	if err := json.Unmarshal(execution.Result, &result); err != nil {
+		return fmt.Errorf("decode stored local execution result: %w", err)
+	}
+	stage := execution.FinalizationStatus
+	if stage == "" {
+		stage = model.TaskExecutionFinalizationTerminal
+	}
+	for stage != model.TaskExecutionFinalizationDone {
+		if err := s.ensureLocalFinalizationAuthority(leaseCtx, task.ID, execution.ID); err != nil {
+			return err
+		}
+		next, step, err := s.localFinalizationStep(task, execution, result, stage)
+		if err != nil {
+			return err
+		}
+		if err := step(leaseCtx); err != nil {
+			return err
+		}
+		if leaseErr := finalizationLeaseError(leaseLost); leaseErr != nil {
+			return leaseErr
+		}
+		if s.finalizationAfterStage != nil {
+			if err := s.finalizationAfterStage(next); err != nil {
+				return err
+			}
+		}
+		renewed, err := s.renewFinalizationClaim(leaseCtx, execution.ID, token)
+		if err != nil {
+			return fmt.Errorf("renew local finalization before advancing to %s: %w", next, err)
+		}
+		if !renewed {
+			return ErrFinalizationLeaseLost
+		}
+		if err := s.advanceExecutionFinalization(leaseCtx, execution.ID, token, stage, next); err != nil {
+			return err
+		}
+		stage = next
+		if s.finalizationAfterAdvance != nil {
+			if err := s.finalizationAfterAdvance(stage); err != nil {
+				return err
+			}
+		}
+	}
+	return s.ensureLocalFinalizationAuthority(leaseCtx, task.ID, execution.ID)
+}
+
+func (s *TaskService) localFinalizationStep(task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult, stage string) (string, cloudFinalizationStep, error) {
+	switch stage {
+	case model.TaskExecutionFinalizationTerminal:
+		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
+			return s.recordTerminalProviderCost(ctx, task, result)
+		}, nil
+	case model.TaskExecutionFinalizationResult:
+		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
+			return s.syncCloudSlot(ctx, task)
+		}, nil
+	case model.TaskExecutionFinalizationSlot:
+		return model.TaskExecutionFinalizationDispatch, func(ctx context.Context) error {
+			if task.ProjectID == "" {
+				return nil
+			}
+			return s.DispatchPendingTasks(ctx, task.ProjectID)
+		}, nil
+	case model.TaskExecutionFinalizationDispatch:
+		return model.TaskExecutionFinalizationNotification, func(ctx context.Context) error {
+			return s.notifyTerminalDurable(ctx, task, task.Status, task.ErrorMessage)
+		}, nil
+	case model.TaskExecutionFinalizationNotification:
+		return model.TaskExecutionFinalizationDone, func(context.Context) error { return nil }, nil
+	default:
+		return "", nil, fmt.Errorf("unknown local execution finalization stage %q", stage)
+	}
+}
+
+func (s *TaskService) ensureLocalFinalizationAuthority(ctx context.Context, taskID, executionID string) error {
+	task, execution, err := s.localCompletionSnapshot(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	if task.ID != taskID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
+		task.ExecutionTarget != model.ExecutionTargetLocalClaimed || execution.Target != model.ExecutionTargetLocalClaimed ||
+		(task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled) {
+		return ErrStaleTaskExecution
+	}
 	return nil
 }
 

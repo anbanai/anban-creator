@@ -188,7 +188,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 
 func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
 	if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
-		return nil
+		return s.ensureTerminalExecutionAuthority(ctx, task.ID, execution.ID)
 	}
 	if err := s.ensureExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
 		return err
@@ -273,6 +273,24 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 	return nil
 }
 
+func (s *TaskService) ensureTerminalExecutionAuthority(ctx context.Context, taskID, executionID string) error {
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		execution, err := tx.TaskExecutions().FindByIDForUpdate(ctx, executionID)
+		if err != nil {
+			return fmt.Errorf("verify terminal execution authority: %w", err)
+		}
+		task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("verify terminal task authority: %w", err)
+		}
+		if execution.TaskID != taskID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
+			(task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled) {
+			return ErrStaleTaskExecution
+		}
+		return nil
+	})
+}
+
 func (s *TaskService) ensureFinalizationAuthority(ctx context.Context, taskID, executionID string, leaseLost <-chan error) error {
 	if err := finalizationLeaseError(leaseLost); err != nil {
 		return err
@@ -313,8 +331,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			if err := s.updateExecutionResultForExecution(ctx, task.ID, execution.ID, result); err != nil {
 				return err
 			}
-			s.recordTerminalProviderCost(ctx, task, result)
-			return nil
+			return s.recordTerminalProviderCost(ctx, task, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
 		return model.TaskExecutionFinalizationWorkflow, func(ctx context.Context) error {
