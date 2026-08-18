@@ -155,7 +155,6 @@ describe("validateManagedInit", () => {
         "mcp__anban__list_project_titles",
         "mcp__anban__search_seednote_feeds",
         "mcp__anban__submit_agent_feedback",
-        "mcp__anban__update_task_progress",
       ],
       skills: [
         "anban:seednote-research",
@@ -184,7 +183,6 @@ describe("validateManagedInit", () => {
         "mcp__anban__get_project_profile",
         "mcp__anban__list_project_titles",
         "mcp__anban__submit_agent_feedback",
-        "mcp__anban__update_task_progress",
       ],
       skills: [
         "anban:seednote-research",
@@ -194,8 +192,31 @@ describe("validateManagedInit", () => {
       ],
     };
     expect(() => validateManagedInit(message, "viral_analysis")).not.toThrow();
+    message.tools = message.tools.filter((tool) => tool !== "mcp__anban__get_project_profile");
+    expect(() => validateManagedInit(message, "viral_analysis")).toThrow("get_project_profile");
+    message.tools = [...message.tools, "mcp__anban__get_project_profile"];
     message.skills = [];
     expect(() => validateManagedInit(message, "viral_analysis")).toThrow("anban:seednote-research");
+  });
+
+  test("does not implicitly require legacy progress for other managed task types", () => {
+    const taskTypes = [
+      { taskType: "article", tool: "get_project_profile", skills: ["anban:humanizer"] },
+      { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
+      { taskType: "live-slicer", tool: "analyze_video", skills: ["anban:live-slice", "anban:capcut-draft"] },
+      { taskType: "moments", tool: "get_project_profile", skills: [] },
+      { taskType: "montage", tool: "analyze_video", skills: [] },
+    ];
+    for (const fixture of taskTypes) {
+      expect(() => validateManagedInit({
+        type: "system",
+        subtype: "init",
+        mcp_servers: [{ name: "anban", status: "connected" }],
+        plugins: [{ name: "anban", path: "/anbanai" }],
+        tools: [`mcp__anban__${fixture.tool}`],
+        skills: fixture.skills,
+      }, fixture.taskType)).not.toThrow();
+    }
   });
 
   test("maps terminal SDK usage through the bootstrap model aliases", () => {

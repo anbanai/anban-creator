@@ -120,14 +120,16 @@ func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message str
 	return nil
 }
 
-// UpdateProgress records a structured progress update for a task stage.
+// UpdateProgress records a compatibility progress update for hosts without
+// Claude SDK Task lifecycle hooks, notably Codex and DSH. The MCP
+// update_task_progress handler is the compatibility entry point.
 //
 // When percent is not provided (<=0), the server looks up a default percent
-// from stagePercentByType using the task's Type — this lets skills advance
-// the progress bar without each one needing to pass progress_percent
-// explicitly. The resolved percent is persisted on the task row so the Studio
-// UI can render it across reloads, and a structured SSE event is published
-// for real-time updates.
+// from legacyStagePercentByType using the task's Type. This keeps legacy host
+// workflows advancing without requiring every explicit MCP call to pass
+// progress_percent. The resolved percent is persisted on the task row so the
+// Studio UI can render it across reloads, and a structured SSE event is
+// published for real-time updates.
 //
 // The persisted percent is monotonic: a stage reporting a lower percent than
 // the current value is logged but does not roll the column backward (guards
@@ -139,16 +141,18 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 	}
 
 	if percent <= 0 {
-		if p := defaultPercentForStage(taskType, stage); p > 0 {
+		if p := legacyDefaultPercentForStage(taskType, stage); p > 0 {
 			percent = p
 		}
 	}
 	return s.persistStructuredProgress(ctx, taskID, stage, title, description, percent, currentProgress)
 }
 
-// UpdateProgressFromAgent validates a structured progress event against the
-// immutable Agent Pack identity recorded on the execution. State selects the
-// declared percentage and ordinal transition; client percent must match it.
+// UpdateProgressFromAgent is the authoritative managed Claude progress path.
+// It validates events against the immutable Agent Pack contract frozen on the
+// execution. State selects the declared percentage and ordinal transition;
+// client percent must match it. This path never consults the legacy host stage
+// fallback map used by UpdateProgress.
 func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, executionID, stage, state, title, description string, percent int) error {
 	if strings.TrimSpace(executionID) == "" {
 		return ErrAgentProgressExecutionMismatch

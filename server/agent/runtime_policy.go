@@ -293,14 +293,12 @@ func managedRequiredMCPTools(taskType string) []string {
 			"get_project_profile",
 			"list_project_titles",
 			"submit_agent_feedback",
-			"update_task_progress",
 		}
 	case model.TaskTypeViralAnalysis:
 		return []string{
 			"get_project_profile",
 			"list_project_titles",
 			"submit_agent_feedback",
-			"update_task_progress",
 		}
 	case model.TaskTypeLiveSlicer:
 		return []string{
@@ -313,7 +311,6 @@ func managedRequiredMCPTools(taskType string) []string {
 			"prepare_file_upload",
 			"query_live_analysis_task",
 			"submit_agent_feedback",
-			"update_task_progress",
 		}
 	case model.PlatformMontage:
 		return []string{"analyze_video"}

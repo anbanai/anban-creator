@@ -143,6 +143,25 @@ func TestUpdateProgressFromAgentTreatsClientPercentOnlyAsStateHint(t *testing.T)
 	}
 }
 
+func TestUpdateProgressFromAgentUsesFrozenPackInsteadOfLegacyStageFallback(t *testing.T) {
+	ctx := context.Background()
+	frozen := datatypes.JSON(`[{"id":"writing","title":"Frozen Writing","active_percent":41,"complete_percent":73}]`)
+	svc, repo, task, execution, _, _ := setupProgressFromAgentTest(t, false, func(execution *model.TaskExecution) {
+		execution.AgentPackProgressContract = frozen
+	})
+
+	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "Frozen Writing", "frozen contract", 73); err != nil {
+		t.Fatalf("UpdateProgressFromAgent: %v", err)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Progress != 73 || persisted.LatestProgress.Data().Percent != 73 {
+		t.Fatalf("managed progress = %d/%#v, want frozen Pack percent 73 instead of legacy moments fallback 55", persisted.Progress, persisted.LatestProgress.Data())
+	}
+}
+
 func TestUpdateProgressFromAgentRejectsInvalidExecutionPackContract(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {

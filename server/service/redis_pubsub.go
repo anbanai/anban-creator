@@ -59,10 +59,10 @@ type CancelEvent struct {
 // ProgressEvent is published to Redis when task progress is updated,
 // allowing SSE handlers on any replica to push updates to clients.
 //
-// Stage/Title/Description/Percent are populated by UpdateProgress (structured
-// updates from update_task_progress MCP calls). Message carries the raw log
-// line for backward compat with string-only callers (e.g. agent.go:170,
-// task_execution.go:120 OnProgress).
+// Stage/Title/Description/Percent are populated by either managed Claude's
+// UpdateProgressFromAgent path or compatibility update_task_progress MCP calls
+// through UpdateProgress. Message carries the raw log line for backward compat
+// with string-only callers (e.g. agent.go:170, task_execution.go:120 OnProgress).
 type ProgressEvent struct {
 	TaskID      string `json:"task_id"`
 	Message     string `json:"message"`
