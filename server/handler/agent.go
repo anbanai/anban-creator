@@ -359,15 +359,39 @@ func isAgentTaskAccessError(err error) bool {
 }
 
 type agentProgressRequest struct {
-	TaskID          string   `json:"task_id"`
-	ExecutionID     string   `json:"execution_id"`
-	Message         string   `json:"message"`
-	Logs            []string `json:"logs"`
-	Stage           *string  `json:"stage"`
-	State           *string  `json:"state"`
-	Title           *string  `json:"title"`
-	Description     *string  `json:"description"`
-	ProgressPercent *int     `json:"progress_percent"`
+	TaskID                 string   `json:"task_id"`
+	ExecutionID            string   `json:"execution_id"`
+	Message                string   `json:"message"`
+	Logs                   []string `json:"logs"`
+	Stage                  *string  `json:"stage"`
+	State                  *string  `json:"state"`
+	Title                  *string  `json:"title"`
+	Description            *string  `json:"description"`
+	ProgressPercent        *int     `json:"progress_percent"`
+	stagePresent           bool
+	statePresent           bool
+	titlePresent           bool
+	descriptionPresent     bool
+	progressPercentPresent bool
+}
+
+func (r *agentProgressRequest) UnmarshalJSON(data []byte) error {
+	type wireRequest agentProgressRequest
+	var wire wireRequest
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = agentProgressRequest(wire)
+	_, r.stagePresent = fields["stage"]
+	_, r.statePresent = fields["state"]
+	_, r.titlePresent = fields["title"]
+	_, r.descriptionPresent = fields["description"]
+	_, r.progressPercentPresent = fields["progress_percent"]
+	return nil
 }
 
 type agentCompleteRequest struct {
@@ -448,7 +472,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	if err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
-	structuredIntent := req.Stage != nil || req.State != nil || req.Title != nil || req.Description != nil || req.ProgressPercent != nil
+	structuredIntent := req.stagePresent || req.statePresent || req.titlePresent || req.descriptionPresent || req.progressPercentPresent
 	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
 	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
 	executionID := authenticatedExecutionID
@@ -467,27 +491,31 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 
 	if structuredIntent {
 		stage, state, title, description, percent := "", "", "", "", 0
-		if req.Stage != nil {
-			stage = strings.TrimSpace(*req.Stage)
-		}
-		if stage == "" {
+		if !req.stagePresent || req.Stage == nil || strings.TrimSpace(*req.Stage) == "" {
 			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
 		}
-		if req.State != nil {
-			state = strings.TrimSpace(*req.State)
+		stage = strings.TrimSpace(*req.Stage)
+		if !req.statePresent || req.State == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress state is required")
 		}
+		state = strings.TrimSpace(*req.State)
 		if state != "active" && state != "complete" {
 			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
 		}
-		if req.Title != nil {
-			title = *req.Title
+		if !req.titlePresent || req.Title == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress title is required")
 		}
-		if req.Description != nil {
+		title = *req.Title
+		if req.descriptionPresent {
+			if req.Description == nil {
+				return Error(c, fiber.StatusBadRequest, "structured progress description must not be null")
+			}
 			description = *req.Description
 		}
-		if req.ProgressPercent != nil {
-			percent = *req.ProgressPercent
+		if !req.progressPercentPresent || req.ProgressPercent == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress_percent is required")
 		}
+		percent = *req.ProgressPercent
 		logs := append([]string(nil), req.Logs...)
 		if req.Message != "" {
 			logs = append(logs, req.Message)

@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
@@ -22,8 +23,15 @@ import (
 
 func setupProgressFromAgentTest(t *testing.T, withPubSub bool, mutateExecution func(*model.TaskExecution)) (*TaskService, repository.Repository, *model.Task, *model.TaskExecution, *ProgressSubscriber, *miniredis.Miniredis) {
 	t.Helper()
+	svc, repo, task, execution, subscriber, miniRedis, _ := setupProgressFromAgentTestWithDB(t, withPubSub, mutateExecution)
+	return svc, repo, task, execution, subscriber, miniRedis
+}
+
+func setupProgressFromAgentTestWithDB(t *testing.T, withPubSub bool, mutateExecution func(*model.TaskExecution)) (*TaskService, repository.Repository, *model.Task, *model.TaskExecution, *ProgressSubscriber, *miniredis.Miniredis, *gorm.DB) {
+	t.Helper()
 	ctx := context.Background()
-	repo := repository.New(setupTaskTestDB(t))
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMoments)
 	pack, ok := agentpack.Default().Pack("moments")
@@ -75,7 +83,7 @@ func setupProgressFromAgentTest(t *testing.T, withPubSub bool, mutateExecution f
 			}
 		}
 	}
-	return newTestTaskService(repo, nil, nil, &logger, "", pubsub, nil), repo, task, execution, subscriber, miniRedis
+	return newTestTaskService(repo, nil, nil, &logger, "", pubsub, nil), repo, task, execution, subscriber, miniRedis, db
 }
 
 func TestUpdateProgressFromAgentUsesFrozenExecutionPackAndPublishesSSE(t *testing.T) {
@@ -262,6 +270,37 @@ func TestUpdateProgressFromAgentRollsBackEveryTransactionalFailure(t *testing.T)
 			assertNoProgressEvent(t, subscriber)
 		})
 	}
+}
+
+func TestUpdateProgressFromAgentRollsBackCASWhenStructuredPayloadPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution, subscriber, _, db := setupProgressFromAgentTestWithDB(t, true, nil)
+	if err := db.Exec(`
+		CREATE TRIGGER fail_structured_progress_payload
+		BEFORE UPDATE OF latest_progress ON tasks
+		BEGIN
+			SELECT RAISE(FAIL, 'injected latest progress failure');
+		END
+	`).Error; err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must roll back", 55, "raw message", "raw log")
+	if err == nil || !strings.Contains(err.Error(), "injected latest progress failure") {
+		t.Fatalf("UpdateProgressFromAgent error = %v, want injected second-phase failure", err)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("second-phase failure left partial effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	assertNoProgressEvent(t, subscriber)
 }
 
 func TestUpdateProgressFromAgentRejectsStaleExecutionOrTerminalTaskWithoutPublishingSSE(t *testing.T) {

@@ -690,6 +690,38 @@ type beforeStructuredProgressTxRepository struct {
 	before func()
 }
 
+func newAgentProgressTestPubSub(t *testing.T) (*service.RedisPubSub, *miniredis.Miniredis) {
+	t.Helper()
+	miniRedis := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	return service.NewRedisPubSub(rdb, &logger), miniRedis
+}
+
+func subscribeAgentProgressTest(t *testing.T, ctx context.Context, pubsub *service.RedisPubSub, miniRedis *miniredis.Miniredis, taskID string) *service.ProgressSubscriber {
+	t.Helper()
+	subscriber := pubsub.SubscribeProgress(ctx, taskID)
+	t.Cleanup(func() { _ = subscriber.Close() })
+	channel := "anban:task:progress:" + taskID
+	deadline := time.Now().Add(time.Second)
+	for miniRedis.PubSubNumSub(channel)[channel] != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out establishing progress subscription")
+		}
+	}
+	return subscriber
+}
+
+func assertNoAgentProgressEvent(t *testing.T, subscriber *service.ProgressSubscriber) {
+	t.Helper()
+	select {
+	case event := <-subscriber.Events():
+		t.Fatalf("rejected structured request published SSE payload: %s", event.Payload)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func (r *beforeStructuredProgressTxRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
 	r.once.Do(r.before)
 	return r.Repository.WithTx(ctx, fn)
@@ -698,51 +730,54 @@ func (r *beforeStructuredProgressTxRepository) WithTx(ctx context.Context, fn fu
 func TestAgentStructuredProgressRejectsExecutionThatBecomesStaleAfterAuthorization(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
-		mutate func(context.Context, repository.Repository, *model.Task) error
+		mutate func(context.Context, repository.Repository, *model.Task, string) error
 	}{
 		{
 			name: "execution replaced",
-			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task, _ string) error {
 				_, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, uuid.NewString())
 				return err
 			},
 		},
 		{
 			name: "task terminal",
-			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task, _ string) error {
 				return repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusCancelled)
+			},
+		},
+		{
+			name: "execution terminal",
+			mutate: func(ctx context.Context, repo repository.Repository, _ *model.Task, executionID string) error {
+				changed, err := repo.TaskExecutions().Transition(ctx, executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{})
+				if err != nil {
+					return err
+				}
+				if !changed {
+					return errors.New("execution terminal transition lost")
+				}
+				return nil
 			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			miniRedis := miniredis.RunT(t)
-			rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
-			t.Cleanup(func() { _ = rdb.Close() })
-			logger := zerolog.New(io.Discard)
-			pubsub := service.NewRedisPubSub(rdb, &logger)
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
 			var hookErr error
 			var hookCalls int
 			var taskForHook *model.Task
+			var executionIDForHook string
 			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
 				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
 				func(base repository.Repository) repository.Repository {
 					return &beforeStructuredProgressTxRepository{Repository: base, before: func() {
 						hookCalls++
-						hookErr = tt.mutate(ctx, base, taskForHook)
+						hookErr = tt.mutate(ctx, base, taskForHook, executionIDForHook)
 					}}
 				}, pubsub,
 			)
 			taskForHook = task
-			subscriber := pubsub.SubscribeProgress(ctx, task.ID)
-			t.Cleanup(func() { _ = subscriber.Close() })
-			channel := "anban:task:progress:" + task.ID
-			deadline := time.Now().Add(time.Second)
-			for miniRedis.PubSubNumSub(channel)[channel] != 1 {
-				if time.Now().After(deadline) {
-					t.Fatal("timed out establishing progress subscription")
-				}
-			}
+			executionIDForHook = executionID
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
 			body := `{"task_id":"` + task.ID + `","message":"raw message","logs":["raw log"],"stage":"writing","state":"complete","title":"朋友圈正文","description":"must not persist","progress_percent":55}`
 			req := agentJSONRequest("/agent/progress", body)
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -768,11 +803,7 @@ func TestAgentStructuredProgressRejectsExecutionThatBecomesStaleAfterAuthorizati
 			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
 				t.Fatalf("stale structured request caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
 			}
-			select {
-			case event := <-subscriber.Events():
-				t.Fatalf("stale structured request published SSE payload: %s", event.Payload)
-			case <-time.After(500 * time.Millisecond):
-			}
+			assertNoAgentProgressEvent(t, subscriber)
 		})
 	}
 }
@@ -951,6 +982,11 @@ func TestAgentStructuredProgressIntentRequiresStage(t *testing.T) {
 		{name: "invalid state", fields: `"stage":"writing","state":"paused","title":"朋友圈正文","progress_percent":35,"message":"must not persist"`},
 		{name: "invalid title", fields: `"stage":"writing","state":"active","title":"错误标题","progress_percent":35,"message":"must not persist"`},
 		{name: "invalid percent", fields: `"stage":"writing","state":"active","title":"朋友圈正文","progress_percent":36,"message":"must not persist"`},
+		{name: "null stage", fields: `"stage":null,"message":"must not persist"`},
+		{name: "null state", fields: `"stage":"writing","state":null,"title":"朋友圈正文","progress_percent":35,"message":"must not persist"`},
+		{name: "missing title", fields: `"stage":"writing","state":"active","progress_percent":35,"message":"must not persist"`},
+		{name: "null title", fields: `"stage":"writing","state":"active","title":null,"progress_percent":35,"message":"must not persist"`},
+		{name: "null description", fields: `"stage":"writing","state":"active","title":"朋友圈正文","description":null,"progress_percent":35,"message":"must not persist"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -979,6 +1015,107 @@ func TestAgentStructuredProgressIntentRequiresStage(t *testing.T) {
 			}
 		})
 	}
+}
+
+type frozenProgressContractRepository struct {
+	repository.Repository
+	contract datatypes.JSON
+}
+
+func (r *frozenProgressContractRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &frozenProgressContractExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), contract: r.contract}
+}
+
+type frozenProgressContractExecutions struct {
+	repository.TaskExecutionRepository
+	contract datatypes.JSON
+}
+
+func (r *frozenProgressContractExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	copy := *execution
+	copy.AgentPackProgressContract = append(datatypes.JSON(nil), r.contract...)
+	return &copy, nil
+}
+
+func TestAgentStructuredProgressRequiresExplicitPercentForZeroPercentStage(t *testing.T) {
+	contract := datatypes.JSON(`[{"id":"zero","title":"Zero","active_percent":0,"complete_percent":0}]`)
+	for _, tt := range []struct {
+		name         string
+		percentField string
+	}{
+		{name: "missing"},
+		{name: "null", percentField: `,"progress_percent":null`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
+				func(base repository.Repository) repository.Repository {
+					return &frozenProgressContractRepository{Repository: base, contract: contract}
+				}, pubsub,
+			)
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+			body := `{"task_id":"` + task.ID + `","stage":"zero","state":"active","title":"Zero","message":"must not persist"` + tt.percentField + `}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("missing/null percent caused side effects: sequence=%d log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoAgentProgressEvent(t, subscriber)
+		})
+	}
+}
+
+func TestAgentExplicitNullStageIsStructuredAndHasNoSideEffects(t *testing.T) {
+	ctx := context.Background()
+	pubsub, miniRedis := newAgentProgressTestPubSub(t)
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning, nil, pubsub,
+	)
+	subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","stage":null,"message":"must not persist"}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("null stage caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	assertNoAgentProgressEvent(t, subscriber)
 }
 
 func agentJSONRequest(path, body string) *http.Request {
