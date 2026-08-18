@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.12"
-	dshPluginReleaseDate = "2026-08-17"
+	dshPluginVersion     = "4.1.13"
+	dshPluginReleaseDate = "2026-08-18"
 )
 
 type dshPackageManifest struct {
@@ -447,11 +447,11 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 	})
 
-	t.Run("4.1.12 release operators perform a real low privilege MCP check", func(t *testing.T) {
+	t.Run("current release operators perform a real low privilege MCP check", func(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "docs", "dsh-installation.md"))
 		normalized := strings.Join(strings.Fields(body), " ")
 		for _, want := range []string{
-			"4.1.12 release-operator checklist",
+			dshPluginVersion + " release-operator checklist",
 			"after automated code gates and before public announcement",
 			"dedicated low-privilege",
 			"outside Git",
@@ -787,6 +787,72 @@ func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
 	workflow := readWorkflowContract(t, ".github/workflows/release.yml")
 	if err := validateDSHReleaseWorkflow(workflow); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDSHReleaseArtifactDigestRejectsChangedTarballBytes(t *testing.T) {
+	root := t.TempDir()
+	metadataPath := filepath.Join(root, "pack.json")
+	tarballName := "anban-dsh-plugin-" + dshPluginVersion + ".tgz"
+	tarballPath := filepath.Join(root, tarballName)
+	digestPath := filepath.Join(root, "artifact.sha256.json")
+	metadata := fmt.Sprintf(`[{
+  "name": "@anban/dsh-plugin",
+  "version": %q,
+  "filename": %q,
+  "files": [{"path": "package.json"}]
+}]`, dshPluginVersion, tarballName)
+	if err := os.WriteFile(metadataPath, []byte(metadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tarballPath, []byte("trusted artifact bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(repoRoot(t), "scripts", "dsh-artifact-integrity.mjs")
+	run := func(action string) ([]byte, error) {
+		command := exec.Command("node", script, action, metadataPath, dshPluginVersion, digestPath)
+		return command.CombinedOutput()
+	}
+	if output, err := run("create"); err != nil {
+		t.Fatalf("create release artifact digest: %v\n%s", err, output)
+	}
+	if output, err := run("verify"); err != nil {
+		t.Fatalf("verify unchanged release artifact: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(tarballPath, []byte("tampered artifact byte"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("verify"); err == nil {
+		t.Fatalf("changed release artifact passed digest verification:\n%s", output)
+	}
+	if err := os.WriteFile(tarballPath, []byte("trusted artifact bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tamperedMetadata := strings.Replace(metadata, `"package.json"`, `"tampered.js"`, 1)
+	if err := os.WriteFile(metadataPath, []byte(tamperedMetadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("verify"); err == nil {
+		t.Fatalf("changed pack metadata passed digest verification:\n%s", output)
+	}
+}
+
+func TestDSHDesktopProcessSupervisor(t *testing.T) {
+	command := exec.Command("node", "--test", filepath.Join(repoRoot(t), "scripts", "dsh-process-supervisor.test.mjs"))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Desktop process supervisor tests: %v\n%s", err, output)
+	}
+	body := readRepoFile(t, filepath.Join(repoRoot(t), "scripts", "dsh-desktop-acceptance.mjs"))
+	for _, required := range []string{"runBoundedCommand", "spawnProcessTree", "terminateProcessTree"} {
+		if !strings.Contains(body, required) {
+			t.Errorf("Desktop acceptance does not use shared process supervisor %q", required)
+		}
+	}
+	for _, forbidden := range []string{"child.kill()", "child.kill('SIGKILL')"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("Desktop acceptance still uses direct child termination %q", forbidden)
+		}
 	}
 }
 
@@ -1235,7 +1301,7 @@ func validatePackagedDSHDesktopJob(job workflowJob) error {
 		return fmt.Errorf("Desktop acceptance must launch the packaged application")
 	}
 	profile, err := requireEnabledStep(job, "Validate packaged Desktop profile exports and Skill catalogs")
-	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop") {
+	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop "+dshPluginVersion) {
 		return fmt.Errorf("Desktop acceptance must validate the installed Desktop profile and mounted catalogs")
 	}
 	for _, step := range job.Steps {
@@ -1259,6 +1325,35 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if !ok || !input.Required {
 		return fmt.Errorf("workflow_dispatch version input must be required")
 	}
+	packageJob, ok := workflow.Jobs["dsh-package"]
+	if !ok || packageJob.RunsOn != "ubuntu-latest" {
+		return fmt.Errorf("release workflow must build one DSH package artifact in an unprivileged Ubuntu job")
+	}
+	if packageJob.Permissions["contents"] != "read" || packageJob.Permissions["id-token"] != "" {
+		return fmt.Errorf("DSH package job must use contents: read without id-token")
+	}
+	pack, err := requireEnabledStep(packageJob, "Pack DSH plugin exactly once")
+	if err != nil || pack.ID != "pack" || !runHasCode(pack.Run, "pnpm pack --json --pack-destination") || !runHasCode(pack.Run, "parsePackResult") {
+		return fmt.Errorf("unprivileged DSH package job must structurally capture one controlled pack result")
+	}
+	digest, err := requireEnabledStep(packageJob, "Create exact DSH artifact digest")
+	if err != nil || !runHasCode(digest.Run, "node scripts/dsh-artifact-integrity.mjs create") {
+		return fmt.Errorf("unprivileged package job must create the exact artifact digest")
+	}
+	if err := requireActionInput(packageJob, "Upload exact DSH release artifact", "actions/upload-artifact@"+actionsUploadArtifactV4SHA, "name", "anban-dsh-plugin-release"); err != nil {
+		return err
+	}
+	packCount := 0
+	for _, job := range workflow.Jobs {
+		for _, step := range job.Steps {
+			if stepEnabled(step) && runHasCode(step.Run, "pnpm pack --json --pack-destination") {
+				packCount++
+			}
+		}
+	}
+	if packCount != 1 {
+		return fmt.Errorf("release workflow pack steps = %d, want exactly one across all jobs", packCount)
+	}
 	desktop, ok := workflow.Jobs["dsh-desktop-acceptance"]
 	if !ok || desktop.RunsOn != "${{ matrix.os }}" {
 		return fmt.Errorf("release workflow must gate on packaged Desktop acceptance")
@@ -1267,6 +1362,9 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	sort.Strings(gotOS)
 	if strings.Join(gotOS, ",") != "macos-latest,windows-latest" {
 		return fmt.Errorf("release packaged Desktop OS matrix = %v", gotOS)
+	}
+	if !workflowJobNeeds(desktop, "dsh-package") {
+		return fmt.Errorf("release Desktop acceptance must consume the unprivileged package artifact")
 	}
 	if err := validateReleasePackagedDSHDesktopJob(desktop); err != nil {
 		return err
@@ -1280,8 +1378,8 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if !ok || release.RunsOn != "ubuntu-latest" {
 		return fmt.Errorf("release must be one Ubuntu job")
 	}
-	if !workflowJobNeeds(release, "dsh-desktop-acceptance") {
-		return fmt.Errorf("npm and GitHub release must wait for both packaged Desktop matrix jobs")
+	if !workflowJobNeeds(release, "dsh-package") || !workflowJobNeeds(release, "dsh-desktop-acceptance") {
+		return fmt.Errorf("npm and GitHub release must wait for the exact package and both Desktop matrix jobs")
 	}
 	if err := requireActionReference(release, "Checkout code", "actions/checkout@"+actionsCheckoutV4SHA); err != nil {
 		return err
@@ -1316,35 +1414,15 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 			return fmt.Errorf("release version locations step missing executable validation for %s", path)
 		}
 	}
-	if _, err := requireEnabledRunStep(release, "Install DSH plugin dependencies", "pnpm install --frozen-lockfile"); err != nil {
+	if err := requireActionInput(release, "Download exact DSH release artifact", "actions/download-artifact@"+actionsDownloadArtifactV4SHA, "name", "anban-dsh-plugin-release"); err != nil {
 		return err
 	}
-	if _, err := requireEnabledRunStep(release, "Verify DSH plugin source", "pnpm run verify:source"); err != nil {
-		return err
-	}
-	pack, err := requireEnabledStep(release, "Pack DSH plugin exactly once")
-	if err != nil || pack.ID != "pack" || !runHasCode(pack.Run, "pnpm pack --json --pack-destination") || !runHasCode(pack.Run, "parsePackResult") {
-		return fmt.Errorf("release must structurally capture one controlled pack result")
-	}
-	packCount := 0
-	for _, step := range release.Steps {
-		if stepEnabled(step) && runHasCode(step.Run, "pnpm pack --json --pack-destination") {
-			packCount++
-		}
-	}
-	if packCount != 1 {
-		return fmt.Errorf("release controlled pack steps = %d, want 1", packCount)
-	}
-	verify, err := requireEnabledStep(release, "Verify exact DSH package tarball")
-	if err != nil || verify.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || verify.Env["PACK_METADATA"] != "${{ steps.pack.outputs.metadata }}" || !runHasCode(verify.Run, "inspectAndExtractArchive") {
-		return fmt.Errorf("exact pack verification must consume the pack step outputs")
-	}
-	localSmoke, err := requireEnabledStep(release, "Smoke-test exact local DSH package")
-	if err != nil || localSmoke.Env["TARBALL"] != "${{ steps.pack.outputs.tarball }}" || localSmoke.Env["PACK_METADATA"] != "${{ steps.pack.outputs.metadata }}" || !runHasCode(localSmoke.Run, "smokeProfile") {
-		return fmt.Errorf("local profile smoke must consume the exact pack step outputs")
+	verify, err := requireEnabledStep(release, "Verify exact DSH release artifact")
+	if err != nil || !runHasCode(verify.Run, "dsh-verify-pack.mjs") {
+		return fmt.Errorf("privileged release must verify the downloaded pack metadata and digest")
 	}
 	asset, err := requireEnabledStep(release, "Stage exact DSH package asset")
-	if err != nil || asset.ID != "asset" || asset.Env["SOURCE_TARBALL"] != "${{ steps.pack.outputs.tarball }}" || !runHasCode(asset.Run, "copyFile") || !runHasCode(asset.Run, "createHash('sha256')") || !runHasCode(asset.Run, "GITHUB_OUTPUT") {
+	if err != nil || asset.ID != "asset" || asset.Env["SOURCE_TARBALL"] != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz" || !runHasCode(asset.Run, "copyFile") || !runHasCode(asset.Run, "createHash('sha256')") || !runHasCode(asset.Run, "GITHUB_OUTPUT") {
 		return fmt.Errorf("release asset staging must copy and byte-verify the exact tarball into bin")
 	}
 	preflight, err := requireEnabledStep(release, "Inspect exact npm registry version")
@@ -1382,11 +1460,8 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	return requireNamedStepOrder(release, []string{
 		"Validate release version contract",
 		"Validate every DSH plugin version location and changelog",
-		"Install DSH plugin dependencies",
-		"Verify DSH plugin source",
-		"Pack DSH plugin exactly once",
-		"Verify exact DSH package tarball",
-		"Smoke-test exact local DSH package",
+		"Download exact DSH release artifact",
+		"Verify exact DSH release artifact",
 		"Build server binaries and Agent package",
 		"Stage exact DSH package asset",
 		"Inspect exact npm registry version",
@@ -1425,12 +1500,12 @@ func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
 	if desktopBuild.WorkingDirectory != "_dsh-desktop" {
 		return fmt.Errorf("release Desktop package build must run from the pinned checkout")
 	}
-	pack, err := requireEnabledStep(job, "Pack exact local DSH plugin")
-	if err != nil || pack.WorkingDirectory != "plugins" || !runHasCode(pack.Run, "pnpm pack --json --pack-destination") {
-		return fmt.Errorf("release Desktop acceptance must consume one exact local plugin tarball")
-	}
-	if err := validateReleaseCrossPlatformDSHPackStep(pack); err != nil {
+	if err := requireActionInput(job, "Download exact DSH release artifact", "actions/download-artifact@"+actionsDownloadArtifactV4SHA, "name", "anban-dsh-plugin-release"); err != nil {
 		return err
+	}
+	verifyArtifact, err := requireEnabledStep(job, "Verify exact DSH release artifact")
+	if err != nil || !runHasCode(verifyArtifact.Run, "dsh-verify-pack.mjs") {
+		return fmt.Errorf("release Desktop acceptance must verify the handed-off metadata and digest")
 	}
 	publicInstall, err := requireEnabledStep(job, "Install exact plugin through public DSH")
 	if err != nil || !runHasCode(publicInstall.Run, "dsh-desktop-acceptance.mjs install") || !runHasCode(publicInstall.Run, "anban-dsh-plugin") {
@@ -1444,11 +1519,11 @@ func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
 		return fmt.Errorf("release Desktop acceptance must launch the packaged application")
 	}
 	profile, err := requireEnabledStep(job, "Validate packaged Desktop profile exports and Skill catalogs")
-	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop") {
+	if err != nil || !runHasCode(profile.Run, `smoke-profile.mjs --existing-profile desktop "${{ steps.version.outputs.VERSION }}"`) {
 		return fmt.Errorf("release Desktop acceptance must validate exports and mounted Skill catalogs")
 	}
 	for _, step := range job.Steps {
-		if strings.Contains(step.Run+step.Env["DSH_PLUGIN_TARBALL"], "4.1.12") {
+		if strings.Contains(step.Run+step.Env["DSH_PLUGIN_TARBALL"], dshPluginVersion) {
 			return fmt.Errorf("release Desktop acceptance must not hardcode the current plugin version")
 		}
 		for _, forbidden := range []string{"ELECTRON_RUN_AS_NODE", "desktopRuntime", "desktopPnpmBootstrap", "public Desktop runtime fixture"} {
@@ -1461,9 +1536,10 @@ func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
 		"Checkout pinned DSH Desktop",
 		"Verify pinned DSH Desktop commit",
 		"Validate release version contract",
+		"Download exact DSH release artifact",
+		"Verify exact DSH release artifact",
 		"Install pinned DSH Desktop dependencies",
 		"Build unsigned packaged DSH Desktop",
-		"Pack exact local DSH plugin",
 		"Install exact plugin through public DSH",
 		"Launch packaged DSH Desktop application",
 		"Validate packaged Desktop profile exports and Skill catalogs",
@@ -1478,6 +1554,10 @@ func validateReleasePermissionContract(workflow workflowContract) error {
 	if !ok || desktop.Permissions["contents"] != "read" || desktop.Permissions["id-token"] != "" {
 		return fmt.Errorf("Desktop acceptance must explicitly use contents: read without id-token")
 	}
+	packageJob, ok := workflow.Jobs["dsh-package"]
+	if !ok || packageJob.Permissions["contents"] != "read" || packageJob.Permissions["id-token"] != "" {
+		return fmt.Errorf("DSH package job must explicitly use contents: read without id-token")
+	}
 	release, ok := workflow.Jobs["release"]
 	if !ok || release.Permissions["contents"] != "write" || release.Permissions["id-token"] != "write" {
 		return fmt.Errorf("release job must own contents and id-token write permissions")
@@ -1491,7 +1571,7 @@ func validateCrossPlatformDSHPackStep(step workflowStep) error {
 			return fmt.Errorf("Desktop pack step contains shell-specific inline verifier %q", forbidden)
 		}
 	}
-	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12") {
+	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "+dshPluginVersion) {
 		return fmt.Errorf("Desktop pack step must use the cross-platform exact-pack verifier")
 	}
 	return nil
