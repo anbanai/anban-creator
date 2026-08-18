@@ -117,6 +117,56 @@ func TestUpdateProgressFromAgentUsesFrozenExecutionPackAndPublishesSSE(t *testin
 	}
 }
 
+func TestUpdateProgressFromAgentRejectsStaleExecutionOrTerminalTaskWithoutPublishingSSE(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(context.Context, repository.Repository, *model.Task) error
+	}{
+		{
+			name: "current execution replaced",
+			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+				_, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, uuid.NewString())
+				return err
+			},
+		},
+		{name: model.TaskStatusCancelled, mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+			return repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusCancelled)
+		}},
+		{name: model.TaskStatusCompleted, mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+			return repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusCompleted)
+		}},
+		{name: model.TaskStatusFailed, mutate: func(ctx context.Context, repo repository.Repository, task *model.Task) error {
+			return repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusFailed)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution, subscriber, _ := setupProgressFromAgentTest(t, true, nil)
+			if err := tt.mutate(ctx, repo, task); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "complete", "朋友圈正文", "must be rejected", 55); err != nil {
+				t.Fatalf("UpdateProgressFromAgent: %v", err)
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" {
+				t.Fatalf("rejected progress mutated task: sequence=%d progress=%d latest=%#v log=%q",
+					persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog)
+			}
+			select {
+			case message := <-subscriber.Events():
+				t.Fatalf("rejected progress published structured SSE payload: %s", message.Payload)
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
+	}
+}
+
 func TestUpdateProgressFromAgentTreatsClientPercentOnlyAsStateHint(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, task, execution, _, _ := setupProgressFromAgentTest(t, false, nil)

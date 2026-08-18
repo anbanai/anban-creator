@@ -173,10 +173,10 @@ func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, pa
 // AdvanceStructuredProgress uses the declared stage/state sequence as its CAS
 // high-water mark. Numeric progress is retained independently as a maximum so
 // Pack stages with equal or zero percentages still advance deterministically.
-func (r *taskRepository) AdvanceStructuredProgress(ctx context.Context, id string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error) {
+func (r *taskRepository) AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error) {
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.Task{}).
-			Where("id = ? AND progress_sequence < ?", id, sequence).
+			Where("id = ? AND progress_sequence < ? AND current_execution_id = ? AND status = ?", id, sequence, executionID, model.TaskStatusRunning).
 			Updates(map[string]any{
 				"progress_sequence": sequence,
 				"progress": gorm.Expr(

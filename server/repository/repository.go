@@ -102,8 +102,9 @@ type TaskRepository interface {
 	// so Studio can render the current stage without parsing progress_log.
 	UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error
 	// AdvanceStructuredProgress atomically advances the structured progress sequence
-	// and its latest payload/log. Lower and duplicate events are ignored.
-	AdvanceStructuredProgress(ctx context.Context, id string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error)
+	// and its latest payload/log for the current running execution. Lower,
+	// duplicate, stale-execution, and terminal-task events are ignored.
+	AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error)
 	// GetTypeAndProgress loads only the type and progress columns for a task.
 	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
 	// including the longtext progress_log — would be wasteful.

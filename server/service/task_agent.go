@@ -228,7 +228,7 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 		Description: description,
 		Percent:     expectedPercent,
 	}
-	advanced, persisted, err := s.repo.Tasks().AdvanceStructuredProgress(ctx, taskID, sequence, payload)
+	advanced, persisted, err := s.repo.Tasks().AdvanceStructuredProgress(ctx, taskID, executionID, sequence, payload)
 	if err != nil {
 		return fmt.Errorf("advance structured progress: %w", err)
 	}
