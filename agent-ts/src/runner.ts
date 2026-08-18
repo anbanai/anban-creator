@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 
 import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
+import { validateAllStageArtifacts, type ArtifactValidationResult } from "./artifact-validator.js";
+import { CLAUDE_PROFILE_ENV_KEYS, type AgentPack, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import { ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
@@ -231,15 +232,21 @@ export function buildQueryOptions(
     void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
   };
   const emitter = new ProgressEmitter(pack, reporter, diagnostic);
-  const stopHooks: HookCallback[] = [createManagedProgressStopHook(emitter, cwd)];
+  let stopHook = createManagedProgressStopHook(emitter, cwd);
+  if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
+    stopHook = createSeednoteProgressStopHook(
+      emitter,
+      pack,
+      cwd,
+      createSeednoteStopGate(cwd, data.task_type, pluginRoot),
+      diagnostic,
+    );
+  }
   const hooks: NonNullable<Options["hooks"]> = {
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
     PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, cwd, diagnostic)] }],
-    Stop: [{ hooks: stopHooks }],
+    Stop: [{ hooks: [stopHook] }],
   };
-  if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
-    stopHooks.push(createSeednoteStopGate(cwd, data.task_type, pluginRoot));
-  }
   return {
     abortController: controller,
     cwd,
@@ -297,9 +304,15 @@ export function createTaskProgressHook(
       diagnostic("TaskUpdate progress input is missing taskId");
       return {};
     }
+    if (isRecord(input.tool_response) && input.tool_response.success === false) {
+      const error = cleanString(input.tool_response.error);
+      diagnostic(`TaskUpdate response reported success=false${error ? `: ${error}` : ""}`);
+      return {};
+    }
     const createdStage = taskStages.get(taskID);
     if (createdStage && createdStage !== stage) {
       diagnostic(`TaskUpdate stage ${stage} does not match TaskCreate stage ${createdStage} for task ${taskID}`);
+      return {};
     }
 
     const status = input.tool_input.status;
@@ -325,20 +338,49 @@ export function createTaskProgressHook(
 function createManagedProgressStopHook(emitter: ProgressEmitter, workspace: string): HookCallback {
   return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
-    const result = await emitter.handle({ state: "final" }, workspace, hookOptions.signal);
-    if (!result.validation || result.validation.ok) return {};
+    return emitFinalProgress(emitter, workspace, hookOptions.signal);
+  };
+}
 
-    const additionalContext = result.validation.reason === "missing_artifacts"
-      ? `Managed completion gate is blocked. Create or repair these required artifacts: ${result.validation.missing.join(", ")}.`
-      : `Managed completion gate is blocked because failure state ${result.validation.path} exists. Resolve the recorded failure before stopping.`;
-    return {
-      decision: "block",
-      reason: additionalContext,
-      hookSpecificOutput: {
-        hookEventName: "Stop",
-        additionalContext,
-      },
-    };
+function createSeednoteProgressStopHook(
+  emitter: ProgressEmitter,
+  pack: AgentPack,
+  workspace: string,
+  qualityGate: HookCallback,
+  diagnostic: ProgressDiagnostic,
+): HookCallback {
+  return async (input, toolUseID, hookOptions): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
+    try {
+      const validation = await validateAllStageArtifacts(pack, workspace);
+      if (!validation.ok) return blockedStopOutput(validation);
+    } catch (error) {
+      diagnostic(`progress stop validation failed: ${error instanceof Error ? error.message : String(error)}`);
+      return {};
+    }
+
+    const qualityResult = await qualityGate(input, toolUseID, hookOptions);
+    if (Object.keys(qualityResult).length > 0) return qualityResult;
+    return emitFinalProgress(emitter, workspace, hookOptions.signal);
+  };
+}
+
+async function emitFinalProgress(emitter: ProgressEmitter, workspace: string, signal: AbortSignal): Promise<HookJSONOutput> {
+  const result = await emitter.handle({ state: "final" }, workspace, signal);
+  return result.validation && !result.validation.ok ? blockedStopOutput(result.validation) : {};
+}
+
+function blockedStopOutput(validation: Exclude<ArtifactValidationResult, { ok: true }>): HookJSONOutput {
+  const additionalContext = validation.reason === "missing_artifacts"
+    ? `Managed completion gate is blocked. Create or repair these required artifacts: ${validation.missing.join(", ")}.`
+    : `Managed completion gate is blocked because failure state ${validation.path} exists. Resolve the recorded failure before stopping.`;
+  return {
+    decision: "block",
+    reason: additionalContext,
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext,
+    },
   };
 }
 

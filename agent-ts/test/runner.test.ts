@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -244,7 +244,7 @@ describe("buildQueryOptions", () => {
     });
   });
 
-  test("enforces the MCP boundary and Seednote stop gate for both Seednote task types", async () => {
+  test("enforces the MCP boundary and composes the Seednote stop gate for both Seednote task types", async () => {
     const articleOptions = runner.buildQueryOptions(validBootstrap(), "/workspace");
     const articleHooks = articleOptions.hooks as Record<string, Array<{ hooks: Array<(input: unknown, toolUseID: string | undefined, options: { signal: AbortSignal }) => Promise<Record<string, unknown>>> }>>;
     expect(articleHooks.PreToolUse).toHaveLength(1);
@@ -266,7 +266,7 @@ describe("buildQueryOptions", () => {
       const hooks = options.hooks as Record<string, unknown[]>;
       expect(hooks.PreToolUse).toHaveLength(1);
       expect(hooks.Stop).toHaveLength(1);
-      expect((hooks.Stop[0] as { hooks: unknown[] }).hooks).toHaveLength(2);
+      expect((hooks.Stop[0] as { hooks: unknown[] }).hooks).toHaveLength(1);
     }
   });
 
@@ -442,6 +442,58 @@ describe("managed progress hooks", () => {
     }
   });
 
+  test("rejects a TaskUpdate stage that conflicts with its TaskCreate mapping", async () => {
+    const root = await progressWorkspace();
+    const diagnostics: string[] = [];
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    const emitter = new ProgressEmitter(articlePack, { stageProgress }, (message) => diagnostics.push(message));
+    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
+    try {
+      await callback(taskHookInput("TaskCreate", {
+        subject: "Research",
+        description: "Research",
+        metadata: { anban_progress_stage: "research" },
+      }, { task: { id: "task-1", subject: "Research" } }), "tool-1", hookOptions);
+
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "delivery" },
+      }, { success: true, taskId: "task-1", updatedFields: ["status", "metadata"] }), "tool-2", hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
+      expect(diagnostics.join("\n")).toContain("does not match TaskCreate stage research");
+
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "research" },
+      }, { success: true, taskId: "task-1", updatedFields: ["status", "metadata"] }), "tool-3", hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({ stage: "research", state: "active" }), hookOptions.signal);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores an explicitly failed TaskUpdate response", async () => {
+    const root = await progressWorkspace();
+    const diagnostics: string[] = [];
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    const emitter = new ProgressEmitter(articlePack, { stageProgress }, (message) => diagnostics.push(message));
+    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
+    try {
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "research" },
+      }, { success: false, taskId: "task-1", updatedFields: [], error: "not found" }), "tool-1", hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
+      expect(diagnostics.join("\n")).toContain("reported success=false");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("generic Stop emits final 100 only after all artifacts validate", async () => {
     const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
@@ -501,6 +553,41 @@ describe("managed progress hooks", () => {
       expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
       expect(stageProgress).toHaveBeenCalledTimes(1);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("runs the Seednote quality gate before emitting final progress", async () => {
+    const root = await progressWorkspace(true);
+    const pluginRoot = join(root, "plugin");
+    const hooksRoot = join(pluginRoot, "hooks");
+    await mkdir(hooksRoot, { recursive: true });
+    const gatePath = join(hooksRoot, "seednote-quality-gate.sh");
+    await writeFile(gatePath, [
+      "#!/bin/sh",
+      'if [ -f "$CLAUDE_PROJECT_DIR/quality-pass" ]; then exit 0; fi',
+      "printf '%s' '{\"decision\":\"block\",\"reason\":\"quality blocked\"}'",
+    ].join("\n"));
+    await chmod(gatePath, 0o755);
+    const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const callback = optionHooks(runner.buildQueryOptions({ ...validBootstrap(), task_type: "seednote" }, root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).Stop![0]!.hooks[0]!;
+
+      expect(await callback(stopHookInput(), undefined, hookOptions)).toMatchObject({ decision: "block", reason: "quality blocked" });
+      expect(stageProgress).not.toHaveBeenCalled();
+
+      await writeFile(join(root, "quality-pass"), "pass");
+      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({ progress_percent: 100 }), hookOptions.signal);
+    } finally {
+      if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
       await rm(root, { recursive: true, force: true });
     }
   });
