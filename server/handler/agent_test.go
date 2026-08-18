@@ -579,6 +579,78 @@ func TestAgentCompletionJWTRejectsLocalExecutionTarget(t *testing.T) {
 
 var errInjectedCompletionFindExecution = errors.New("injected completion execution lookup failure")
 
+type completionCorruptResultRepository struct {
+	repository.Repository
+	suffix  string
+	corrupt bool
+}
+
+func (r *completionCorruptResultRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &completionCorruptResultTaskExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), parent: r}
+}
+
+type completionCorruptResultTaskExecutions struct {
+	repository.TaskExecutionRepository
+	parent *completionCorruptResultRepository
+}
+
+func (r *completionCorruptResultTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || !r.parent.corrupt {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append(append([]byte(nil), execution.Result...), r.parent.suffix...)
+	return &cloned, nil
+}
+
+func TestAgentCompletionCorruptStoredResultReturns409ForJWTAndAPIKey(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		target     string
+		credential func(token, apiKey string) string
+	}{
+		{name: "cloud JWT", target: "kubernetes", credential: func(token, _ string) string { return token }},
+		{name: "local API key", target: model.ExecutionTargetLocalClaimed, credential: func(_, apiKey string) string { return apiKey }},
+	} {
+		for _, suffix := range []string{" trailing", ` {"second":true}`} {
+			t.Run(test.name+suffix, func(t *testing.T) {
+				var corruptRepo *completionCorruptResultRepository
+				app, _, task, executionID, token, apiKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+					t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning,
+					func(base repository.Repository) repository.Repository {
+						corruptRepo = &completionCorruptResultRepository{Repository: base, suffix: suffix}
+						return corruptRepo
+					}, nil,
+				)
+				body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed"}}`
+				credential := test.credential(token, apiKey)
+				first := agentJSONRequest("/agent/complete", body)
+				first.Header.Set("Authorization", "Bearer "+credential)
+				firstResp, err := app.Test(first)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if firstResp.StatusCode != fiber.StatusOK {
+					responseBody, _ := io.ReadAll(firstResp.Body)
+					t.Fatalf("first completion status/body = %d/%s, want 200", firstResp.StatusCode, responseBody)
+				}
+				corruptRepo.corrupt = true
+				retry := agentJSONRequest("/agent/complete", body)
+				retry.Header.Set("Authorization", "Bearer "+credential)
+				resp, err := app.Test(retry)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != fiber.StatusConflict {
+					responseBody, _ := io.ReadAll(resp.Body)
+					t.Fatalf("retry status/body = %d/%s, want 409", resp.StatusCode, responseBody)
+				}
+			})
+		}
+	}
+}
+
 type completionFindExecutionErrorRepository struct {
 	repository.Repository
 	findCalls int

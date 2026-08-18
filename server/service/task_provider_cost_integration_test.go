@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -131,6 +132,103 @@ func TestCompleteLocalTaskResponseLossRetryDoesNotRepeatTerminalSideEffects(t *t
 	notifications, err := repo.IlinkNotifications().ListDue(ctx, 10)
 	if err != nil || len(notifications) != 1 {
 		t.Fatalf("terminal notifications after retry = %#v, %v", notifications, err)
+	}
+}
+
+func TestCompleteLocalTaskConcurrentIdenticalOutcomeRunsTerminalSideEffectsOnce(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		name := "failure"
+		if success {
+			name = "success"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, repo, costRepo := setupLocalProviderCostTest(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			if success {
+				addLocalSeednoteDeliverables(t, repo, taskID)
+			}
+			claimed, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || claimed.CurrentExecutionID == nil {
+				t.Fatalf("claimed task = %#v, %v", claimed, err)
+			}
+			executionID := *claimed.CurrentExecutionID
+
+			if err := repo.IlinkBindings().Create(ctx, &model.IlinkBinding{
+				ID: uuid.NewString(), UserID: userID, PlatformAccountID: stringPtr("platform-1"),
+				ExternalUserID: stringPtr("wx-user-1"), Status: model.IlinkBindingStatusActive,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			logger := zerolog.New(io.Discard)
+			svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &logger))
+			miniRedis := miniredis.RunT(t)
+			rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+			t.Cleanup(func() { _ = rdb.Close() })
+			svc.pubsub = NewRedisPubSub(rdb, &logger)
+			if count, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved || count != 1 {
+				t.Fatalf("reserve current local slot = %d/%v/%v", count, reserved, err)
+			}
+			pending := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+				Status: model.TaskStatusPending, ExecutionTarget: model.ExecutionTargetCloud,
+			}
+			if err := repo.Tasks().Create(ctx, pending); err != nil {
+				t.Fatal(err)
+			}
+			svc.SetProviderCostService(NewProviderCostService(costRepo, providerCostBundleWithTurbo()))
+			svc.repo = newLocalCompletionRaceRepository(repo)
+			newResult := func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{
+					Success: success, Error: "provider unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
+					CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
+						Provider: "volcengine_ark", Model: "doubao-seed-evolving", InputTokens: 10, OutputTokens: 2,
+					}},
+				}
+			}
+
+			var wg sync.WaitGroup
+			errs := make(chan error, 2)
+			wg.Add(2)
+			for range 2 {
+				go func() {
+					defer wg.Done()
+					errs <- svc.CompleteLocalTask(ctx, taskID, executionID, newResult())
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if err != nil {
+					t.Fatalf("identical concurrent completion = %v, want nil", err)
+				}
+			}
+
+			events, err := costRepo.ListEventsByExecution(ctx, executionID)
+			if err != nil || len(events) != 1 {
+				t.Fatalf("provider events = %#v, %v; want one", events, err)
+			}
+			if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
+				t.Fatalf("dispatch enqueue count = %d, want 1", got)
+			}
+			if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+				t.Fatalf("slot count = %d/%v, want replacement slot only", count, err)
+			}
+			notifications, err := repo.IlinkNotifications().ListDue(ctx, 10)
+			if err != nil || len(notifications) != 1 {
+				t.Fatalf("terminal notifications = %#v, %v; want one", notifications, err)
+			}
+			terminal, err := repo.Tasks().FindByID(ctx, taskID)
+			wantReason := model.TaskBillingTerminalProviderError
+			if success {
+				wantReason = model.TaskBillingTerminalCompleted
+			}
+			if err != nil || terminal.BillingTerminalReason != wantReason {
+				t.Fatalf("terminal billing evidence = %#v, %v; want reason %q", terminal, err, wantReason)
+			}
+		})
 	}
 }
 

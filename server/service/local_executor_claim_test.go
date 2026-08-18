@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ type localCompletionRace struct {
 	secondFinalize  chan struct{}
 	winnerCommitted chan struct{}
 	winnerModel     string
+	loseWithCASErr  bool
 }
 
 type executionCASLossRepository struct {
@@ -34,6 +36,36 @@ type executionCASLossRepository struct {
 	executionID string
 	once        sync.Once
 	injectErr   error
+}
+
+type executionResultOverrideRepository struct {
+	repository.Repository
+	executionID string
+	result      []byte
+}
+
+func (r *executionResultOverrideRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &executionResultOverrideTaskExecutions{
+		TaskExecutionRepository: r.Repository.TaskExecutions(),
+		executionID:             r.executionID,
+		result:                  r.result,
+	}
+}
+
+type executionResultOverrideTaskExecutions struct {
+	repository.TaskExecutionRepository
+	executionID string
+	result      []byte
+}
+
+func (r *executionResultOverrideTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || id != r.executionID {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append([]byte(nil), r.result...)
+	return &cloned, nil
 }
 
 func (r *executionCASLossRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
@@ -57,18 +89,26 @@ type localCompletionRaceRepository struct {
 }
 
 func (r *localCompletionRaceRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
-	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
-		wrapped := &localCompletionRaceRepository{Repository: tx}
+	var wrapped *localCompletionRaceRepository
+	err := r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		wrapped = &localCompletionRaceRepository{Repository: tx}
 		wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: tx.Tasks(), race: r.tasks.race}
 		return fn(wrapped)
 	})
+	if err == nil && wrapped != nil && wrapped.tasks.winner {
+		close(r.tasks.race.winnerCommitted)
+	}
+	return err
 }
 
-func newLocalCompletionRaceRepository(base repository.Repository) *localCompletionRaceRepository {
+func newLocalCompletionRaceRepository(base repository.Repository, loseWithCASErr ...bool) *localCompletionRaceRepository {
 	race := &localCompletionRace{
 		readsReady:      make(chan struct{}),
 		secondFinalize:  make(chan struct{}),
 		winnerCommitted: make(chan struct{}),
+	}
+	if len(loseWithCASErr) > 0 {
+		race.loseWithCASErr = loseWithCASErr[0]
 	}
 	wrapped := &localCompletionRaceRepository{Repository: base}
 	wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: base.Tasks(), race: race}
@@ -95,13 +135,14 @@ func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Contex
 		}
 		<-r.race.secondFinalize
 		won, err := finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
-		if won {
-			close(r.race.winnerCommitted)
-		}
+		r.winner = won
 		return won, err
 	case 2:
 		close(r.race.secondFinalize)
 		<-r.race.winnerCommitted
+		if r.race.loseWithCASErr {
+			return false, fmt.Errorf("%w: concurrent winner committed", repository.ErrLocalTaskExecutionCASLost)
+		}
 		return false, nil
 	}
 	return finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
@@ -111,7 +152,8 @@ func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { retu
 
 type localCompletionRaceTaskRepository struct {
 	repository.TaskRepository
-	race *localCompletionRace
+	race   *localCompletionRace
+	winner bool
 }
 
 func (r *localCompletionRaceTaskRepository) FindByID(ctx context.Context, id string) (*model.Task, error) {
@@ -600,7 +642,7 @@ func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testin
 	}
 }
 
-func TestCompleteLocalTask_ExecutionCASLossRollsBackWithoutReleaseOrDispatch(t *testing.T) {
+func TestCompleteLocalTask_ExecutionCASLossWithInconsistentTerminalStateConflictsWithoutSideEffects(t *testing.T) {
 	for _, success := range []bool{true, false} {
 		name := "failure"
 		if success {
@@ -630,8 +672,8 @@ func TestCompleteLocalTask_ExecutionCASLossRollsBackWithoutReleaseOrDispatch(t *
 			executionID := *task.CurrentExecutionID
 			svc.repo = &executionCASLossRepository{Repository: repo, executionID: executionID}
 			result := &agent.ExecutionResult{Success: success, Error: "agent failed"}
-			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrStaleTaskExecution) {
-				t.Fatalf("CompleteLocalTask error = %v, want ErrStaleTaskExecution", err)
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("CompleteLocalTask error = %v, want ErrTaskCompletionConflict", err)
 			}
 
 			persistedTask, err := repo.Tasks().FindByID(ctx, taskID)
@@ -863,6 +905,38 @@ func TestCompleteLocalTask_AcknowledgesSameTerminalDuplicateAndRejectsConflict(t
 	}
 }
 
+func TestCompleteLocalTaskRejectsInvalidStoredExecutionResultAsConflict(t *testing.T) {
+	for _, suffix := range []string{" trailing", ` {"second":true}`} {
+		t.Run(suffix, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			claimed, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || claimed.CurrentExecutionID == nil {
+				t.Fatalf("claimed task = %#v, %v", claimed, err)
+			}
+			executionID := *claimed.CurrentExecutionID
+			result := &agent.ExecutionResult{Success: false, Error: "provider unavailable"}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			stored, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.repo = &executionResultOverrideRepository{
+				Repository: repo, executionID: executionID,
+				result: append(append([]byte(nil), stored.Result...), suffix...),
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("retry with corrupt stored result = %v, want ErrTaskCompletionConflict", err)
+			}
+		})
+	}
+}
+
 func TestCompleteLocalTaskAcceptsSameOriginalResultAfterServerNormalization(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -908,6 +982,50 @@ func TestCompleteLocalTaskAcceptsSameOriginalResultAfterServerNormalization(t *t
 	}
 }
 
+func TestCompleteLocalTaskConcurrentIdenticalOutcomeAcknowledgesBothCallers(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		for _, loseWithCASErr := range []bool{false, true} {
+			name := fmt.Sprintf("success=%v/CAS-error=%v", success, loseWithCASErr)
+			t.Run(name, func(t *testing.T) {
+				svc, baseRepo := setupTaskServiceWithEnqueuer(t)
+				ctx := context.Background()
+				userID := uuid.NewString()
+				projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
+				taskID := claimOneLocal(t, svc, baseRepo, userID, projectID)
+				if success {
+					addLocalSeednoteDeliverables(t, baseRepo, taskID)
+				}
+				claimed, err := baseRepo.Tasks().FindByID(ctx, taskID)
+				if err != nil || claimed.CurrentExecutionID == nil {
+					t.Fatalf("claimed task = %#v, %v", claimed, err)
+				}
+				executionID := *claimed.CurrentExecutionID
+				raceRepo := newLocalCompletionRaceRepository(baseRepo, loseWithCASErr)
+				svc.repo = raceRepo
+				newResult := func() *agent.ExecutionResult {
+					return &agent.ExecutionResult{
+						Success: success, Error: "same-error", LogText: "same-result",
+						ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "same", InputTokens: 11}},
+						CostStatus: agent.CostStatusReconciled,
+					}
+				}
+
+				errCh := make(chan error, 2)
+				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, executionID, newResult()) }()
+				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, executionID, newResult()) }()
+				for range 2 {
+					if err := <-errCh; err != nil {
+						t.Fatalf("identical concurrent completion = %v, want nil", err)
+					}
+				}
+				if calls := raceRepo.tasks.race.finalizeCalls.Load(); calls != 2 {
+					t.Fatalf("finalize calls = %d, want 2 competing callers", calls)
+				}
+			})
+		}
+	}
+}
+
 func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testing.T) {
 	for _, success := range []bool{true, false} {
 		name := "failure"
@@ -944,20 +1062,20 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				result := result
 				go func() { errCh <- completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, result) }()
 			}
-			var successCount, staleCount int
+			var successCount, conflictCount int
 			for range results {
 				err := <-errCh
 				switch {
 				case err == nil:
 					successCount++
-				case errors.Is(err, ErrStaleTaskExecution):
-					staleCount++
+				case errors.Is(err, ErrTaskCompletionConflict):
+					conflictCount++
 				default:
 					t.Fatalf("concurrent CompleteLocalTask: %v", err)
 				}
 			}
-			if successCount != 1 || staleCount != 1 {
-				t.Fatalf("completion results = success:%d stale:%d, want 1/1", successCount, staleCount)
+			if successCount != 1 || conflictCount != 1 {
+				t.Fatalf("completion results = success:%d conflict:%d, want 1/1", successCount, conflictCount)
 			}
 
 			got, err := baseRepo.Tasks().FindByID(ctx, taskID)

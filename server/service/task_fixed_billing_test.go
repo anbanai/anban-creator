@@ -319,6 +319,46 @@ func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
 	}
 }
 
+func TestConcurrentIdenticalLocalFailureEnqueuesOneBillingSettlement(t *testing.T) {
+	ctx := context.Background()
+	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "overlapping local failure", Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	task := tasks[0]
+	seedHistoricalManagedLocalExecution(t, f, task)
+	executionID := *task.CurrentExecutionID
+	svc.repo = newLocalCompletionRaceRepository(f.repo, true)
+	newResult := func() *agent.ExecutionResult {
+		return &agent.ExecutionResult{
+			Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
+		}
+	}
+	errs := make(chan error, 2)
+	go func() { errs <- svc.CompleteLocalTask(ctx, task.ID, executionID, newResult()) }()
+	go func() { errs <- svc.CompleteLocalTask(ctx, task.ID, executionID, newResult()) }()
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("identical concurrent failure = %v, want nil", err)
+		}
+	}
+
+	settlements, err := f.repo.Billing().ListSettlementsByTask(ctx, task.ID)
+	if err != nil || len(settlements) != 1 || settlements[0].Action != model.BillingSettlementActionReverseTask {
+		t.Fatalf("billing settlements = %#v, %v; want one reversal", settlements, err)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("ProcessSettlementOutbox=%d, %v; want one", processed, err)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 0 {
+		t.Fatalf("duplicate ProcessSettlementOutbox=%d, %v; want zero", processed, err)
+	}
+}
+
 func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)

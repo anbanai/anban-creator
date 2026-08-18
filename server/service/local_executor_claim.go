@@ -275,7 +275,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 				Strs("missing_files", validation.Missing).
 				Msg(outcome.errorMessage)
 		}
-		return s.failLocalTask(ctx, task, executionID, outcome.result, outcome.billingReason, outcome.errorMessage)
+		return s.failLocalTask(ctx, task, executionID, outcome)
 	}
 
 	// Success. Publishing model for local: the desktop agent publishes via the
@@ -313,14 +313,11 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		}
 		return s.persistTerminalBillingInTx(ctx, tx, task, execution, model.TaskBillingTerminalCompleted, true)
 	})
-	if err != nil {
-		if errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
-			return ErrStaleTaskExecution
-		}
+	if err != nil && !errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
 		return fmt.Errorf("finalize local task as completed: %w", err)
 	}
-	if !swapped {
-		return ErrStaleTaskExecution
+	if err != nil || !swapped {
+		return s.confirmLocalCompletionAfterCASLoss(ctx, taskID, executionID, outcome)
 	}
 	s.recordTerminalProviderCost(ctx, task, result)
 	// Task-admission charges remain posted on success. Provider usage is recorded
@@ -391,6 +388,10 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 }
 
 func (s *TaskService) confirmLocalCompletionRetry(ctx context.Context, task *model.Task, executionID string, outcome *localCompletionOutcome) error {
+	if task == nil || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
+		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return ErrStaleTaskExecution
+	}
 	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed {
 		return ErrTaskCompletionConflict
 	}
@@ -422,7 +423,7 @@ func (s *TaskService) confirmLocalCompletionRetry(ctx context.Context, task *mod
 	for _, stored := range [][]byte{execution.Result, []byte(*task.Result)} {
 		equal, err := semanticJSONEqual(stored, []byte(publicResult))
 		if err != nil {
-			return fmt.Errorf("compare terminal local execution result: %w", err)
+			return ErrTaskCompletionConflict
 		}
 		if !equal {
 			return ErrTaskCompletionConflict
@@ -432,6 +433,17 @@ func (s *TaskService) confirmLocalCompletionRetry(ctx context.Context, task *mod
 		return ErrTaskCompletionConflict
 	}
 	return nil
+}
+
+func (s *TaskService) confirmLocalCompletionAfterCASLoss(ctx context.Context, taskID, executionID string, outcome *localCompletionOutcome) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrStaleTaskExecution
+	}
+	if err != nil {
+		return fmt.Errorf("reload local task after completion CAS loss: %w", err)
+	}
+	return s.confirmLocalCompletionRetry(ctx, task, executionID, outcome)
 }
 
 func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, userID string) error {
@@ -492,7 +504,10 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 	return nil
 }
 
-func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, executionID string, result *agent.ExecutionResult, reason, errMsg string) error {
+func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, executionID string, outcome *localCompletionOutcome) error {
+	result := outcome.result
+	reason := outcome.billingReason
+	errMsg := outcome.errorMessage
 	result.Success = false
 	result.Error = errMsg
 	result.TerminalReason = reason
@@ -517,14 +532,11 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 		}
 		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
 	})
-	if err != nil {
-		if errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
-			return ErrStaleTaskExecution
-		}
+	if err != nil && !errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
 		return fmt.Errorf("finalize local task as failed: %w", err)
 	}
-	if !swapped {
-		return ErrStaleTaskExecution
+	if err != nil || !swapped {
+		return s.confirmLocalCompletionAfterCASLoss(ctx, task.ID, executionID, outcome)
 	}
 	s.recordTerminalProviderCost(ctx, task, result)
 	s.releaseSlotAndDispatch(ctx, task)

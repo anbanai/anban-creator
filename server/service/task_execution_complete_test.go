@@ -158,6 +158,55 @@ func TestCompleteCloudExecutionRejectsConflictingDuplicateResult(t *testing.T) {
 	}
 }
 
+func TestSemanticJSONEqualRequiresExactlyOneJSONValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		left      string
+		right     string
+		wantEqual bool
+		wantErr   bool
+	}{
+		{name: "whitespace and object key order", left: "  {\"large\":9007199254740993,\"nested\":{\"a\":1}}\n", right: "{\"nested\":{\"a\":1},\"large\":9007199254740993}", wantEqual: true},
+		{name: "UseNumber preserves numeric spelling", left: "{\"value\":1}", right: "{\"value\":1.0}"},
+		{name: "left trailing garbage", left: "{\"value\":1} trailing", right: "{\"value\":1}", wantErr: true},
+		{name: "right trailing garbage", left: "{\"value\":1}", right: "{\"value\":1} trailing", wantErr: true},
+		{name: "left second JSON value", left: "{\"value\":1} {\"second\":true}", right: "{\"value\":1}", wantErr: true},
+		{name: "right second JSON value", left: "{\"value\":1}", right: "{\"value\":1} {\"second\":true}", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			equal, err := semanticJSONEqual([]byte(test.left), []byte(test.right))
+			if equal != test.wantEqual || (err != nil) != test.wantErr {
+				t.Fatalf("semanticJSONEqual = %v, %v; want equal=%v error=%v", equal, err, test.wantEqual, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionRejectsInvalidStoredExecutionResultAsConflict(t *testing.T) {
+	for _, suffix := range []string{" trailing", ` {"second":true}`} {
+		t.Run(suffix, func(t *testing.T) {
+			svc, repo, db, _, execution := setupCloudCompletionTestWithDB(t, false)
+			ctx := context.Background()
+			result := &agent.ExecutionResult{Success: false, Error: "provider unavailable", RemoteArtifacts: true}
+			if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			stored, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			corrupt := append(append([]byte(nil), stored.Result...), suffix...)
+			if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).UpdateColumn("result", corrupt).Error; err != nil {
+				t.Fatalf("corrupt stored result: %v", err)
+			}
+			if err := svc.CompleteCloudExecution(ctx, execution.ID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("retry with corrupt stored result = %v, want ErrTaskCompletionConflict", err)
+			}
+		})
+	}
+}
+
 func TestCompleteCloudExecutionAcceptsSameOriginalResultAfterServerNormalization(t *testing.T) {
 	for _, test := range []struct {
 		name          string

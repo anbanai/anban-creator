@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"sync"
@@ -86,7 +87,7 @@ func ensureCompletionOutcomeMatches(execution *model.TaskExecution, terminal, re
 	}
 	equal, err := semanticJSONEqual(execution.Result, encoded)
 	if err != nil {
-		return fmt.Errorf("compare completion retry result: %w", err)
+		return ErrTaskCompletionConflict
 	}
 	if !equal {
 		return ErrTaskCompletionConflict
@@ -100,6 +101,13 @@ func semanticJSONEqual(left, right []byte) (bool, error) {
 		decoder := json.NewDecoder(strings.NewReader(string(data)))
 		decoder.UseNumber()
 		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("multiple JSON values")
+			}
 			return nil, err
 		}
 		return value, nil
