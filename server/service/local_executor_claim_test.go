@@ -472,6 +472,18 @@ func claimOneLocalMontage(t *testing.T, svc *TaskService, repo repository.Reposi
 	return task.ID
 }
 
+func completeLocalForCurrentExecution(ctx context.Context, svc *TaskService, repo repository.Repository, taskID string, result *agent.ExecutionResult) error {
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	executionID := ""
+	if task != nil && task.CurrentExecutionID != nil {
+		executionID = *task.CurrentExecutionID
+	}
+	return svc.CompleteLocalTask(ctx, taskID, executionID, result)
+}
+
 // TestCompleteLocalTask_Success verifies a claimed local task transitions to
 // completed (terminal) and records completed_at — the core fix for the
 // "local tasks never complete" gap.
@@ -483,7 +495,7 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -499,6 +511,57 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	}
 }
 
+func TestCompleteLocalTask_ExplicitCurrentExecutionSucceeds(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%v err=%v", task, err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed", got.Status)
+	}
+}
+
+func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%v err=%v", task, err)
+	}
+	oldExecutionID := *task.CurrentExecutionID
+	newExecutionID := uuid.New().String()
+	task.CurrentExecutionID = &newExecutionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, oldExecutionID, &agent.ExecutionResult{Success: false, Error: "stale result"}); err != nil {
+		t.Fatalf("CompleteLocalTask stale result: %v", err)
+	}
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TaskStatusRunning || got.Result != nil || got.CompletedAt != nil {
+		t.Fatalf("stale completion changed replacement task: status=%q result=%v completed_at=%v", got.Status, got.Result, got.CompletedAt)
+	}
+}
+
 func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -509,7 +572,7 @@ func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: taskID, Role: model.FileRoleOther, FileName: "CLAUDE.md", FilePath: "CLAUDE.md"}); err != nil {
 		t.Fatalf("create runtime file: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -539,7 +602,7 @@ func TestCompleteLocalTask_MontageRejectsZeroByteDeliverables(t *testing.T) {
 	if err := repo.TaskFiles().BatchCreate(ctx, files); err != nil {
 		t.Fatalf("create zero-byte montage files: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -563,7 +626,7 @@ func TestCompleteLocalTask_NestedAgentOnlyFails(t *testing.T) {
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -588,7 +651,7 @@ func TestCompleteLocalTask_Failure(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: false, Error: "boom"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "boom"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -611,7 +674,7 @@ func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, nil); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, nil); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -660,7 +723,7 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 		t.Fatalf("create cloud task: %v", err)
 	}
 
-	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, &agent.ExecutionResult{Success: true}); err != nil {
+	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, "", &agent.ExecutionResult{Success: true}); err != nil {
 		t.Fatalf("CompleteLocalTask on cloud task: %v", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, cloudTask.ID)
@@ -682,11 +745,11 @@ func TestCompleteLocalTask_Idempotent(t *testing.T) {
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true}); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
 	// Second call must not error and must not flip status.
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); err != nil {
 		t.Fatalf("second complete: %v", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
@@ -732,7 +795,7 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 			errCh := make(chan error, len(results))
 			for _, result := range results {
 				result := result
-				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, result) }()
+				go func() { errCh <- completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, result) }()
 			}
 			for range results {
 				if err := <-errCh; err != nil {
@@ -768,7 +831,7 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "late", InputTokens: 99}},
 				CostStatus: agent.CostStatusUnreconciled,
 			}
-			if err := svc.CompleteLocalTask(ctx, taskID, late); err != nil {
+			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); err != nil {
 				t.Fatalf("idempotent retry: %v", err)
 			}
 			retried, err := baseRepo.Tasks().FindByID(ctx, taskID)

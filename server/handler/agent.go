@@ -371,8 +371,9 @@ type agentProgressRequest struct {
 }
 
 type agentCompleteRequest struct {
-	TaskID string                       `json:"task_id"`
-	Result *serveragent.ExecutionResult `json:"result"`
+	TaskID      string                       `json:"task_id"`
+	ExecutionID string                       `json:"execution_id"`
+	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
 const agentPackContractVersion = 2
@@ -540,12 +541,31 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	executionID := h.authenticatedExecutionID(c)
+	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
+	executionID := authenticatedExecutionID
+	if authenticatedExecutionID != "" {
+		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+	} else {
+		if requestedExecutionID == "" {
+			return Error(c, fiber.StatusBadRequest, "execution_id is required")
+		}
+		task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
+		if err != nil {
+			return Error(c, fiber.StatusForbidden, "task access denied")
+		}
+		if err := h.taskSvc.ValidateLocalAgentExecutionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+		executionID = requestedExecutionID
+	}
 	var err error
-	if executionID != "" {
+	if authenticatedExecutionID != "" {
 		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
 	} else {
-		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, req.Result)
+		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, executionID, req.Result)
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrStaleTaskExecution) {

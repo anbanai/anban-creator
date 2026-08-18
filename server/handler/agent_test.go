@@ -362,6 +362,95 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 	}
 }
 
+func TestAgentAPIKeyCompletionRequiresCurrentExecutionWithoutSideEffects(t *testing.T) {
+	app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: `{"task_id":"` + task.ID + `","result":{"success":false,"error":"late"}}`},
+		{name: "stale", body: `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","result":{"success":false,"error":"late"}}`},
+		{name: "replaced", body: `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"late"}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "replaced" {
+				replacement := uuid.NewString()
+				task.CurrentExecutionID = &replacement
+				if err := repo.Tasks().Update(context.Background(), task); err != nil {
+					t.Fatal(err)
+				}
+			}
+			req := agentJSONRequest("/agent/complete", tt.body)
+			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode < fiber.StatusBadRequest || resp.StatusCode >= fiber.StatusInternalServerError {
+				t.Fatalf("status = %d, want client error", resp.StatusCode)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Status != model.TaskStatusRunning || persisted.Result != nil || persisted.CompletedAt != nil {
+				t.Fatalf("rejected completion changed task: status=%q result=%v completed_at=%v", persisted.Status, persisted.Result, persisted.CompletedAt)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedExecution.Status != model.TaskExecutionRunning || persistedExecution.CompletedAt != nil {
+				t.Fatalf("rejected completion changed execution: status=%q completed_at=%v", persistedExecution.Status, persistedExecution.CompletedAt)
+			}
+		})
+	}
+}
+
+func TestAgentExecutionJWTRejectsConflictingCompletionBodyExecution(t *testing.T) {
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","result":{"success":false,"error":"must reject"}}`
+	req := agentJSONRequest("/agent/complete", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.TaskStatusRunning || persisted.Result != nil || persisted.CompletedAt != nil {
+		t.Fatalf("conflicting JWT completion changed task: status=%q result=%v completed_at=%v", persisted.Status, persisted.Result, persisted.CompletedAt)
+	}
+}
+
+func TestAgentAPIKeyCurrentLocalCompletionFailureFinalizesTask(t *testing.T) {
+	app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed"}}`
+	req := agentJSONRequest("/agent/complete", body)
+	req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.TaskStatusFailed || persisted.ErrorMessage != "agent failed" {
+		t.Fatalf("task = status:%q error:%q, want failed/agent failed", persisted.Status, persisted.ErrorMessage)
+	}
+}
+
 func TestAgentProgressResultPayloadCannotWriteTerminalEvidence(t *testing.T) {
 	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
 	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`

@@ -294,10 +294,10 @@ func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
 	task := tasks[0]
 	seedHistoricalManagedLocalExecution(t, f, task)
 	result := &agent.ExecutionResult{Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError}
-	if err := svc.CompleteLocalTask(ctx, task.ID, result); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, task.ID, result); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
 		t.Fatalf("duplicate CompleteLocalTask: %v", err)
 	}
 	found, err := f.repo.Tasks().FindByID(ctx, task.ID)
@@ -337,7 +337,7 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	}); err != nil {
 		t.Fatalf("create durable partial output: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, task.ID, &agent.ExecutionResult{
+	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, &agent.ExecutionResult{
 		Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
 	}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)

@@ -88,6 +88,7 @@ fn claim_body() -> ClaimBody<'static> {
 #[derive(Serialize)]
 struct CompleteBody<'a> {
     task_id: &'a str,
+    execution_id: &'a str,
     result: FailureResult<'a>,
 }
 
@@ -159,9 +160,10 @@ async fn claim_once(
     Ok(envelope.data)
 }
 
-fn failure_complete_payload<'a>(task_id: &'a str, error: &'a str) -> CompleteBody<'a> {
+fn failure_complete_payload<'a>(task_id: &'a str, execution_id: &'a str, error: &'a str) -> CompleteBody<'a> {
     CompleteBody {
         task_id,
+        execution_id,
         result: FailureResult {
             success: false,
             error,
@@ -175,13 +177,14 @@ async fn complete_failed_task(
     api_base: &str,
     api_key: &str,
     task_id: &str,
+    execution_id: &str,
     error: &str,
 ) -> Result<(), String> {
     let url = format!("{}/agent/complete", api_base.trim_end_matches('/'));
     let resp = client
         .post(&url)
         .bearer_auth(api_key)
-        .json(&failure_complete_payload(task_id, error))
+        .json(&failure_complete_payload(task_id, execution_id, error))
         .send()
         .await
         .map_err(|e| format!("complete request failed: {e}"))?;
@@ -364,6 +367,7 @@ pub async fn run_loop(
                         &snapshot.api_base,
                         &snapshot.api_key,
                         &task_cfg.task_id,
+                        &task_cfg.execution_id,
                         &error,
                     )
                     .await
@@ -435,10 +439,11 @@ mod tests {
 
     #[test]
     fn failure_complete_payload_marks_local_task_failed() {
-        let body = failure_complete_payload("task-1", "spawn failed");
+        let body = failure_complete_payload("task-1", "execution-1", "spawn failed");
         let json = serde_json::to_value(&body).expect("serialize payload");
 
         assert_eq!(json["task_id"], "task-1");
+        assert_eq!(json["execution_id"], "execution-1");
         assert_eq!(json["result"]["success"], false);
         assert_eq!(json["result"]["error"], "spawn failed");
     }

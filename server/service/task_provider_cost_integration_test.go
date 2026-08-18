@@ -52,14 +52,14 @@ func TestCompleteLocalTaskRecordsTerminalProviderCostOnce(t *testing.T) {
 		{Provider: "volcengine_ark", Model: "doubao-seed-evolving", InputTokens: 10, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
 		{Provider: "volcengine_ark", Model: "doubao-seed-2-1-turbo-260628", InputTokens: 7, OutputTokens: 1},
 	}}
-	if err := svc.CompleteLocalTask(ctx, taskID, result); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); err != nil {
 		t.Fatal(err)
 	}
 	terminalExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
 	if err != nil || terminalExecution.Status != model.TaskExecutionSucceeded || terminalExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || terminalExecution.CleanupStatus != model.TaskExecutionCleanupDone || len(terminalExecution.Result) == 0 {
 		t.Fatalf("local execution terminal state = %#v err=%v", terminalExecution, err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, result); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); err != nil {
 		t.Fatal(err)
 	}
 	events, err := costRepo.ListEventsByExecution(ctx, executionID)
@@ -86,7 +86,7 @@ func TestCompleteLocalTaskRollsBackWhenDurableExecutionIsMissing(t *testing.T) {
 	if err := repo.Tasks().Update(ctx, claimed); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true}); err == nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true}); err == nil {
 		t.Fatal("missing durable execution did not fail atomic finalization")
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
@@ -108,7 +108,7 @@ func TestCompleteLocalTaskMissingUsageMarksUnreconciled(t *testing.T) {
 	costSvc := NewProviderCostService(costRepo, providerCostBundleWithTurbo())
 	svc.SetProviderCostService(costSvc)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: false, Error: "provider failed"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "provider failed"}); err != nil {
 		t.Fatal(err)
 	}
 	status, err := costRepo.FindExecutionCostStatus(ctx, *claimed.CurrentExecutionID)
@@ -134,7 +134,7 @@ func TestCompleteLocalTaskUnpricedUsageMarksUnreconciled(t *testing.T) {
 	result := &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
 		Provider: "moonshot", Model: "unpriced-model", InputTokens: 1,
 	}}}
-	if err := svc.CompleteLocalTask(ctx, taskID, result); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); err != nil {
 		t.Fatal(err)
 	}
 	executionID := *claimed.CurrentExecutionID
@@ -157,7 +157,7 @@ func TestCompleteLocalTaskCostFailureDoesNotChangeTerminalOutcome(t *testing.T) 
 	addLocalSeednoteDeliverables(t, repo, taskID)
 	svc.SetProviderCostService(NewProviderCostService(failingExecutionCostRepository{BillingCostRepository: baseCostRepo}, providerCostBundleWithTurbo()))
 
-	err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
+	err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
 		Provider: "volcengine_ark", Model: "doubao-seed-evolving", InputTokens: 1,
 	}}})
 	if err != nil {
