@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func createStructuredProgressTask(t *testing.T, repo Repository) *model.Task {
@@ -61,12 +63,13 @@ func TestTaskRepositoryAdvanceStructuredProgressRejectsLowerAndDuplicateEvents(t
 }
 
 func TestTaskRepositoryAdvanceStructuredProgressIsAtomicHighWater(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupConcurrentStructuredProgressDB(t)
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(4)
 	repo := New(db)
 	task := createStructuredProgressTask(t, repo)
 	items := []struct {
@@ -77,7 +80,11 @@ func TestTaskRepositoryAdvanceStructuredProgressIsAtomicHighWater(t *testing.T) 
 		{sequence: 6, payload: model.ProgressPayload{Stage: "writing", State: "complete", Title: "朋友圈正文", Percent: 55}},
 	}
 	start := make(chan struct{})
-	errs := make(chan error, len(items))
+	results := make(chan struct {
+		sequence int
+		advanced bool
+		err      error
+	}, len(items))
 	var wg sync.WaitGroup
 	for _, item := range items {
 		item := item
@@ -85,17 +92,28 @@ func TestTaskRepositoryAdvanceStructuredProgressIsAtomicHighWater(t *testing.T) 
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, err := repo.Tasks().AdvanceStructuredProgress(context.Background(), task.ID, *task.CurrentExecutionID, item.sequence, item.payload)
-			errs <- err
+			advanced, _, err := repo.Tasks().AdvanceStructuredProgress(context.Background(), task.ID, *task.CurrentExecutionID, item.sequence, item.payload)
+			results <- struct {
+				sequence int
+				advanced bool
+				err      error
+			}{item.sequence, advanced, err}
 		}()
 	}
 	close(start)
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
+	close(results)
+	var highAdvanced bool
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
 		}
+		if result.sequence == 10 {
+			highAdvanced = result.advanced
+		}
+	}
+	if !highAdvanced {
+		t.Fatal("high sequence event did not advance")
 	}
 	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
@@ -104,6 +122,19 @@ func TestTaskRepositoryAdvanceStructuredProgressIsAtomicHighWater(t *testing.T) 
 	if persisted.ProgressSequence != 10 || persisted.Progress != 88 || persisted.LatestProgress.Data().Percent != 88 || persisted.LatestProgress.Data().Stage != "quality_review" {
 		t.Fatalf("concurrent high water = sequence:%d progress:%d payload:%#v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data())
 	}
+}
+
+func setupConcurrentStructuredProgressDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open concurrent test db: %v", err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate concurrent test db: %v", err)
+	}
+	return db
 }
 
 func TestTaskRepositoryAdvanceStructuredProgressPersistsZeroPercent(t *testing.T) {

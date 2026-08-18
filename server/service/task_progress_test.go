@@ -158,12 +158,27 @@ func TestUpdateProgressFromAgentRejectsStaleExecutionOrTerminalTaskWithoutPublis
 				t.Fatalf("rejected progress mutated task: sequence=%d progress=%d latest=%#v log=%q",
 					persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog)
 			}
-			select {
-			case message := <-subscriber.Events():
-				t.Fatalf("rejected progress published structured SSE payload: %s", message.Payload)
-			case <-time.After(50 * time.Millisecond):
-			}
+			assertNoProgressEvent(t, subscriber)
 		})
+	}
+}
+
+func assertNoProgressEvent(t *testing.T, subscriber *ProgressSubscriber) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		select {
+		case message := <-subscriber.Events():
+			t.Fatalf("rejected progress published structured SSE payload: %s", message.Payload)
+		case <-poll.C:
+			// Keep polling until the bounded observation window expires so an
+			// asynchronously delivered publish cannot escape the assertion.
+		case <-deadline.C:
+			return
+		}
 	}
 }
 
