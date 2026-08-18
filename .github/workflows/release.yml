@@ -5,21 +5,122 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release tag version without the v prefix
+        required: true
+        type: string
 
-permissions:
-  contents: write
+concurrency:
+  group: dsh-release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  dsh-desktop-acceptance:
+    name: Packaged DSH Desktop release gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
+      - name: Checkout pinned DSH Desktop
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: anywhere-labs/deepseek-harness-desktop
+          ref: 4f68147091e585aaa1d815f99d30a657b3842d7c
+          path: _dsh-desktop
+          submodules: recursive
+
+      - name: Verify pinned DSH Desktop commit
+        run: node -e "const {execFileSync}=require('node:child_process'); const sha=execFileSync('git',['rev-parse','HEAD'],{cwd:'_dsh-desktop',encoding:'utf8'}).trim(); if(sha!=='4f68147091e585aaa1d815f99d30a657b3842d7c') process.exit(1)"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
+
+      - name: Install DSH plugin dependencies
+        working-directory: plugins
+        run: pnpm install --frozen-lockfile
+
+      - name: Build DSH plugin
+        working-directory: plugins
+        run: pnpm run build
+
+      - name: Validate release version contract
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: node -e "const {appendFileSync}=require('node:fs'); const event=process.env.GITHUB_EVENT_NAME; const ref=process.env.GITHUB_REF_NAME; const version=event==='workflow_dispatch'?process.env.REQUESTED_VERSION:ref.startsWith('v')?ref.slice(1):''; if(!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)||process.env.GITHUB_REF_TYPE!=='tag'||ref!=='v'+version) process.exit(1); appendFileSync(process.env.GITHUB_OUTPUT,'VERSION='+version+'\n')"
+
+      - name: Install pinned DSH Desktop dependencies
+        working-directory: _dsh-desktop
+        run: corepack yarn install --immutable
+
+      - name: Build unsigned packaged DSH Desktop
+        working-directory: _dsh-desktop
+        run: corepack yarn package:dir
+
+      - name: Pack exact local DSH plugin
+        working-directory: plugins
+        run: |
+          node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
+          pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
+
+      - name: Install exact plugin through public DSH
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz
+        run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
+
+      - name: Launch packaged DSH Desktop application
+        env:
+          DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
+          DSH_DESKTOP_STATE_DIR: ${{ runner.temp }}/anban-dsh-desktop-state
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node scripts/dsh-desktop-acceptance.mjs launch
+
+      - name: Validate packaged Desktop profile exports and Skill catalogs
+        env:
+          DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
+        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop
+
+  release:
+    needs: dsh-desktop-acceptance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
           cache: true
@@ -27,51 +128,228 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: agent-ts/package-lock.json
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.19.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
 
       - name: Run tests
         run: go test -v ./...
 
-      - name: Set version
+      - name: Validate release version contract
         id: version
-        run: |
-          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          mkdir -p bin
-
-      - name: Validate DSH package version
         env:
-          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          package_version=$(node -p "require('./plugins/package.json').version")
-          test "$TAG_VERSION" = "$package_version"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            test "$GITHUB_REF_TYPE" = "tag"
+            release_tag="$GITHUB_REF_NAME"
+            version="${release_tag#v}"
+            test "$release_tag" = "v${version}"
+          else
+            test -n "$REQUESTED_VERSION"
+            version="$REQUESTED_VERSION"
+            release_tag="v${version}"
+            test "$GITHUB_REF_TYPE" = "tag"
+            test "$GITHUB_REF_NAME" = "$release_tag"
+          fi
 
-      - name: Pack DSH plugin
+          node -e 'const version = process.argv[1]; if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)) process.exit(1)' "$version"
+          git rev-parse --verify "refs/tags/${release_tag}^{commit}"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${release_tag}^{commit}")"
+          echo "VERSION=$version" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Validate every DSH plugin version location and changelog
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          node <<'NODE'
+          const { readFileSync } = require('node:fs')
+
+          const version = process.env.VERSION
+          const locations = [
+            ['plugins/package.json', JSON.parse(readFileSync('plugins/package.json', 'utf8')).version],
+            ['plugins/.claude-plugin/plugin.json', JSON.parse(readFileSync('plugins/.claude-plugin/plugin.json', 'utf8')).version],
+            ['plugins/.codex-plugin/plugin.json', JSON.parse(readFileSync('plugins/.codex-plugin/plugin.json', 'utf8')).version],
+          ]
+          const marketplace = JSON.parse(
+            readFileSync('plugins/.claude-plugin/marketplace.json', 'utf8'),
+          )
+          const marketplacePlugin = marketplace.plugins?.find(
+            (plugin) => plugin.name === 'anban',
+          )
+          locations.push([
+            'plugins/.claude-plugin/marketplace.json',
+            marketplacePlugin?.version,
+          ])
+
+          for (const [path, declared] of locations) {
+            if (declared !== version) {
+              throw new Error(`${path} version ${declared ?? '<missing>'} does not match ${version}`)
+            }
+          }
+
+          const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          const changelog = readFileSync('plugins/CHANGELOG.md', 'utf8')
+          const heading = new RegExp(`^## \\[${escaped}\\](?: - .+)?$`, 'gm')
+          if ([...changelog.matchAll(heading)].length !== 1) {
+            throw new Error(`plugins/CHANGELOG.md must contain exactly one ${version} release heading`)
+          }
+          NODE
+
+      - name: Install DSH plugin dependencies
         working-directory: plugins
-        run: pnpm install --frozen-lockfile && pnpm pack --pack-destination ../bin
+        run: pnpm install --frozen-lockfile
 
-      - name: Verify DSH package tarball
+      - name: Type-check and test DSH plugin
+        working-directory: plugins
+        run: |
+          pnpm run typecheck
+          pnpm run test
+
+      - name: Build DSH plugin
+        working-directory: plugins
+        run: pnpm run build
+
+      - name: Verify DSH plugin source
+        working-directory: plugins
+        run: pnpm run verify:source
+
+      - name: Pack DSH plugin exactly once
+        id: pack
+        working-directory: plugins
         env:
-          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          PACK_ROOT: ${{ github.workspace }}/release/dsh
         run: |
           set -euo pipefail
-          expected_tarball="bin/anban-dsh-plugin-${TAG_VERSION}.tgz"
-          test -f "$expected_tarball"
-          tarball_count=$(find bin -maxdepth 1 -type f -name 'anban-dsh-plugin-*.tgz' | wc -l | tr -d ' ')
-          test "$tarball_count" = "1"
+          mkdir -p "$PACK_ROOT"
+          pnpm pack --json --pack-destination "$PACK_ROOT" > "$PACK_ROOT/pack.json"
+          node --input-type=module <<'NODE'
+          import { appendFile, lstat, readFile, readdir } from 'node:fs/promises'
+          import { basename, isAbsolute, join, resolve } from 'node:path'
+          import { parsePackResult } from './dsh/scripts/package-integrity.mjs'
+
+          const packRoot = resolve(process.env.PACK_ROOT)
+          const metadataPath = join(packRoot, 'pack.json')
+          const result = parsePackResult(await readFile(metadataPath, 'utf8'))
+          if (result.name !== '@anban/dsh-plugin' || result.version !== process.env.VERSION) {
+            throw new Error('pnpm pack metadata does not match the release contract')
+          }
+          const tarball = resolve(
+            isAbsolute(result.filename)
+              ? result.filename
+              : join(process.cwd(), result.filename),
+          )
+          if (tarball !== join(packRoot, basename(result.filename))) {
+            throw new Error('pnpm pack returned a tarball outside the controlled destination')
+          }
+          const tarballs = (await readdir(packRoot)).filter((name) => name.endsWith('.tgz'))
+          if (tarballs.length !== 1 || join(packRoot, tarballs[0]) !== tarball) {
+            throw new Error('controlled destination must contain exactly the reported tarball')
+          }
+          const status = await lstat(tarball)
+          if (!status.isFile() || status.isSymbolicLink()) {
+            throw new Error('reported DSH tarball is not a regular file')
+          }
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `tarball=${tarball}\nfilename=${basename(tarball)}\nmetadata=${metadataPath}\n`,
+          )
+          NODE
+
+      - name: Verify exact DSH package tarball
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          PACK_METADATA: ${{ steps.pack.outputs.metadata }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, rm } from 'node:fs/promises'
+          import { join } from 'node:path'
+          import {
+            inspectAndExtractArchive,
+            parsePackResult,
+          } from './plugins/dsh/scripts/package-integrity.mjs'
+
+          const result = parsePackResult(await readFile(process.env.PACK_METADATA, 'utf8'))
+          const extractionRoot = join(process.env.RUNNER_TEMP, 'verified-dsh-package')
+          await rm(extractionRoot, { force: true, recursive: true })
+          const inspected = await inspectAndExtractArchive({
+            archivePath: process.env.TARBALL,
+            destination: extractionRoot,
+            executablePaths: ['dsh/bin/anban-dsh.js'],
+            expectedFiles: result.files,
+          })
+          const manifest = JSON.parse(
+            await readFile(join(extractionRoot, 'package', 'package.json'), 'utf8'),
+          )
+          if (
+            manifest.name !== '@anban/dsh-plugin' ||
+            manifest.version !== process.env.VERSION ||
+            inspected.files.length !== result.files.length
+          ) {
+            throw new Error('verified DSH tarball contents do not match the release')
+          }
+          NODE
+
+      - name: Smoke-test exact local DSH package
+        working-directory: plugins
+        env:
+          PACK_METADATA: ${{ steps.pack.outputs.metadata }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { copyFile, readFile } from 'node:fs/promises'
+          import { basename, dirname, join } from 'node:path'
+          import { parsePackResult } from './dsh/scripts/package-integrity.mjs'
+          import {
+            portableCommand,
+            runProfileCommand,
+            smokeProfile,
+          } from './dsh/scripts/smoke-profile.mjs'
+
+          const result = parsePackResult(await readFile(process.env.PACK_METADATA, 'utf8'))
+          await smokeProfile({
+            resolvePnpmCommand: async () => portableCommand('prepacked-artifact'),
+            runCommand: async (command, args, options) => {
+              if (options.label !== 'pnpm pack') {
+                return runProfileCommand(command, args, options)
+              }
+              const smokeRoot = dirname(options.env.DSH_HOME)
+              const filename = basename(process.env.TARBALL)
+              await copyFile(process.env.TARBALL, join(smokeRoot, filename))
+              return {
+                signal: null,
+                status: 0,
+                stderr: '',
+                stdout: JSON.stringify({
+                  name: result.name,
+                  version: result.version,
+                  filename,
+                  files: result.files.map((path) => ({ path })),
+                }),
+              }
+            },
+          })
+          NODE
+
+      - name: Set up Agent runtime Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent-ts/package-lock.json
 
       - name: Build server binaries and Agent package
         run: |
@@ -93,31 +371,378 @@ jobs:
             -C agent-ts package.json package-lock.json dist
 
           chmod +x bin/anban-creator-server-linux-* bin/anban-creator-server-darwin-* 2>/dev/null || true
-          echo "${{ github.ref_name }}" > bin/version.txt
+          echo "${{ steps.version.outputs.RELEASE_TAG }}" > bin/version.txt
+
+      - name: Restore release Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Stage exact DSH package asset
+        id: asset
+        env:
+          SOURCE_TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { COPYFILE_EXCL } from 'node:constants'
+          import { createHash } from 'node:crypto'
+          import { appendFile, copyFile, mkdir, readFile } from 'node:fs/promises'
+          import { basename, join, resolve } from 'node:path'
+
+          const source = resolve(process.env.SOURCE_TARBALL)
+          const destinationRoot = resolve('bin')
+          const destination = join(destinationRoot, basename(source))
+          await mkdir(destinationRoot, { recursive: true })
+          await copyFile(source, destination, COPYFILE_EXCL)
+          const digest = async (path) =>
+            createHash('sha256').update(await readFile(path)).digest('hex')
+          if (await digest(source) !== await digest(destination)) {
+            throw new Error('staged DSH tarball bytes differ from the verified package')
+          }
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `tarball=${destination}\nfilename=${basename(destination)}\n`,
+          )
+          NODE
 
       - name: Show binary sizes
         run: ls -lh bin/
 
-      - name: Generate checksums
+      - name: Inspect exact npm registry version
+        id: registry-preflight
+        env:
+          TARBALL: ${{ steps.asset.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          cd bin
-          sha256sum * | tee checksums.txt
+          set -euo pipefail
+          registry_root="$RUNNER_TEMP/anban-dsh-registry-preflight"
+          mkdir -p "$registry_root/home"
+          : > "$registry_root/npmrc"
+          REGISTRY_HOME="$registry_root/home" \
+            REGISTRY_NPMRC="$registry_root/npmrc" \
+            node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { appendFileSync, readFileSync } = require('node:fs')
+          const { spawnSync } = require('node:child_process')
+
+          const cleanEnvironment = {}
+          for (const key of [
+            'COMSPEC', 'ComSpec', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PATH',
+            'PATHEXT', 'SYSTEMROOT', 'SystemRoot', 'TEMP', 'TMP', 'WINDIR',
+          ]) {
+            if (process.env[key] !== undefined) cleanEnvironment[key] = process.env[key]
+          }
+          cleanEnvironment.HOME = process.env.REGISTRY_HOME
+          cleanEnvironment.NPM_CONFIG_USERCONFIG = process.env.REGISTRY_NPMRC
+          cleanEnvironment.USERPROFILE = process.env.REGISTRY_HOME
+
+          const spec = `@anban/dsh-plugin@${process.env.VERSION}`
+          let query
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            query = spawnSync(
+              'npm',
+              ['view', spec, 'version', 'dist.integrity', 'dist.attestations.provenance', '--json', '--registry=https://registry.npmjs.org'],
+              { encoding: 'utf8', env: cleanEnvironment, maxBuffer: 1024 * 1024 },
+            )
+            if (query.error) throw query.error
+            if (query.status === 0) break
+            const diagnostics = `${query.stdout}\n${query.stderr}`
+            if (!/\bE404\b/.test(diagnostics)) {
+              throw new Error(`anonymous npm registry preflight failed with status ${query.status}`)
+            }
+            if (attempt < 3) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5_000)
+            }
+          }
+          if (query.status !== 0) {
+              appendFileSync(process.env.GITHUB_OUTPUT, 'publish_required=true\n')
+              process.exit(0)
+          }
+
+          const published = JSON.parse(query.stdout)
+          const publishedVersion = published.version
+          const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
+          const localIntegrity = `sha512-${createHash('sha512')
+            .update(readFileSync(process.env.TARBALL))
+            .digest('base64')}`
+          if (
+            publishedVersion !== process.env.VERSION ||
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
+          ) {
+            throw new Error('existing npm version lacks exact tarball integrity or provenance')
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, 'publish_required=false\n')
+          NODE
+
+      - name: Publish exact DSH package to npm
+        if: steps.registry-preflight.outputs.publish_required == 'true'
+        env:
+          TARBALL: ${{ steps.asset.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set +e
+          npm publish "$TARBALL" --access public --provenance
+          publish_status=$?
+          set -e
+          if [[ "$publish_status" -eq 0 ]]; then
+            exit 0
+          fi
+
+          recovered=false
+          for attempt in $(seq 1 6); do
+            attempt_root="$RUNNER_TEMP/anban-dsh-publish-recovery-$attempt"
+            mkdir -p "$attempt_root/home"
+            : > "$attempt_root/npmrc"
+            if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
+              HOME="$attempt_root/home" \
+              NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
+              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity dist.attestations.provenance --json \
+              --registry=https://registry.npmjs.org > "$attempt_root/view.json" 2>/dev/null; then
+              if VIEW_PATH="$attempt_root/view.json" VERSION="$VERSION" TARBALL="$TARBALL" node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync } = require('node:fs')
+          const published = JSON.parse(readFileSync(process.env.VIEW_PATH, 'utf8'))
+          const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
+          const localIntegrity = `sha512-${createHash('sha512')
+            .update(readFileSync(process.env.TARBALL))
+            .digest('base64')}`
+          if (
+            published.version !== process.env.VERSION ||
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
+          ) process.exit(1)
+          NODE
+              then
+                recovered=true
+                break
+              fi
+            fi
+            sleep 5
+          done
+          if [[ "$recovered" == "true" ]]; then
+            exit 0
+          fi
+          exit "$publish_status"
+
+      - name: Verify anonymous npm availability
+        env:
+          TARBALL: ${{ steps.asset.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          available=false
+          for attempt in $(seq 1 12); do
+            attempt_root="$RUNNER_TEMP/anban-dsh-anonymous-view-$attempt"
+            mkdir -p "$attempt_root/home"
+            : > "$attempt_root/npmrc"
+            if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
+              HOME="$attempt_root/home" \
+              NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
+              npm view "@anban/dsh-plugin@${VERSION}" version dist.integrity dist.attestations.provenance --json \
+              --registry=https://registry.npmjs.org > "$attempt_root/view.json" 2>/dev/null; then
+              if VIEW_PATH="$attempt_root/view.json" VERSION="$VERSION" TARBALL="$TARBALL" node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync } = require('node:fs')
+          const published = JSON.parse(readFileSync(process.env.VIEW_PATH, 'utf8'))
+          const publishedVersion = published.version
+          const publishedIntegrity = published['dist.integrity'] ?? published.dist?.integrity
+          const publishedProvenance =
+            published['dist.attestations.provenance'] ??
+            published.dist?.attestations?.provenance
+          const localIntegrity = `sha512-${createHash('sha512')
+            .update(readFileSync(process.env.TARBALL))
+            .digest('base64')}`
+          if (
+            publishedVersion !== process.env.VERSION ||
+            publishedIntegrity !== localIntegrity ||
+            publishedProvenance === null ||
+            typeof publishedProvenance !== 'object' ||
+            Array.isArray(publishedProvenance) ||
+            publishedProvenance.predicateType !== 'https://slsa.dev/provenance/v1'
+          ) process.exit(1)
+          NODE
+              then
+                available=true
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$available" = "true"
+
+      - name: Smoke-test exact registry DSH package
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          healthy=false
+          for attempt in $(seq 1 6); do
+            attempt_root="$RUNNER_TEMP/anban-dsh-registry-smoke-$attempt"
+            mkdir -p "$attempt_root/home"
+            : > "$attempt_root/npmrc"
+            if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
+              HOME="$attempt_root/home" \
+              NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
+              node plugins/dsh/scripts/smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"; then
+              healthy=true
+              break
+            fi
+            sleep 10
+          done
+          test "$healthy" = "true"
+
+      - name: Generate checksums
+        env:
+          TARBALL: ${{ steps.asset.outputs.tarball }}
+        run: |
+          node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync, readdirSync, writeFileSync } = require('node:fs')
+          const { basename, resolve } = require('node:path')
+
+          process.chdir('bin')
+          const tarball = basename(process.env.TARBALL)
+          if (resolve(tarball) !== resolve(process.env.TARBALL)) {
+            throw new Error('verified DSH tarball is not a flat bin asset')
+          }
+          const artifacts = readdirSync('.', { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name !== 'checksums.txt' && !entry.name.endsWith('.sha256'))
+            .map((entry) => entry.name)
+          artifacts.sort()
+          if (!artifacts.includes(tarball)) {
+            throw new Error('verified DSH tarball is missing from flat release assets')
+          }
+          const checksums = artifacts.map((path) => {
+            const digest = createHash('sha256').update(readFileSync(path)).digest('hex')
+            return `${digest}  ${basename(path)}`
+          })
+          writeFileSync('checksums.txt', `${checksums.join('\n')}\n`)
+
+          const tarballDigest = createHash('sha256')
+            .update(readFileSync(tarball))
+            .digest('hex')
+          writeFileSync(
+            `${tarball}.sha256`,
+            `${tarballDigest}  ${tarball}\n`,
+          )
+          NODE
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            bin/anban-creator-server-linux-amd64
-            bin/anban-creator-server-linux-arm64
-            bin/anban-creator-server-darwin-amd64
-            bin/anban-creator-server-darwin-arm64
-            bin/anban-creator-server-windows-amd64.exe
-            bin/anban-agent-runtime-*.tar.gz
-            bin/anban-dsh-plugin-*.tgz
-            bin/version.txt
-            bin/checksums.txt
-          draft: false
-          prerelease: false
-          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' -t local_assets < <(find bin -maxdepth 1 -type f -print0 | sort -z)
+          test "${#local_assets[@]}" -gt 0
+          expected_commit=$(git rev-parse "${RELEASE_TAG}^{commit}")
+          download_root=$(mktemp -d "$RUNNER_TEMP/anban-release-assets.XXXXXX")
+          cleanup() {
+            DOWNLOAD_ROOT="$download_root" node -e \
+              'require("node:fs").rmSync(process.env.DOWNLOAD_ROOT, { force: true, recursive: true })'
+          }
+          trap cleanup EXIT
+
+          set +e
+          release_json=$(gh release view "$RELEASE_TAG" \
+            --json assets,isDraft,isPrerelease,tagName,targetCommitish \
+            2>"$download_root/view-error.txt")
+          view_status=$?
+          set -e
+          if [[ "$view_status" -ne 0 ]]; then
+            if ! grep -Fq "release not found" "$download_root/view-error.txt"; then
+              cat "$download_root/view-error.txt" >&2
+              exit "$view_status"
+            fi
+            gh release create "$RELEASE_TAG" "${local_assets[@]}" \
+              --verify-tag \
+              --target "$expected_commit" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+            exit 0
+          fi
+
+          RELEASE_JSON="$release_json" \
+            EXPECTED_TAG="$RELEASE_TAG" \
+            TARGET_PATH="$download_root/target.txt" \
+            node <<'NODE'
+          const { writeFileSync } = require('node:fs')
+          const release = JSON.parse(process.env.RELEASE_JSON)
+          if (
+            release.tagName !== process.env.EXPECTED_TAG ||
+            release.isDraft !== false ||
+            release.isPrerelease !== false ||
+            typeof release.targetCommitish !== 'string' ||
+            release.targetCommitish.length === 0
+          ) {
+            throw new Error('existing GitHub Release is not a stable release for the exact tag')
+          }
+          writeFileSync(process.env.TARGET_PATH, release.targetCommitish)
+          NODE
+          release_target=$(cat "$download_root/target.txt")
+          target_commit=$(git rev-parse "${release_target}^{commit}")
+          test "$target_commit" = "$expected_commit"
+
+          printf '%s\n' "${local_assets[@]##*/}" > "$download_root/local-assets.txt"
+          RELEASE_JSON="$release_json" \
+            LOCAL_ASSET_PATH="$download_root/local-assets.txt" \
+            node <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const release = JSON.parse(process.env.RELEASE_JSON)
+          const expected = new Set(
+            readFileSync(process.env.LOCAL_ASSET_PATH, 'utf8').trim().split('\n'),
+          )
+          const unexpected = release.assets
+            .map((asset) => asset.name)
+            .filter((name) => !expected.has(name))
+          if (unexpected.length > 0) {
+            throw new Error(`existing GitHub Release has unexpected assets: ${unexpected.join(', ')}`)
+          }
+          NODE
+
+          missing_assets=()
+          for local_asset in "${local_assets[@]}"; do
+            asset_name=${local_asset##*/}
+            if RELEASE_JSON="$release_json" ASSET_NAME="$asset_name" node <<'NODE'
+          const release = JSON.parse(process.env.RELEASE_JSON)
+          process.exit(release.assets.some((asset) => asset.name === process.env.ASSET_NAME) ? 0 : 1)
+          NODE
+            then
+              asset_root="$download_root/$asset_name"
+              mkdir -p "$asset_root"
+              gh release download "$RELEASE_TAG" --pattern "$asset_name" --dir "$asset_root"
+              LOCAL_ASSET="$local_asset" \
+                REMOTE_ASSET="$asset_root/$asset_name" \
+                node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync } = require('node:fs')
+          const local = readFileSync(process.env.LOCAL_ASSET)
+          const remote = readFileSync(process.env.REMOTE_ASSET)
+          const digest = (value) => createHash('sha256').update(value).digest('hex')
+          if (digest(local) !== digest(remote) || !local.equals(remote)) {
+            throw new Error(`existing GitHub Release asset differs: ${process.env.LOCAL_ASSET}`)
+          }
+          NODE
+            else
+              missing_assets+=("$local_asset")
+            fi
+          done
+
+          if [[ "${#missing_assets[@]}" -gt 0 ]]; then
+            gh release upload "$RELEASE_TAG" "${missing_assets[@]}"
+          fi
