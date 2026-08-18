@@ -122,6 +122,7 @@ export interface AgentPack {
   bindings: { task_types?: string[] };
   runtime: { profile?: string; adapter?: string; max_turns?: number };
   progress: AgentPackProgressStage[];
+  progress_by_task_type?: Record<string, AgentPackProgressStage[]>;
 }
 
 export interface ResolvedBootstrapResponse extends BootstrapResponse {
@@ -260,7 +261,7 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
   if (pack.id !== data.agent_pack_id || pack.version !== data.agent_pack_version || pack.digest !== data.agent_pack_digest || pack.runtime?.profile !== data.runtime_profile || pack.runtime?.adapter !== data.runtime_adapter || data.agent_flag !== `anban:${pack.agent?.name}`) {
     throw new Error("bootstrap Agent Pack identity does not match runtime Catalog");
   }
-  return pack;
+  return { ...pack, progress: pack.progress_by_task_type?.[data.task_type] ?? pack.progress };
 }
 
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
@@ -269,28 +270,44 @@ function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPa
     if (!isRecord(rawPack) || !Array.isArray(rawPack.progress) || rawPack.progress.length === 0) {
       throw new Error("Agent Pack Catalog progress is invalid");
     }
-    const stageIDs = new Set<string>();
-    let previousComplete = -1;
-    for (const rawStage of rawPack.progress) {
-      if (!isRecord(rawStage)
-        || !cleanString(rawStage.id)
-        || !cleanString(rawStage.title)
-        || !validProgressPercent(rawStage.active_percent)
-        || !validProgressPercent(rawStage.complete_percent)
-        || rawStage.active_percent > rawStage.complete_percent
-        || (rawStage.required_artifacts !== undefined
-          && (!Array.isArray(rawStage.required_artifacts)
-            || !rawStage.required_artifacts.every((artifact) => cleanString(artifact) && validRequiredArtifactPath(artifact))))) {
-        throw new Error("Agent Pack Catalog progress stage is invalid");
+    validateProgressContract(rawPack.progress);
+    if (rawPack.progress_by_task_type === undefined) continue;
+    if (!isRecord(rawPack.progress_by_task_type) || !isRecord(rawPack.bindings) || !Array.isArray(rawPack.bindings.task_types)) {
+      throw new Error("Agent Pack Catalog progress overrides are invalid");
+    }
+    const taskTypes = new Set(rawPack.bindings.task_types.filter((value): value is string => typeof value === "string"));
+    for (const [taskType, progress] of Object.entries(rawPack.progress_by_task_type)) {
+      if (!taskTypes.has(taskType) || !Array.isArray(progress) || progress.length === 0) {
+        throw new Error("Agent Pack Catalog progress override is invalid");
       }
-      if (stageIDs.has(rawStage.id)) throw new Error("Agent Pack Catalog progress stage is duplicated");
-      if (rawStage.complete_percent < previousComplete) throw new Error("Agent Pack Catalog progress complete_percent is decreasing");
-      stageIDs.add(rawStage.id);
-      previousComplete = rawStage.complete_percent;
+      validateProgressContract(progress);
     }
-    if ((rawPack.progress.at(-1) as Record<string, unknown>).complete_percent !== 100) {
-      throw new Error("Agent Pack Catalog progress final complete_percent must be 100");
+  }
+}
+
+function validateProgressContract(progress: unknown[]): void {
+  const stageIDs = new Set<string>();
+  let previousComplete = -1;
+  for (const rawStage of progress) {
+    if (!isRecord(rawStage)
+      || !cleanString(rawStage.id)
+      || !cleanString(rawStage.title)
+      || !validProgressPercent(rawStage.active_percent)
+      || !validProgressPercent(rawStage.complete_percent)
+      || rawStage.active_percent > rawStage.complete_percent
+      || (rawStage.required_artifacts !== undefined
+        && (!Array.isArray(rawStage.required_artifacts)
+          || !rawStage.required_artifacts.every((artifact) => cleanString(artifact) && validRequiredArtifactPath(artifact))))) {
+      throw new Error("Agent Pack Catalog progress stage is invalid");
     }
+    if (stageIDs.has(rawStage.id)) throw new Error("Agent Pack Catalog progress stage is duplicated");
+    if (rawStage.complete_percent < previousComplete) throw new Error("Agent Pack Catalog progress complete_percent is decreasing");
+    if (rawStage.active_percent < previousComplete) throw new Error("Agent Pack Catalog progress active_percent is decreasing");
+    stageIDs.add(rawStage.id);
+    previousComplete = rawStage.complete_percent;
+  }
+  if ((progress.at(-1) as Record<string, unknown>).complete_percent !== 100) {
+    throw new Error("Agent Pack Catalog progress final complete_percent must be 100");
   }
 }
 

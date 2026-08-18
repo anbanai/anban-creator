@@ -31,6 +31,38 @@ const articlePack: AgentPack = {
   ],
 };
 
+const viralAnalysisPack: AgentPack = {
+  ...articlePack,
+  id: "seednote",
+  agent: { name: "seednote" },
+  bindings: { task_types: ["seednote", "viral_analysis"] },
+  runtime: { profile: "seednote", adapter: "standard" },
+  progress: [
+    { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
+    {
+      id: "delivery",
+      title: "Delivery",
+      active_percent: 90,
+      complete_percent: 100,
+      required_artifacts: ["output/source-analysis.md", "output/viral-template.json"],
+    },
+  ],
+};
+
+const finalArtifactPack: AgentPack = {
+  ...articlePack,
+  progress: [
+    { id: "research", title: "Research", active_percent: 10, complete_percent: 20 },
+    {
+      id: "delivery",
+      title: "Delivery",
+      active_percent: 80,
+      complete_percent: 100,
+      required_artifacts: ["output/final.md"],
+    },
+  ],
+};
+
 const validBootstrap = () => ({
   task_type: "article",
   agent_pack_id: "article",
@@ -516,6 +548,43 @@ describe("managed progress hooks", () => {
     }
   });
 
+  test("delays generic final-stage completion until Stop while preserving artifact repair context", async () => {
+    const root = await progressWorkspace();
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const hooks = optionHooks(runner.buildQueryOptions({
+        ...validBootstrap(),
+        resolved_agent_pack: finalArtifactPack,
+      }, root, undefined, undefined, { progress: async () => {}, stageProgress }));
+      const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
+      const stop = hooks.Stop![0]!.hooks[0]!;
+      const completedDelivery = taskHookInput("TaskUpdate", {
+        taskId: "delivery-task",
+        status: "completed",
+        metadata: { anban_progress_stage: "delivery" },
+      });
+
+      expect(await taskProgress(completedDelivery, "tool-delivery", hookOptions)).toMatchObject({
+        hookSpecificOutput: { additionalContext: expect.stringContaining("output/final.md") },
+      });
+      expect(stageProgress).not.toHaveBeenCalled();
+
+      await writeFile(join(root, "output", "final.md"), "delivery");
+      expect(await taskProgress(completedDelivery, "tool-delivery", hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
+
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
+        stage: "delivery",
+        state: "complete",
+        progress_percent: 100,
+      }), hookOptions.signal);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("generic Stop blocks with repair context for missing artifacts and failure state", async () => {
     const root = await progressWorkspace();
     try {
@@ -573,10 +642,18 @@ describe("managed progress hooks", () => {
     process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
     try {
-      const callback = optionHooks(runner.buildQueryOptions({ ...validBootstrap(), task_type: "seednote" }, root, undefined, undefined, {
+      const hooks = optionHooks(runner.buildQueryOptions({ ...validBootstrap(), task_type: "seednote" }, root, undefined, undefined, {
         progress: async () => {},
         stageProgress,
-      })).Stop![0]!.hooks[0]!;
+      }));
+      const callback = hooks.Stop![0]!.hooks[0]!;
+      const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
+      expect(await taskProgress(taskHookInput("TaskUpdate", {
+        taskId: "delivery-task",
+        status: "completed",
+        metadata: { anban_progress_stage: "delivery" },
+      }), "tool-delivery", hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
 
       expect(await callback(stopHookInput(), undefined, hookOptions)).toMatchObject({ decision: "block", reason: "quality blocked" });
       expect(stageProgress).not.toHaveBeenCalled();
@@ -585,6 +662,57 @@ describe("managed progress hooks", () => {
       expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
       expect(stageProgress).toHaveBeenCalledTimes(1);
       expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({ progress_percent: 100 }), hookOptions.signal);
+    } finally {
+      if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("uses the resolved viral analysis artifacts and deduplicates delivery completion at Stop", async () => {
+    const root = await progressWorkspace();
+    const pluginRoot = join(root, "plugin");
+    const hooksRoot = join(pluginRoot, "hooks");
+    await mkdir(hooksRoot, { recursive: true });
+    const gatePath = join(hooksRoot, "seednote-quality-gate.sh");
+    await writeFile(gatePath, "#!/bin/sh\nexit 0\n");
+    await chmod(gatePath, 0o755);
+    await writeFile(join(root, "output", "source-analysis.md"), "analysis");
+    const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const options = runner.buildQueryOptions({
+        ...validBootstrap(),
+        task_type: "viral_analysis",
+        agent_pack_id: "seednote",
+        runtime_profile: "seednote",
+        agent_flag: "anban:seednote",
+        resolved_agent_pack: viralAnalysisPack,
+      }, root, undefined, undefined, { progress: async () => {}, stageProgress });
+      const hooks = optionHooks(options);
+      const stop = hooks.Stop![0]!.hooks[0]!;
+      const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
+
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toMatchObject({
+        decision: "block",
+        hookSpecificOutput: { additionalContext: expect.stringContaining("output/viral-template.json") },
+      });
+      expect(stageProgress).not.toHaveBeenCalled();
+
+      await writeFile(join(root, "output", "viral-template.json"), "{}");
+      expect(await taskProgress(taskHookInput("TaskUpdate", {
+        taskId: "delivery-task",
+        status: "completed",
+        metadata: { anban_progress_stage: "delivery" },
+      }), "tool-delivery", hookOptions)).toEqual({});
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
+        stage: "delivery",
+        state: "complete",
+        progress_percent: 100,
+      }), hookOptions.signal);
     } finally {
       if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
       else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;

@@ -32,6 +32,19 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 		"seednote":    true,
 	}
 	foundManagedPacks := make(map[string]bool, len(wantManagedPacks))
+	wantStageIDs := map[string][]string{
+		"article/article":         {"research", "writing", "delivery"},
+		"ecommerce/ecommerce":     {"analysis", "production", "delivery"},
+		"live-slicer/live-slicer": {"transcription", "slicing", "delivery"},
+		"moments/moments":         {"project", "material_analysis", "writing", "image_generation", "quality_review", "delivery_validation", "finalize"},
+		"montage/montage":         {"prepare", "production", "delivery"},
+		"seednote/seednote":       {"research", "writing", "delivery"},
+		"seednote/viral_analysis": {"research", "delivery"},
+	}
+	wantDeliveryArtifacts := map[string][]string{
+		"seednote/seednote":       {"output/content.md", "output/image-plan.md"},
+		"seednote/viral_analysis": {"output/source-analysis.md", "output/viral-template.json"},
+	}
 
 	for _, pack := range catalog.Packs {
 		if pack.Kind != agentpack.KindManaged {
@@ -39,18 +52,10 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 		}
 		foundManagedPacks[pack.ID] = true
 		t.Run(pack.ID, func(t *testing.T) {
-			if len(pack.Progress) == 0 {
-				t.Fatal("managed Pack must declare progress stages")
-			}
-
 			claudePaths := []string{
 				filepath.Join(pluginRoot, "packs", pack.ID, pack.Agent.ClaudeSource),
 				filepath.Join(pluginRoot, "agents", pack.Agent.Name+".md"),
 			}
-			for _, path := range claudePaths {
-				assertClaudeTaskProgressContract(t, path, pack)
-			}
-
 			codexPaths := []string{
 				filepath.Join(pluginRoot, "packs", pack.ID, pack.Agent.CodexSource),
 				filepath.Join(pluginRoot, "agents", pack.Agent.Name+".toml"),
@@ -64,8 +69,32 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 				assertLegacyProgressContract(t, path, legacyProgressPacks[pack.ID])
 			}
 
-			assertDeliveryProgressCoversRequiredArtifacts(t, pack)
+			for _, taskType := range pack.Bindings.TaskTypes {
+				contractKey := pack.ID + "/" + taskType
+				progress := pack.ProgressForTaskType(taskType)
+				wantIDs, ok := wantStageIDs[contractKey]
+				if !ok {
+					t.Fatalf("managed task contract %q is not pinned", contractKey)
+				}
+				gotIDs := make([]string, 0, len(progress))
+				for _, stage := range progress {
+					gotIDs = append(gotIDs, stage.ID)
+				}
+				if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+					t.Errorf("%s progress stages = %v, want %v", contractKey, gotIDs, wantIDs)
+				}
+				for _, path := range claudePaths {
+					assertClaudeTaskProgressContract(t, path, pack, taskType, progress)
+				}
+				if wantArtifacts, ok := wantDeliveryArtifacts[contractKey]; ok {
+					assertDeliveryProgressArtifacts(t, contractKey, progress, wantArtifacts)
+				}
+				delete(wantStageIDs, contractKey)
+			}
 		})
+	}
+	for contractKey := range wantStageIDs {
+		t.Errorf("managed task contract %q disappeared from the catalog", contractKey)
 	}
 
 	for packID := range wantManagedPacks {
@@ -89,7 +118,7 @@ func TestLegacyProgressContractRejectsBTWTelemetry(t *testing.T) {
 	t.Fatal("legacy progress contract did not reject /btw telemetry")
 }
 
-func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.Manifest) {
+func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.Manifest, taskType string, progress []agentpack.ProgressStage) {
 	t.Helper()
 	body := readRepoFile(t, path)
 	if strings.Contains(body, "update_task_progress(") {
@@ -114,7 +143,7 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 			t.Errorf("%s missing Task metadata progress rule %q", path, want)
 		}
 	}
-	for _, stage := range pack.Progress {
+	for _, stage := range progress {
 		metadata := `{"anban_progress_stage":"` + stage.ID + `"}`
 		if !strings.Contains(body, metadata) {
 			t.Errorf("%s does not map declared progress stage %q through Task metadata %s", path, stage.ID, metadata)
@@ -141,6 +170,20 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 		for _, forbidden := range []string{"十个细粒度业务任务"} {
 			if strings.Contains(body, forbidden) {
 				t.Errorf("%s contains inaccurate ecommerce task count %q", path, forbidden)
+			}
+		}
+	case "seednote":
+		if taskType == "viral_analysis" {
+			for _, want := range []string{"viral_analysis", "只创建 `research`、`delivery`", "不得创建 `writing`"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing viral analysis task contract %q", path, want)
+				}
+			}
+		} else {
+			for _, want := range []string{"普通 `seednote`", "`research`、`writing`、`delivery`"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing seednote task contract %q", path, want)
+				}
 			}
 		}
 	}
@@ -170,34 +213,19 @@ func legacyProgressForbiddenMatches(body string) []string {
 	return matches
 }
 
-func assertDeliveryProgressCoversRequiredArtifacts(t *testing.T, pack agentpack.Manifest) {
+func assertDeliveryProgressArtifacts(t *testing.T, contractKey string, progress []agentpack.ProgressStage, want []string) {
 	t.Helper()
 	var delivery *agentpack.ProgressStage
-	for i := range pack.Progress {
-		if pack.Progress[i].ID == "delivery" || pack.Progress[i].ID == "delivery_validation" {
-			delivery = &pack.Progress[i]
+	for i := range progress {
+		if progress[i].ID == "delivery" || progress[i].ID == "delivery_validation" {
+			delivery = &progress[i]
 		}
 	}
 	if delivery == nil {
 		t.Fatal("managed Pack must declare a delivery or delivery_validation progress stage")
 	}
 
-	covered := make(map[string]bool, len(delivery.RequiredArtifacts))
-	for _, path := range delivery.RequiredArtifacts {
-		covered[path] = true
-	}
-	required := make(map[string]bool, len(pack.Artifacts))
-	for _, artifact := range pack.Artifacts {
-		if artifact.Required {
-			required[artifact.Path] = true
-		}
-		if artifact.Required && !covered[artifact.Path] {
-			t.Errorf("progress stage %q required_artifacts missing required Pack artifact %q", delivery.ID, artifact.Path)
-		}
-	}
-	for _, path := range delivery.RequiredArtifacts {
-		if !required[path] {
-			t.Errorf("progress stage %q required_artifacts contains optional or unknown Pack artifact %q", delivery.ID, path)
-		}
+	if strings.Join(delivery.RequiredArtifacts, ",") != strings.Join(want, ",") {
+		t.Errorf("%s delivery artifacts = %v, want %v", contractKey, delivery.RequiredArtifacts, want)
 	}
 }

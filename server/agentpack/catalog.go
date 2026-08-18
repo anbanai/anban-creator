@@ -235,12 +235,36 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
 		}
 	}
-	if manifest.Progress != nil && len(manifest.Progress) == 0 {
+	if err := validateProgressContract(manifest.Progress, manifest.Progress != nil); err != nil {
+		return err
+	}
+	overrideTaskTypes := make([]string, 0, len(manifest.ProgressByTaskType))
+	for taskType := range manifest.ProgressByTaskType {
+		overrideTaskTypes = append(overrideTaskTypes, taskType)
+	}
+	sort.Strings(overrideTaskTypes)
+	for _, taskType := range overrideTaskTypes {
+		if !taskTypes[taskType] {
+			return fmt.Errorf("progress override references unbound task type %q", taskType)
+		}
+		progress := manifest.ProgressByTaskType[taskType]
+		if len(progress) == 0 {
+			return fmt.Errorf("progress override for task type %q must not be empty", taskType)
+		}
+		if err := validateProgressContract(progress, true); err != nil {
+			return fmt.Errorf("progress override for task type %q: %w", taskType, err)
+		}
+	}
+	return nil
+}
+
+func validateProgressContract(progress []ProgressStage, declared bool) error {
+	if declared && len(progress) == 0 {
 		return fmt.Errorf("progress must not be empty")
 	}
-	seenProgress := make(map[string]struct{}, len(manifest.Progress))
+	seenProgress := make(map[string]struct{}, len(progress))
 	previousComplete := -1
-	for _, stage := range manifest.Progress {
+	for _, stage := range progress {
 		if strings.TrimSpace(stage.ID) == "" || strings.TrimSpace(stage.Title) == "" {
 			return fmt.Errorf("progress stage id and title must not be empty")
 		}
@@ -260,6 +284,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if stage.CompletePercent < previousComplete {
 			return fmt.Errorf("progress stage %q complete_percent must be non-decreasing", stage.ID)
 		}
+		if stage.ActivePercent < previousComplete {
+			return fmt.Errorf("progress stage %q active_percent must be >= previous complete_percent", stage.ID)
+		}
 		previousComplete = stage.CompletePercent
 		for _, artifact := range stage.RequiredArtifacts {
 			if err := validateOutputArtifactPath(artifact); err != nil {
@@ -267,7 +294,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
-	if len(manifest.Progress) > 0 && manifest.Progress[len(manifest.Progress)-1].CompletePercent != 100 {
+	if len(progress) > 0 && progress[len(progress)-1].CompletePercent != 100 {
 		return fmt.Errorf("progress final complete_percent must be 100")
 	}
 	return nil

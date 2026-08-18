@@ -11,23 +11,24 @@ const (
 )
 
 type Manifest struct {
-	ID                string            `yaml:"id" json:"id"`
-	Version           string            `yaml:"version" json:"version"`
-	Kind              string            `yaml:"kind" json:"kind"`
-	DisplayName       string            `yaml:"display_name" json:"display_name"`
-	Description       string            `yaml:"description" json:"description"`
-	Agent             AgentSpec         `yaml:"agent" json:"agent"`
-	Bindings          Bindings          `yaml:"bindings" json:"bindings"`
-	Runtime           RuntimeSpec       `yaml:"runtime" json:"runtime"`
-	Surfaces          []string          `yaml:"surfaces" json:"surfaces"`
-	Features          []string          `yaml:"features" json:"features,omitempty"`
-	BillingOperations map[string]string `yaml:"billing_operations" json:"billing_operations,omitempty"`
-	Progress          []ProgressStage   `yaml:"progress" json:"progress,omitempty"`
-	Artifacts         []ArtifactSpec    `yaml:"artifacts" json:"artifacts,omitempty"`
-	SchemaFiles       SchemaRefs        `yaml:"schemas" json:"-"`
-	Schemas           *SchemaDocuments  `yaml:"-" json:"schemas,omitempty"`
-	UI                UISpec            `yaml:"ui" json:"ui,omitempty"`
-	Digest            string            `yaml:"-" json:"digest"`
+	ID                 string                     `yaml:"id" json:"id"`
+	Version            string                     `yaml:"version" json:"version"`
+	Kind               string                     `yaml:"kind" json:"kind"`
+	DisplayName        string                     `yaml:"display_name" json:"display_name"`
+	Description        string                     `yaml:"description" json:"description"`
+	Agent              AgentSpec                  `yaml:"agent" json:"agent"`
+	Bindings           Bindings                   `yaml:"bindings" json:"bindings"`
+	Runtime            RuntimeSpec                `yaml:"runtime" json:"runtime"`
+	Surfaces           []string                   `yaml:"surfaces" json:"surfaces"`
+	Features           []string                   `yaml:"features" json:"features,omitempty"`
+	BillingOperations  map[string]string          `yaml:"billing_operations" json:"billing_operations,omitempty"`
+	Progress           []ProgressStage            `yaml:"progress" json:"progress,omitempty"`
+	ProgressByTaskType map[string][]ProgressStage `yaml:"progress_by_task_type" json:"progress_by_task_type,omitempty"`
+	Artifacts          []ArtifactSpec             `yaml:"artifacts" json:"artifacts,omitempty"`
+	SchemaFiles        SchemaRefs                 `yaml:"schemas" json:"-"`
+	Schemas            *SchemaDocuments           `yaml:"-" json:"schemas,omitempty"`
+	UI                 UISpec                     `yaml:"ui" json:"ui,omitempty"`
+	Digest             string                     `yaml:"-" json:"digest"`
 
 	dir string
 }
@@ -100,6 +101,13 @@ func (m Manifest) ProgressStage(id string) (ProgressStage, bool) {
 		}
 	}
 	return ProgressStage{}, false
+}
+
+func (m Manifest) ProgressForTaskType(taskType string) []ProgressStage {
+	if progress, ok := m.ProgressByTaskType[taskType]; ok {
+		return progress
+	}
+	return m.Progress
 }
 
 func (c *Catalog) Pack(id string) (Manifest, bool) {

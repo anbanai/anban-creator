@@ -57,7 +57,7 @@ export class ProgressEmitter {
     }
 
     const reporterState = event.state === "active" ? "active" : "complete";
-    const dedupeKey = `${stage.id}:${event.state}`;
+    const dedupeKey = `${stage.id}:${reporterState}`;
     if (this.emitted.has(dedupeKey)) return { emitted: false };
 
     let validation: ArtifactValidationResult | undefined;
@@ -67,6 +67,9 @@ export class ProgressEmitter {
       validation = await validateAllStageArtifacts(this.pack, workspace);
     }
     if (validation && !validation.ok) return { emitted: false, validation };
+    if (event.state === "complete" && stage === this.pack.progress.at(-1)) {
+      return { emitted: false, validation: validation ?? { ok: true } };
+    }
 
     const progressEvent: StageProgressEvent = {
       stage: stage.id,

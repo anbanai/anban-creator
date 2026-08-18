@@ -31,7 +31,7 @@ func applyAgentPackIdentity(execution *model.TaskExecution, taskType string) err
 	execution.AgentPackID = pack.ID
 	execution.AgentPackVersion = pack.Version
 	execution.AgentPackDigest = pack.Digest
-	progressContract, err := json.Marshal(pack.Progress)
+	progressContract, err := json.Marshal(pack.ProgressForTaskType(taskType))
 	if err != nil {
 		return fmt.Errorf("marshal Agent Pack progress contract: %w", err)
 	}

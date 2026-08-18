@@ -103,6 +103,33 @@ describe("ProgressEmitter", () => {
     }
   });
 
+  test("delays the final stage completion until the final event", async () => {
+    const root = await populatedWorkspace();
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    const emitter = new ProgressEmitter(articlePack, { stageProgress });
+    try {
+      expect(await emitter.handle({ stage: "delivery", state: "complete" }, root)).toEqual({
+        emitted: false,
+        validation: { ok: true },
+      });
+      expect(stageProgress).not.toHaveBeenCalled();
+
+      expect(await emitter.handle({ state: "final" }, root)).toEqual({
+        emitted: true,
+        validation: { ok: true },
+      });
+      expect(await emitter.handle({ state: "final" }, root)).toEqual({ emitted: false });
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
+        stage: "delivery",
+        state: "complete",
+        progress_percent: 100,
+      }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("serializes concurrent progress sends", async () => {
     const root = await populatedWorkspace();
     const calls: string[] = [];

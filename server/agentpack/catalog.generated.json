@@ -565,6 +565,26 @@
           ]
         }
       ],
+      "progress_by_task_type": {
+        "viral_analysis": [
+          {
+            "id": "research",
+            "title": "素材研究",
+            "active_percent": 5,
+            "complete_percent": 80
+          },
+          {
+            "id": "delivery",
+            "title": "交付验收",
+            "active_percent": 90,
+            "complete_percent": 100,
+            "required_artifacts": [
+              "output/source-analysis.md",
+              "output/viral-template.json"
+            ]
+          }
+        ]
+      },
       "artifacts": [
         {
           "role": "final_markdown",
@@ -588,7 +608,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "4759d3a8dc10423f9f9474987caa029436f5dd064c0d2a9648ce4090399a26e7"
+      "digest": "dfec9e17f5d365df73dfe4df11a9d5e79df66ef8e7920f293106fcace7e08e03"
     }
   ]
 }

@@ -12,23 +12,68 @@ import (
 )
 
 func TestApplyAgentPackIdentityFreezesResolvedExecutionContract(t *testing.T) {
-	execution := &model.TaskExecution{}
-	if err := applyAgentPackIdentity(execution, model.TaskTypeViralAnalysis); err != nil {
-		t.Fatalf("applyAgentPackIdentity: %v", err)
-	}
-	if execution.AgentPackID != "seednote" || execution.AgentPackVersion != "1.0.0" || len(execution.AgentPackDigest) != 64 {
-		t.Fatalf("Pack identity = %#v", execution)
-	}
-	if execution.RuntimeProfile != "seednote" || execution.RuntimeAdapter != "standard" {
-		t.Fatalf("runtime identity = %s/%s", execution.RuntimeProfile, execution.RuntimeAdapter)
-	}
 	pack, ok := agentpack.Default().Pack("seednote")
 	if !ok {
 		t.Fatal("embedded seednote Pack missing")
 	}
-	var progress []agentpack.ProgressStage
-	if err := json.Unmarshal(execution.AgentPackProgressContract, &progress); err != nil || !reflect.DeepEqual(progress, pack.Progress) {
-		t.Fatalf("frozen progress contract = %#v, %v", progress, err)
+
+	tests := []struct {
+		name     string
+		taskType string
+		wantIDs  []string
+		wantLast []string
+	}{
+		{name: "seednote", taskType: model.PlatformSeednote, wantIDs: []string{"research", "writing", "delivery"}, wantLast: []string{"output/content.md", "output/image-plan.md"}},
+		{name: "viral analysis", taskType: model.TaskTypeViralAnalysis, wantIDs: []string{"research", "delivery"}, wantLast: []string{"output/source-analysis.md", "output/viral-template.json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execution := &model.TaskExecution{}
+			if err := applyAgentPackIdentity(execution, tt.taskType); err != nil {
+				t.Fatalf("applyAgentPackIdentity: %v", err)
+			}
+			if execution.AgentPackID != "seednote" || execution.AgentPackVersion != "1.0.0" || len(execution.AgentPackDigest) != 64 {
+				t.Fatalf("Pack identity = %#v", execution)
+			}
+			if execution.RuntimeProfile != "seednote" || execution.RuntimeAdapter != "standard" {
+				t.Fatalf("runtime identity = %s/%s", execution.RuntimeProfile, execution.RuntimeAdapter)
+			}
+			var progress []agentpack.ProgressStage
+			if err := json.Unmarshal(execution.AgentPackProgressContract, &progress); err != nil {
+				t.Fatalf("decode frozen progress contract: %v", err)
+			}
+			if !reflect.DeepEqual(progress, pack.ProgressForTaskType(tt.taskType)) {
+				t.Fatalf("frozen progress contract = %#v, want resolved Pack contract", progress)
+			}
+			gotIDs := make([]string, 0, len(progress))
+			for _, stage := range progress {
+				gotIDs = append(gotIDs, stage.ID)
+			}
+			if !reflect.DeepEqual(gotIDs, tt.wantIDs) {
+				t.Fatalf("stage ids = %#v, want %#v", gotIDs, tt.wantIDs)
+			}
+			if !reflect.DeepEqual(progress[len(progress)-1].RequiredArtifacts, tt.wantLast) {
+				t.Fatalf("delivery artifacts = %#v, want %#v", progress[len(progress)-1].RequiredArtifacts, tt.wantLast)
+			}
+		})
+	}
+}
+
+func TestInheritAgentPackIdentityPreservesResolvedViralAnalysisContract(t *testing.T) {
+	source := &model.TaskExecution{}
+	if err := applyAgentPackIdentity(source, model.TaskTypeViralAnalysis); err != nil {
+		t.Fatalf("applyAgentPackIdentity: %v", err)
+	}
+	target := &model.TaskExecution{}
+	if !inheritAgentPackIdentity(target, source) {
+		t.Fatal("expected viral analysis Pack identity to be inherited")
+	}
+	if string(target.AgentPackProgressContract) != string(source.AgentPackProgressContract) {
+		t.Fatalf("progress snapshot = %s, want %s", target.AgentPackProgressContract, source.AgentPackProgressContract)
+	}
+	progress, err := resolveFrozenExecutionProgressContract(target)
+	if err != nil || len(progress) != 2 || progress[0].ID != "research" || progress[1].ID != "delivery" {
+		t.Fatalf("resolved inherited progress = %#v, %v", progress, err)
 	}
 }
 

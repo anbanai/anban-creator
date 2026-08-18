@@ -42,6 +42,24 @@ const pack: AgentPack = {
   ],
 };
 
+const viralAnalysisPack: AgentPack = {
+  ...pack,
+  id: "seednote",
+  agent: { name: "seednote" },
+  bindings: { task_types: ["seednote", "viral_analysis"] },
+  runtime: { profile: "seednote", adapter: "standard" },
+  progress: [
+    { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
+    {
+      id: "delivery",
+      title: "Delivery",
+      active_percent: 90,
+      complete_percent: 100,
+      required_artifacts: ["output/source-analysis.md", "output/viral-template.json"],
+    },
+  ],
+};
+
 async function workspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "anban-progress-artifacts-"));
   roots.push(root);
@@ -127,5 +145,18 @@ describe("artifact validation", () => {
 
     expect(await validateStageArtifacts(pack, "research", root)).toEqual({ ok: true });
     expect(await validateAllStageArtifacts(pack, root)).toEqual({ ok: true });
+  });
+
+  test("validates only the artifacts in the resolved viral analysis contract", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "source-analysis.md"), "analysis");
+    await writeFile(join(root, "output", "viral-template.json"), "{}");
+
+    expect(await validateAllStageArtifacts(viralAnalysisPack, root)).toEqual({ ok: true });
+    expect(await validateAllStageArtifacts(pack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: ["output/topic-analysis.md", "output/final.md"],
+    });
   });
 });
