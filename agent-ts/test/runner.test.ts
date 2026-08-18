@@ -1,8 +1,35 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
+
+import type { AgentPack } from "../src/bootstrap.js";
+import { ProgressEmitter } from "../src/progress.js";
+import type { StageProgressEvent } from "../src/reporter.js";
 import * as runner from "../src/runner.js";
 
 const { buildExecutionEnvironment, terminalModelUsage, validateManagedInit } = runner;
+
+const articlePack: AgentPack = {
+  id: "article",
+  version: "1.0.0",
+  digest: "a".repeat(64),
+  agent: { name: "article" },
+  bindings: { task_types: ["article"] },
+  runtime: { profile: "article", adapter: "standard" },
+  progress: [
+    {
+      id: "research",
+      title: "Research",
+      active_percent: 10,
+      complete_percent: 20,
+      required_artifacts: ["output/topic-analysis.md"],
+    },
+    { id: "delivery", title: "Delivery", active_percent: 80, complete_percent: 100 },
+  ],
+};
 
 const validBootstrap = () => ({
   task_type: "article",
@@ -16,6 +43,7 @@ const validBootstrap = () => ({
   agent_flag: "anban:article",
   prompt: "write",
   artifact_transport: { mode: "stream" },
+  resolved_agent_pack: articlePack,
   execution_profile: {
     profile_id: "quality",
     provider: "moonshot",
@@ -36,6 +64,42 @@ const validBootstrap = () => ({
     model_usage_aliases: { "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" } },
   },
 });
+
+const hookOptions = { signal: new AbortController().signal };
+
+function taskHookInput(toolName: "TaskCreate" | "TaskUpdate", toolInput: Record<string, unknown>, toolResponse: unknown = {}): Parameters<HookCallback>[0] {
+  return {
+    session_id: "session-1",
+    transcript_path: "/tmp/transcript.jsonl",
+    cwd: "/workspace",
+    hook_event_name: "PostToolUse",
+    tool_name: toolName,
+    tool_input: toolInput,
+    tool_response: toolResponse,
+    tool_use_id: "tool-1",
+  };
+}
+
+function stopHookInput(stopHookActive = false): Parameters<HookCallback>[0] {
+  return {
+    session_id: "session-1",
+    transcript_path: "/tmp/transcript.jsonl",
+    cwd: "/workspace",
+    hook_event_name: "Stop",
+    stop_hook_active: stopHookActive,
+  };
+}
+
+function optionHooks(options: ReturnType<typeof runner.buildQueryOptions>) {
+  return options.hooks!;
+}
+
+async function progressWorkspace(withResearchArtifact = false): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "anban-runner-hooks-"));
+  await mkdir(join(root, "output"));
+  if (withResearchArtifact) await writeFile(join(root, "output", "topic-analysis.md"), "research");
+  return root;
+}
 
 describe("validateManagedInit", () => {
   test("requires the configured remote MCP and article plugin skill", () => {
@@ -184,7 +248,10 @@ describe("buildQueryOptions", () => {
     const articleOptions = runner.buildQueryOptions(validBootstrap(), "/workspace");
     const articleHooks = articleOptions.hooks as Record<string, Array<{ hooks: Array<(input: unknown, toolUseID: string | undefined, options: { signal: AbortSignal }) => Promise<Record<string, unknown>>> }>>;
     expect(articleHooks.PreToolUse).toHaveLength(1);
-    expect(articleHooks.Stop).toBeUndefined();
+    expect(articleHooks.PostToolUse).toHaveLength(1);
+    expect(articleHooks.PostToolUse[0]).toMatchObject({ matcher: "TaskCreate|TaskUpdate" });
+    expect(articleHooks.Stop).toHaveLength(1);
+    expect(articleHooks.Stop[0].hooks).toHaveLength(1);
 
     const boundary = articleHooks.PreToolUse[0].hooks[0];
     const hookOptions = { signal: new AbortController().signal };
@@ -199,6 +266,7 @@ describe("buildQueryOptions", () => {
       const hooks = options.hooks as Record<string, unknown[]>;
       expect(hooks.PreToolUse).toHaveLength(1);
       expect(hooks.Stop).toHaveLength(1);
+      expect((hooks.Stop[0] as { hooks: unknown[] }).hooks).toHaveLength(2);
     }
   });
 
@@ -219,6 +287,244 @@ describe("buildQueryOptions", () => {
       MAX_THINKING_TOKENS: "0",
       ENABLE_TOOL_SEARCH: "false",
     });
+  });
+});
+
+describe("managed progress hooks", () => {
+  test("translates TaskUpdate in_progress metadata into an active stage event", async () => {
+    const root = await progressWorkspace();
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).PostToolUse![0]!.hooks[0]!;
+
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "research" },
+      }), "tool-1", hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledWith({
+        stage: "research",
+        state: "active",
+        title: "Research",
+        description: undefined,
+        progress_percent: 10,
+      }, hookOptions.signal);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("returns non-blocking context and no completion event when stage artifacts are missing", async () => {
+    const root = await progressWorkspace();
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).PostToolUse![0]!.hooks[0]!;
+
+      const result = await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "completed",
+        metadata: { anban_progress_stage: "research" },
+      }), "tool-1", hookOptions);
+
+      expect(result).toEqual({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: expect.stringContaining("output/topic-analysis.md"),
+        },
+      });
+      expect(stageProgress).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("emits a completion event after the declared stage artifacts exist", async () => {
+    const root = await progressWorkspace(true);
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).PostToolUse![0]!.hooks[0]!;
+
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "completed",
+        metadata: { anban_progress_stage: "research" },
+      }), "tool-1", hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
+        stage: "research",
+        state: "complete",
+        progress_percent: 20,
+      }), hookOptions.signal);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("returns failure-state context without describing artifacts as missing", async () => {
+    const root = await progressWorkspace(true);
+    await writeFile(join(root, "output", "failure-state.json"), "{}");
+    const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root)).PostToolUse![0]!.hooks[0]!;
+    try {
+      const result = await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "completed",
+        metadata: { anban_progress_stage: "research" },
+      }), "tool-1", hookOptions);
+      const context = (result.hookSpecificOutput as { additionalContext: string }).additionalContext;
+
+      expect(context).toContain("failure state output/failure-state.json exists");
+      expect(context.toLowerCase()).not.toContain("missing");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("diagnoses an unknown stage and returns an empty Hook result", async () => {
+    const root = await progressWorkspace();
+    const diagnostics: string[] = [];
+    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
+    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
+    try {
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "unknown" },
+      }), "tool-1", hookOptions)).toEqual({});
+      expect(diagnostics.join("\n")).toContain("unknown progress stage: unknown");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("diagnoses TaskUpdate without repeated progress metadata and leaves it unrelated", async () => {
+    const root = await progressWorkspace();
+    const diagnostics: string[] = [];
+    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
+    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
+    try {
+      expect(await callback(taskHookInput("TaskUpdate", { taskId: "task-1", status: "in_progress" }), "tool-1", hookOptions)).toEqual({});
+      expect(diagnostics.join("\n")).toContain("anban_progress_stage");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("records the TaskCreate response id and diagnoses malformed responses without blocking", async () => {
+    const root = await progressWorkspace();
+    const diagnostics: string[] = [];
+    const taskStages = new Map<string, string>();
+    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
+    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message), taskStages);
+    try {
+      expect(await callback(taskHookInput("TaskCreate", {
+        subject: "Research",
+        description: "Research",
+        metadata: { anban_progress_stage: "research" },
+      }, { task: { id: "task-1", subject: "Research" } }), "tool-1", hookOptions)).toEqual({});
+      expect(taskStages.get("task-1")).toBe("research");
+
+      expect(await callback(taskHookInput("TaskCreate", {
+        subject: "Research",
+        description: "Research",
+        metadata: { anban_progress_stage: "research" },
+      }, { task: {} }), "tool-2", hookOptions)).toEqual({});
+      expect(diagnostics.join("\n")).toContain("TaskCreate response");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("generic Stop emits final 100 only after all artifacts validate", async () => {
+    const root = await progressWorkspace(true);
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).Stop![0]!.hooks[0]!;
+
+      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledWith({
+        stage: "delivery",
+        state: "complete",
+        title: "Delivery",
+        description: undefined,
+        progress_percent: 100,
+      }, hookOptions.signal);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("generic Stop blocks with repair context for missing artifacts and failure state", async () => {
+    const root = await progressWorkspace();
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root)).Stop![0]!.hooks[0]!;
+      const missing = await callback(stopHookInput(), undefined, hookOptions);
+      expect(missing).toMatchObject({
+        decision: "block",
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("output/topic-analysis.md") },
+      });
+
+      await writeFile(join(root, "output", "failure-state.json"), "{}");
+      const failed = await callback(stopHookInput(), undefined, hookOptions);
+      const failureContext = (failed.hookSpecificOutput as { additionalContext: string }).additionalContext;
+      expect(failed).toMatchObject({
+        decision: "block",
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("failure state") },
+      });
+      expect(failureContext.toLowerCase()).not.toContain("missing");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("generic Stop avoids recursion and does not let Reporter failure block delivery", async () => {
+    const root = await progressWorkspace(true);
+    const stageProgress = mock(async () => { throw new Error("server unavailable"); });
+    try {
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).Stop![0]!.hooks[0]!;
+
+      expect(await callback(stopHookInput(true), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
+      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("creates isolated progress state for each query options instance", async () => {
+    const root = await progressWorkspace();
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    const reporter = { progress: async () => {}, stageProgress };
+    try {
+      const first = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, reporter)).PostToolUse![0]!.hooks[0]!;
+      const second = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, reporter)).PostToolUse![0]!.hooks[0]!;
+      const input = taskHookInput("TaskUpdate", {
+        taskId: "task-1",
+        status: "in_progress",
+        metadata: { anban_progress_stage: "research" },
+      });
+
+      await first(input, "tool-1", hookOptions);
+      await first(input, "tool-1", hookOptions);
+      await second(input, "tool-1", hookOptions);
+      expect(stageProgress).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

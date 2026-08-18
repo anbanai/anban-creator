@@ -124,6 +124,11 @@ export interface AgentPack {
   progress: AgentPackProgressStage[];
 }
 
+export interface ResolvedBootstrapResponse extends BootstrapResponse {
+  /** Runtime-only Pack snapshot selected from the validated Catalog. */
+  resolved_agent_pack: AgentPack;
+}
+
 export interface AgentPackCatalog {
   packs: AgentPack[];
 }
@@ -153,7 +158,7 @@ export async function readWorkloadToken(path: string): Promise<string> {
   return token;
 }
 
-export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<BootstrapResponse> {
+export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -172,8 +177,8 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
   try {
     const data = validateBootstrapResponse(config.executionID, envelope.data);
-    validateAgentPackCatalog(data, await readAgentPackCatalog());
-    return data;
+    const pack = validateAgentPackCatalog(data, await readAgentPackCatalog());
+    return { ...data, resolved_agent_pack: pack };
   } catch (error) {
     const identity = trustedBootstrapIdentity(config.executionID, envelope.data);
     if (identity) {

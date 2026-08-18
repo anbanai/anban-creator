@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 
-import type { BootstrapResponse } from "../src/bootstrap.js";
+import type { ResolvedBootstrapResponse } from "../src/bootstrap.js";
 import type { ExecutionResult } from "../src/reporter.js";
 import {
   CompletionReportError,
@@ -42,7 +42,7 @@ const jobArgs = [
   "--workload-token-file", "/token",
 ];
 
-const bootstrapData: BootstrapResponse = {
+const bootstrapData: ResolvedBootstrapResponse = {
   execution_token: "execution-token", task_id: "task-1", task_type: "article",
   agent_pack_id: "article", agent_pack_version: "1.0.0", agent_pack_digest: "0".repeat(64),
   runtime_profile: "article", runtime_adapter: "standard", project_id: "project-1", prompt: "write",
@@ -52,6 +52,11 @@ const bootstrapData: BootstrapResponse = {
   },
   max_turns: 1, agent_flag: "anban:article", auto_memory_directory: ".claude/memory",
   files: [], artifact_transport: { mode: "direct" },
+  resolved_agent_pack: {
+    id: "article", version: "1.0.0", digest: "0".repeat(64), agent: { name: "article" },
+    bindings: { task_types: ["article"] }, runtime: { profile: "article", adapter: "standard" },
+    progress: [{ id: "delivery", title: "Delivery", active_percent: 80, complete_percent: 100 }],
+  },
 };
 
 function runJobHarness() {

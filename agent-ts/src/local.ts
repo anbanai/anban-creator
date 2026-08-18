@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { uploadWorkspaceArtifacts } from "./artifacts.js";
-import { readAgentPackCatalog, type AgentPackCatalog, type BootstrapResponse } from "./bootstrap.js";
+import { readAgentPackCatalog, type AgentPack, type AgentPackCatalog, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { CompletionReportError } from "./errors.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
@@ -33,6 +33,7 @@ export interface LocalConfig {
   articleWithCover: boolean;
   articleWithContentImages: boolean;
   modelUsageAliases: BootstrapResponse["execution_profile"]["model_usage_aliases"];
+  agentPack: AgentPack;
 }
 
 export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<LocalConfig> {
@@ -108,6 +109,7 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     articleWithCover: booleans.get("--article-with-cover") ?? true,
     articleWithContentImages: booleans.get("--article-with-content-images") ?? true,
     modelUsageAliases: parseModelUsageAliases(aliases),
+    agentPack: pack,
   };
 }
 
@@ -152,7 +154,7 @@ export async function runLocal(
   }
 }
 
-function localBootstrap(config: LocalConfig): BootstrapResponse {
+function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {
   const inheritedKey = process.env.ANTHROPIC_API_KEY?.trim();
   const envs: Record<string, string> = {};
   if (inheritedKey) envs.ANTHROPIC_API_KEY = inheritedKey;
@@ -181,6 +183,7 @@ function localBootstrap(config: LocalConfig): BootstrapResponse {
     agent_flag: config.agentFlag,
     auto_memory_directory: config.autoMemoryDirectory,
     artifact_transport: { mode: "stream" },
+    resolved_agent_pack: config.agentPack,
   };
 }
 

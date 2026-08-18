@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
-import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse } from "./bootstrap.js";
+import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { CompletionReportError, exitCodeForError } from "./errors.js";
 import { runLocal } from "./local.js";
@@ -25,12 +25,12 @@ export interface FinalizationTimeouts {
 
 export interface RunJobDependencies {
   readWorkloadToken(path: string): Promise<string>;
-  bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<BootstrapResponse>;
+  bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse>;
   materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
   prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
   createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "task_id">): JobReporter;
   startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
-  runClaude(config: JobConfig, data: BootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
+  runClaude(config: JobConfig, data: ResolvedBootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
   uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
   subscribeShutdown(onSignal: () => void): () => void;
 }
@@ -85,7 +85,7 @@ export async function runJob(
   let stopHeartbeat: (() => void) | undefined;
   try {
     const workloadToken = await dependencies.readWorkloadToken(config.workloadTokenFile);
-    let data: BootstrapResponse | undefined;
+    let data: ResolvedBootstrapResponse | undefined;
     try {
       data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
       await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);

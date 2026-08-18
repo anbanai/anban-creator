@@ -35,6 +35,10 @@ describe("parseLocalConfig", () => {
       taskID: "task-1", taskType: "article", maxTurns: 60,
       agentFlag: "anban:article", articleWithCover: false,
       articleWithContentImages: true,
+      agentPack: {
+        id: "article",
+        progress: [{ id: "research", active_percent: 10, complete_percent: 100 }],
+      },
     });
   });
 

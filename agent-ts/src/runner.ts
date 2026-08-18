@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 
-import { query, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse } from "./bootstrap.js";
+import { CLAUDE_PROFILE_ENV_KEYS, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
+import { ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
 
@@ -158,7 +159,7 @@ export interface ToolUseDiagnostics {
   last_tool_error_tool?: string;
   last_tool_error?: string;
 }
-export type RunnerReporter = Pick<Reporter, "progress">;
+export type RunnerReporter = Pick<Reporter, "progress" | "stageProgress">;
 
 class RuntimeArtifactMaterializationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -171,7 +172,7 @@ export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "res
   return appendResumeContextToPrompt(data.prompt, data.resume_context_path);
 }
 
-export async function runClaude(workspace: string, data: BootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
+export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
   const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
@@ -216,20 +217,28 @@ export async function runClaude(workspace: string, data: BootstrapResponse, serv
 }
 
 export function buildQueryOptions(
-  data: BootstrapResponse,
+  data: ResolvedBootstrapResponse,
   workspace: string,
   serverURL = "https://server.invalid",
   token = "test-token",
-  reporter: RunnerReporter = { progress: async () => {} },
+  reporter: RunnerReporter = { progress: async () => {}, stageProgress: async () => {} },
   controller = new AbortController(),
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
+  const pack = data.resolved_agent_pack;
+  const diagnostic: ProgressDiagnostic = (message) => {
+    void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
+  };
+  const emitter = new ProgressEmitter(pack, reporter, diagnostic);
+  const stopHooks: HookCallback[] = [createManagedProgressStopHook(emitter, cwd)];
   const hooks: NonNullable<Options["hooks"]> = {
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
+    PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, cwd, diagnostic)] }],
+    Stop: [{ hooks: stopHooks }],
   };
   if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
-    hooks.Stop = [{ hooks: [createSeednoteStopGate(cwd, data.task_type, pluginRoot)] }];
+    stopHooks.push(createSeednoteStopGate(cwd, data.task_type, pluginRoot));
   }
   return {
     abortController: controller,
@@ -251,6 +260,104 @@ export function buildQueryOptions(
     stderr: (line) => void reporter.progress(line.trim()),
     hooks,
   };
+}
+
+export function createTaskProgressHook(
+  emitter: ProgressEmitter,
+  workspace: string,
+  diagnostic: ProgressDiagnostic = (message) => console.error(message),
+  taskStages = new Map<string, string>(),
+): HookCallback {
+  return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PostToolUse") return {};
+    if (input.tool_name !== "TaskCreate" && input.tool_name !== "TaskUpdate") return {};
+    if (!isRecord(input.tool_input)) {
+      diagnostic(`${input.tool_name} progress input is malformed`);
+      return {};
+    }
+
+    const stage = progressStageMetadata(input.tool_input.metadata);
+    if (!stage) {
+      diagnostic(`${input.tool_name} is missing metadata.anban_progress_stage`);
+      return {};
+    }
+
+    if (input.tool_name === "TaskCreate") {
+      const taskID = taskCreateResponseID(input.tool_response);
+      if (!taskID) {
+        diagnostic("TaskCreate response is missing task.id");
+        return {};
+      }
+      taskStages.set(taskID, stage);
+      return {};
+    }
+
+    const taskID = cleanString(input.tool_input.taskId);
+    if (!taskID) {
+      diagnostic("TaskUpdate progress input is missing taskId");
+      return {};
+    }
+    const createdStage = taskStages.get(taskID);
+    if (createdStage && createdStage !== stage) {
+      diagnostic(`TaskUpdate stage ${stage} does not match TaskCreate stage ${createdStage} for task ${taskID}`);
+    }
+
+    const status = input.tool_input.status;
+    if (status !== "in_progress" && status !== "completed") return {};
+    const result = await emitter.handle({
+      stage,
+      state: status === "in_progress" ? "active" : "complete",
+    }, workspace, hookOptions.signal);
+    if (!result.validation || result.validation.ok) return {};
+
+    const additionalContext = result.validation.reason === "missing_artifacts"
+      ? `Stage ${stage} cannot be completed. Create or repair these required artifacts: ${result.validation.missing.join(", ")}.`
+      : `Stage ${stage} cannot be completed because failure state ${result.validation.path} exists. Resolve the recorded failure before completing the task.`;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext,
+      },
+    };
+  };
+}
+
+function createManagedProgressStopHook(emitter: ProgressEmitter, workspace: string): HookCallback {
+  return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
+    const result = await emitter.handle({ state: "final" }, workspace, hookOptions.signal);
+    if (!result.validation || result.validation.ok) return {};
+
+    const additionalContext = result.validation.reason === "missing_artifacts"
+      ? `Managed completion gate is blocked. Create or repair these required artifacts: ${result.validation.missing.join(", ")}.`
+      : `Managed completion gate is blocked because failure state ${result.validation.path} exists. Resolve the recorded failure before stopping.`;
+    return {
+      decision: "block",
+      reason: additionalContext,
+      hookSpecificOutput: {
+        hookEventName: "Stop",
+        additionalContext,
+      },
+    };
+  };
+}
+
+function progressStageMetadata(metadata: unknown): string | undefined {
+  if (!isRecord(metadata)) return undefined;
+  return cleanString(metadata.anban_progress_stage);
+}
+
+function taskCreateResponseID(response: unknown): string | undefined {
+  if (!isRecord(response) || !isRecord(response.task)) return undefined;
+  return cleanString(response.task.id);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cleanString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function createManagedMCPBoundaryHook() {
