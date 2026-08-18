@@ -69,15 +69,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
 	}
-	var codexHooks []json.RawMessage
-	if len(codexManifest.Hooks) == 0 {
-		t.Fatal("Codex manifest must explicitly override default plugin hook discovery")
-	}
-	if err := json.Unmarshal(codexManifest.Hooks, &codexHooks); err != nil {
-		t.Fatalf("Codex manifest hooks must be an array: %v", err)
-	}
-	if len(codexHooks) != 0 {
-		t.Fatalf("Codex manifest hooks = %s, want an explicit empty array until a validated reporter adapter exists", codexManifest.Hooks)
+	if err := validateCodexHooksDisabled(codexManifest.Hooks); err != nil {
+		t.Fatal(err)
 	}
 
 	for _, path := range []string{
@@ -101,6 +94,46 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if len(markdownAgents) != 6 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ: Claude=%v Codex=%v", markdownAgents, tomlAgents)
 	}
+}
+
+func TestCodexHooksDisabledContractRejectsNullAndNonEmptyValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		wantErr bool
+	}{
+		{name: "missing", wantErr: true},
+		{name: "null", raw: json.RawMessage(`null`), wantErr: true},
+		{name: "object", raw: json.RawMessage(`{}`), wantErr: true},
+		{name: "non-empty array", raw: json.RawMessage(`["./hooks/codex.json"]`), wantErr: true},
+		{name: "explicit empty array", raw: json.RawMessage(`[]`)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateCodexHooksDisabled(test.raw)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("validateCodexHooksDisabled(%s) error = %v, wantErr %t", test.raw, err, test.wantErr)
+			}
+		})
+	}
+}
+
+func validateCodexHooksDisabled(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("Codex manifest must explicitly override default plugin hook discovery")
+	}
+	var hooks []json.RawMessage
+	if err := json.Unmarshal(raw, &hooks); err != nil {
+		return fmt.Errorf("Codex manifest hooks must be an array: %w", err)
+	}
+	if hooks == nil {
+		return fmt.Errorf("Codex manifest hooks must be an explicit empty array, not null")
+	}
+	if len(hooks) != 0 {
+		return fmt.Errorf("Codex manifest hooks = %s, want an explicit empty array until a validated reporter adapter exists", raw)
+	}
+	return nil
 }
 
 func TestRuntimeContractsDoNotUseTaskFileListingAsCompletionGate(t *testing.T) {
