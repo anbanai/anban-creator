@@ -829,28 +829,82 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 	}
 }
 
-// TestCompleteLocalTask_RejectsTerminalDuplicate confirms execution-scoped
-// retries cannot silently acknowledge a terminal task.
-func TestCompleteLocalTask_RejectsTerminalDuplicate(t *testing.T) {
+func TestCompleteLocalTask_AcknowledgesSameTerminalDuplicateAndRejectsConflict(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load current execution: task=%#v err=%v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+	first := &agent.ExecutionResult{Success: true, LogText: "done", ToolUseSummary: map[string]int{"Write": 1}}
 
-	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true}); err != nil {
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, first); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
-	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); !errors.Is(err, ErrStaleTaskExecution) {
-		t.Fatalf("second complete error = %v, want ErrStaleTaskExecution", err)
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{
+		Success: true, LogText: "done", ToolUseSummary: map[string]int{"Write": 1},
+	}); err != nil {
+		t.Fatalf("same completion retry: %v", err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: false, Error: "late"}); err == nil {
+		t.Fatal("conflicting completion retry = nil, want conflict")
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if got.Status != model.TaskStatusCompleted {
-		t.Fatalf("status = %q, want completed (idempotent)", got.Status)
+	if got.Status != model.TaskStatusCompleted || got.Result == nil || !strings.Contains(*got.Result, `"log_text":"done"`) {
+		t.Fatalf("terminal retry changed task: status=%q result=%v", got.Status, got.Result)
+	}
+}
+
+func TestCompleteLocalTaskAcceptsSameOriginalResultAfterServerNormalization(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		addArtifacts bool
+		result       func() *agent.ExecutionResult
+	}{
+		{
+			name: "failure", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: false, Error: "provider unavailable"}
+			},
+		},
+		{
+			name: "nested agent", addArtifacts: true, result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1, "TaskUpdate": 2}}
+			},
+		},
+		{
+			name: "artifact invalid", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			if test.addArtifacts {
+				addLocalSeednoteDeliverables(t, repo, taskID)
+			}
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, test.result()); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, test.result()); err != nil {
+				t.Fatalf("same original result retry: %v", err)
+			}
+		})
 	}
 }
 
@@ -934,8 +988,8 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "late", InputTokens: 99}},
 				CostStatus: agent.CostStatusUnreconciled,
 			}
-			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); !errors.Is(err, ErrStaleTaskExecution) {
-				t.Fatalf("terminal retry error = %v, want ErrStaleTaskExecution", err)
+			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("terminal retry error = %v, want ErrTaskCompletionConflict", err)
 			}
 			retried, err := baseRepo.Tasks().FindByID(ctx, taskID)
 			if err != nil {

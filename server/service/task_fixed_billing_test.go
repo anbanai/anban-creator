@@ -297,8 +297,8 @@ func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
 	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
-	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); !errors.Is(err, ErrStaleTaskExecution) {
-		t.Fatalf("duplicate CompleteLocalTask error = %v, want ErrStaleTaskExecution", err)
+	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
+		t.Fatalf("duplicate CompleteLocalTask: %v", err)
 	}
 	found, err := f.repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil || found.BillingTerminalReason != model.TaskBillingTerminalProviderError {

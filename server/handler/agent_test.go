@@ -324,8 +324,12 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 				if mode == "current" && resp.StatusCode != fiber.StatusOK {
 					t.Fatalf("current execution %s status = %d, want 200", executionID, resp.StatusCode)
 				}
-				if mode != "current" && resp.StatusCode != fiber.StatusForbidden {
-					t.Fatalf("%s status = %d, want 403", mode, resp.StatusCode)
+				wantRejectedStatus := fiber.StatusForbidden
+				if endpoint.name == "complete" && mode == "terminal" {
+					wantRejectedStatus = fiber.StatusConflict
+				}
+				if mode != "current" && resp.StatusCode != wantRejectedStatus {
+					t.Fatalf("%s status = %d, want %d", mode, resp.StatusCode, wantRejectedStatus)
 				}
 				if mode != "current" {
 					persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
@@ -385,13 +389,13 @@ func TestAgentAPIKeyCompletionRequiresCurrentExecutionWithoutSideEffects(t *test
 				t.Fatal(err)
 			}
 		}},
-		{name: "terminal task", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+		{name: "terminal task", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusConflict, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
 			task.Status = model.TaskStatusFailed
 			if err := repo.Tasks().Update(context.Background(), task); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{name: "completed execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, _ *model.Task, executionID string) {
+		{name: "completed execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusConflict, mutate: func(t *testing.T, repo repository.Repository, _ *model.Task, executionID string) {
 			transitioned, err := repo.TaskExecutions().Transition(context.Background(), executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "already terminal"})
 			if err != nil || !transitioned {
 				t.Fatalf("terminal execution transition = %v/%v", transitioned, err)
@@ -514,6 +518,108 @@ func TestAgentAPIKeyCurrentLocalCompletionFailureFinalizesTask(t *testing.T) {
 	}
 }
 
+func TestAgentCompletionResponseLossRetryIsIdempotentForJWTAndAPIKey(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		target     string
+		credential func(token, apiKey string) string
+	}{
+		{name: "cloud JWT", target: "kubernetes", credential: func(token, _ string) string { return token }},
+		{name: "local API key", target: model.ExecutionTargetLocalClaimed, credential: func(_, apiKey string) string { return apiKey }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, repo, task, executionID, token, apiKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning)
+			body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed","tool_use_summary":{"Write":1}}}`
+			credential := test.credential(token, apiKey)
+			for attempt := 1; attempt <= 2; attempt++ {
+				req := agentJSONRequest("/agent/complete", body)
+				req.Header.Set("Authorization", "Bearer "+credential)
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != fiber.StatusOK {
+					responseBody, _ := io.ReadAll(resp.Body)
+					t.Fatalf("attempt %d status/body = %d/%s, want 200", attempt, resp.StatusCode, responseBody)
+				}
+			}
+
+			conflict := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"different result"}}`
+			req := agentJSONRequest("/agent/complete", conflict)
+			req.Header.Set("Authorization", "Bearer "+credential)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusConflict {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("conflict status/body = %d/%s, want 409", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil || persisted.Status != model.TaskStatusFailed || persisted.ErrorMessage != "agent failed" {
+				t.Fatalf("terminal task after retries = %#v, %v", persisted, err)
+			}
+		})
+	}
+}
+
+func TestAgentCompletionJWTRejectsLocalExecutionTarget(t *testing.T) {
+	app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","result":{"success":false,"error":"wrong target"}}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 403", resp.StatusCode, body)
+	}
+}
+
+var errInjectedCompletionFindExecution = errors.New("injected completion execution lookup failure")
+
+type completionFindExecutionErrorRepository struct {
+	repository.Repository
+	findCalls int
+}
+
+func (r *completionFindExecutionErrorRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &completionFindExecutionErrorTaskExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), parent: r}
+}
+
+type completionFindExecutionErrorTaskExecutions struct {
+	repository.TaskExecutionRepository
+	parent *completionFindExecutionErrorRepository
+}
+
+func (r *completionFindExecutionErrorTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	r.parent.findCalls++
+	if r.parent.findCalls == 2 {
+		return nil, errInjectedCompletionFindExecution
+	}
+	return r.TaskExecutionRepository.FindByID(ctx, id)
+}
+
+func TestAgentCompletionRepositoryErrorAfterAuthorizationReturns500(t *testing.T) {
+	app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning,
+		func(base repository.Repository) repository.Repository {
+			return &completionFindExecutionErrorRepository{Repository: base}
+		}, nil,
+	)
+	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","result":{"success":false,"error":"agent failed"}}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusInternalServerError || !strings.Contains(string(body), "complete failed") {
+		t.Fatalf("status/body = %d/%s, want redacted 500", resp.StatusCode, body)
+	}
+}
+
 func TestAgentCompletionErrorResponseDistinguishesStaleFromInternal(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
@@ -522,6 +628,7 @@ func TestAgentCompletionErrorResponseDistinguishesStaleFromInternal(t *testing.T
 		wantBody   string
 	}{
 		{name: "stale CAS loss", err: fmt.Errorf("finalize: %w", service.ErrStaleTaskExecution), wantStatus: fiber.StatusConflict, wantBody: "task execution is no longer current"},
+		{name: "completion conflict", err: fmt.Errorf("finalize: %w", service.ErrTaskCompletionConflict), wantStatus: fiber.StatusConflict, wantBody: "completion result conflicts with terminal outcome"},
 		{name: "ordinary repository error", err: errors.New("database unavailable"), wantStatus: fiber.StatusInternalServerError, wantBody: "complete failed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

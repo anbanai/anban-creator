@@ -6,10 +6,12 @@ import (
 	"io"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 )
 
@@ -59,12 +61,76 @@ func TestCompleteLocalTaskRecordsTerminalProviderCostOnce(t *testing.T) {
 	if err != nil || terminalExecution.Status != model.TaskExecutionSucceeded || terminalExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || terminalExecution.CleanupStatus != model.TaskExecutionCleanupDone || len(terminalExecution.Result) == 0 {
 		t.Fatalf("local execution terminal state = %#v err=%v", terminalExecution, err)
 	}
-	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); !errors.Is(err, ErrStaleTaskExecution) {
-		t.Fatalf("duplicate completion error = %v, want ErrStaleTaskExecution", err)
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, result); err != nil {
+		t.Fatalf("same duplicate completion: %v", err)
 	}
 	events, err := costRepo.ListEventsByExecution(ctx, executionID)
 	if err != nil || len(events) != 2 {
 		t.Fatalf("provider cost events = %#v err=%v, want two exactly once", events, err)
+	}
+}
+
+func TestCompleteLocalTaskResponseLossRetryDoesNotRepeatTerminalSideEffects(t *testing.T) {
+	svc, repo, costRepo := setupLocalProviderCostTest(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("claimed task = %#v, %v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+
+	if err := repo.IlinkBindings().Create(ctx, &model.IlinkBinding{
+		ID: uuid.NewString(), UserID: userID, PlatformAccountID: stringPtr("platform-1"),
+		ExternalUserID: stringPtr("wx-user-1"), Status: model.IlinkBindingStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &logger))
+
+	miniRedis := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	svc.pubsub = NewRedisPubSub(rdb, &logger)
+	if count, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved || count != 1 {
+		t.Fatalf("reserve current local slot = %d/%v/%v", count, reserved, err)
+	}
+	pending := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+		Status: model.TaskStatusPending, ExecutionTarget: model.ExecutionTargetCloud,
+	}
+	if err := repo.Tasks().Create(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetProviderCostService(NewProviderCostService(costRepo, providerCostBundleWithTurbo()))
+	result := &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{
+		Provider: "volcengine_ark", Model: "doubao-seed-evolving", InputTokens: 10, OutputTokens: 2,
+	}}}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+		t.Fatalf("first completion: %v", err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+		t.Fatalf("response-loss retry: %v", err)
+	}
+
+	events, err := costRepo.ListEventsByExecution(ctx, executionID)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("provider events after retry = %#v, %v", events, err)
+	}
+	if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 1 {
+		t.Fatalf("dispatch enqueue count = %d, want 1", got)
+	}
+	if count, err := rdb.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+		t.Fatalf("slot count after retry = %d/%v, want replacement slot only", count, err)
+	}
+	notifications, err := repo.IlinkNotifications().ListDue(ctx, 10)
+	if err != nil || len(notifications) != 1 {
+		t.Fatalf("terminal notifications after retry = %#v, %v", notifications, err)
 	}
 }
 

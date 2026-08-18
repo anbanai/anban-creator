@@ -102,6 +102,33 @@ describe("postJSONWithRetry", () => {
     }
   });
 
+  test("retries the identical completion body after the server commits but the response is lost", async () => {
+    const requests: unknown[] = [];
+    let durableCompletions = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push(body);
+      if (durableCompletions === 0) {
+        durableCompletions += 1;
+        throw new Error("response lost after commit");
+      }
+      return new Response("{}", { status: 200 });
+    };
+    try {
+      const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
+      const result = { success: false, error: "agent failed", tool_use_summary: { Write: 1 } };
+      await reporter.complete(result);
+
+      expect(durableCompletions).toBe(1);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual(requests[0]);
+      expect(requests[0]).toEqual({ task_id: "task-1", execution_id: "execution-1", result });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("retries structured stage progress twice before succeeding", async () => {
     let attempts = 0;
     const originalFetch = globalThis.fetch;

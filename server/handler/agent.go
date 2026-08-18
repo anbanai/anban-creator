@@ -173,9 +173,8 @@ func (h *AgentHandler) authenticatedExecutionID(c fiber.Ctx) string {
 }
 
 func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
-	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
-	if claimTaskID != "" && claimTaskID != taskID {
-		return errors.New("execution token task mismatch")
+	if err := h.authorizeClaimTaskScope(c, taskID); err != nil {
+		return err
 	}
 	executionID, _ := c.Locals(agentExecutionIDContextKey).(string)
 	if executionID != "" {
@@ -185,6 +184,14 @@ func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
 			return errors.New("task service unavailable")
 		}
 		return h.taskSvc.ValidateAgentExecutionAccess(c.Context(), userID, projectID, taskID, executionID)
+	}
+	return nil
+}
+
+func (h *AgentHandler) authorizeClaimTaskScope(c fiber.Ctx, taskID string) error {
+	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
+	if claimTaskID != "" && claimTaskID != taskID {
+		return errors.New("execution token task mismatch")
 	}
 	return nil
 }
@@ -664,8 +671,8 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 // A desktop local executor calls this once when anban finishes, with
 // the final ExecutionResult. The service finalizes the task (status → completed
 // or failed, slot release, dispatch, refund-on-failure) — guarded to the
-// current running local_claimed execution. Stale and repeated local completion
-// is rejected. This is the terminal half of the local-execution path; without it a
+// current local_claimed execution. Identical terminal retries are acknowledged.
+// This is the terminal half of the local-execution path; without it a
 // local task could never reach a terminal state (the agent binary is shared with
 // cloud, whose authoritative finalization is server-side HandleExecution).
 func (h *AgentHandler) Complete(c fiber.Ctx) error {
@@ -680,11 +687,12 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
+	if err := h.authorizeClaimTaskScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
+	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
+	if err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
@@ -695,20 +703,19 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
 			return Error(c, fiber.StatusForbidden, "execution access denied")
 		}
+		projectID, _ := c.Locals(agentProjectIDContextKey).(string)
+		if err := h.taskSvc.ValidateAgentCompletionAccess(c.Context(), h.authenticatedUserID(c), projectID, req.TaskID, authenticatedExecutionID); err != nil {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
 	} else {
 		if requestedExecutionID == "" {
 			return Error(c, fiber.StatusBadRequest, "execution_id is required")
 		}
-		task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
-		if err != nil {
-			return Error(c, fiber.StatusForbidden, "task access denied")
-		}
-		if err := h.taskSvc.ValidateLocalAgentExecutionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
+		if err := h.taskSvc.ValidateLocalAgentCompletionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
 			return Error(c, fiber.StatusForbidden, "execution access denied")
 		}
 		executionID = requestedExecutionID
 	}
-	var err error
 	if authenticatedExecutionID != "" {
 		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
 	} else {
@@ -726,6 +733,9 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 }
 
 func agentCompletionErrorResponse(err error) (int, string) {
+	if errors.Is(err, service.ErrTaskCompletionConflict) {
+		return fiber.StatusConflict, "completion result conflicts with terminal outcome"
+	}
 	if errors.Is(err, service.ErrStaleTaskExecution) {
 		return fiber.StatusConflict, "task execution is no longer current"
 	}
