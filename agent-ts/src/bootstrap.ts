@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, posix, relative, resolve } from "node:path";
 
 import type { JobConfig } from "./config.js";
 
@@ -106,15 +106,26 @@ export interface BootstrapResponse {
   artifact_transport: { mode: "direct" | "stream" };
 }
 
+export interface AgentPackProgressStage {
+  id: string;
+  title: string;
+  active_percent: number;
+  complete_percent: number;
+  required_artifacts?: string[];
+}
+
+export interface AgentPack {
+  id: string;
+  version: string;
+  digest: string;
+  agent: { name: string };
+  bindings: { task_types?: string[] };
+  runtime: { profile?: string; adapter?: string; max_turns?: number };
+  progress: AgentPackProgressStage[];
+}
+
 export interface AgentPackCatalog {
-  packs: Array<{
-    id: string;
-    version: string;
-    digest: string;
-    agent: { name: string };
-    bindings: { task_types?: string[] };
-    runtime: { profile?: string; adapter?: string; max_turns?: number };
-  }>;
+  packs: AgentPack[];
 }
 
 export interface BootstrapIdentity {
@@ -177,11 +188,14 @@ export async function readAgentPackCatalog(path = DEFAULT_AGENT_PACK_CATALOG_PAT
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_BOOTSTRAP_RESPONSE_BYTES) {
     throw new Error("Agent Pack Catalog is invalid");
   }
+  let catalog: unknown;
   try {
-    return JSON.parse(await readFile(path, "utf8")) as AgentPackCatalog;
+    catalog = JSON.parse(await readFile(path, "utf8"));
   } catch {
     throw new Error("Agent Pack Catalog is not valid JSON");
   }
+  validateAgentPackCatalogShape(catalog);
+  return catalog;
 }
 
 function trustedBootstrapIdentity(executionID: string, input: unknown): BootstrapIdentity | undefined {
@@ -234,7 +248,7 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
 }
 
 export function validateAgentPackCatalog(data: BootstrapResponse, catalog: AgentPackCatalog): AgentPackCatalog["packs"][number] {
-  if (!isRecord(catalog) || !Array.isArray(catalog.packs)) throw new Error("Agent Pack Catalog is invalid");
+  validateAgentPackCatalogShape(catalog);
   const matches = catalog.packs.filter((pack) => Array.isArray(pack.bindings?.task_types) && pack.bindings.task_types.includes(data.task_type));
   if (matches.length !== 1) throw new Error("bootstrap task type does not resolve to exactly one Agent Pack");
   const pack = matches[0]!;
@@ -242,6 +256,50 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
     throw new Error("bootstrap Agent Pack identity does not match runtime Catalog");
   }
   return pack;
+}
+
+function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
+  if (!isRecord(input) || !Array.isArray(input.packs)) throw new Error("Agent Pack Catalog is invalid");
+  for (const rawPack of input.packs) {
+    if (!isRecord(rawPack) || !Array.isArray(rawPack.progress) || rawPack.progress.length === 0) {
+      throw new Error("Agent Pack Catalog progress is invalid");
+    }
+    const stageIDs = new Set<string>();
+    let previousComplete = -1;
+    for (const rawStage of rawPack.progress) {
+      if (!isRecord(rawStage)
+        || !cleanString(rawStage.id)
+        || !cleanString(rawStage.title)
+        || !validProgressPercent(rawStage.active_percent)
+        || !validProgressPercent(rawStage.complete_percent)
+        || rawStage.active_percent > rawStage.complete_percent
+        || (rawStage.required_artifacts !== undefined
+          && (!Array.isArray(rawStage.required_artifacts)
+            || !rawStage.required_artifacts.every((artifact) => cleanString(artifact) && validRequiredArtifactPath(artifact))))) {
+        throw new Error("Agent Pack Catalog progress stage is invalid");
+      }
+      if (stageIDs.has(rawStage.id)) throw new Error("Agent Pack Catalog progress stage is duplicated");
+      if (rawStage.complete_percent < previousComplete) throw new Error("Agent Pack Catalog progress complete_percent is decreasing");
+      stageIDs.add(rawStage.id);
+      previousComplete = rawStage.complete_percent;
+    }
+    if ((rawPack.progress.at(-1) as Record<string, unknown>).complete_percent !== 100) {
+      throw new Error("Agent Pack Catalog progress final complete_percent must be 100");
+    }
+  }
+}
+
+function validProgressPercent(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100;
+}
+
+function validRequiredArtifactPath(artifact: string): boolean {
+  return !artifact.includes("\\")
+    && !posix.isAbsolute(artifact)
+    && !artifact.split("/").includes("..")
+    && posix.normalize(artifact) === artifact
+    && artifact !== "output"
+    && artifact.startsWith("output/");
 }
 
 function validateExecutionProfile(input: unknown): asserts input is ExecutionProfile {

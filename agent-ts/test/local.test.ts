@@ -14,6 +14,7 @@ async function localFixture() {
       id: "article", version: "1.2.3", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard", max_turns: 60 },
+      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
     }],
   }));
   return { root, plugin };

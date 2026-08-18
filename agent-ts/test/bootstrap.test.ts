@@ -79,9 +79,46 @@ describe("validateBootstrapResponse", () => {
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard" },
+      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
     }] };
 
     expect(() => validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog)).toThrow("Agent Pack identity");
+  });
+
+  test("rejects malformed Agent Pack progress contracts", () => {
+    const response = validateBootstrapResponse("execution-1", validResponse());
+    const basePack = {
+      id: "article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "article" }, bindings: { task_types: ["article"] },
+      runtime: { profile: "article", adapter: "standard" },
+    };
+    const invalidProgress = [
+      undefined,
+      [{ id: "", title: "Research", active_percent: 10, complete_percent: 100 }],
+      [{ id: "research", title: "", active_percent: 10, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: 10.5, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: -1, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: 30, complete_percent: 20 }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 101 }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: "output/a.md" }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: [1] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 90 }],
+      [
+        { id: "research", title: "Research", active_percent: 10, complete_percent: 60 },
+        { id: "writing", title: "Writing", active_percent: 20, complete_percent: 50 },
+        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+      ],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["/tmp/a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["../a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output/tmp/../a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output//a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output\\a.md"] }],
+    ];
+
+    for (const progress of invalidProgress) {
+      const catalog = { packs: [{ ...basePack, ...(progress === undefined ? {} : { progress }) }] } as unknown as AgentPackCatalog;
+      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("progress");
+    }
   });
 
   test("accepts all Claude profile env values without rewriting them", () => {

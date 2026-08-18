@@ -35,6 +35,8 @@ billing_operations:
 progress:
   - id: prepare
     title: Prepare
+    active_percent: 90
+    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md
@@ -130,8 +132,16 @@ func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
 			name: "rejects decreasing completion percentage",
 			progress: `progress:
   - {id: research, title: Research, active_percent: 10, complete_percent: 40}
-  - {id: writing, title: Writing, active_percent: 25, complete_percent: 30}`,
+  - {id: writing, title: Writing, active_percent: 25, complete_percent: 30}
+  - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}`,
 			want: "complete_percent must be non-decreasing",
+		},
+		{
+			name: "rejects progress contract that does not finish at 100",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20}
+  - {id: writing, title: Writing, active_percent: 30, complete_percent: 60}`,
+			want: "final complete_percent must be 100",
 		},
 		{
 			name: "rejects unsafe required artifact",
@@ -166,13 +176,13 @@ func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
 			name: "accepts ordered stage contract",
 			progress: `progress:
   - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/topic-analysis.md]}
-  - {id: writing, title: Writing, active_percent: 30, complete_percent: 60}`,
+  - {id: writing, title: Writing, active_percent: 30, complete_percent: 100}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare", tt.progress, 1)
+			manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100", tt.progress, 1)
 			root := writePackFixture(t, manifest)
 			catalog, err := LoadCatalog(root)
 			if tt.want != "" {
@@ -196,7 +206,7 @@ func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
 }
 
 func TestLoadCatalogAllowsOmittedProgressContract(t *testing.T) {
-	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n", "", 1)
+	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
 	root := writePackFixture(t, manifest)
 
 	if _, err := LoadCatalog(root); err != nil {
@@ -1144,6 +1154,8 @@ billing_operations:
 progress:
   - id: prepare
     title: Prepare
+    active_percent: 90
+    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md

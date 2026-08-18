@@ -267,6 +267,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
+	if len(manifest.Progress) > 0 && manifest.Progress[len(manifest.Progress)-1].CompletePercent != 100 {
+		return fmt.Errorf("progress final complete_percent must be 100")
+	}
 	return nil
 }
 
