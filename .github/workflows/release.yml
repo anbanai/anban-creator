@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      tarball_sha256: ${{ steps.artifact_digest.outputs.tarball_sha256 }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -185,7 +187,23 @@ jobs:
           NODE
 
       - name: Create exact DSH artifact digest
-        run: node scripts/dsh-artifact-integrity.mjs create release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json
+        id: artifact_digest
+        run: |
+          node scripts/dsh-artifact-integrity.mjs create release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from 'node:fs/promises'
+
+          const manifest = JSON.parse(
+            await readFile('release/dsh/artifact.sha256.json', 'utf8'),
+          )
+          if (!/^[0-9a-f]{64}$/.test(manifest.tarballSha256 ?? '')) {
+            throw new Error('artifact manifest is missing the tarball SHA-256')
+          }
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `tarball_sha256=${manifest.tarballSha256}\n`,
+          )
+          NODE
 
       - name: Upload exact DSH release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -238,16 +256,8 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: node -e "const {appendFileSync}=require('node:fs'); const event=process.env.GITHUB_EVENT_NAME; const ref=process.env.GITHUB_REF_NAME; const version=event==='workflow_dispatch'?process.env.REQUESTED_VERSION:ref.startsWith('v')?ref.slice(1):''; if(!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)||process.env.GITHUB_REF_TYPE!=='tag'||ref!=='v'+version) process.exit(1); appendFileSync(process.env.GITHUB_OUTPUT,'VERSION='+version+'\n')"
 
-      - name: Download exact DSH release artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: anban-dsh-plugin-release
-          path: release/dsh
-
-      - name: Verify exact DSH release artifact
-        run: |
-          node scripts/dsh-verify-pack.mjs release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
-          node scripts/dsh-artifact-integrity.mjs verify release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json
+      - name: Run Desktop supervisor acceptance tests
+        run: node --test scripts/dsh-process-supervisor.test.mjs scripts/dsh-desktop-acceptance.test.mjs
 
       - name: Install pinned DSH Desktop dependencies
         working-directory: _dsh-desktop
@@ -256,6 +266,19 @@ jobs:
       - name: Build unsigned packaged DSH Desktop
         working-directory: _dsh-desktop
         run: corepack yarn package:dir
+
+      - name: Download exact DSH release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: anban-dsh-plugin-release
+          path: release/dsh
+
+      - name: Verify exact DSH release artifact
+        env:
+          TRUSTED_TARBALL_SHA256: ${{ needs.dsh-package.outputs.tarball_sha256 }}
+        run: |
+          node scripts/dsh-verify-pack.mjs release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
+          node scripts/dsh-artifact-integrity.mjs verify release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json "$TRUSTED_TARBALL_SHA256"
 
       - name: Install exact plugin through public DSH
         env:
@@ -379,17 +402,6 @@ jobs:
           }
           NODE
 
-      - name: Download exact DSH release artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: anban-dsh-plugin-release
-          path: release/dsh
-
-      - name: Verify exact DSH release artifact
-        run: |
-          node scripts/dsh-verify-pack.mjs release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
-          node scripts/dsh-artifact-integrity.mjs verify release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json
-
       - name: Set up Agent runtime Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -424,6 +436,19 @@ jobs:
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+
+      - name: Download exact DSH release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: anban-dsh-plugin-release
+          path: release/dsh
+
+      - name: Verify exact DSH release artifact
+        env:
+          TRUSTED_TARBALL_SHA256: ${{ needs.dsh-package.outputs.tarball_sha256 }}
+        run: |
+          node scripts/dsh-verify-pack.mjs release/dsh/pack.json "${{ steps.version.outputs.VERSION }}"
+          node scripts/dsh-artifact-integrity.mjs verify release/dsh/pack.json "${{ steps.version.outputs.VERSION }}" release/dsh/artifact.sha256.json "$TRUSTED_TARBALL_SHA256"
 
       - name: Stage exact DSH package asset
         id: asset

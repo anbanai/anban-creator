@@ -189,6 +189,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: plugins/pnpm-lock.yaml
 
+      - name: Run Desktop supervisor acceptance tests
+        run: node --test scripts/dsh-process-supervisor.test.mjs scripts/dsh-desktop-acceptance.test.mjs
+
       - name: Install locked DSH plugin dependencies
         working-directory: plugins
         run: pnpm install --frozen-lockfile

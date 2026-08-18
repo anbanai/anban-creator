@@ -2,6 +2,7 @@ import { access, readFile, readdir, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   runBoundedCommand,
@@ -12,6 +13,7 @@ import {
 const COMMAND_TIMEOUT_MS = 180_000
 const LAUNCH_TIMEOUT_MS = 120_000
 const OUTPUT_LIMIT = 1024 * 1024
+const PROBE_TIMEOUT_MS = 2_000
 
 function requiredPath(name) {
   const value = process.env[name]
@@ -179,6 +181,16 @@ async function reservePort() {
   })
 }
 
+export function fetchWithDeadline(url, deadline, fetchImpl = fetch) {
+  const remainingMs = deadline - Date.now()
+  if (remainingMs <= 0) {
+    throw new DOMException('Desktop launch deadline expired', 'TimeoutError')
+  }
+  return fetchImpl(url, {
+    signal: AbortSignal.timeout(Math.min(remainingMs, PROBE_TIMEOUT_MS)),
+  })
+}
+
 async function waitForPackagedWindow(port, child, diagnostics) {
   const deadline = Date.now() + LAUNCH_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -188,7 +200,10 @@ async function waitForPackagedWindow(port, child, diagnostics) {
       )
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${String(port)}/json/list`)
+      const response = await fetchWithDeadline(
+        `http://127.0.0.1:${String(port)}/json/list`,
+        deadline,
+      )
       if (response.ok) {
         const targets = await response.json()
         const page = targets.find(
@@ -198,7 +213,7 @@ async function waitForPackagedWindow(port, child, diagnostics) {
             target.url.startsWith('http://127.0.0.1:'),
         )
         if (page !== undefined) {
-          const web = await fetch(page.url)
+          const web = await fetchWithDeadline(page.url, deadline)
           const html = await web.text()
           if (
             web.ok &&
@@ -261,11 +276,14 @@ async function launchPackagedApp() {
   }
 }
 
-const action = process.argv[2]
-if (action === 'install') {
-  await installPlugin()
-} else if (action === 'launch') {
-  await launchPackagedApp()
-} else {
-  throw new Error('usage: dsh-desktop-acceptance.mjs <install|launch>')
+const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  const action = process.argv[2]
+  if (action === 'install') {
+    await installPlugin()
+  } else if (action === 'launch') {
+    await launchPackagedApp()
+  } else {
+    throw new Error('usage: dsh-desktop-acceptance.mjs <install|launch>')
+  }
 }

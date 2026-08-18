@@ -87,7 +87,11 @@ export async function verifyArtifactDigest(
   metadataPath,
   expectedVersion,
   digestPath,
+  expectedTarballSha256,
 ) {
+  if (!/^[0-9a-f]{64}$/.test(expectedTarballSha256 ?? '')) {
+    throw new Error('trusted job tarball digest must be an exact SHA-256 value')
+  }
   const tarball = await verifyPackResult(metadataPath, expectedVersion)
   await requireRegularFile(tarball, 'DSH release tarball')
   const source = digestPathFor(metadataPath, digestPath)
@@ -96,7 +100,8 @@ export async function verifyArtifactDigest(
   if (
     manifest.metadataSha256 !== (await sha256(resolve(metadataPath))) ||
     manifest.tarball !== basename(tarball) ||
-    manifest.tarballSha256 !== (await sha256(tarball))
+    manifest.tarballSha256 !== (await sha256(tarball)) ||
+    manifest.tarballSha256 !== expectedTarballSha256
   ) {
     throw new Error('DSH release artifact digest mismatch')
   }
@@ -105,20 +110,27 @@ export async function verifyArtifactDigest(
 
 const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  const [, , action, metadataPath, expectedVersion, digestPath] = process.argv
+  const args = process.argv.slice(2)
+  const [action, metadataPath, expectedVersion, digestPath, expectedDigest] = args
   if (
     !['create', 'verify'].includes(action) ||
     metadataPath === undefined ||
     expectedVersion === undefined ||
-    digestPath === undefined
+    digestPath === undefined ||
+    (action === 'create' ? args.length !== 4 : args.length !== 5)
   ) {
     throw new Error(
-      'usage: dsh-artifact-integrity.mjs <create|verify> <pack.json> <version> <artifact.sha256.json>',
+      'usage: dsh-artifact-integrity.mjs create <pack.json> <version> <artifact.sha256.json> | verify <pack.json> <version> <artifact.sha256.json> <trusted-tarball-sha256>',
     )
   }
   if (action === 'create') {
     await createArtifactDigest(metadataPath, expectedVersion, digestPath)
   } else {
-    await verifyArtifactDigest(metadataPath, expectedVersion, digestPath)
+    await verifyArtifactDigest(
+      metadataPath,
+      expectedVersion,
+      digestPath,
+      expectedDigest,
+    )
   }
 }

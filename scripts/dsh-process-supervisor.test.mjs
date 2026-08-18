@@ -7,6 +7,7 @@ import test from 'node:test'
 
 import {
   runBoundedCommand,
+  terminateProcessTree,
   terminateWindowsTree,
 } from './dsh-process-supervisor.mjs'
 
@@ -120,6 +121,50 @@ test(
   },
 )
 
+test(
+  'Windows timeout removes the real root and descendant process identities',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-supervisor-windows-test-'))
+    const parentPidPath = join(root, 'parent.pid')
+    const childPidPath = join(root, 'child.pid')
+    const fixturePath = join(root, 'windows-tree.mjs')
+    let pids = []
+    await writeFile(
+      fixturePath,
+      `import { spawn } from 'node:child_process'\n` +
+        `import { writeFileSync } from 'node:fs'\n` +
+        `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid))\n` +
+        `const child = spawn(process.execPath, ['-e', ${JSON.stringify('setInterval(() => {}, 1000)')}], { stdio: 'ignore' })\n` +
+        `writeFileSync(${JSON.stringify(childPidPath)}, String(child.pid))\n` +
+        `setInterval(() => {}, 1000)\n`,
+    )
+
+    try {
+      await assert.rejects(
+        runBoundedCommand(process.execPath, [fixturePath], {
+          label: 'real Windows tree',
+          timeoutMs: 1_000,
+          terminationGraceMs: 100,
+          closeWatchdogMs: 3_000,
+        }),
+        /real Windows tree timed out after 1000ms/,
+      )
+      pids = [await waitForFile(parentPidPath), await waitForFile(childPidPath)]
+      await waitForProcessesGone(pids)
+    } finally {
+      for (const pid of pids.filter(processExists)) {
+        try {
+          await terminateWindowsTree(pid, true)
+        } catch {
+          // The assertion above reports the primary cleanup failure.
+        }
+      }
+      await rm(root, { force: true, recursive: true })
+    }
+  },
+)
+
 test('Windows termination awaits taskkill tree operations', async () => {
   const invocations = []
   const spawnProcess = (command, args, options) => {
@@ -146,5 +191,76 @@ test('Windows termination awaits taskkill tree operations', async () => {
         options.stdio === 'ignore' &&
         options.windowsHide === true,
     ),
+  )
+})
+
+test('Windows cleanup retains and force-kills descendants after the root exits', async () => {
+  const alive = new Set([42, 84])
+  const child = {
+    exitCode: null,
+    kill() {
+      assert.fail('Windows cleanup must not use direct child.kill')
+    },
+    pid: 42,
+    signalCode: null,
+  }
+  const invocations = []
+  const spawnProcess = (command, args, options) => {
+    invocations.push({ args, command, options })
+    const killer = new EventEmitter()
+    queueMicrotask(() => {
+      const pid = Number.parseInt(args[1], 10)
+      if (args.includes('/F')) {
+        alive.delete(pid)
+      } else {
+        alive.delete(42)
+        child.exitCode = 0
+      }
+      killer.emit('close', 0, null)
+    })
+    return killer
+  }
+
+  await terminateProcessTree(child, {
+    closeWatchdogMs: 100,
+    platform: 'win32',
+    snapshotWindowsTree: async () => [42, 84],
+    spawnProcess,
+    terminationGraceMs: 1,
+    windowsProcessExists: (pid) => alive.has(pid),
+  })
+
+  assert.deepEqual([...alive], [])
+  assert.ok(
+    invocations.some(
+      ({ args }) => args[1] === '84' && args.includes('/T') && args.includes('/F'),
+    ),
+    'forced cleanup must target the retained descendant PID',
+  )
+})
+
+test('Windows cleanup reports failed taskkill status for surviving identities', async () => {
+  const child = {
+    exitCode: null,
+    pid: 42,
+    signalCode: null,
+  }
+  const spawnProcess = () => {
+    const killer = new EventEmitter()
+    queueMicrotask(() => killer.emit('close', 5, null))
+    return killer
+  }
+
+  await assert.rejects(
+    terminateProcessTree(child, {
+      closeWatchdogMs: 1,
+      label: 'failed Windows tree',
+      platform: 'win32',
+      snapshotWindowsTree: async () => [42],
+      spawnProcess,
+      terminationGraceMs: 1,
+      windowsProcessExists: () => true,
+    }),
+    /taskkill failed with status 5.*PIDs: 42/,
   )
 })
