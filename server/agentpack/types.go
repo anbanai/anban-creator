@@ -53,8 +53,11 @@ type RuntimeSpec struct {
 }
 
 type ProgressStage struct {
-	ID    string `yaml:"id" json:"id"`
-	Title string `yaml:"title" json:"title"`
+	ID                string   `yaml:"id" json:"id"`
+	Title             string   `yaml:"title" json:"title"`
+	ActivePercent     int      `yaml:"active_percent" json:"active_percent"`
+	CompletePercent   int      `yaml:"complete_percent" json:"complete_percent"`
+	RequiredArtifacts []string `yaml:"required_artifacts,omitempty" json:"required_artifacts,omitempty"`
 }
 
 type ArtifactSpec struct {
@@ -88,6 +91,15 @@ type Catalog struct {
 	byID              map[string]int
 	byTaskType        map[string]int
 	byProjectPlatform map[string]int
+}
+
+func (m Manifest) ProgressStage(id string) (ProgressStage, bool) {
+	for _, stage := range m.Progress {
+		if stage.ID == id {
+			return stage, true
+		}
+	}
+	return ProgressStage{}, false
 }
 
 func (c *Catalog) Pack(id string) (Manifest, bool) {

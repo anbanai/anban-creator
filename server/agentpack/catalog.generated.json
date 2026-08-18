@@ -50,15 +50,21 @@
       "progress": [
         {
           "id": "research",
-          "title": "选题研究"
+          "title": "选题研究",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "writing",
-          "title": "内容创作"
+          "title": "内容创作",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "delivery",
-          "title": "交付验收"
+          "title": "交付验收",
+          "active_percent": 0,
+          "complete_percent": 0
         }
       ],
       "artifacts": [
@@ -131,15 +137,21 @@
       "progress": [
         {
           "id": "analysis",
-          "title": "产品分析"
+          "title": "产品分析",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "production",
-          "title": "素材生产"
+          "title": "素材生产",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "delivery",
-          "title": "交付验收"
+          "title": "交付验收",
+          "active_percent": 0,
+          "complete_percent": 0
         }
       ],
       "artifacts": [
@@ -201,15 +213,21 @@
       "progress": [
         {
           "id": "transcription",
-          "title": "视频转写"
+          "title": "视频转写",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "slicing",
-          "title": "切片导出"
+          "title": "切片导出",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "delivery",
-          "title": "交付验收"
+          "title": "交付验收",
+          "active_percent": 0,
+          "complete_percent": 0
         }
       ],
       "artifacts": [
@@ -275,16 +293,66 @@
       },
       "progress": [
         {
-          "id": "analysis",
-          "title": "素材分析"
+          "id": "project",
+          "title": "项目选择",
+          "active_percent": 5,
+          "complete_percent": 10
+        },
+        {
+          "id": "material_analysis",
+          "title": "素材分析",
+          "active_percent": 15,
+          "complete_percent": 25,
+          "required_artifacts": [
+            "output/material-analysis.md"
+          ]
         },
         {
           "id": "writing",
-          "title": "内容创作"
+          "title": "朋友圈正文",
+          "active_percent": 35,
+          "complete_percent": 55,
+          "required_artifacts": [
+            "output/content.md"
+          ]
         },
         {
-          "id": "delivery",
-          "title": "交付验收"
+          "id": "image_generation",
+          "title": "朋友圈配图",
+          "active_percent": 65,
+          "complete_percent": 75,
+          "required_artifacts": [
+            "output/image-prompts.md",
+            "output/moments-image.png"
+          ]
+        },
+        {
+          "id": "quality_review",
+          "title": "质量复盘",
+          "active_percent": 80,
+          "complete_percent": 88,
+          "required_artifacts": [
+            "output/quality-review.md"
+          ]
+        },
+        {
+          "id": "delivery_validation",
+          "title": "交付校验",
+          "active_percent": 92,
+          "complete_percent": 97,
+          "required_artifacts": [
+            "output/material-analysis.md",
+            "output/content.md",
+            "output/image-prompts.md",
+            "output/moments-image.png",
+            "output/quality-review.md"
+          ]
+        },
+        {
+          "id": "finalize",
+          "title": "完成",
+          "active_percent": 99,
+          "complete_percent": 100
         }
       ],
       "artifacts": [
@@ -322,7 +390,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "11c2a12033051b06aed801df3ead364273c8b28e2302314e116649849ab9f870"
+      "digest": "187dffaf6eb80978be119fc1a9f2ce442a5ec46cfefac6f6564eb5bb52a58ece"
     },
     {
       "id": "montage",
@@ -366,15 +434,21 @@
       "progress": [
         {
           "id": "prepare",
-          "title": "准备 Montage 项目"
+          "title": "准备 Montage 项目",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "production",
-          "title": "视频生产"
+          "title": "视频生产",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "delivery",
-          "title": "交付验收"
+          "title": "交付验收",
+          "active_percent": 0,
+          "complete_percent": 0
         }
       ],
       "artifacts": [
@@ -450,15 +524,21 @@
       "progress": [
         {
           "id": "research",
-          "title": "素材研究"
+          "title": "素材研究",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "writing",
-          "title": "笔记创作"
+          "title": "笔记创作",
+          "active_percent": 0,
+          "complete_percent": 0
         },
         {
           "id": "delivery",
-          "title": "交付验收"
+          "title": "交付验收",
+          "active_percent": 0,
+          "complete_percent": 0
         }
       ],
       "artifacts": [
