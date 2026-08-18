@@ -297,6 +297,20 @@ func TestLoadCatalogValidatesProgressContractsByTaskType(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsProgressOverrideWithoutDefaultContract(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
+	manifest = strings.Replace(manifest, "artifacts:\n", `progress_by_task_type:
+  demo-task:
+    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}
+artifacts:
+`, 1)
+	root := writePackFixture(t, manifest)
+
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "progress_by_task_type requires non-empty progress") {
+		t.Fatalf("LoadCatalog error = %v, want override default progress rejection", err)
+	}
+}
+
 func TestLoadCatalogAllowsOmittedProgressContract(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
 	root := writePackFixture(t, manifest)

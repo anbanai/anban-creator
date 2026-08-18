@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { executionProfileFingerprint, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -151,6 +151,35 @@ describe("validateBootstrapResponse", () => {
     expect(resolved).not.toBe(pack);
     expect(resolved.progress).toEqual(viralProgress);
     expect(pack.progress).toBe(defaultProgress);
+
+    resolved.progress[0]!.title = "Changed";
+    resolved.progress[1]!.required_artifacts!.push("output/changed.json");
+    expect(viralProgress[0]!.title).toBe("Research");
+    expect(viralProgress[1]!.required_artifacts).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
+  });
+
+  test("shared progress resolution selects overrides and falls back to an isolated default", () => {
+    const pack = {
+      id: "seednote", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
+      runtime: { profile: "seednote", adapter: "standard" },
+      progress: [
+        { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
+        { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
+        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+      ],
+      progress_by_task_type: {
+        viral_analysis: [
+          { id: "research", title: "Viral Research", active_percent: 5, complete_percent: 80 },
+          { id: "delivery", title: "Viral Delivery", active_percent: 90, complete_percent: 100 },
+        ],
+      },
+    } as AgentPackCatalog["packs"][number];
+
+    expect(resolveAgentPackForTaskType(pack, "viral_analysis").progress.map((stage) => stage.id)).toEqual(["research", "delivery"]);
+    const fallback = resolveAgentPackForTaskType(pack, "seednote");
+    expect(fallback.progress.map((stage) => stage.id)).toEqual(["research", "writing", "delivery"]);
+    expect(fallback.progress).not.toBe(pack.progress);
   });
 
   test("rejects malformed task-specific progress contracts", () => {

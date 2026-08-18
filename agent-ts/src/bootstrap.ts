@@ -134,6 +134,17 @@ export interface AgentPackCatalog {
   packs: AgentPack[];
 }
 
+export function resolveAgentPackForTaskType(pack: AgentPack, taskType: string): AgentPack {
+  const selected = pack.progress_by_task_type?.[taskType] ?? pack.progress;
+  const progress = selected.map((stage) => {
+    const cloned = { ...stage };
+    if (stage.required_artifacts) cloned.required_artifacts = [...stage.required_artifacts];
+    return cloned;
+  });
+  const { progress_by_task_type: _overrides, ...resolved } = pack;
+  return { ...resolved, progress };
+}
+
 export interface BootstrapIdentity {
   execution_token: string;
   task_id: string;
@@ -261,7 +272,7 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
   if (pack.id !== data.agent_pack_id || pack.version !== data.agent_pack_version || pack.digest !== data.agent_pack_digest || pack.runtime?.profile !== data.runtime_profile || pack.runtime?.adapter !== data.runtime_adapter || data.agent_flag !== `anban:${pack.agent?.name}`) {
     throw new Error("bootstrap Agent Pack identity does not match runtime Catalog");
   }
-  return { ...pack, progress: pack.progress_by_task_type?.[data.task_type] ?? pack.progress };
+  return resolveAgentPackForTaskType(pack, data.task_type);
 }
 
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { uploadWorkspaceArtifacts } from "./artifacts.js";
-import { readAgentPackCatalog, type AgentPack, type AgentPackCatalog, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
+import { readAgentPackCatalog, resolveAgentPackForTaskType, type AgentPack, type AgentPackCatalog, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { CompletionReportError } from "./errors.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
@@ -68,15 +68,16 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
   const taskType = required("--task-type");
   const pluginRoot = resolve(env.CLAUDE_PLUGIN_ROOT || "/anbanai");
   const catalog = await readAgentPackCatalog(join(pluginRoot, "agent-pack-catalog.json"));
-  const pack = resolveLocalPack(catalog, taskType);
+  const catalogPack = resolveLocalPack(catalog, taskType);
   const providedIdentity = ["--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile"].some((flag) => values.has(flag));
   if (providedIdentity && (
-    values.get("--agent-pack-id") !== pack.id
-    || values.get("--agent-pack-version") !== pack.version
-    || values.get("--agent-pack-digest") !== pack.digest
-    || values.get("--runtime-adapter") !== pack.runtime.adapter
-    || values.get("--runtime-profile") !== pack.runtime.profile
+    values.get("--agent-pack-id") !== catalogPack.id
+    || values.get("--agent-pack-version") !== catalogPack.version
+    || values.get("--agent-pack-digest") !== catalogPack.digest
+    || values.get("--runtime-adapter") !== catalogPack.runtime.adapter
+    || values.get("--runtime-profile") !== catalogPack.runtime.profile
   )) throw new Error("frozen Agent Pack identity does not match runtime Catalog");
+  const pack = resolveAgentPackForTaskType(catalogPack, taskType);
 
   const server = new URL(required("--server-url"));
   if (!["http:", "https:"].includes(server.protocol) || server.username || server.password || server.search || server.hash || (server.pathname && server.pathname !== "/")) throw new Error("server URL is invalid");

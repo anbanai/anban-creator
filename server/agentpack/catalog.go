@@ -235,6 +235,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
 		}
 	}
+	if len(manifest.ProgressByTaskType) > 0 && len(manifest.Progress) == 0 {
+		return fmt.Errorf("progress_by_task_type requires non-empty progress")
+	}
 	if err := validateProgressContract(manifest.Progress, manifest.Progress != nil); err != nil {
 		return err
 	}

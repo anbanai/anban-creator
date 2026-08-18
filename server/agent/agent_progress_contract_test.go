@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,7 +34,7 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 		"seednote":    true,
 	}
 	foundManagedPacks := make(map[string]bool, len(wantManagedPacks))
-	wantStageIDs := map[string][]string{
+	knownStageIDs := map[string][]string{
 		"article/article":         {"research", "writing", "delivery"},
 		"ecommerce/ecommerce":     {"analysis", "production", "delivery"},
 		"live-slicer/live-slicer": {"transcription", "slicing", "delivery"},
@@ -41,8 +43,7 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 		"seednote/seednote":       {"research", "writing", "delivery"},
 		"seednote/viral_analysis": {"research", "delivery"},
 	}
-	wantDeliveryArtifacts := map[string][]string{
-		"seednote/seednote":       {"output/content.md", "output/image-plan.md"},
+	progressArtifactOverrides := map[string][]string{
 		"seednote/viral_analysis": {"output/source-analysis.md", "output/viral-template.json"},
 	}
 
@@ -72,28 +73,27 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 			for _, taskType := range pack.Bindings.TaskTypes {
 				contractKey := pack.ID + "/" + taskType
 				progress := pack.ProgressForTaskType(taskType)
-				wantIDs, ok := wantStageIDs[contractKey]
-				if !ok {
-					t.Fatalf("managed task contract %q is not pinned", contractKey)
-				}
-				gotIDs := make([]string, 0, len(progress))
-				for _, stage := range progress {
-					gotIDs = append(gotIDs, stage.ID)
-				}
-				if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
-					t.Errorf("%s progress stages = %v, want %v", contractKey, gotIDs, wantIDs)
+				_, known := knownStageIDs[contractKey]
+				if err := validateManagedProgressStageIDs(contractKey, progress, knownStageIDs); err != nil {
+					t.Error(err)
 				}
 				for _, path := range claudePaths {
 					assertClaudeTaskProgressContract(t, path, pack, taskType, progress)
 				}
-				if wantArtifacts, ok := wantDeliveryArtifacts[contractKey]; ok {
-					assertDeliveryProgressArtifacts(t, contractKey, progress, wantArtifacts)
+				expectedArtifacts := requiredPackArtifactPaths(pack)
+				if override, ok := progressArtifactOverrides[contractKey]; ok {
+					expectedArtifacts = override
 				}
-				delete(wantStageIDs, contractKey)
+				if err := validateDeliveryProgressArtifacts(progress, expectedArtifacts); err != nil {
+					t.Errorf("%s: %v", contractKey, err)
+				}
+				if known {
+					delete(knownStageIDs, contractKey)
+				}
 			}
 		})
 	}
-	for contractKey := range wantStageIDs {
+	for contractKey := range knownStageIDs {
 		t.Errorf("managed task contract %q disappeared from the catalog", contractKey)
 	}
 
@@ -116,6 +116,45 @@ func TestLegacyProgressContractRejectsBTWTelemetry(t *testing.T) {
 		}
 	}
 	t.Fatal("legacy progress contract did not reject /btw telemetry")
+}
+
+func TestValidateManagedProgressStageIDsAllowsUnknownAndPinsKnownContracts(t *testing.T) {
+	known := map[string][]string{"known/task": {"research", "delivery"}}
+	progress := []agentpack.ProgressStage{{ID: "analysis"}, {ID: "delivery"}}
+	if err := validateManagedProgressStageIDs("new-pack/new-task", progress, known); err != nil {
+		t.Fatalf("unknown managed contract rejected: %v", err)
+	}
+	if err := validateManagedProgressStageIDs("known/task", progress, known); err == nil || !strings.Contains(err.Error(), "want [research delivery]") {
+		t.Fatalf("known renamed stages error = %v", err)
+	}
+	if err := validateManagedProgressStageIDs("new-pack/empty", nil, known); err == nil || !strings.Contains(err.Error(), "must declare progress stages") {
+		t.Fatalf("empty unknown contract error = %v", err)
+	}
+}
+
+func TestValidateDeliveryProgressArtifactsRequiresExactCoverage(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   []string
+		expected []string
+		wantErr  string
+	}{
+		{name: "exact", actual: []string{"output/a.md", "output/b.md"}, expected: []string{"output/a.md", "output/b.md"}},
+		{name: "missing", actual: []string{"output/a.md"}, expected: []string{"output/a.md", "output/b.md"}, wantErr: "missing required Pack artifact"},
+		{name: "extra", actual: []string{"output/a.md", "output/b.md", "output/c.md"}, expected: []string{"output/a.md", "output/b.md"}, wantErr: "optional or unknown Pack artifact"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			progress := []agentpack.ProgressStage{{ID: "delivery", RequiredArtifacts: tt.actual}}
+			err := validateDeliveryProgressArtifacts(progress, tt.expected)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("validateDeliveryProgressArtifacts: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("validateDeliveryProgressArtifacts error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.Manifest, taskType string, progress []agentpack.ProgressStage) {
@@ -213,8 +252,35 @@ func legacyProgressForbiddenMatches(body string) []string {
 	return matches
 }
 
-func assertDeliveryProgressArtifacts(t *testing.T, contractKey string, progress []agentpack.ProgressStage, want []string) {
-	t.Helper()
+func validateManagedProgressStageIDs(contractKey string, progress []agentpack.ProgressStage, known map[string][]string) error {
+	if len(progress) == 0 {
+		return fmt.Errorf("managed task contract %q must declare progress stages", contractKey)
+	}
+	want, ok := known[contractKey]
+	if !ok {
+		return nil
+	}
+	got := make([]string, 0, len(progress))
+	for _, stage := range progress {
+		got = append(got, stage.ID)
+	}
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("%s progress stages = %v, want %v", contractKey, got, want)
+	}
+	return nil
+}
+
+func requiredPackArtifactPaths(pack agentpack.Manifest) []string {
+	var paths []string
+	for _, artifact := range pack.Artifacts {
+		if artifact.Required {
+			paths = append(paths, artifact.Path)
+		}
+	}
+	return paths
+}
+
+func validateDeliveryProgressArtifacts(progress []agentpack.ProgressStage, expected []string) error {
 	var delivery *agentpack.ProgressStage
 	for i := range progress {
 		if progress[i].ID == "delivery" || progress[i].ID == "delivery_validation" {
@@ -222,10 +288,24 @@ func assertDeliveryProgressArtifacts(t *testing.T, contractKey string, progress 
 		}
 	}
 	if delivery == nil {
-		t.Fatal("managed Pack must declare a delivery or delivery_validation progress stage")
+		return fmt.Errorf("managed Pack must declare a delivery or delivery_validation progress stage")
 	}
 
-	if strings.Join(delivery.RequiredArtifacts, ",") != strings.Join(want, ",") {
-		t.Errorf("%s delivery artifacts = %v, want %v", contractKey, delivery.RequiredArtifacts, want)
+	actualSet := make(map[string]bool, len(delivery.RequiredArtifacts))
+	for _, path := range delivery.RequiredArtifacts {
+		actualSet[path] = true
 	}
+	expectedSet := make(map[string]bool, len(expected))
+	for _, path := range expected {
+		expectedSet[path] = true
+		if !actualSet[path] {
+			return fmt.Errorf("progress stage %q required_artifacts missing required Pack artifact %q", delivery.ID, path)
+		}
+	}
+	for _, path := range delivery.RequiredArtifacts {
+		if !expectedSet[path] {
+			return fmt.Errorf("progress stage %q required_artifacts contains optional or unknown Pack artifact %q", delivery.ID, path)
+		}
+	}
+	return nil
 }
