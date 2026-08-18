@@ -328,6 +328,16 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID,
 }
 
 func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	locked, err := lockActiveTaskExecutionFirst(ctx, r.db, executionID, id, activeTaskExecutionLock{
+		target: model.ExecutionTargetLocalClaimed,
+	})
+	if err != nil {
+		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
+	}
+	if !locked {
+		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
+	}
+
 	now := time.Now()
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
@@ -339,7 +349,7 @@ func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executio
 		return false, res.Error
 	}
 	if res.RowsAffected == 0 {
-		return false, nil
+		return false, fmt.Errorf("%w: task %s no longer owns execution %s", ErrLocalTaskExecutionCASLost, id, executionID)
 	}
 	executionStatus := model.TaskExecutionFailed
 	if status == model.TaskStatusCompleted {

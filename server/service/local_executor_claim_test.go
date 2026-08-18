@@ -36,6 +36,31 @@ type executionCASLossRepository struct {
 	injectErr   error
 }
 
+type crossPathCompletionRepository struct {
+	repository.Repository
+	entered atomic.Int32
+	ready   chan struct{}
+	mu      sync.Mutex
+}
+
+func newCrossPathCompletionRepository(base repository.Repository) *crossPathCompletionRepository {
+	return &crossPathCompletionRepository{Repository: base, ready: make(chan struct{})}
+}
+
+func (r *crossPathCompletionRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	if r.entered.Add(1) == 2 {
+		close(r.ready)
+	}
+	select {
+	case <-r.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Repository.WithTx(ctx, fn)
+}
+
 func (r *executionCASLossRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
 	r.once.Do(func() {
 		transitioned, err := r.Repository.TaskExecutions().Transition(ctx, r.executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "lost before finalization"})
@@ -943,6 +968,64 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 			}
 			if retried.Result == nil || *retried.Result != *got.Result || retried.CostStatus != got.CostStatus {
 				t.Fatal("idempotent retry overwrote terminal evidence")
+			}
+		})
+	}
+}
+
+// SQL-order tests in repository prove the MySQL execution->task lock order.
+// This test separately exercises cross-path goroutine interleaving under the
+// race detector without treating SQLite's single-writer behavior as MySQL
+// deadlock evidence.
+func TestCompleteLocalTaskConcurrentWithAgentRecordersLeavesLegalTerminalState(t *testing.T) {
+	for _, recorder := range []string{"legacy heartbeat", "structured progress"} {
+		t.Run(recorder, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			addLocalSeednoteDeliverables(t, repo, taskID)
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+			}
+			executionID := *task.CurrentExecutionID
+			svc.repo = newCrossPathCompletionRepository(repo)
+
+			errs := make(chan error, 2)
+			go func() {
+				errs <- svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: true, LogText: "done"})
+			}()
+			go func() {
+				if recorder == "legacy heartbeat" {
+					errs <- svc.UpdateAgentHeartbeat(ctx, taskID, executionID)
+					return
+				}
+				errs <- svc.UpdateProgressFromAgent(ctx, taskID, executionID, "writing", "active", "笔记创作", "writing", 35)
+			}()
+
+			for range 2 {
+				err := <-errs
+				if err != nil && !errors.Is(err, ErrStaleTaskExecution) {
+					t.Fatalf("completion vs %s error = %v, want nil or stale", recorder, err)
+				}
+			}
+
+			persistedTask, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedTask.Status != model.TaskStatusCompleted || persistedTask.Result == nil || persistedTask.CompletedAt == nil {
+				t.Fatalf("task after completion vs %s = status:%q result:%v completed:%v", recorder, persistedTask.Status, persistedTask.Result, persistedTask.CompletedAt)
+			}
+			if persistedExecution.Status != model.TaskExecutionSucceeded || persistedExecution.CompletedAt == nil || persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+				t.Fatalf("execution after completion vs %s = status:%q completed:%v finalization:%q", recorder, persistedExecution.Status, persistedExecution.CompletedAt, persistedExecution.FinalizationStatus)
 			}
 		})
 	}

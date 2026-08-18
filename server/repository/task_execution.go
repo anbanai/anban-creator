@@ -398,12 +398,38 @@ func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string
 }
 
 func (r *taskExecutionRepository) LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error) {
+	return lockActiveTaskExecutionFirst(ctx, r.db, id, taskID, activeTaskExecutionLock{
+		requireStarted:    true,
+		requireIncomplete: true,
+	})
+}
+
+// activeTaskExecutionLock defines the path-specific identity predicates added
+// to the common execution-first row lock. Completion and structured progress
+// use this locked validation; legacy heartbeat acquires the same row first via
+// its execution UPDATE. All three paths touch tasks only afterward.
+type activeTaskExecutionLock struct {
+	target            string
+	requireStarted    bool
+	requireIncomplete bool
+}
+
+func lockActiveTaskExecutionFirst(ctx context.Context, db *gorm.DB, id, taskID string, guard activeTaskExecutionLock) (bool, error) {
 	var execution model.TaskExecution
-	err := r.db.WithContext(ctx).
+	query := db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Select("id").
-		Where("id = ? AND task_id = ? AND status = ? AND started = ? AND completed_at IS NULL", id, taskID, model.TaskExecutionRunning, true).
-		Take(&execution).Error
+		Where("id = ? AND task_id = ? AND status = ?", id, taskID, model.TaskExecutionRunning)
+	if guard.target != "" {
+		query = query.Where("target = ?", guard.target)
+	}
+	if guard.requireStarted {
+		query = query.Where("started = ?", true)
+	}
+	if guard.requireIncomplete {
+		query = query.Where("completed_at IS NULL")
+	}
+	err := query.Take(&execution).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
