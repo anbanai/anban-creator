@@ -80,6 +80,15 @@ func TestManagedAgentProgressContracts(t *testing.T) {
 	}
 }
 
+func TestLegacyProgressContractRejectsBTWTelemetry(t *testing.T) {
+	for _, match := range legacyProgressForbiddenMatches("update_task_progress(task_id=$TASK_ID)\n/btw report progress") {
+		if match == "/btw" {
+			return
+		}
+	}
+	t.Fatal("legacy progress contract did not reject /btw telemetry")
+}
+
 func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.Manifest) {
 	t.Helper()
 	body := readRepoFile(t, path)
@@ -111,6 +120,30 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 			t.Errorf("%s does not map declared progress stage %q through Task metadata %s", path, stage.ID, metadata)
 		}
 	}
+	switch pack.ID {
+	case "article":
+		for _, want := range []string{"发布前总验收、`publish_draft` 成功、最终 feedback 全部结束后才完成"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing article delivery boundary %q", path, want)
+			}
+		}
+		for _, forbidden := range []string{"明确跳过发布"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s contains unsupported article delivery branch %q", path, forbidden)
+			}
+		}
+	case "ecommerce":
+		for _, want := range []string{"原有八个细粒度业务任务"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing ecommerce task count contract %q", path, want)
+			}
+		}
+		for _, forbidden := range []string{"十个细粒度业务任务"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s contains inaccurate ecommerce task count %q", path, forbidden)
+			}
+		}
+	}
 }
 
 func assertLegacyProgressContract(t *testing.T, path string, requireLegacyProgress bool) {
@@ -122,11 +155,19 @@ func assertLegacyProgressContract(t *testing.T, path string, requireLegacyProgre
 	if !requireLegacyProgress && strings.Contains(body, "update_task_progress") {
 		t.Errorf("%s must not introduce explicit update_task_progress", path)
 	}
-	for _, forbidden := range []string{"anban_progress_stage", "官方 Task Hook", "Runner Hook"} {
+	for _, forbidden := range legacyProgressForbiddenMatches(body) {
+		t.Errorf("%s contains forbidden compatibility progress token: %q", path, forbidden)
+	}
+}
+
+func legacyProgressForbiddenMatches(body string) []string {
+	var matches []string
+	for _, forbidden := range []string{"anban_progress_stage", "官方 Task Hook", "Runner Hook", "/btw"} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("%s must not claim Claude Task Hook progress support: %q", path, forbidden)
+			matches = append(matches, forbidden)
 		}
 	}
+	return matches
 }
 
 func assertDeliveryProgressCoversRequiredArtifacts(t *testing.T, pack agentpack.Manifest) {

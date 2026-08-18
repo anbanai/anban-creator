@@ -95,7 +95,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "52e66e149efba5013703c92104602b0061d86a9ba4e7ecac11ab53a2cc48cdd5"
+      "digest": "e3f66bd57371b03d6751c19659f0f03501e8a3b2e3b44dadda2c4d12ba0c08e0"
     },
     {
       "id": "ecommerce",
@@ -187,7 +187,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "04ae51b66e743cd2bda1f7c89c32e61bf57de1df967a0b7baa02d736ec44584b"
+      "digest": "1fb864d426f00365d7183b08c1142be673cd9e3b41166e64a9b58372e68bc58a"
     },
     {
       "id": "live-slicer",
