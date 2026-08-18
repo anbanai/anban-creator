@@ -111,8 +111,8 @@ func (s *TaskService) UpdateAgentHeartbeat(ctx context.Context, taskID, executio
 	}
 	now := time.Now()
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.TaskExecutions().UpdateHeartbeat(ctx, executionID, now); err != nil {
-			return fmt.Errorf("update execution heartbeat: %w", err)
+		if err := s.updateExecutionHeartbeatFirst(ctx, tx, taskID, executionID, now, false); err != nil {
+			return err
 		}
 		if err := tx.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
 			return fmt.Errorf("update task heartbeat: %w", err)
@@ -120,6 +120,27 @@ func (s *TaskService) UpdateAgentHeartbeat(ctx context.Context, taskID, executio
 		return nil
 	}); err != nil {
 		return fmt.Errorf("update agent heartbeat: %w", err)
+	}
+	return nil
+}
+
+// updateExecutionHeartbeatFirst centralizes the cross-table lock order shared
+// by legacy heartbeat and structured progress transactions. Any transaction
+// touching both rows must touch task_executions before tasks.
+func (s *TaskService) updateExecutionHeartbeatFirst(ctx context.Context, tx repository.Repository, taskID, executionID string, now time.Time, requireActive bool) error {
+	if requireActive {
+		matched, err := tx.TaskExecutions().LockActiveForProgress(ctx, executionID, taskID)
+		if err != nil {
+			return fmt.Errorf("lock execution for structured progress: %w", err)
+		}
+		if !matched {
+			return ErrStaleTaskExecution
+		}
+	}
+	// Do not infer predicate matching from UPDATE RowsAffected. MySQL reports
+	// zero when DATETIME(3) already equals now unless clientFoundRows is enabled.
+	if err := tx.TaskExecutions().UpdateHeartbeat(ctx, executionID, now); err != nil {
+		return fmt.Errorf("update execution heartbeat: %w", err)
 	}
 	return nil
 }
@@ -240,19 +261,8 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 	var persisted model.ProgressPayload
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		now := time.Now()
-		matched, err := tx.Tasks().UpdateHeartbeatForExecution(ctx, taskID, executionID, now)
-		if err != nil {
-			return fmt.Errorf("update task heartbeat for structured progress: %w", err)
-		}
-		if !matched {
-			return ErrStaleTaskExecution
-		}
-		matched, err = tx.TaskExecutions().UpdateHeartbeatIfRunning(ctx, executionID, taskID, now)
-		if err != nil {
-			return fmt.Errorf("update execution heartbeat for structured progress: %w", err)
-		}
-		if !matched {
-			return ErrStaleTaskExecution
+		if err := s.updateExecutionHeartbeatFirst(ctx, tx, taskID, executionID, now, true); err != nil {
+			return err
 		}
 		for _, line := range normalizedLogs {
 			if err := tx.Tasks().AppendProgressLog(ctx, taskID, line); err != nil {
@@ -264,10 +274,19 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 			return fmt.Errorf("advance structured progress: %w", err)
 		}
 		if !advanced {
-			// Duplicate/lower-sequence reports are idempotent and refresh no
-			// heartbeats. Returning a sentinel forces the outer transaction to
-			// roll back the tentative heartbeat and raw-log writes.
-			return errDuplicateAgentProgress
+			task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+			if err != nil || task.Status != model.TaskStatusRunning || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+				return ErrStaleTaskExecution
+			}
+			if task.ProgressSequence >= sequence {
+				// Duplicate/lower-sequence reports are idempotent and refresh no
+				// heartbeats. The sentinel rolls back execution heartbeat/raw logs.
+				return errDuplicateAgentProgress
+			}
+			return errAgentProgressCASLost
+		}
+		if err := tx.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
+			return fmt.Errorf("update task heartbeat for structured progress: %w", err)
 		}
 		return nil
 	})
@@ -287,6 +306,7 @@ func (s *TaskService) UpdateProgressFromAgent(ctx context.Context, taskID, execu
 }
 
 var errDuplicateAgentProgress = errors.New("duplicate agent structured progress")
+var errAgentProgressCASLost = errors.New("agent structured progress CAS lost while task guards remained current")
 
 func (s *TaskService) persistStructuredProgress(ctx context.Context, taskID, stage, title, description string, percent, currentProgress int) error {
 

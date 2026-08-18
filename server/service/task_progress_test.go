@@ -163,6 +163,137 @@ type structuredProgressFailureRepository struct {
 	step string
 }
 
+type heartbeatOrderRepository struct {
+	repository.Repository
+	order *[]string
+}
+
+func (r *heartbeatOrderRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&heartbeatOrderTx{Repository: tx, order: r.order})
+	})
+}
+
+type heartbeatOrderTx struct {
+	repository.Repository
+	order *[]string
+}
+
+func (r *heartbeatOrderTx) Tasks() repository.TaskRepository {
+	return &heartbeatOrderTasks{TaskRepository: r.Repository.Tasks(), order: r.order}
+}
+
+func (r *heartbeatOrderTx) TaskExecutions() repository.TaskExecutionRepository {
+	return &heartbeatOrderExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), order: r.order}
+}
+
+type heartbeatOrderTasks struct {
+	repository.TaskRepository
+	order *[]string
+}
+
+func (r *heartbeatOrderTasks) UpdateHeartbeat(ctx context.Context, id string) error {
+	*r.order = append(*r.order, "task")
+	return r.TaskRepository.UpdateHeartbeat(ctx, id)
+}
+
+func (r *heartbeatOrderTasks) AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (bool, model.ProgressPayload, error) {
+	*r.order = append(*r.order, "task")
+	return r.TaskRepository.AdvanceStructuredProgress(ctx, id, executionID, sequence, payload)
+}
+
+type heartbeatOrderExecutions struct {
+	repository.TaskExecutionRepository
+	order *[]string
+}
+
+func (r *heartbeatOrderExecutions) UpdateHeartbeat(ctx context.Context, id string, now time.Time) error {
+	*r.order = append(*r.order, "execution")
+	return r.TaskExecutionRepository.UpdateHeartbeat(ctx, id, now)
+}
+
+func (r *heartbeatOrderExecutions) LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error) {
+	*r.order = append(*r.order, "execution")
+	return r.TaskExecutionRepository.LockActiveForProgress(ctx, id, taskID)
+}
+
+func compactRepositoryOrder(order []string) []string {
+	compact := make([]string, 0, len(order))
+	for _, item := range order {
+		if len(compact) == 0 || compact[len(compact)-1] != item {
+			compact = append(compact, item)
+		}
+	}
+	return compact
+}
+
+func TestAgentHeartbeatTransactionsUseExecutionThenTaskLockOrder(t *testing.T) {
+	for _, path := range []string{"legacy", "structured"} {
+		t.Run(path, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution, _, _ := setupProgressFromAgentTest(t, false, nil)
+			var order []string
+			svc.repo = &heartbeatOrderRepository{Repository: repo, order: &order}
+			var err error
+			if path == "legacy" {
+				err = svc.UpdateAgentHeartbeat(ctx, task.ID, execution.ID)
+			} else {
+				err = svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "active", "朋友圈正文", "ordered", 35)
+			}
+			if err != nil {
+				t.Fatalf("%s progress: %v", path, err)
+			}
+			if got := strings.Join(compactRepositoryOrder(order), ","); got != "execution,task" {
+				t.Fatalf("%s repository lock order = %q (%v), want execution,task", path, got, order)
+			}
+		})
+	}
+}
+
+type unchangedExecutionHeartbeatRepository struct {
+	repository.Repository
+}
+
+func (r *unchangedExecutionHeartbeatRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&unchangedExecutionHeartbeatTx{Repository: tx})
+	})
+}
+
+type unchangedExecutionHeartbeatTx struct {
+	repository.Repository
+}
+
+func (r *unchangedExecutionHeartbeatTx) TaskExecutions() repository.TaskExecutionRepository {
+	return &unchangedExecutionHeartbeatExecutions{TaskExecutionRepository: r.Repository.TaskExecutions()}
+}
+
+type unchangedExecutionHeartbeatExecutions struct {
+	repository.TaskExecutionRepository
+}
+
+func (r *unchangedExecutionHeartbeatExecutions) UpdateHeartbeat(context.Context, string, time.Time) error {
+	// Simulate MySQL matched predicate + unchanged DATETIME(3). The preceding
+	// lock established that the predicate matched; UPDATE outcome is irrelevant.
+	return nil
+}
+
+func TestUpdateProgressFromAgentDoesNotTreatUnchangedHeartbeatAsStale(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution, _, _ := setupProgressFromAgentTest(t, false, nil)
+	svc.repo = &unchangedExecutionHeartbeatRepository{Repository: repo}
+	if err := svc.UpdateProgressFromAgent(ctx, task.ID, execution.ID, "writing", "active", "朋友圈正文", "same millisecond heartbeat", 35); err != nil {
+		t.Fatalf("UpdateProgressFromAgent: %v", err)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 5 || persisted.Progress != 35 {
+		t.Fatalf("valid progress not advanced: sequence=%d progress=%d", persisted.ProgressSequence, persisted.Progress)
+	}
+}
+
 func (r *structuredProgressFailureRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
 	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
 		return fn(&structuredProgressFailureTx{Repository: tx, step: r.step})
@@ -187,14 +318,11 @@ type structuredProgressFailureTasks struct {
 	step string
 }
 
-func (r *structuredProgressFailureTasks) UpdateHeartbeatForExecution(ctx context.Context, id, executionID string, now time.Time) (bool, error) {
+func (r *structuredProgressFailureTasks) UpdateHeartbeat(ctx context.Context, id string) error {
 	if r.step == "task heartbeat error" {
-		return false, errors.New("injected task heartbeat failure")
+		return errors.New("injected task heartbeat failure")
 	}
-	if r.step == "task heartbeat CAS loss" {
-		return false, nil
-	}
-	return r.TaskRepository.UpdateHeartbeatForExecution(ctx, id, executionID, now)
+	return r.TaskRepository.UpdateHeartbeat(ctx, id)
 }
 
 func (r *structuredProgressFailureTasks) AppendProgressLog(ctx context.Context, id, message string) error {
@@ -219,29 +347,31 @@ type structuredProgressFailureExecutions struct {
 	step string
 }
 
-func (r *structuredProgressFailureExecutions) UpdateHeartbeatIfRunning(ctx context.Context, id, taskID string, now time.Time) (bool, error) {
-	if r.step == "execution heartbeat error" {
-		return false, errors.New("injected execution heartbeat failure")
-	}
+func (r *structuredProgressFailureExecutions) LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error) {
 	if r.step == "execution heartbeat CAS loss" {
 		return false, nil
 	}
-	return r.TaskExecutionRepository.UpdateHeartbeatIfRunning(ctx, id, taskID, now)
+	return r.TaskExecutionRepository.LockActiveForProgress(ctx, id, taskID)
+}
+
+func (r *structuredProgressFailureExecutions) UpdateHeartbeat(ctx context.Context, id string, now time.Time) error {
+	if r.step == "execution heartbeat error" {
+		return errors.New("injected execution heartbeat failure")
+	}
+	return r.TaskExecutionRepository.UpdateHeartbeat(ctx, id, now)
 }
 
 func TestUpdateProgressFromAgentRollsBackEveryTransactionalFailure(t *testing.T) {
 	for _, tt := range []struct {
 		step      string
 		wantStale bool
-		wantNil   bool
 	}{
 		{step: "task heartbeat error"},
-		{step: "task heartbeat CAS loss", wantStale: true},
 		{step: "execution heartbeat error"},
 		{step: "execution heartbeat CAS loss", wantStale: true},
 		{step: "raw log error"},
 		{step: "structured update error"},
-		{step: "structured update CAS loss", wantNil: true},
+		{step: "structured update CAS loss"},
 	} {
 		t.Run(tt.step, func(t *testing.T) {
 			ctx := context.Background()
@@ -251,9 +381,7 @@ func TestUpdateProgressFromAgentRollsBackEveryTransactionalFailure(t *testing.T)
 			switch {
 			case tt.wantStale && !errors.Is(err, ErrStaleTaskExecution):
 				t.Fatalf("error = %v, want ErrStaleTaskExecution", err)
-			case tt.wantNil && err != nil:
-				t.Fatalf("duplicate CAS loss error = %v, want nil", err)
-			case !tt.wantStale && !tt.wantNil && err == nil:
+			case !tt.wantStale && err == nil:
 				t.Fatal("injected repository error unexpectedly succeeded")
 			}
 			persisted, findErr := repo.Tasks().FindByID(ctx, task.ID)

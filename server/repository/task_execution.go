@@ -397,12 +397,17 @@ func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string
 		Update("last_heartbeat_at", now).Error
 }
 
-func (r *taskExecutionRepository) UpdateHeartbeatIfRunning(ctx context.Context, id, taskID string, now time.Time) (bool, error) {
-	result := r.db.WithContext(ctx).
-		Model(&model.TaskExecution{}).
+func (r *taskExecutionRepository) LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error) {
+	var execution model.TaskExecution
+	err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
 		Where("id = ? AND task_id = ? AND status = ? AND started = ? AND completed_at IS NULL", id, taskID, model.TaskExecutionRunning, true).
-		Update("last_heartbeat_at", now)
-	return result.RowsAffected == 1, result.Error
+		Take(&execution).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (r *taskExecutionRepository) Transition(

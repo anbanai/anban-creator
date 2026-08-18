@@ -1118,6 +1118,57 @@ func TestAgentExplicitNullStageIsStructuredAndHasNoSideEffects(t *testing.T) {
 	assertNoAgentProgressEvent(t, subscriber)
 }
 
+func TestAgentStructuredProgressRejectsNonCanonicalOrDuplicateJSONKeys(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fields string
+	}{
+		{
+			name:   "casing only",
+			fields: `"Stage":"writing","State":"active","Title":"朋友圈正文","Progress_Percent":35`,
+		},
+		{
+			name:   "canonical null mixed-case bypass",
+			fields: `"stage":null,"Stage":"writing","state":"active","title":"朋友圈正文","progress_percent":35`,
+		},
+		{
+			name:   "exact duplicate canonical key",
+			fields: `"stage":"writing","stage":"writing","state":"active","title":"朋友圈正文","progress_percent":35`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning, nil, pubsub,
+			)
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+			req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"must not persist",`+tt.fields+`}`)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("invalid structured keys caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoAgentProgressEvent(t, subscriber)
+		})
+	}
+}
+
 func agentJSONRequest(path, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

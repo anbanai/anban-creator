@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -376,21 +378,120 @@ type agentProgressRequest struct {
 }
 
 func (r *agentProgressRequest) UnmarshalJSON(data []byte) error {
-	type wireRequest agentProgressRequest
+	type wireRequest struct {
+		TaskID      string   `json:"task_id"`
+		ExecutionID string   `json:"execution_id"`
+		Message     string   `json:"message"`
+		Logs        []string `json:"logs"`
+	}
 	var wire wireRequest
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
+	*r = agentProgressRequest{
+		TaskID:      wire.TaskID,
+		ExecutionID: wire.ExecutionID,
+		Message:     wire.Message,
+		Logs:        wire.Logs,
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if _, err := decoder.Token(); err != nil {
 		return err
 	}
-	*r = agentProgressRequest(wire)
-	_, r.stagePresent = fields["stage"]
-	_, r.statePresent = fields["state"]
-	_, r.titlePresent = fields["title"]
-	_, r.descriptionPresent = fields["description"]
-	_, r.progressPercentPresent = fields["progress_percent"]
+	seen := make(map[string]struct{}, 5)
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return errors.New("agent progress JSON object key must be a string")
+		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return err
+		}
+		canonical, structured := canonicalAgentProgressKey(key)
+		if !structured {
+			continue
+		}
+		if key != canonical {
+			return fmt.Errorf("structured progress key %q must use canonical casing %q", key, canonical)
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return fmt.Errorf("duplicate structured progress key %q", canonical)
+		}
+		seen[canonical] = struct{}{}
+		if err := r.decodeStructuredProgressField(canonical, raw); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func canonicalAgentProgressKey(key string) (string, bool) {
+	for _, canonical := range [...]string{"stage", "state", "title", "description", "progress_percent"} {
+		if strings.EqualFold(key, canonical) {
+			return canonical, true
+		}
+	}
+	return "", false
+}
+
+func (r *agentProgressRequest) decodeStructuredProgressField(key string, raw json.RawMessage) error {
+	null := bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+	switch key {
+	case "stage":
+		r.stagePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Stage = &value
+		}
+	case "state":
+		r.statePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.State = &value
+		}
+	case "title":
+		r.titlePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Title = &value
+		}
+	case "description":
+		r.descriptionPresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Description = &value
+		}
+	case "progress_percent":
+		r.progressPercentPresent = true
+		if !null {
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.ProgressPercent = &value
+		}
+	}
 	return nil
 }
 
