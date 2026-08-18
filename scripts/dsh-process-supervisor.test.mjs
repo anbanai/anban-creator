@@ -9,6 +9,7 @@ import test from 'node:test'
 import {
   runBoundedCommand,
   queryWindowsProcesses,
+  spawnProcessTree,
   terminateProcessTree,
   terminateWindowsTree,
 } from './dsh-process-supervisor.mjs'
@@ -279,7 +280,7 @@ test('Windows cleanup retains and force-kills descendants after the root exits',
     closeWatchdogMs: 100,
     platform: 'win32',
     queryWindowsProcesses: async () => rows,
-    snapshotWindowsTree: async () => [root, descendant],
+    windowsTreeSnapshot: [root, descendant],
     spawnProcess,
     terminationGraceMs: 1,
   })
@@ -312,7 +313,7 @@ test('Windows cleanup reports failed taskkill status for surviving identities', 
       label: 'failed Windows tree',
       platform: 'win32',
       queryWindowsProcesses: async () => [root],
-      snapshotWindowsTree: async () => [root],
+      windowsTreeSnapshot: [root],
       spawnProcess,
       terminationGraceMs: 1,
     }),
@@ -341,7 +342,7 @@ test('Windows cleanup does not kill a reused PID with a different creation ident
     closeWatchdogMs: 100,
     platform: 'win32',
     queryWindowsProcesses: async () => rows,
-    snapshotWindowsTree: async () => [root, descendant],
+    windowsTreeSnapshot: [root, descendant],
     spawnProcess,
     terminationGraceMs: 1,
   })
@@ -371,12 +372,93 @@ test('Windows cleanup revalidates the root identity before its first taskkill', 
     closeWatchdogMs: 100,
     platform: 'win32',
     queryWindowsProcesses: async () => [replacement],
-    snapshotWindowsTree: async () => [root],
+    windowsTreeSnapshot: [root],
     spawnProcess,
     terminationGraceMs: 1,
   })
 
   assert.deepEqual(invocations, [])
+})
+
+test('Windows cleanup uses the root identity captured when the process spawns', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const replacement = {
+    creationDate: 'replacement-created',
+    parentPid: 1,
+    pid: 42,
+  }
+  const invocations = []
+  const spawnProcess = (command, args) => {
+    invocations.push({ args, command })
+    const child = new EventEmitter()
+    child.exitCode = null
+    child.pid = 42
+    child.signalCode = null
+    child.kill = (signal) => signal === 0
+    if (command === 'taskkill') {
+      queueMicrotask(() => child.emit('close', 0, null))
+    }
+    return child
+  }
+  const child = spawnProcessTree('fixture.exe', [], {
+    platform: 'win32',
+    snapshotWindowsTree: async () => [root],
+    spawnProcess,
+  })
+
+  await terminateProcessTree(child, {
+    closeWatchdogMs: 100,
+    platform: 'win32',
+    queryWindowsProcesses: async () => [replacement],
+    spawnProcess,
+    terminationGraceMs: 1,
+  })
+
+  assert.ok(
+    !invocations.some(({ command }) => command === 'taskkill'),
+    'cleanup killed a replacement that reused the spawned root PID',
+  )
+})
+
+test('Windows spawn capture rejects a root observed after its original handle exits', async () => {
+  const replacement = {
+    creationDate: 'replacement-created',
+    parentPid: 1,
+    pid: 42,
+  }
+  const invocations = []
+  const spawnProcess = (command, args) => {
+    invocations.push({ args, command })
+    const child = new EventEmitter()
+    child.exitCode = null
+    child.pid = 42
+    child.signalCode = null
+    child.kill = (signal) => signal !== 0
+    if (command === 'taskkill') {
+      queueMicrotask(() => child.emit('close', 0, null))
+    }
+    return child
+  }
+  const child = spawnProcessTree('fixture.exe', [], {
+    platform: 'win32',
+    snapshotWindowsTree: async () => [replacement],
+    spawnProcess,
+  })
+
+  await assert.rejects(
+    terminateProcessTree(child, {
+      closeWatchdogMs: 100,
+      platform: 'win32',
+      queryWindowsProcesses: async () => [replacement],
+      spawnProcess,
+      terminationGraceMs: 1,
+    }),
+    /could not use its spawn-time Windows process tree/,
+  )
+  assert.ok(
+    !invocations.some(({ command }) => command === 'taskkill'),
+    'cleanup killed a root observed only after the original handle exited',
+  )
 })
 
 test('Windows cleanup does not infer ancestry from an absent retained parent', async () => {
@@ -400,7 +482,7 @@ test('Windows cleanup does not infer ancestry from an absent retained parent', a
     closeWatchdogMs: 100,
     platform: 'win32',
     queryWindowsProcesses: async () => rows,
-    snapshotWindowsTree: async () => [root, parent],
+    windowsTreeSnapshot: [root, parent],
     spawnProcess,
     terminationGraceMs: 1,
   })
@@ -436,7 +518,7 @@ test('Windows cleanup repeatedly captures a late descendant after its parent exi
     closeWatchdogMs: 100,
     platform: 'win32',
     queryWindowsProcesses: async () => rows,
-    snapshotWindowsTree: async () => [root, descendant],
+    windowsTreeSnapshot: [root, descendant],
     spawnProcess,
     terminationGraceMs: 1,
   })
@@ -477,7 +559,7 @@ test('Windows cleanup requires a stable empty tree before returning', async () =
         Boolean,
       )
     },
-    snapshotWindowsTree: async () => [root],
+    windowsTreeSnapshot: [root],
     spawnProcess,
     terminationGraceMs: 1,
   })
@@ -556,7 +638,7 @@ test('Windows process queries use the cleanup watchdog rather than the grace del
       observedTimeouts.push(timeoutMs)
       return []
     },
-    snapshotWindowsTree: async () => [root],
+    windowsTreeSnapshot: [root],
     spawnProcess,
     terminationGraceMs: 1,
   })

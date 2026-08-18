@@ -10,15 +10,14 @@ function parsePackResult(source) {
     throw new Error('pnpm pack metadata is not valid JSON')
   }
   if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 1 ||
-    parsed[0] === null ||
-    typeof parsed[0] !== 'object' ||
-    typeof parsed[0].name !== 'string' ||
-    typeof parsed[0].version !== 'string' ||
-    typeof parsed[0].filename !== 'string' ||
-    !Array.isArray(parsed[0].files) ||
-    !parsed[0].files.every(
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    typeof parsed.name !== 'string' ||
+    typeof parsed.version !== 'string' ||
+    typeof parsed.filename !== 'string' ||
+    !Array.isArray(parsed.files) ||
+    !parsed.files.every(
       (file) =>
         file !== null &&
         typeof file === 'object' &&
@@ -27,7 +26,7 @@ function parsePackResult(source) {
   ) {
     throw new Error('pnpm pack metadata does not contain one complete result')
   }
-  return parsed[0]
+  return parsed
 }
 
 export async function verifyPackResult(metadataPath, expectedVersion) {

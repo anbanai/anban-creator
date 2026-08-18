@@ -4,6 +4,7 @@ const DEFAULT_TERMINATION_GRACE_MS = 1_000
 const DEFAULT_CLOSE_WATCHDOG_MS = 10_000
 const DEFAULT_TASKKILL_TIMEOUT_MS = 5_000
 const WINDOWS_SNAPSHOT_TIMEOUT_MS = 5_000
+const windowsTreeCapture = Symbol('windowsTreeCapture')
 
 function hasExited(child) {
   return child.exitCode !== null || child.signalCode !== null
@@ -35,14 +36,76 @@ async function treeExitsWithin(child, timeoutMs, platform, killProcess) {
 }
 
 export function spawnProcessTree(command, args, options = {}) {
-  const { platform = process.platform, spawnProcess = spawn, ...spawnOptions } =
-    options
-  return spawnProcess(command, args, {
+  const {
+    platform = process.platform,
+    queryWindowsProcesses: queryProcesses = queryWindowsProcesses,
+    snapshotWindowsTree: snapshotTree = snapshotWindowsProcessTree,
+    spawnProcess = spawn,
+    windowsSnapshotTimeoutMs = WINDOWS_SNAPSHOT_TIMEOUT_MS,
+    ...spawnOptions
+  } = options
+  const child = spawnProcess(command, args, {
     ...spawnOptions,
     detached: platform !== 'win32',
     shell: false,
     windowsHide: true,
   })
+  if (platform === 'win32') {
+    child[windowsTreeCapture] = captureWindowsTreeAtSpawn(child, {
+      queryWindowsProcesses: queryProcesses,
+      snapshotWindowsTree: snapshotTree,
+      spawnProcess,
+      timeoutMs: windowsSnapshotTimeoutMs,
+    })
+  }
+  return child
+}
+
+function captureWindowsTreeAtSpawn(
+  child,
+  {
+    queryWindowsProcesses: queryProcesses,
+    snapshotWindowsTree,
+    spawnProcess,
+    timeoutMs,
+  },
+) {
+  if (child.pid === undefined) {
+    return Promise.resolve({
+      error: new Error('spawned Windows process is missing its root PID'),
+    })
+  }
+  let snapshot
+  try {
+    snapshot = snapshotWindowsTree(child.pid, {
+      queryWindowsProcesses: queryProcesses,
+      spawnProcess,
+      timeoutMs,
+    })
+  } catch (error) {
+    return Promise.resolve({ error })
+  }
+  return Promise.resolve(snapshot).then(
+    (identities) => {
+      const normalized = normalizeWindowsProcessRows(identities)
+      if (!normalized.some((identity) => identity.pid === child.pid)) {
+        throw new Error('spawn-time Windows snapshot is missing the root identity')
+      }
+      let rootHandleIsLive = false
+      try {
+        rootHandleIsLive = !hasExited(child) && child.kill(0)
+      } catch {
+        rootHandleIsLive = false
+      }
+      if (!rootHandleIsLive) {
+        throw new Error(
+          'spawned Windows process exited before its identity was captured',
+        )
+      }
+      return { identities: normalized }
+    },
+    (error) => ({ error }),
+  ).catch((error) => ({ error }))
 }
 
 export function terminateWindowsTree(
@@ -341,9 +404,9 @@ async function terminateWindowsProcessTree(
     closeWatchdogMs,
     label,
     queryWindowsProcesses: queryProcesses,
-    snapshotWindowsTree,
     spawnProcess,
     terminationGraceMs,
+    windowsTreeSnapshot,
   },
 ) {
   const cleanupDeadline =
@@ -351,18 +414,20 @@ async function terminateWindowsProcessTree(
   let retained
   const taskkillFailures = []
   try {
-    const identities = normalizeWindowsProcessRows(
-      await snapshotWindowsTree(child.pid, {
-        queryWindowsProcesses: queryProcesses,
-        spawnProcess,
-        timeoutMs: Math.max(1, cleanupDeadline - Date.now()),
-      }),
-    )
+    const capture = windowsTreeSnapshot === undefined
+      ? await child[windowsTreeCapture]
+      : { identities: await windowsTreeSnapshot }
+    if (capture === undefined) {
+      throw new Error('Windows process tree identity was not captured at spawn')
+    }
+    if (capture.error !== undefined) throw capture.error
+    const identities = normalizeWindowsProcessRows(capture.identities)
     retained = new Map(identities.map((identity) => [identity.pid, identity]))
   } catch (error) {
-    throw new Error(`${label} could not snapshot its Windows process tree`, {
-      cause: error,
-    })
+    throw new Error(
+      `${label} could not use its spawn-time Windows process tree`,
+      { cause: error },
+    )
   }
 
   let state = await queryRetainedWindowsTree(
@@ -472,9 +537,9 @@ export async function terminateProcessTree(
     label = 'process tree',
     platform = process.platform,
     queryWindowsProcesses: queryProcesses = queryWindowsProcesses,
-    snapshotWindowsTree = snapshotWindowsProcessTree,
     spawnProcess = spawn,
     terminationGraceMs = DEFAULT_TERMINATION_GRACE_MS,
+    windowsTreeSnapshot,
   } = {},
 ) {
   if (child.pid === undefined) return
@@ -483,9 +548,9 @@ export async function terminateProcessTree(
       closeWatchdogMs,
       label,
       queryWindowsProcesses: queryProcesses,
-      snapshotWindowsTree,
       spawnProcess,
       terminationGraceMs,
+      windowsTreeSnapshot,
     })
     return
   }

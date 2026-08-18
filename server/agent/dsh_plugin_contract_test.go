@@ -845,12 +845,12 @@ func TestDSHReleaseArtifactDigestRejectsChangedTarballBytes(t *testing.T) {
 	tarballName := "anban-dsh-plugin-" + dshPluginVersion + ".tgz"
 	tarballPath := filepath.Join(root, tarballName)
 	digestPath := filepath.Join(root, "artifact.sha256.json")
-	metadata := fmt.Sprintf(`[{
+	metadata := fmt.Sprintf(`{
   "name": "@anban/dsh-plugin",
   "version": %q,
   "filename": %q,
   "files": [{"path": "package.json"}]
-}]`, dshPluginVersion, tarballName)
+}`, dshPluginVersion, tarballName)
 	if err := os.WriteFile(metadataPath, []byte(metadata), 0o600); err != nil {
 		t.Fatal(err)
 	}
