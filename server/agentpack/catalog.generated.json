@@ -64,7 +64,12 @@
           "id": "delivery",
           "title": "交付验收",
           "active_percent": 90,
-          "complete_percent": 100
+          "complete_percent": 100,
+          "required_artifacts": [
+            "output/04-article-final.md",
+            "output/05-article.html",
+            "output/final-review.md"
+          ]
         }
       ],
       "artifacts": [
@@ -90,7 +95,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "40ee17fb424a5dab0e04f5e2a76a4fa301ffa2d873a72a0910a7cecd0b3cc0a3"
+      "digest": "52e66e149efba5013703c92104602b0061d86a9ba4e7ecac11ab53a2cc48cdd5"
     },
     {
       "id": "ecommerce",
@@ -151,7 +156,12 @@
           "id": "delivery",
           "title": "交付验收",
           "active_percent": 90,
-          "complete_percent": 100
+          "complete_percent": 100,
+          "required_artifacts": [
+            "output/product-bible.md",
+            "output/copywriting.md",
+            "output/manifest.json"
+          ]
         }
       ],
       "artifacts": [
@@ -177,7 +187,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "557796b359961d1040dbb9560a4feae8347b936fdd46dbc82d2ee0722c4a536b"
+      "digest": "04ae51b66e743cd2bda1f7c89c32e61bf57de1df967a0b7baa02d736ec44584b"
     },
     {
       "id": "live-slicer",
@@ -227,7 +237,12 @@
           "id": "delivery",
           "title": "交付验收",
           "active_percent": 90,
-          "complete_percent": 100
+          "complete_percent": 100,
+          "required_artifacts": [
+            "output/summary.md",
+            "output/clip-manifest.json",
+            "output/clip-plan.json"
+          ]
         }
       ],
       "artifacts": [
@@ -251,7 +266,7 @@
         }
       ],
       "ui": {},
-      "digest": "fcf70ffab820ad4e021d69103212fe0001c8668c79e758d8d7161ea8d54fb971"
+      "digest": "2b8676fb0d8add71253eced5586e43b4fd0f9d835141a5b90e6d24154ac171a7"
     },
     {
       "id": "moments",
@@ -448,7 +463,12 @@
           "id": "delivery",
           "title": "交付验收",
           "active_percent": 90,
-          "complete_percent": 100
+          "complete_percent": 100,
+          "required_artifacts": [
+            "output/montage-project.json",
+            "output/delivery-manifest.json",
+            "output/final.mp4"
+          ]
         }
       ],
       "artifacts": [
@@ -474,7 +494,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "04391077d56c4235d171093fd1f08a222dd955dd16cff178d5242c6c0b8c4ca3"
+      "digest": "0545c87a39d06108272fc36534b00837c74fe0e154865f914c1dbc0d2296a87b"
     },
     {
       "id": "seednote",
@@ -538,7 +558,11 @@
           "id": "delivery",
           "title": "交付验收",
           "active_percent": 90,
-          "complete_percent": 100
+          "complete_percent": 100,
+          "required_artifacts": [
+            "output/content.md",
+            "output/image-plan.md"
+          ]
         }
       ],
       "artifacts": [
@@ -564,7 +588,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "926022e6f01af2a30ac7506903a8dfcadd004ba0b2c1aaa0637975aa5eff380d"
+      "digest": "4759d3a8dc10423f9f9474987caa029436f5dd064c0d2a9648ce4090399a26e7"
     }
   ]
 }
