@@ -917,6 +917,29 @@ func TestDSHDesktopProcessSupervisor(t *testing.T) {
 			t.Errorf("Desktop acceptance still uses direct child termination %q", forbidden)
 		}
 	}
+
+	supervisor := readRepoFile(t, filepath.Join(repoRoot(t), "scripts", "dsh-process-supervisor.mjs"))
+	jobAdapter := readRepoFile(t, filepath.Join(repoRoot(t), "scripts", "dsh-windows-job.ps1"))
+	for _, required := range []string{
+		"JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+		"CREATE_SUSPENDED",
+		"EXTENDED_STARTUPINFO_PRESENT",
+		"PROC_THREAD_ATTRIBUTE_JOB_LIST",
+		"STARTUPINFOEX",
+		"ResumeThread",
+	} {
+		if !strings.Contains(jobAdapter, required) {
+			t.Errorf("Windows Job Object adapter missing %q", required)
+		}
+	}
+	if !strings.Contains(supervisor, "dsh-windows-job.ps1") {
+		t.Error("Desktop process supervisor does not launch the Windows Job Object adapter")
+	}
+	for _, forbidden := range []string{"AssignProcessToJobObject", "Get-CimInstance", "taskkill"} {
+		if strings.Contains(supervisor, forbidden) || strings.Contains(jobAdapter, forbidden) {
+			t.Errorf("Windows process supervision still uses PID-based cleanup %q", forbidden)
+		}
+	}
 }
 
 func TestDSHReliabilityPlanUsesExecutableVitestRepetition(t *testing.T) {

@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 const DEFAULT_TERMINATION_GRACE_MS = 1_000
 const DEFAULT_CLOSE_WATCHDOG_MS = 10_000
-const DEFAULT_TASKKILL_TIMEOUT_MS = 5_000
-const WINDOWS_SNAPSHOT_TIMEOUT_MS = 5_000
-const windowsTreeCapture = Symbol('windowsTreeCapture')
+const WINDOWS_JOB_SCRIPT = fileURLToPath(
+  new URL('./dsh-windows-job.ps1', import.meta.url),
+)
 
 function hasExited(child) {
   return child.exitCode !== null || child.signalCode !== null
@@ -21,506 +22,79 @@ function posixProcessGroupExists(pid, killProcess) {
   }
 }
 
-async function treeExitsWithin(child, timeoutMs, platform, killProcess) {
+async function posixTreeExitsWithin(pid, timeoutMs, killProcess) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const gone =
-      platform === 'win32'
-        ? hasExited(child)
-        : child.pid === undefined ||
-          !posixProcessGroupExists(child.pid, killProcess)
-    if (gone) return true
+    if (!posixProcessGroupExists(pid, killProcess)) return true
     await new Promise((resolveWait) => setTimeout(resolveWait, 20))
   }
   return false
 }
 
+function windowsJobArguments(command, args) {
+  const payload = Buffer.from(
+    JSON.stringify({ args, command }),
+    'utf8',
+  ).toString('base64')
+  return [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    WINDOWS_JOB_SCRIPT,
+    '-Payload',
+    payload,
+  ]
+}
+
 export function spawnProcessTree(command, args, options = {}) {
-  const {
-    platform = process.platform,
-    queryWindowsProcesses: queryProcesses = queryWindowsProcesses,
-    snapshotWindowsTree: snapshotTree = snapshotWindowsProcessTree,
-    spawnProcess = spawn,
-    windowsSnapshotTimeoutMs = WINDOWS_SNAPSHOT_TIMEOUT_MS,
-    ...spawnOptions
-  } = options
-  const child = spawnProcess(command, args, {
+  const { platform = process.platform, spawnProcess = spawn, ...spawnOptions } =
+    options
+  const wrappedCommand = platform === 'win32' ? 'powershell.exe' : command
+  const wrappedArgs = platform === 'win32'
+    ? windowsJobArguments(command, args)
+    : args
+  return spawnProcess(wrappedCommand, wrappedArgs, {
     ...spawnOptions,
     detached: platform !== 'win32',
     shell: false,
     windowsHide: true,
   })
-  if (platform === 'win32') {
-    child[windowsTreeCapture] = captureWindowsTreeAtSpawn(child, {
-      queryWindowsProcesses: queryProcesses,
-      snapshotWindowsTree: snapshotTree,
-      spawnProcess,
-      timeoutMs: windowsSnapshotTimeoutMs,
-    })
-  }
-  return child
 }
 
-function captureWindowsTreeAtSpawn(
-  child,
-  {
-    queryWindowsProcesses: queryProcesses,
-    snapshotWindowsTree,
-    spawnProcess,
-    timeoutMs,
-  },
-) {
-  if (child.pid === undefined) {
-    return Promise.resolve({
-      error: new Error('spawned Windows process is missing its root PID'),
-    })
-  }
-  let snapshot
-  try {
-    snapshot = snapshotWindowsTree(child.pid, {
-      queryWindowsProcesses: queryProcesses,
-      spawnProcess,
-      timeoutMs,
-    })
-  } catch (error) {
-    return Promise.resolve({ error })
-  }
-  return Promise.resolve(snapshot).then(
-    (identities) => {
-      const normalized = normalizeWindowsProcessRows(identities)
-      if (!normalized.some((identity) => identity.pid === child.pid)) {
-        throw new Error('spawn-time Windows snapshot is missing the root identity')
-      }
-      let rootHandleIsLive = false
-      try {
-        rootHandleIsLive = !hasExited(child) && child.kill(0)
-      } catch {
-        rootHandleIsLive = false
-      }
-      if (!rootHandleIsLive) {
-        throw new Error(
-          'spawned Windows process exited before its identity was captured',
-        )
-      }
-      return { identities: normalized }
-    },
-    (error) => ({ error }),
-  ).catch((error) => ({ error }))
-}
-
-export function terminateWindowsTree(
-  pid,
-  force,
-  {
-    spawnProcess = spawn,
-    timeoutMs = DEFAULT_TASKKILL_TIMEOUT_MS,
-  } = {},
-) {
+function terminateWindowsJob(child, { label, timeoutMs }) {
+  if (hasExited(child)) return Promise.resolve()
   return new Promise((resolveTermination, rejectTermination) => {
-    const args = ['/PID', String(pid), '/T']
-    if (force) args.push('/F')
-    const killer = spawnProcess('taskkill', args, {
-      shell: false,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
     let settled = false
-    let timedOut = false
-    const totalMs = Math.max(timeoutMs, 1)
-    const closeReserveMs = Math.min(
-      1_000,
-      Math.max(1, Math.floor(totalMs / 4)),
-    )
-    const finish = (error, result) => {
+    let timer
+    const finish = (error) => {
       if (settled) return
       settled = true
-      clearTimeout(killTimer)
-      clearTimeout(deadlineTimer)
-      if (error === undefined) resolveTermination(result)
+      clearTimeout(timer)
+      child.off('close', onClose)
+      child.off('error', onError)
+      if (error === undefined) resolveTermination()
       else rejectTermination(error)
     }
-    killer.once('error', (error) => finish(error))
-    killer.once('close', (status, signal) => {
-      if (timedOut) {
-        finish(
-          new Error(
-            `taskkill ${args.join(' ')} timed out after ${String(timeoutMs)}ms`,
-          ),
-        )
-        return
-      }
-      finish(undefined, { signal, status })
-    })
-    const timeoutError = () =>
-      new Error(
-        `taskkill ${args.join(' ')} timed out after ${String(timeoutMs)}ms`,
-      )
-    const killTimer = setTimeout(() => {
-      timedOut = true
-      try {
-        killer.kill('SIGKILL')
-      } catch {
-        // The bounded close wait below preserves the timeout failure.
-      }
-    }, Math.max(0, totalMs - closeReserveMs))
-    const deadlineTimer = setTimeout(() => finish(timeoutError()), totalMs)
-  })
-}
-
-function collectWindowsProcessRows(spawnProcess, timeoutMs) {
-  return new Promise((resolveRows, rejectRows) => {
-    const command = [
-      "$ErrorActionPreference='Stop'",
-      "@(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationDate = $_.CreationDate.ToUniversalTime().ToString('o') } }) | ConvertTo-Json -Compress",
-    ].join('; ')
-    const child = spawnProcess(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
-      {
-        shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      },
+    const onClose = () => finish()
+    const onError = (error) => finish(error)
+    child.once('close', onClose)
+    child.once('error', onError)
+    timer = setTimeout(
+      () => finish(new Error(`${label} Windows Job Object did not close`)),
+      Math.max(1, timeoutMs),
     )
-    const stdout = []
-    const stderr = []
-    let bytes = 0
-    let settled = false
-    let terminationError
-    const totalMs = Math.max(timeoutMs, 1)
-    const closeReserveMs = Math.min(
-      1_000,
-      Math.max(1, Math.floor(totalMs / 4)),
-    )
-    const finish = (error, rows) => {
-      if (settled) return
-      settled = true
-      clearTimeout(killTimer)
-      clearTimeout(deadlineTimer)
-      if (error === undefined) resolveRows(rows)
-      else rejectRows(error)
-    }
-    const beginTermination = (error) => {
-      if (terminationError !== undefined) return
-      terminationError = error
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // The absolute deadline below preserves the helper failure.
-      }
-    }
-    const capture = (chunks, chunk) => {
-      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      bytes += data.length
-      if (bytes > 1024 * 1024) {
-        beginTermination(
-          new Error('Windows process snapshot exceeded output limit'),
-        )
-        return
-      }
-      chunks.push(data)
-    }
-    child.stdout.on('data', (chunk) => capture(stdout, chunk))
-    child.stderr.on('data', (chunk) => capture(stderr, chunk))
-    child.once('error', (error) => finish(error))
-    child.once('close', (status) => {
-      if (terminationError !== undefined) {
-        finish(terminationError)
-        return
-      }
-      if (status !== 0) {
-        finish(
-          new Error(
-            `Windows process snapshot exited ${String(status)}: ${Buffer.concat(stderr).toString('utf8').trim()}`,
-          ),
-        )
-        return
-      }
-      try {
-        const parsed = JSON.parse(Buffer.concat(stdout).toString('utf8'))
-        finish(undefined, Array.isArray(parsed) ? parsed : [parsed])
-      } catch (error) {
-        finish(error)
-      }
-    })
-    const timeoutError = new Error('Windows process snapshot timed out')
-    const killTimer = setTimeout(
-      () => beginTermination(timeoutError),
-      Math.max(0, totalMs - closeReserveMs),
-    )
-    const deadlineTimer = setTimeout(
-      () => finish(terminationError ?? timeoutError),
-      totalMs,
-    )
-  })
-}
-
-function normalizeWindowsProcessRows(rows) {
-  return rows.map((row) => {
-    const pid = Number(row?.ProcessId ?? row?.pid)
-    const parentPid = Number(row?.ParentProcessId ?? row?.parentPid)
-    const creationDate = String(row?.CreationDate ?? row?.creationDate ?? '')
-    if (
-      !Number.isSafeInteger(pid) ||
-      pid <= 0 ||
-      !Number.isSafeInteger(parentPid) ||
-      creationDate.length === 0
-    ) {
-      throw new Error('Windows process snapshot contains invalid process identities')
-    }
-    return { creationDate, parentPid, pid }
-  })
-}
-
-export async function queryWindowsProcesses({
-  spawnProcess = spawn,
-  timeoutMs = WINDOWS_SNAPSHOT_TIMEOUT_MS,
-} = {}) {
-  return normalizeWindowsProcessRows(
-    await collectWindowsProcessRows(spawnProcess, timeoutMs),
-  )
-}
-
-function sameWindowsIdentity(left, right) {
-  return (
-    left !== undefined &&
-    right !== undefined &&
-    left.pid === right.pid &&
-    left.creationDate === right.creationDate
-  )
-}
-
-function windowsRowsByPid(rows) {
-  return new Map(rows.map((row) => [row.pid, row]))
-}
-
-function expandWindowsTree(retained, rows) {
-  const current = windowsRowsByPid(rows)
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const row of rows) {
-      if (retained.has(row.pid)) continue
-      const parent = retained.get(row.parentPid)
-      if (parent === undefined) continue
-      const currentParent = current.get(parent.pid)
-      if (
-        currentParent === undefined ||
-        !sameWindowsIdentity(parent, currentParent)
-      ) {
-        continue
-      }
-      retained.set(row.pid, row)
-      changed = true
-    }
-  }
-}
-
-export async function snapshotWindowsProcessTree(
-  rootPid,
-  {
-    queryWindowsProcesses: queryProcesses = queryWindowsProcesses,
-    spawnProcess = spawn,
-    timeoutMs = WINDOWS_SNAPSHOT_TIMEOUT_MS,
-  } = {},
-) {
-  const rows = normalizeWindowsProcessRows(
-    await queryProcesses({ spawnProcess, timeoutMs }),
-  )
-  const root = rows.find((row) => row.pid === rootPid)
-  if (root === undefined) {
-    throw new Error('Windows process snapshot is missing the root identity')
-  }
-  const retained = new Map([[root.pid, root]])
-  expandWindowsTree(retained, rows)
-  return [...retained.values()]
-}
-
-function liveWindowsIdentities(retained, rows) {
-  const current = windowsRowsByPid(rows)
-  return [...retained.values()].filter((identity) =>
-    sameWindowsIdentity(identity, current.get(identity.pid)),
-  )
-}
-
-async function queryRetainedWindowsTree(
-  retained,
-  deadline,
-  queryProcesses,
-  spawnProcess,
-) {
-  const rows = normalizeWindowsProcessRows(
-    await queryProcesses({
-      spawnProcess,
-      timeoutMs: Math.max(1, deadline - Date.now()),
-    }),
-  )
-  expandWindowsTree(retained, rows)
-  return { live: liveWindowsIdentities(retained, rows), rows }
-}
-
-async function waitForWindowsTree(
-  retained,
-  waitDeadline,
-  queryDeadline,
-  queryProcesses,
-  spawnProcess,
-) {
-  let state
-  let emptySamples = 0
-  do {
-    state = await queryRetainedWindowsTree(
-      retained,
-      queryDeadline,
-      queryProcesses,
-      spawnProcess,
-    )
-    if (state.live.length === 0) {
-      emptySamples += 1
-      if (emptySamples >= 2 || Date.now() >= queryDeadline) return state
-      await new Promise((resolveWait) =>
-        setTimeout(
-          resolveWait,
-          Math.min(20, Math.max(1, queryDeadline - Date.now())),
-        ),
-      )
-      continue
-    }
-    emptySamples = 0
-    if (Date.now() >= waitDeadline) return state
-    await new Promise((resolveWait) =>
-      setTimeout(
-        resolveWait,
-        Math.min(50, Math.max(1, waitDeadline - Date.now())),
-      ),
-    )
-  } while (Date.now() < queryDeadline)
-  return state
-}
-
-async function terminateWindowsProcessTree(
-  child,
-  {
-    closeWatchdogMs,
-    label,
-    queryWindowsProcesses: queryProcesses,
-    spawnProcess,
-    terminationGraceMs,
-    windowsTreeSnapshot,
-  },
-) {
-  const cleanupDeadline =
-    Date.now() + terminationGraceMs + closeWatchdogMs
-  let retained
-  const taskkillFailures = []
-  try {
-    const capture = windowsTreeSnapshot === undefined
-      ? await child[windowsTreeCapture]
-      : { identities: await windowsTreeSnapshot }
-    if (capture === undefined) {
-      throw new Error('Windows process tree identity was not captured at spawn')
-    }
-    if (capture.error !== undefined) throw capture.error
-    const identities = normalizeWindowsProcessRows(capture.identities)
-    retained = new Map(identities.map((identity) => [identity.pid, identity]))
-  } catch (error) {
-    throw new Error(
-      `${label} could not use its spawn-time Windows process tree`,
-      { cause: error },
-    )
-  }
-
-  let state = await queryRetainedWindowsTree(
-    retained,
-    cleanupDeadline,
-    queryProcesses,
-    spawnProcess,
-  )
-  const rootIdentity = retained.get(child.pid)
-  const liveRoot = state.live.find((identity) =>
-    sameWindowsIdentity(identity, rootIdentity),
-  )
-  if (liveRoot !== undefined) {
     try {
-      const result = await terminateWindowsTree(liveRoot.pid, true, {
-        spawnProcess,
-        timeoutMs: Math.max(1, cleanupDeadline - Date.now()),
-      })
-      if (result.status !== 0) {
-        taskkillFailures.push(`status ${String(result.status)}`)
-      }
+      child.kill('SIGKILL')
     } catch (error) {
-      taskkillFailures.push(
-        error instanceof Error ? error.message : String(error),
-      )
+      finish(error)
     }
-  }
-
-  const forceDeadline = cleanupDeadline
-  state = await waitForWindowsTree(
-    retained,
-    Math.min(forceDeadline, Date.now() + terminationGraceMs),
-    forceDeadline,
-    queryProcesses,
-    spawnProcess,
-  )
-  while (state.live.length > 0 && Date.now() < forceDeadline) {
-    for (const identity of [...state.live].reverse()) {
-      const current = await queryRetainedWindowsTree(
-        retained,
-        forceDeadline,
-        queryProcesses,
-        spawnProcess,
-      )
-      const stillLive = current.live.find((item) =>
-        sameWindowsIdentity(item, identity),
-      )
-      if (stillLive === undefined) continue
-      try {
-        const result = await terminateWindowsTree(identity.pid, true, {
-          spawnProcess,
-          timeoutMs: Math.max(1, forceDeadline - Date.now()),
-        })
-        if (result.status !== 0) {
-          taskkillFailures.push(`status ${String(result.status)}`)
-        }
-      } catch (error) {
-        taskkillFailures.push(
-          error instanceof Error ? error.message : String(error),
-        )
-      }
-    }
-    state = await waitForWindowsTree(
-      retained,
-      Math.min(forceDeadline, Date.now() + 100),
-      forceDeadline,
-      queryProcesses,
-      spawnProcess,
-    )
-  }
-  if (state.live.length === 0) return
-
-  const survivors = state.live.map((identity) => identity.pid)
-  const failureDetail = taskkillFailures.length === 0
-    ? ''
-    : `taskkill failed with ${taskkillFailures.join(', ')}; `
-  throw new Error(
-    `${label} ${failureDetail}did not exit after forced termination (PIDs: ${survivors.join(', ')})`,
-  )
+  })
 }
 
-async function signalProcessTree(
-  child,
-  signal,
-  { killProcess = process.kill, platform = process.platform, spawnProcess = spawn },
-) {
-  if (child.pid === undefined) return
-  if (platform === 'win32') {
-    await terminateWindowsTree(child.pid, signal === 'SIGKILL', {
-      spawnProcess,
-    })
-    return
-  }
+function signalPosixProcessTree(child, signal, killProcess) {
   try {
     killProcess(-child.pid, signal)
   } catch (error) {
@@ -536,43 +110,27 @@ export async function terminateProcessTree(
     killProcess = process.kill,
     label = 'process tree',
     platform = process.platform,
-    queryWindowsProcesses: queryProcesses = queryWindowsProcesses,
-    spawnProcess = spawn,
     terminationGraceMs = DEFAULT_TERMINATION_GRACE_MS,
-    windowsTreeSnapshot,
   } = {},
 ) {
   if (child.pid === undefined) return
   if (platform === 'win32') {
-    await terminateWindowsProcessTree(child, {
-      closeWatchdogMs,
+    await terminateWindowsJob(child, {
       label,
-      queryWindowsProcesses: queryProcesses,
-      spawnProcess,
-      terminationGraceMs,
-      windowsTreeSnapshot,
+      timeoutMs: terminationGraceMs + closeWatchdogMs,
     })
     return
   }
-  if (!posixProcessGroupExists(child.pid, killProcess)) {
-    return
-  }
-  const signalOptions = { killProcess, platform, spawnProcess }
-  await signalProcessTree(child, 'SIGTERM', signalOptions)
+  if (!posixProcessGroupExists(child.pid, killProcess)) return
+
+  signalPosixProcessTree(child, 'SIGTERM', killProcess)
   if (
-    await treeExitsWithin(
-      child,
-      terminationGraceMs,
-      platform,
-      killProcess,
-    )
+    await posixTreeExitsWithin(child.pid, terminationGraceMs, killProcess)
   ) {
     return
   }
-  await signalProcessTree(child, 'SIGKILL', signalOptions)
-  if (
-    await treeExitsWithin(child, closeWatchdogMs, platform, killProcess)
-  ) {
+  signalPosixProcessTree(child, 'SIGKILL', killProcess)
+  if (await posixTreeExitsWithin(child.pid, closeWatchdogMs, killProcess)) {
     return
   }
   throw new Error(`${label} did not exit after forced termination`)
@@ -635,7 +193,6 @@ export function runBoundedCommand(
           closeWatchdogMs,
           label,
           platform,
-          spawnProcess,
           terminationGraceMs,
         })
       } catch (error) {
