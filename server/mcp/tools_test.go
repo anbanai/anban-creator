@@ -24,6 +24,16 @@ import (
 
 func listToolNames(t *testing.T, register func(*mcp.Server)) map[string]bool {
 	t.Helper()
+	tools := listRegisteredTools(t, register)
+	names := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		names[tool.Name] = true
+	}
+	return names
+}
+
+func listRegisteredTools(t *testing.T, register func(*mcp.Server)) []*mcp.Tool {
+	t.Helper()
 	ctx := context.Background()
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	register(server)
@@ -43,11 +53,7 @@ func listToolNames(t *testing.T, register func(*mcp.Server)) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := make(map[string]bool, len(result.Tools))
-	for _, tool := range result.Tools {
-		names[tool.Name] = true
-	}
-	return names
+	return result.Tools
 }
 
 func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectService, repository.Repository, func()) {
