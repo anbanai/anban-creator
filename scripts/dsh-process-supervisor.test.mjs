@@ -122,6 +122,56 @@ test(
 )
 
 test(
+  'output overflow removes the real root and descendant process identities',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-supervisor-output-test-'))
+    const parentPidPath = join(root, 'parent.pid')
+    const childPidPath = join(root, 'child.pid')
+    const fixturePath = join(root, 'output-tree.mjs')
+    let pids = []
+    await writeFile(
+      fixturePath,
+      `import { spawn } from 'node:child_process'\n` +
+        `import { writeFileSync } from 'node:fs'\n` +
+        `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid))\n` +
+        `process.on('SIGTERM', () => {})\n` +
+        `const child = spawn(process.execPath, ['-e', ${JSON.stringify("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)")}], { stdio: 'ignore' })\n` +
+        `writeFileSync(${JSON.stringify(childPidPath)}, String(child.pid))\n` +
+        `process.stdout.write('x'.repeat(4096))\n` +
+        `setInterval(() => {}, 1000)\n`,
+    )
+
+    try {
+      await assert.rejects(
+        runBoundedCommand(process.execPath, [fixturePath], {
+          closeWatchdogMs: 3_000,
+          label: 'overflow tree',
+          maxBuffer: 64,
+          terminationGraceMs: 100,
+          timeoutMs: 10_000,
+        }),
+        /overflow tree exceeded output limit/,
+      )
+      pids = [await waitForFile(parentPidPath), await waitForFile(childPidPath)]
+      await waitForProcessesGone(pids)
+    } finally {
+      for (const pid of pids.filter(processExists)) {
+        if (process.platform === 'win32') {
+          try {
+            await terminateWindowsTree(pid, true)
+          } catch {
+            // The assertion above reports the primary cleanup failure.
+          }
+        } else {
+          process.kill(pid, 'SIGKILL')
+        }
+      }
+      await rm(root, { force: true, recursive: true })
+    }
+  },
+)
+
+test(
   'Windows timeout removes the real root and descendant process identities',
   { skip: process.platform !== 'win32' },
   async () => {
@@ -195,7 +245,9 @@ test('Windows termination awaits taskkill tree operations', async () => {
 })
 
 test('Windows cleanup retains and force-kills descendants after the root exits', async () => {
-  const alive = new Set([42, 84])
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const descendant = { creationDate: 'child-created', parentPid: 42, pid: 84 }
+  let rows = [root, descendant]
   const child = {
     exitCode: null,
     kill() {
@@ -211,9 +263,9 @@ test('Windows cleanup retains and force-kills descendants after the root exits',
     queueMicrotask(() => {
       const pid = Number.parseInt(args[1], 10)
       if (args.includes('/F')) {
-        alive.delete(pid)
+        rows = rows.filter((row) => row.pid !== pid)
       } else {
-        alive.delete(42)
+        rows = rows.filter((row) => row.pid !== 42)
         child.exitCode = 0
       }
       killer.emit('close', 0, null)
@@ -224,13 +276,13 @@ test('Windows cleanup retains and force-kills descendants after the root exits',
   await terminateProcessTree(child, {
     closeWatchdogMs: 100,
     platform: 'win32',
-    snapshotWindowsTree: async () => [42, 84],
+    queryWindowsProcesses: async () => rows,
+    snapshotWindowsTree: async () => [root, descendant],
     spawnProcess,
     terminationGraceMs: 1,
-    windowsProcessExists: (pid) => alive.has(pid),
   })
 
-  assert.deepEqual([...alive], [])
+  assert.deepEqual(rows, [])
   assert.ok(
     invocations.some(
       ({ args }) => args[1] === '84' && args.includes('/T') && args.includes('/F'),
@@ -240,6 +292,7 @@ test('Windows cleanup retains and force-kills descendants after the root exits',
 })
 
 test('Windows cleanup reports failed taskkill status for surviving identities', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
   const child = {
     exitCode: null,
     pid: 42,
@@ -256,11 +309,164 @@ test('Windows cleanup reports failed taskkill status for surviving identities', 
       closeWatchdogMs: 1,
       label: 'failed Windows tree',
       platform: 'win32',
-      snapshotWindowsTree: async () => [42],
+      queryWindowsProcesses: async () => [root],
+      snapshotWindowsTree: async () => [root],
       spawnProcess,
       terminationGraceMs: 1,
-      windowsProcessExists: () => true,
     }),
     /taskkill failed with status 5.*PIDs: 42/,
+  )
+})
+
+test('Windows cleanup does not kill a reused PID with a different creation identity', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const descendant = { creationDate: 'child-created', parentPid: 42, pid: 84 }
+  let rows = [root, descendant]
+  const invocations = []
+  const spawnProcess = (command, args) => {
+    invocations.push({ args, command })
+    const killer = new EventEmitter()
+    queueMicrotask(() => {
+      if (!args.includes('/F')) {
+        rows = [{ creationDate: 'replacement-created', parentPid: 1, pid: 84 }]
+      }
+      killer.emit('close', 0, null)
+    })
+    return killer
+  }
+
+  await terminateProcessTree({ exitCode: null, pid: 42, signalCode: null }, {
+    closeWatchdogMs: 100,
+    platform: 'win32',
+    queryWindowsProcesses: async () => rows,
+    snapshotWindowsTree: async () => [root, descendant],
+    spawnProcess,
+    terminationGraceMs: 1,
+  })
+
+  assert.ok(
+    !invocations.some(({ args }) => args[1] === '84' && args.includes('/F')),
+    'cleanup force-killed an unrelated process that reused the descendant PID',
+  )
+})
+
+test('Windows cleanup repeatedly captures a late descendant after its parent exits', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const descendant = { creationDate: 'child-created', parentPid: 42, pid: 84 }
+  const late = { creationDate: 'late-created', parentPid: 84, pid: 126 }
+  let rows = [root, descendant]
+  const invocations = []
+  const spawnProcess = (command, args) => {
+    invocations.push({ args, command })
+    const killer = new EventEmitter()
+    queueMicrotask(() => {
+      if (!args.includes('/F')) rows = [late]
+      if (args.includes('/F') && args[1] === '126') rows = []
+      killer.emit('close', 0, null)
+    })
+    return killer
+  }
+
+  await terminateProcessTree({ exitCode: null, pid: 42, signalCode: null }, {
+    closeWatchdogMs: 100,
+    platform: 'win32',
+    queryWindowsProcesses: async () => rows,
+    snapshotWindowsTree: async () => [root, descendant],
+    spawnProcess,
+    terminationGraceMs: 1,
+  })
+
+  assert.ok(
+    invocations.some(
+      ({ args }) => args[1] === '126' && args.includes('/T') && args.includes('/F'),
+    ),
+    'cleanup did not retain and force the late descendant identity',
+  )
+})
+
+test('Windows cleanup requires a stable empty tree before returning', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const late = { creationDate: 'late-created', parentPid: 42, pid: 126 }
+  let queryCount = 0
+  let lateAlive = true
+  const invocations = []
+  const spawnProcess = (command, args) => {
+    invocations.push({ args, command })
+    const killer = new EventEmitter()
+    queueMicrotask(() => {
+      if (args.includes('/F') && args[1] === '126') lateAlive = false
+      killer.emit('close', 0, null)
+    })
+    return killer
+  }
+
+  await terminateProcessTree({ exitCode: null, pid: 42, signalCode: null }, {
+    closeWatchdogMs: 200,
+    platform: 'win32',
+    queryWindowsProcesses: async () => {
+      queryCount += 1
+      if (queryCount === 1) return []
+      return lateAlive ? [late] : []
+    },
+    snapshotWindowsTree: async () => [root],
+    spawnProcess,
+    terminationGraceMs: 1,
+  })
+
+  assert.ok(queryCount >= 2, 'cleanup accepted a single empty process snapshot')
+  assert.ok(
+    invocations.some(
+      ({ args }) => args[1] === '126' && args.includes('/T') && args.includes('/F'),
+    ),
+    'cleanup missed the descendant that appeared after one empty snapshot',
+  )
+})
+
+test('Windows taskkill helper is bounded when the subprocess never closes', async () => {
+  let killed = false
+  const spawnProcess = () => {
+    const killer = new EventEmitter()
+    killer.kill = () => {
+      killed = true
+    }
+    return killer
+  }
+
+  await assert.rejects(
+    Promise.race([
+      terminateWindowsTree(42, true, { spawnProcess, timeoutMs: 10 }),
+      new Promise((_, rejectWait) =>
+        setTimeout(() => rejectWait(new Error('external test watchdog expired')), 100),
+      ),
+    ]),
+    /taskkill.*timed out/,
+  )
+  assert.equal(killed, true)
+})
+
+test('Windows process queries use the cleanup watchdog rather than the grace delay', async () => {
+  const root = { creationDate: 'root-created', parentPid: 1, pid: 42 }
+  const observedTimeouts = []
+  const spawnProcess = () => {
+    const killer = new EventEmitter()
+    queueMicrotask(() => killer.emit('close', 0, null))
+    return killer
+  }
+
+  await terminateProcessTree({ exitCode: null, pid: 42, signalCode: null }, {
+    closeWatchdogMs: 100,
+    platform: 'win32',
+    queryWindowsProcesses: async ({ timeoutMs }) => {
+      observedTimeouts.push(timeoutMs)
+      return []
+    },
+    snapshotWindowsTree: async () => [root],
+    spawnProcess,
+    terminationGraceMs: 1,
+  })
+
+  assert.ok(
+    observedTimeouts.every((timeoutMs) => timeoutMs > 1),
+    `query timeouts were constrained by grace: ${observedTimeouts.join(', ')}`,
   )
 })

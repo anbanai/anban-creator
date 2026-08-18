@@ -10,6 +10,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -790,6 +791,54 @@ func TestDSHReleaseWorkflowGatesExactRegistryRelease(t *testing.T) {
 	}
 }
 
+func TestDSHReleaseWorkflowRejectsArtifactMutationGaps(t *testing.T) {
+	findStep := func(t *testing.T, job workflowJob, name string) int {
+		t.Helper()
+		for index, step := range job.Steps {
+			if step.Name == name {
+				return index
+			}
+		}
+		t.Fatalf("missing workflow step %q", name)
+		return -1
+	}
+
+	t.Run("upload before digest", func(t *testing.T) {
+		workflow := readWorkflowContract(t, ".github/workflows/release.yml")
+		job := workflow.Jobs["dsh-package"]
+		digest := findStep(t, job, "Create exact DSH artifact digest")
+		upload := findStep(t, job, "Upload exact DSH release artifact")
+		job.Steps[digest], job.Steps[upload] = job.Steps[upload], job.Steps[digest]
+		workflow.Jobs["dsh-package"] = job
+		if err := validateDSHReleaseWorkflow(workflow); err == nil {
+			t.Fatal("upload-before-digest workflow satisfied the release contract")
+		}
+	})
+
+	for _, test := range []struct {
+		job      string
+		consumer string
+	}{
+		{job: "dsh-desktop-acceptance", consumer: "Install exact plugin through public DSH"},
+		{job: "release", consumer: "Stage exact DSH package asset"},
+	} {
+		t.Run("mutation before "+test.consumer, func(t *testing.T) {
+			workflow := readWorkflowContract(t, ".github/workflows/release.yml")
+			job := workflow.Jobs[test.job]
+			consumer := findStep(t, job, test.consumer)
+			mutation := workflowStep{
+				Name: "Replace verified artifact",
+				Run:  "node -e \"require('node:fs').writeFileSync('release/dsh/package.tgz', 'changed')\"",
+			}
+			job.Steps = append(job.Steps[:consumer], append([]workflowStep{mutation}, job.Steps[consumer:]...)...)
+			workflow.Jobs[test.job] = job
+			if err := validateDSHReleaseWorkflow(workflow); err == nil {
+				t.Fatalf("artifact mutation before %q satisfied the release contract", test.consumer)
+			}
+		})
+	}
+}
+
 func TestDSHReleaseArtifactDigestRejectsChangedTarballBytes(t *testing.T) {
 	root := t.TempDir()
 	metadataPath := filepath.Join(root, "pack.json")
@@ -1386,6 +1435,17 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if strings.Join(uploaded, "\n") != strings.Join(wantUploaded, "\n") {
 		return fmt.Errorf("unprivileged package upload files = %v, want only %v", uploaded, wantUploaded)
 	}
+	if err := requireConsecutiveEnabledSteps(packageJob, []string{
+		"Build DSH plugin",
+		"Verify DSH plugin source",
+		"Pack DSH plugin exactly once",
+		"Verify exact DSH package tarball",
+		"Smoke-test exact local DSH package",
+		"Create exact DSH artifact digest",
+		"Upload exact DSH release artifact",
+	}); err != nil {
+		return err
+	}
 	packCount := 0
 	for _, job := range workflow.Jobs {
 		for _, step := range job.Steps {
@@ -1463,6 +1523,13 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	verify, err := requireEnabledStep(release, "Verify exact DSH release artifact")
 	if err != nil || validateReleaseArtifactVerificationStep(verify) != nil {
 		return fmt.Errorf("privileged release must verify metadata, digest file, and independent package-job digest at point of use")
+	}
+	if err := requireConsecutiveEnabledSteps(release, []string{
+		"Download exact DSH release artifact",
+		"Verify exact DSH release artifact",
+		"Stage exact DSH package asset",
+	}); err != nil {
+		return fmt.Errorf("release artifact download, verification, and staging must be consecutive: %w", err)
 	}
 	asset, err := requireEnabledStep(release, "Stage exact DSH package asset")
 	if err != nil || asset.ID != "asset" || asset.Env["SOURCE_TARBALL"] != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz" || !runHasCode(asset.Run, "copyFile") || !runHasCode(asset.Run, "createHash('sha256')") || !runHasCode(asset.Run, "GITHUB_OUTPUT") {
@@ -1553,6 +1620,13 @@ func validateReleasePackagedDSHDesktopJob(job workflowJob) error {
 	verifyArtifact, err := requireEnabledStep(job, "Verify exact DSH release artifact")
 	if err != nil || validateReleaseArtifactVerificationStep(verifyArtifact) != nil {
 		return fmt.Errorf("release Desktop acceptance must verify metadata, digest file, and independent package-job digest at point of use")
+	}
+	if err := requireConsecutiveEnabledSteps(job, []string{
+		"Download exact DSH release artifact",
+		"Verify exact DSH release artifact",
+		"Install exact plugin through public DSH",
+	}); err != nil {
+		return fmt.Errorf("Desktop artifact download, verification, and installation must be consecutive: %w", err)
 	}
 	publicInstall, err := requireEnabledStep(job, "Install exact plugin through public DSH")
 	if err != nil || !runHasCode(publicInstall.Run, "dsh-desktop-acceptance.mjs install") || !runHasCode(publicInstall.Run, "anban-dsh-plugin") {
@@ -1743,6 +1817,21 @@ func requireNamedStepOrder(job workflowJob, names []string) error {
 		previous = index
 	}
 	return nil
+}
+
+func requireConsecutiveEnabledSteps(job workflowJob, names []string) error {
+	enabledNames := make([]string, 0, len(job.Steps))
+	for _, step := range job.Steps {
+		if stepEnabled(step) {
+			enabledNames = append(enabledNames, step.Name)
+		}
+	}
+	for start := 0; start+len(names) <= len(enabledNames); start++ {
+		if slices.Equal(enabledNames[start:start+len(names)], names) {
+			return nil
+		}
+	}
+	return fmt.Errorf("enabled workflow steps do not contain consecutive sequence %v", names)
 }
 
 func stepEnabled(step workflowStep) bool {
