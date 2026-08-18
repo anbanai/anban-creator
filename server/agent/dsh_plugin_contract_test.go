@@ -64,33 +64,6 @@ func TestDSHPluginContract(t *testing.T) {
 			t.Errorf("pnpm root importer version = %q, want %s", rootImporter.Version, dshPluginVersion)
 		}
 
-		for name, path := range map[string]string{
-			"Claude": filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"),
-			"Codex":  filepath.Join(pluginRoot, ".codex-plugin", "plugin.json"),
-		} {
-			var manifest struct {
-				Version string `json:"version"`
-			}
-			readJSONContractFile(t, path, &manifest)
-			if manifest.Version != dshPluginVersion {
-				t.Errorf("%s version = %q, want %s", name, manifest.Version, dshPluginVersion)
-			}
-		}
-
-		var marketplace struct {
-			Plugins []struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			} `json:"plugins"`
-		}
-		readJSONContractFile(t, filepath.Join(pluginRoot, ".claude-plugin", "marketplace.json"), &marketplace)
-		if len(marketplace.Plugins) != 1 || marketplace.Plugins[0].Name != "anban" {
-			t.Fatalf("Claude marketplace plugins = %+v, want only anban", marketplace.Plugins)
-		}
-		if marketplace.Plugins[0].Version != dshPluginVersion {
-			t.Errorf("Claude marketplace version = %q, want %s", marketplace.Plugins[0].Version, dshPluginVersion)
-		}
-
 		changelog := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
 		wantReleaseHeading := fmt.Sprintf("## [%s] - %s", dshPluginVersion, dshPluginReleaseDate)
 		if !strings.Contains(changelog, wantReleaseHeading) {

@@ -4,7 +4,7 @@
 
 **Goal:** Remove Anban-specific progress MCP calls from the managed Claude Agent workflow by deriving structured progress from official Task metadata, Agent Pack declarations, Runner Hooks, and artifact validation.
 
-**Architecture:** Agent Packs declare ordered stages, percentages, and required artifacts. Claude Agent SDK `PostToolUse` observes `TaskCreate|TaskUpdate`, `Stop` validates delivery, and a Runner-local emitter sends structured events through the existing authenticated progress endpoint. The server resolves stages against the execution's frozen Agent Pack snapshot. Codex keeps its existing explicit progress calls until an official host-level Task event adapter exists, because the repository documents that Codex plugins do not support bundled Hooks.
+**Architecture:** Agent Packs declare ordered stages, percentages, and required artifacts. Claude Agent SDK `PostToolUse` observes `TaskCreate|TaskUpdate`, `Stop` validates delivery, and a Runner-local emitter sends structured events through the existing authenticated progress endpoint. The server resolves stages against the execution's frozen Agent Pack snapshot. Codex supports official plugin lifecycle Hooks and App Server plan notifications, but the distributed Anban Codex plugin currently has neither a stable Agent Pack stage identifier in those events nor an authenticated reporter adapter. Its existing explicit progress calls remain the compatibility path until both are available.
 
 **Tech Stack:** Go 1.x, YAML Agent Pack catalog generation, TypeScript/Bun, Claude Agent SDK 0.3.220 Hooks, Fiber handlers, GORM repositories, Redis progress SSE, table-driven Go tests, Bun tests.
 
@@ -503,9 +503,9 @@ git commit -m "refactor: remove explicit progress MCP calls from Claude agents"
 - Modify: `server/agent/claude_plugin_best_practices_test.go`
 - Modify: `server/agent/unified_plugin_contract_test.go`
 
-- [ ] **Step 1: Add a contract test for the Codex limitation.**
+- [ ] **Step 1: Add a contract test for the Codex integration boundary.**
 
-Assert that the repository's Codex documentation states that bundled Hooks are unsupported and that Codex TOML agents retain their delivery validation instructions. This prevents a future change from silently claiming cross-host progress support without an adapter.
+Assert that the repository's Codex documentation acknowledges official bundled lifecycle Hooks and App Server notifications, while stating that their current event payloads provide no stable Agent Pack stage identifier and the distributed Anban plugin has no authenticated reporter adapter. Assert that Codex TOML agents retain their explicit compatibility calls and delivery validation instructions. This prevents a future change from silently claiming cross-host progress support without a complete adapter.
 
 - [ ] **Step 2: Document the safe migration boundary.**
 
@@ -513,8 +513,9 @@ Update `plugins/CODEX.md` to state:
 
 ```text
 Managed Claude execution derives progress from Task metadata and Agent SDK Hooks.
-Codex subagents keep explicit update_task_progress calls until Codex exposes an
-official Task lifecycle event adapter; /btw and model prompts are not telemetry.
+Codex subagents keep explicit update_task_progress calls until official Hooks or
+App Server plan events provide stable stage identity and the distributed plugin
+has authenticated transport; /btw and model prompts are not telemetry.
 ```
 
 Do not add a custom shell poller, `/btw` prompt, or nonstandard Codex protocol.

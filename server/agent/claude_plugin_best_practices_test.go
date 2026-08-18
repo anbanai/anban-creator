@@ -659,6 +659,62 @@ func TestClaudeCodePluginChangelogMentionsManifestVersion(t *testing.T) {
 	}
 }
 
+func TestCodexProgressCompatibilityBoundary(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "plugins")
+	doc := readRepoFile(t, filepath.Join(root, "CODEX.md"))
+	normalizedDoc := strings.Join(strings.Fields(doc), " ")
+	for _, want := range []string{
+		"Managed Claude execution derives progress from Task metadata and Agent SDK Hooks",
+		"PostToolUse",
+		"SubagentStop",
+		"Stop",
+		"tool_name",
+		"tool_input",
+		"tool_response",
+		"no stable Agent Pack stage identifier",
+		"not an App Server host",
+		"turn/plan/updated",
+		"step",
+		"status",
+		"authenticated reporter adapter",
+		"update_task_progress",
+		"/btw",
+		"model prompts are not telemetry",
+	} {
+		if !strings.Contains(normalizedDoc, want) {
+			t.Errorf("CODEX.md progress compatibility boundary missing %q", want)
+		}
+	}
+	for _, obsolete := range []string{
+		"Codex plugins cannot bundle Hooks",
+		"Codex plugin manifest does not accept bundled Hooks",
+	} {
+		if strings.Contains(doc, obsolete) {
+			t.Errorf("CODEX.md retains obsolete Hooks limitation %q", obsolete)
+		}
+	}
+
+	deliveryAnchors := map[string]string{
+		"article":     "完成后交付摘要",
+		"ecommerce":   "交付校验",
+		"live-slicer": "完成后交付摘要",
+		"moments":     "交付校验",
+		"seednote":    "交付校验",
+	}
+	for name, deliveryAnchor := range deliveryAnchors {
+		body := readRepoFile(t, filepath.Join(root, "agents", name+".toml"))
+		if !strings.Contains(body, "update_task_progress") {
+			t.Errorf("Codex %s agent must retain explicit progress compatibility", name)
+		}
+		if !strings.Contains(body, deliveryAnchor) || !strings.Contains(body, "submit_agent_feedback") {
+			t.Errorf("Codex %s agent must retain file-backed delivery validation and feedback", name)
+		}
+		if strings.Contains(body, "/btw") {
+			t.Errorf("Codex %s agent must not use /btw as progress telemetry", name)
+		}
+	}
+}
+
 func TestClaudeCodeHooksUseExecFormForPluginPathCommands(t *testing.T) {
 	var cfg struct {
 		Hooks map[string][]struct {
