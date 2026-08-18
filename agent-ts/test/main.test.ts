@@ -73,12 +73,18 @@ function runJobHarness() {
   let artifactManifest: ArtifactManifestFile[] = [];
   let completed: ExecutionResult | undefined;
   const finalizationOrder: string[] = [];
+  const progressAttempts: string[] = [];
   const stageProgressAttempts: StageProgressEvent[] = [];
   const stageProgressEvents: StageProgressEvent[] = [];
+  let progressImpl = async (_message: string, _signal?: AbortSignal) => {};
   let stageProgressImpl = async (_event: StageProgressEvent, _signal?: AbortSignal) => {};
   let completeImpl = async (_result: ExecutionResult, _signal?: AbortSignal) => {};
   const reporter = {
-    progress: async () => {}, heartbeat: async () => {},
+    progress: async (message: string, signal?: AbortSignal) => {
+      progressAttempts.push(message);
+      await progressImpl(message, signal);
+    },
+    heartbeat: async () => {},
     stageProgress: async (event: StageProgressEvent, signal?: AbortSignal) => {
       stageProgressAttempts.push(event);
       await stageProgressImpl(event, signal);
@@ -113,6 +119,7 @@ function runJobHarness() {
     dependencies,
     stdout: new PassThrough(), stderr: new PassThrough(),
     finalizationOrder,
+    progressAttempts,
     stageProgressAttempts,
     stageProgressEvents,
     artifactSignal: undefined as AbortSignal | undefined,
@@ -121,6 +128,7 @@ function runJobHarness() {
     get artifactManifest() { return artifactManifest; },
     get completed() { return completed; },
     get completeCalls() { return completeCalls; },
+    set progress(value: typeof progressImpl) { progressImpl = value; },
     set stageProgress(value: typeof stageProgressImpl) { stageProgressImpl = value; },
     set complete(value: typeof completeImpl) { completeImpl = value; },
   };
@@ -192,6 +200,31 @@ describe("runJob finalization", () => {
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
       expect(harness.finalizationOrder).toEqual(["artifacts", "complete"]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("continues completion when post-manifest progress delivery fails", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "final.md"), "complete");
+      harness.progress = async () => { throw new Error("text progress server unavailable"); };
+      harness.dependencies.runClaude = async (_config, data, reporter, signal) => {
+        expect(await invokeManagedStop(data, workspace, reporter, signal)).toEqual({});
+        return { success: true, work_dir: workspace };
+      };
+      harness.dependencies.uploadWorkspaceArtifacts = uploadWorkspaceArtifacts;
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+
+      expect(result).toEqual({ success: true, work_dir: workspace });
+      expect(harness.progressAttempts).toEqual(["collected 1 workspace artifact(s)"]);
+      expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
+      expect(harness.completed).toEqual(result);
+      expect(harness.finalizationOrder).toEqual(["progress", "artifacts", "complete"]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
