@@ -17,7 +17,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
+var (
+	ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
+	ErrLocalTaskExecutionCASLost     = errors.New("local task execution finalization CAS lost")
+)
 
 type taskRepository struct {
 	db *gorm.DB
@@ -356,7 +359,7 @@ func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executio
 		return false, execRes.Error
 	}
 	if execRes.RowsAffected != 1 {
-		return false, fmt.Errorf("local task execution %s is missing or not running", executionID)
+		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
 	}
 	return true, nil
 }

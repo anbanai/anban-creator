@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -341,6 +342,9 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		return s.persistTerminalBillingInTx(ctx, tx, task, execution, model.TaskBillingTerminalCompleted, true)
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
+			return ErrStaleTaskExecution
+		}
 		return fmt.Errorf("finalize local task as completed: %w", err)
 	}
 	if !swapped {
@@ -438,6 +442,9 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrLocalTaskExecutionCASLost) {
+			return ErrStaleTaskExecution
+		}
 		return fmt.Errorf("finalize local task as failed: %w", err)
 	}
 	if !swapped {

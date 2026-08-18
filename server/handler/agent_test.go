@@ -508,6 +508,25 @@ func TestAgentAPIKeyCurrentLocalCompletionFailureFinalizesTask(t *testing.T) {
 	}
 }
 
+func TestAgentCompletionErrorResponseDistinguishesStaleFromInternal(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "stale CAS loss", err: fmt.Errorf("finalize: %w", service.ErrStaleTaskExecution), wantStatus: fiber.StatusConflict, wantBody: "task execution is no longer current"},
+		{name: "ordinary repository error", err: errors.New("database unavailable"), wantStatus: fiber.StatusInternalServerError, wantBody: "complete failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			status, body := agentCompletionErrorResponse(tt.err)
+			if status != tt.wantStatus || body != tt.wantBody {
+				t.Fatalf("response = %d/%q, want %d/%q", status, body, tt.wantStatus, tt.wantBody)
+			}
+		})
+	}
+}
+
 func TestAgentProgressResultPayloadCannotWriteTerminalEvidence(t *testing.T) {
 	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
 	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`

@@ -568,13 +568,21 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, executionID, req.Result)
 	}
 	if err != nil {
-		if errors.Is(err, service.ErrStaleTaskExecution) {
-			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		status, message := agentCompletionErrorResponse(err)
+		if status == fiber.StatusConflict {
+			return Error(c, status, message)
 		}
 		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("complete agent task failed")
-		return Error(c, fiber.StatusInternalServerError, "complete failed")
+		return Error(c, status, message)
 	}
 	return Success(c, fiber.Map{"ok": true})
+}
+
+func agentCompletionErrorResponse(err error) (int, string) {
+	if errors.Is(err, service.ErrStaleTaskExecution) {
+		return fiber.StatusConflict, "task execution is no longer current"
+	}
+	return fiber.StatusInternalServerError, "complete failed"
 }
 
 // ResolvePublishing lets an operator close an ambiguous external publish.

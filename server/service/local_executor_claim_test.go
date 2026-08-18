@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -24,6 +27,28 @@ type localCompletionRace struct {
 	secondFinalize  chan struct{}
 	winnerCommitted chan struct{}
 	winnerModel     string
+}
+
+type executionCASLossRepository struct {
+	repository.Repository
+	executionID string
+	once        sync.Once
+	injectErr   error
+}
+
+func (r *executionCASLossRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	r.once.Do(func() {
+		transitioned, err := r.Repository.TaskExecutions().Transition(ctx, r.executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "lost before finalization"})
+		if err != nil {
+			r.injectErr = err
+		} else if !transitioned {
+			r.injectErr = errors.New("execution CAS-loss injection did not transition")
+		}
+	})
+	if r.injectErr != nil {
+		return r.injectErr
+	}
+	return r.Repository.WithTx(ctx, fn)
 }
 
 type localCompletionRaceRepository struct {
@@ -550,6 +575,13 @@ func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testin
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
+	miniRedis := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	svc.pubsub = NewRedisPubSub(redisClient, svc.logger)
+	if _, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved {
+		t.Fatalf("reserve slot = %v/%v", reserved, err)
+	}
 	if err := svc.CompleteLocalTask(ctx, taskID, oldExecutionID, &agent.ExecutionResult{Success: false, Error: "stale result"}); !errors.Is(err, ErrStaleTaskExecution) {
 		t.Fatalf("CompleteLocalTask stale result error = %v, want ErrStaleTaskExecution", err)
 	}
@@ -557,8 +589,72 @@ func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != model.TaskStatusRunning || got.Result != nil || got.CompletedAt != nil {
+	if got.Status != model.TaskStatusRunning || got.Result != nil || got.CompletedAt != nil || got.BillingTerminalReason != "" {
 		t.Fatalf("stale completion changed replacement task: status=%q result=%v completed_at=%v", got.Status, got.Result, got.CompletedAt)
+	}
+	if count, err := redisClient.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+		t.Fatalf("slot count = %d/%v, want reserved slot retained", count, err)
+	}
+	if dispatched := len(svc.enqueuer.(*mockEnqueuer).enqueued); dispatched != 0 {
+		t.Fatalf("stale completion dispatched %d next tasks, want 0", dispatched)
+	}
+}
+
+func TestCompleteLocalTask_ExecutionCASLossRollsBackWithoutReleaseOrDispatch(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		name := "failure"
+		if success {
+			name = "success"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			if success {
+				addLocalSeednoteDeliverables(t, repo, taskID)
+			}
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("claimed task = %#v, %v", task, err)
+			}
+
+			miniRedis := miniredis.RunT(t)
+			redisClient := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+			t.Cleanup(func() { _ = redisClient.Close() })
+			svc.pubsub = NewRedisPubSub(redisClient, svc.logger)
+			if _, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved {
+				t.Fatalf("reserve slot = %v/%v", reserved, err)
+			}
+			executionID := *task.CurrentExecutionID
+			svc.repo = &executionCASLossRepository{Repository: repo, executionID: executionID}
+			result := &agent.ExecutionResult{Success: success, Error: "agent failed"}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrStaleTaskExecution) {
+				t.Fatalf("CompleteLocalTask error = %v, want ErrStaleTaskExecution", err)
+			}
+
+			persistedTask, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedTask.Status != model.TaskStatusRunning || persistedTask.Result != nil || persistedTask.CompletedAt != nil || persistedTask.BillingTerminalReason != "" {
+				t.Fatalf("CAS-loss changed task/billing: %#v", persistedTask)
+			}
+			if persistedExecution.Status != model.TaskExecutionFailed || persistedExecution.CompletedAt == nil || persistedExecution.TerminalReason != "lost before finalization" {
+				t.Fatalf("injected terminal execution = %#v", persistedExecution)
+			}
+			if count, err := redisClient.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+				t.Fatalf("slot count = %d/%v, want reserved slot retained", count, err)
+			}
+			if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
+				t.Fatalf("CAS-loss dispatched %d next tasks, want 0", got)
+			}
+		})
 	}
 }
 
