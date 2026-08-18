@@ -82,20 +82,21 @@ function runJobHarness() {
   const reporter = {
     progress: async (message: string, signal?: AbortSignal) => {
       progressAttempts.push(message);
+      finalizationOrder.push("text-progress-attempt");
       await progressImpl(message, signal);
     },
     heartbeat: async () => {},
     stageProgress: async (event: StageProgressEvent, signal?: AbortSignal) => {
       stageProgressAttempts.push(event);
+      finalizationOrder.push("stage-progress");
       await stageProgressImpl(event, signal);
       stageProgressEvents.push(event);
-      finalizationOrder.push("progress");
     },
     prepareArtifactUpload: async (request: { relative_path: string }) => ({ upload_required: false, key: `existing/${request.relative_path}` }),
     streamArtifactContent: async () => ({ object_key: "existing", content_type: "text/plain", size: 0, sha256: "0".repeat(64) }),
     reportArtifactManifest: async (files: ArtifactManifestFile[]) => {
+      finalizationOrder.push("artifact-manifest");
       artifactManifest = files;
-      finalizationOrder.push("artifacts");
     },
     complete: async (result: ExecutionResult, signal?: AbortSignal) => {
       completeCalls += 1;
@@ -171,7 +172,12 @@ describe("runJob finalization", () => {
       ]);
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
-      expect(harness.finalizationOrder).toEqual(["progress", "artifacts", "complete"]);
+      expect(harness.finalizationOrder).toEqual([
+        "stage-progress",
+        "artifact-manifest",
+        "text-progress-attempt",
+        "complete",
+      ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -199,7 +205,13 @@ describe("runJob finalization", () => {
       expect(harness.stageProgressEvents).toEqual([]);
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
-      expect(harness.finalizationOrder).toEqual(["artifacts", "complete"]);
+      expect(harness.finalizationOrder).toEqual([
+        "stage-progress",
+        "text-progress-attempt",
+        "artifact-manifest",
+        "text-progress-attempt",
+        "complete",
+      ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -224,7 +236,12 @@ describe("runJob finalization", () => {
       expect(harness.progressAttempts).toEqual(["collected 1 workspace artifact(s)"]);
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
-      expect(harness.finalizationOrder).toEqual(["progress", "artifacts", "complete"]);
+      expect(harness.finalizationOrder).toEqual([
+        "stage-progress",
+        "artifact-manifest",
+        "text-progress-attempt",
+        "complete",
+      ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -262,7 +279,11 @@ describe("runJob finalization", () => {
         "output/final.md",
       ]);
       expect(harness.completed).toEqual(failedResult);
-      expect(harness.finalizationOrder).toEqual(["artifacts", "complete"]);
+      expect(harness.finalizationOrder).toEqual([
+        "artifact-manifest",
+        "text-progress-attempt",
+        "complete",
+      ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
