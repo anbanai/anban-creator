@@ -63,12 +63,16 @@ export function terminateWindowsTree(
     })
     let settled = false
     let timedOut = false
-    let closeTimer
+    const totalMs = Math.max(timeoutMs, 1)
+    const closeReserveMs = Math.min(
+      1_000,
+      Math.max(1, Math.floor(totalMs / 4)),
+    )
     const finish = (error, result) => {
       if (settled) return
       settled = true
-      clearTimeout(timeoutTimer)
-      clearTimeout(closeTimer)
+      clearTimeout(killTimer)
+      clearTimeout(deadlineTimer)
       if (error === undefined) resolveTermination(result)
       else rejectTermination(error)
     }
@@ -84,23 +88,19 @@ export function terminateWindowsTree(
       }
       finish(undefined, { signal, status })
     })
-    const timeoutTimer = setTimeout(() => {
+    const timeoutError = () =>
+      new Error(
+        `taskkill ${args.join(' ')} timed out after ${String(timeoutMs)}ms`,
+      )
+    const killTimer = setTimeout(() => {
       timedOut = true
       try {
         killer.kill('SIGKILL')
       } catch {
         // The bounded close wait below preserves the timeout failure.
       }
-      closeTimer = setTimeout(
-        () =>
-          finish(
-            new Error(
-              `taskkill ${args.join(' ')} timed out after ${String(timeoutMs)}ms`,
-            ),
-          ),
-        Math.min(Math.max(timeoutMs, 1), 1_000),
-      )
-    }, Math.max(timeoutMs, 1))
+    }, Math.max(0, totalMs - closeReserveMs))
+    const deadlineTimer = setTimeout(() => finish(timeoutError()), totalMs)
   })
 }
 
@@ -123,19 +123,36 @@ function collectWindowsProcessRows(spawnProcess, timeoutMs) {
     const stderr = []
     let bytes = 0
     let settled = false
+    let terminationError
+    const totalMs = Math.max(timeoutMs, 1)
+    const closeReserveMs = Math.min(
+      1_000,
+      Math.max(1, Math.floor(totalMs / 4)),
+    )
     const finish = (error, rows) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      clearTimeout(killTimer)
+      clearTimeout(deadlineTimer)
       if (error === undefined) resolveRows(rows)
       else rejectRows(error)
+    }
+    const beginTermination = (error) => {
+      if (terminationError !== undefined) return
+      terminationError = error
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // The absolute deadline below preserves the helper failure.
+      }
     }
     const capture = (chunks, chunk) => {
       const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       bytes += data.length
       if (bytes > 1024 * 1024) {
-        child.kill('SIGKILL')
-        finish(new Error('Windows process snapshot exceeded output limit'))
+        beginTermination(
+          new Error('Windows process snapshot exceeded output limit'),
+        )
         return
       }
       chunks.push(data)
@@ -144,6 +161,10 @@ function collectWindowsProcessRows(spawnProcess, timeoutMs) {
     child.stderr.on('data', (chunk) => capture(stderr, chunk))
     child.once('error', (error) => finish(error))
     child.once('close', (status) => {
+      if (terminationError !== undefined) {
+        finish(terminationError)
+        return
+      }
       if (status !== 0) {
         finish(
           new Error(
@@ -159,10 +180,15 @@ function collectWindowsProcessRows(spawnProcess, timeoutMs) {
         finish(error)
       }
     })
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      finish(new Error('Windows process snapshot timed out'))
-    }, Math.max(timeoutMs, 1))
+    const timeoutError = new Error('Windows process snapshot timed out')
+    const killTimer = setTimeout(
+      () => beginTermination(timeoutError),
+      Math.max(0, totalMs - closeReserveMs),
+    )
+    const deadlineTimer = setTimeout(
+      () => finish(terminationError ?? timeoutError),
+      totalMs,
+    )
   })
 }
 
@@ -216,7 +242,7 @@ function expandWindowsTree(retained, rows) {
       if (parent === undefined) continue
       const currentParent = current.get(parent.pid)
       if (
-        currentParent !== undefined &&
+        currentParent === undefined ||
         !sameWindowsIdentity(parent, currentParent)
       ) {
         continue
@@ -334,44 +360,45 @@ async function terminateWindowsProcessTree(
     )
     retained = new Map(identities.map((identity) => [identity.pid, identity]))
   } catch (error) {
-    try {
-      await terminateWindowsTree(child.pid, true, {
-        spawnProcess,
-        timeoutMs: Math.max(1, cleanupDeadline - Date.now()),
-      })
-    } catch {
-      // Preserve the snapshot failure, which means cleanup cannot be proven.
-    }
     throw new Error(`${label} could not snapshot its Windows process tree`, {
       cause: error,
     })
   }
 
-  try {
-    const result = await terminateWindowsTree(child.pid, false, {
-      spawnProcess,
-      timeoutMs: Math.max(1, cleanupDeadline - Date.now()),
-    })
-    if (result.status !== 0) {
-      taskkillFailures.push(`status ${String(result.status)}`)
-    }
-  } catch (error) {
-    taskkillFailures.push(error instanceof Error ? error.message : String(error))
-  }
-  const graceDeadline = Math.min(
-    cleanupDeadline,
-    Date.now() + terminationGraceMs,
-  )
-  let state = await waitForWindowsTree(
+  let state = await queryRetainedWindowsTree(
     retained,
-    graceDeadline,
     cleanupDeadline,
     queryProcesses,
     spawnProcess,
   )
-  if (state.live.length === 0) return
+  const rootIdentity = retained.get(child.pid)
+  const liveRoot = state.live.find((identity) =>
+    sameWindowsIdentity(identity, rootIdentity),
+  )
+  if (liveRoot !== undefined) {
+    try {
+      const result = await terminateWindowsTree(liveRoot.pid, true, {
+        spawnProcess,
+        timeoutMs: Math.max(1, cleanupDeadline - Date.now()),
+      })
+      if (result.status !== 0) {
+        taskkillFailures.push(`status ${String(result.status)}`)
+      }
+    } catch (error) {
+      taskkillFailures.push(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
 
   const forceDeadline = cleanupDeadline
+  state = await waitForWindowsTree(
+    retained,
+    Math.min(forceDeadline, Date.now() + terminationGraceMs),
+    forceDeadline,
+    queryProcesses,
+    spawnProcess,
+  )
   while (state.live.length > 0 && Date.now() < forceDeadline) {
     for (const identity of [...state.live].reverse()) {
       const current = await queryRetainedWindowsTree(
