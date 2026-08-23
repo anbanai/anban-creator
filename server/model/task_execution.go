@@ -23,9 +23,11 @@ type TaskExecution struct {
 	AgentPackID       string `gorm:"type:varchar(80);index" json:"agent_pack_id,omitempty"`
 	AgentPackVersion  string `gorm:"type:varchar(32)" json:"agent_pack_version,omitempty"`
 	AgentPackDigest   string `gorm:"type:char(64);index" json:"agent_pack_digest,omitempty"`
-	RuntimeAdapter    string `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
-	RuntimeProfile    string `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
-	RuntimeImage      string `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
+	// AgentPackProgressContract freezes the stage contract for resume safety.
+	AgentPackProgressContract datatypes.JSON `gorm:"type:json" json:"-"`
+	RuntimeAdapter            string         `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
+	RuntimeProfile            string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
+	RuntimeImage              string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
 
 	ExecutionProfile   string            `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
 	Provider           string            `gorm:"type:varchar(80);not null;index" json:"provider"`

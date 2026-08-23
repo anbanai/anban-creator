@@ -8,9 +8,12 @@ import (
 )
 
 func registerProgressTools(server *mcp.Server) {
+	// Compatibility surface for hosts without Claude SDK Task lifecycle hooks,
+	// notably Codex and DSH. Managed Claude progress is reported by Runner Hooks
+	// to the structured agent progress endpoint instead of calling this tool.
 	server.AddTool(&mcp.Tool{
 		Name:        "update_task_progress",
-		Description: "Update one task progress stage with its name, title, optional description, and percentage.",
+		Description: "Compatibility tool for hosts without Task lifecycle hooks. Update one task progress stage with its name, title, optional description, and percentage.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

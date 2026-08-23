@@ -232,6 +232,14 @@ func (r *taskExecutionRepository) FindByID(ctx context.Context, id string) (*mod
 	return &execution, nil
 }
 
+func (r *taskExecutionRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	var execution model.TaskExecution
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&execution).Error; err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
 func (r *taskExecutionRepository) FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error) {
 	var execution model.TaskExecution
 	err := r.db.WithContext(ctx).
@@ -395,6 +403,52 @@ func (r *taskExecutionRepository) UpdateHeartbeat(ctx context.Context, id string
 		Model(&model.TaskExecution{}).
 		Where("id = ?", id).
 		Update("last_heartbeat_at", now).Error
+}
+
+func (r *taskExecutionRepository) LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error) {
+	return lockActiveTaskExecutionFirst(ctx, r.db, id, taskID, activeTaskExecutionLock{
+		requireStarted:    true,
+		requireIncomplete: true,
+	})
+}
+
+func (r *taskExecutionRepository) LockCurrentForArtifactMutation(ctx context.Context, id, taskID string) (bool, error) {
+	return lockActiveTaskExecutionFirst(ctx, r.db, id, taskID, activeTaskExecutionLock{
+		requireStarted:    true,
+		requireIncomplete: true,
+	})
+}
+
+// Cross-table lock-order invariant: lock an existing task_execution before its
+// task. Completion and structured progress use this locked validation; legacy
+// heartbeat acquires the same row first via its execution UPDATE. Artifact
+// mutations enforce the same order in lockCurrentArtifactExecution.
+type activeTaskExecutionLock struct {
+	target            string
+	requireStarted    bool
+	requireIncomplete bool
+}
+
+func lockActiveTaskExecutionFirst(ctx context.Context, db *gorm.DB, id, taskID string, guard activeTaskExecutionLock) (bool, error) {
+	var execution model.TaskExecution
+	query := db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("id = ? AND task_id = ? AND status = ?", id, taskID, model.TaskExecutionRunning)
+	if guard.target != "" {
+		query = query.Where("target = ?", guard.target)
+	}
+	if guard.requireStarted {
+		query = query.Where("started = ?", true)
+	}
+	if guard.requireIncomplete {
+		query = query.Where("completed_at IS NULL")
+	}
+	err := query.Take(&execution).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (r *taskExecutionRepository) Transition(

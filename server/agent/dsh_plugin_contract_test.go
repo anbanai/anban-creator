@@ -61,8 +61,9 @@ func TestDSHPluginContract(t *testing.T) {
 			} `yaml:"importers"`
 		}
 		readYAMLContractFile(t, filepath.Join(pluginRoot, "pnpm-lock.yaml"), &lockfile)
-		if rootImporter, ok := lockfile.Importers["."]; ok && rootImporter.Version != "" && rootImporter.Version != dshPluginVersion {
-			t.Errorf("pnpm root importer version = %q, want %s", rootImporter.Version, dshPluginVersion)
+		rootImporter, ok := lockfile.Importers["."]
+		if !ok || rootImporter.Version != dshPluginVersion {
+			t.Errorf("pnpm root importer version = %q (present=%t), want %s", rootImporter.Version, ok, dshPluginVersion)
 		}
 
 		for name, path := range map[string]string{
@@ -508,11 +509,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		return "```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add " + specifier + "\n```"
 	}
 	for _, allowed := range []string{
-		`"@anban/dsh-plugin@4.1.12"`,
-		`"/tmp/anban-dsh-plugin-4.1.12.tgz"`,
-		`"file:/tmp/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz"`,
-		`"git+https://github.com/anbanai/creator-skills.git#v4.1.12"`,
+		`"@anban/dsh-plugin@4.1.13"`,
+		`"/tmp/anban-dsh-plugin-4.1.13.tgz"`,
+		`"file:/tmp/anban-dsh-plugin-4.1.13.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz"`,
+		`"git+https://github.com/anbanai/creator-skills.git#v4.1.13"`,
 		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
@@ -530,11 +531,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"file:/tmp/anban-dsh-plugin.tgz",
 		`"@anban/dsh-plugin"`,
 		`"@anban/dsh-plugin@latest"`,
-		`"@anban/dsh-plugin@^4.1.12"`,
+		`"@anban/dsh-plugin@^4.1.13"`,
 		`"@anban/dsh-plugin@01.2.3"`,
 		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
 		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.13.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.14.tgz"`,
 		`"git+https://github.com/anbanai/creator-skills.git#main"`,
 		`"git+https://github.com/anbanai/creator-skills.git#HEAD"`,
 		`"git+https://github.com/anbanai/creator-skills.git#v01.2.3"`,
@@ -562,14 +563,14 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		}
 	}
 	for _, source := range []string{
-		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
-		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
+		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
 		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.12/anban-dsh-plugin-4.1.12.tgz\"\n```",
-		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.12\"\n```",
-		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz\"\n```",
+		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
+		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
 		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.12.tgz\"\n```",
+		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.13.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
 			t.Errorf("approved prefixed or continued add findings = %v:\n%s", findings, source)
@@ -1021,12 +1022,12 @@ func TestReleaseDesktopArtifactContractSupportsFutureVersionsAndRejectsLiterals(
 	}
 
 	tarball := "${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ steps.version.outputs.VERSION }}.tgz"
-	resolved := strings.ReplaceAll(tarball, dynamicVersion, "4.1.13")
-	if resolved != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.13.tgz" {
+	resolved := strings.ReplaceAll(tarball, dynamicVersion, "4.1.14")
+	if resolved != "${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.14.tgz" {
 		t.Fatalf("future release tarball = %q", resolved)
 	}
 
-	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.12`
+	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.13`
 	if err := validateReleaseCrossPlatformDSHPackStep(step); err == nil {
 		t.Fatal("hardcoded release version satisfied the Desktop pack contract")
 	}

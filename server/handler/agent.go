@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -171,9 +173,8 @@ func (h *AgentHandler) authenticatedExecutionID(c fiber.Ctx) string {
 }
 
 func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
-	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
-	if claimTaskID != "" && claimTaskID != taskID {
-		return errors.New("execution token task mismatch")
+	if err := h.authorizeClaimTaskScope(c, taskID); err != nil {
+		return err
 	}
 	executionID, _ := c.Locals(agentExecutionIDContextKey).(string)
 	if executionID != "" {
@@ -183,6 +184,14 @@ func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
 			return errors.New("task service unavailable")
 		}
 		return h.taskSvc.ValidateAgentExecutionAccess(c.Context(), userID, projectID, taskID, executionID)
+	}
+	return nil
+}
+
+func (h *AgentHandler) authorizeClaimTaskScope(c fiber.Ctx, taskID string) error {
+	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
+	if claimTaskID != "" && claimTaskID != taskID {
+		return errors.New("execution token task mismatch")
 	}
 	return nil
 }
@@ -359,17 +368,147 @@ func isAgentTaskAccessError(err error) bool {
 }
 
 type agentProgressRequest struct {
-	TaskID  string   `json:"task_id"`
-	Message string   `json:"message"`
-	Logs    []string `json:"logs"`
+	TaskID                 string   `json:"task_id"`
+	ExecutionID            string   `json:"execution_id"`
+	Message                string   `json:"message"`
+	Logs                   []string `json:"logs"`
+	Stage                  *string  `json:"stage"`
+	State                  *string  `json:"state"`
+	Title                  *string  `json:"title"`
+	Description            *string  `json:"description"`
+	ProgressPercent        *int     `json:"progress_percent"`
+	stagePresent           bool
+	statePresent           bool
+	titlePresent           bool
+	descriptionPresent     bool
+	progressPercentPresent bool
+}
+
+func (r *agentProgressRequest) UnmarshalJSON(data []byte) error {
+	type wireRequest struct {
+		TaskID      string   `json:"task_id"`
+		ExecutionID string   `json:"execution_id"`
+		Message     string   `json:"message"`
+		Logs        []string `json:"logs"`
+	}
+	var wire wireRequest
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = agentProgressRequest{
+		TaskID:      wire.TaskID,
+		ExecutionID: wire.ExecutionID,
+		Message:     wire.Message,
+		Logs:        wire.Logs,
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, 5)
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return errors.New("agent progress JSON object key must be a string")
+		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return err
+		}
+		canonical, structured := canonicalAgentProgressKey(key)
+		if !structured {
+			continue
+		}
+		if key != canonical {
+			return fmt.Errorf("structured progress key %q must use canonical casing %q", key, canonical)
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return fmt.Errorf("duplicate structured progress key %q", canonical)
+		}
+		seen[canonical] = struct{}{}
+		if err := r.decodeStructuredProgressField(canonical, raw); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func canonicalAgentProgressKey(key string) (string, bool) {
+	for _, canonical := range [...]string{"stage", "state", "title", "description", "progress_percent"} {
+		if strings.EqualFold(key, canonical) {
+			return canonical, true
+		}
+	}
+	return "", false
+}
+
+func (r *agentProgressRequest) decodeStructuredProgressField(key string, raw json.RawMessage) error {
+	null := bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+	switch key {
+	case "stage":
+		r.stagePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Stage = &value
+		}
+	case "state":
+		r.statePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.State = &value
+		}
+	case "title":
+		r.titlePresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Title = &value
+		}
+	case "description":
+		r.descriptionPresent = true
+		if !null {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.Description = &value
+		}
+	case "progress_percent":
+		r.progressPercentPresent = true
+		if !null {
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			r.ProgressPercent = &value
+		}
+	}
+	return nil
 }
 
 type agentCompleteRequest struct {
-	TaskID string                       `json:"task_id"`
-	Result *serveragent.ExecutionResult `json:"result"`
+	TaskID      string                       `json:"task_id"`
+	ExecutionID string                       `json:"execution_id"`
+	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentPackContractVersion = 1
+const agentPackContractVersion = 2
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for
@@ -436,22 +575,85 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
+	userID := h.authenticatedUserID(c)
+	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, userID)
+	if err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
+	structuredIntent := req.stagePresent || req.statePresent || req.titlePresent || req.descriptionPresent || req.progressPercentPresent
+	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
+	executionID := authenticatedExecutionID
+	if authenticatedExecutionID != "" {
+		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+	} else if requestedExecutionID != "" {
+		if err := h.taskSvc.ValidateLocalAgentExecutionAccess(c.Context(), task, userID, requestedExecutionID); err != nil {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+		executionID = requestedExecutionID
+	} else if structuredIntent {
+		return Error(c, fiber.StatusBadRequest, "execution_id is required for structured progress")
+	}
 
-	// Refresh the heartbeat on every progress report. This is the local-
+	if structuredIntent {
+		stage, state, title, description, percent := "", "", "", "", 0
+		if !req.stagePresent || req.Stage == nil || strings.TrimSpace(*req.Stage) == "" {
+			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
+		}
+		stage = strings.TrimSpace(*req.Stage)
+		if !req.statePresent || req.State == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress state is required")
+		}
+		state = strings.TrimSpace(*req.State)
+		if state != "active" && state != "complete" {
+			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
+		}
+		if !req.titlePresent || req.Title == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress title is required")
+		}
+		title = *req.Title
+		if req.descriptionPresent {
+			if req.Description == nil {
+				return Error(c, fiber.StatusBadRequest, "structured progress description must not be null")
+			}
+			description = *req.Description
+		}
+		if !req.progressPercentPresent || req.ProgressPercent == nil {
+			return Error(c, fiber.StatusBadRequest, "structured progress_percent is required")
+		}
+		percent = *req.ProgressPercent
+		logs := append([]string(nil), req.Logs...)
+		if req.Message != "" {
+			logs = append(logs, req.Message)
+		}
+		if err := h.taskSvc.UpdateProgressFromAgent(c.Context(), req.TaskID, executionID, stage, state, title, description, percent, logs...); err != nil {
+			switch {
+			case errors.Is(err, service.ErrAgentProgressUnknownStage), errors.Is(err, service.ErrAgentProgressStateMismatch), errors.Is(err, service.ErrAgentProgressTitleMismatch), errors.Is(err, service.ErrAgentProgressPercentMismatch):
+				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
+			case errors.Is(err, service.ErrStaleTaskExecution):
+				return Error(c, fiber.StatusConflict, "task execution is no longer current")
+			case errors.Is(err, service.ErrAgentProgressExecutionMismatch), errors.Is(err, service.ErrAgentProgressPackMismatch):
+				return Error(c, fiber.StatusConflict, "structured progress contract conflict")
+			default:
+				h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist structured agent progress")
+				return Error(c, fiber.StatusInternalServerError, "failed to persist structured progress")
+			}
+		}
+		return Success(c, fiber.Map{"ok": true})
+	}
+
+	// Refresh the heartbeat on every legacy progress report. This is the local-
 	// execution keep-alive: a desktop agent reports progress per turn/line, and
 	// each report resets the 5-min stuck-task reaper. Cloud tasks are also kept
 	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
 	// refresh there. Without it, a long-running local task would be force-failed
 	// by reapStuckTasks (plan_checker.go) before it completes.
-	executionID := h.authenticatedExecutionID(c)
 	if err := h.taskSvc.UpdateAgentHeartbeat(c.Context(), req.TaskID, executionID); err != nil {
 		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
 		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
 	}
-
 	if req.Message != "" {
 		req.Logs = append(req.Logs, req.Message)
 	}
@@ -461,7 +663,6 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "failed to persist progress")
 		}
 	}
-
 	return Success(c, fiber.Map{"ok": true})
 }
 
@@ -469,9 +670,9 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 //
 // A desktop local executor calls this once when anban finishes, with
 // the final ExecutionResult. The service finalizes the task (status → completed
-// or failed, slot release, dispatch, refund-on-failure) — guarded to
-// local_claimed tasks and idempotent, so a cloud task or a repeat call is a
-// no-op. This is the terminal half of the local-execution path; without it a
+// or failed, slot release, dispatch, refund-on-failure) — guarded to the
+// current local_claimed execution. Identical terminal retries are acknowledged.
+// This is the terminal half of the local-execution path; without it a
 // local task could never reach a terminal state (the agent binary is shared with
 // cloud, whose authoritative finalization is server-side HandleExecution).
 func (h *AgentHandler) Complete(c fiber.Ctx) error {
@@ -486,29 +687,71 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
+	if err := h.authorizeClaimTaskScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
-		return Error(c, fiber.StatusForbidden, "task access denied")
-	}
-
-	executionID := h.authenticatedExecutionID(c)
-	var err error
-	if executionID != "" {
-		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
-	} else {
-		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, req.Result)
-	}
+	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
 	if err != nil {
-		if errors.Is(err, service.ErrStaleTaskExecution) {
-			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		if errors.Is(err, service.ErrAgentAccessDenied) {
+			return Error(c, fiber.StatusForbidden, "task access denied")
 		}
-		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("complete agent task failed")
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("validate agent task completion access")
 		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
+
+	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
+	executionID := authenticatedExecutionID
+	if authenticatedExecutionID != "" {
+		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
+			return Error(c, fiber.StatusForbidden, "execution access denied")
+		}
+		projectID, _ := c.Locals(agentProjectIDContextKey).(string)
+		if err := h.taskSvc.ValidateAgentCompletionAccess(c.Context(), h.authenticatedUserID(c), projectID, req.TaskID, authenticatedExecutionID); err != nil {
+			if errors.Is(err, service.ErrAgentAccessDenied) {
+				return Error(c, fiber.StatusForbidden, "execution access denied")
+			}
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", authenticatedExecutionID).Msg("validate cloud completion access")
+			return Error(c, fiber.StatusInternalServerError, "complete failed")
+		}
+	} else {
+		if requestedExecutionID == "" {
+			return Error(c, fiber.StatusBadRequest, "execution_id is required")
+		}
+		if err := h.taskSvc.ValidateLocalAgentCompletionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
+			if errors.Is(err, service.ErrAgentAccessDenied) {
+				return Error(c, fiber.StatusForbidden, "execution access denied")
+			}
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", requestedExecutionID).Msg("validate local completion access")
+			return Error(c, fiber.StatusInternalServerError, "complete failed")
+		}
+		executionID = requestedExecutionID
+	}
+	if authenticatedExecutionID != "" {
+		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
+	} else {
+		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, executionID, req.Result)
+	}
+	if err != nil {
+		status, message := agentCompletionErrorResponse(err)
+		if status == fiber.StatusConflict {
+			return Error(c, status, message)
+		}
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("complete agent task failed")
+		return Error(c, status, message)
+	}
 	return Success(c, fiber.Map{"ok": true})
+}
+
+func agentCompletionErrorResponse(err error) (int, string) {
+	if errors.Is(err, service.ErrTaskCompletionConflict) {
+		return fiber.StatusConflict, "completion result conflicts with terminal outcome"
+	}
+	if errors.Is(err, service.ErrStaleTaskExecution) {
+		return fiber.StatusConflict, "task execution is no longer current"
+	}
+	return fiber.StatusInternalServerError, "complete failed"
 }
 
 // ResolvePublishing lets an operator close an ambiguous external publish.

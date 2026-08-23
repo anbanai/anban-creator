@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -131,6 +132,136 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
 	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 1 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
+	}
+}
+
+func TestCompleteCloudExecutionRejectsConflictingDuplicateResult(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	first := &agent.ExecutionResult{Success: true, RemoteArtifacts: true, LogText: "first"}
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, first); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{
+		Success: false, Error: "conflicting retry", RemoteArtifacts: true,
+	})
+	if !errors.Is(err, ErrTaskCompletionConflict) {
+		t.Fatalf("conflicting duplicate completion = %v, want ErrTaskCompletionConflict", err)
+	}
+
+	foundTask, findErr := repo.Tasks().FindByID(context.Background(), task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if foundTask.Status != model.TaskStatusCompleted || foundTask.Result == nil || !strings.Contains(*foundTask.Result, `"log_text":"first"`) {
+		t.Fatalf("conflicting retry changed task evidence: status=%q result=%v", foundTask.Status, foundTask.Result)
+	}
+}
+
+func TestSemanticJSONEqualRequiresExactlyOneJSONValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		left      string
+		right     string
+		wantEqual bool
+		wantErr   bool
+	}{
+		{name: "whitespace and object key order", left: "  {\"large\":9007199254740993,\"nested\":{\"a\":1}}\n", right: "{\"nested\":{\"a\":1},\"large\":9007199254740993}", wantEqual: true},
+		{name: "UseNumber preserves numeric spelling", left: "{\"value\":1}", right: "{\"value\":1.0}"},
+		{name: "left trailing garbage", left: "{\"value\":1} trailing", right: "{\"value\":1}", wantErr: true},
+		{name: "right trailing garbage", left: "{\"value\":1}", right: "{\"value\":1} trailing", wantErr: true},
+		{name: "left second JSON value", left: "{\"value\":1} {\"second\":true}", right: "{\"value\":1}", wantErr: true},
+		{name: "right second JSON value", left: "{\"value\":1}", right: "{\"value\":1} {\"second\":true}", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			equal, err := semanticJSONEqual([]byte(test.left), []byte(test.right))
+			if equal != test.wantEqual || (err != nil) != test.wantErr {
+				t.Fatalf("semanticJSONEqual = %v, %v; want equal=%v error=%v", equal, err, test.wantEqual, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionRejectsInvalidStoredExecutionResultAsConflict(t *testing.T) {
+	for _, suffix := range []string{" trailing", ` {"second":true}`} {
+		t.Run(suffix, func(t *testing.T) {
+			svc, repo, db, _, execution := setupCloudCompletionTestWithDB(t, false)
+			ctx := context.Background()
+			result := &agent.ExecutionResult{Success: false, Error: "provider unavailable", RemoteArtifacts: true}
+			if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			stored, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			corrupt := append(append([]byte(nil), stored.Result...), suffix...)
+			if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).UpdateColumn("result", corrupt).Error; err != nil {
+				t.Fatalf("corrupt stored result: %v", err)
+			}
+			if err := svc.CompleteCloudExecution(ctx, execution.ID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("retry with corrupt stored result = %v, want ErrTaskCompletionConflict", err)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionAcceptsSameOriginalResultAfterServerNormalization(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		withArtifact  bool
+		result        func() *agent.ExecutionResult
+		wantExecution string
+	}{
+		{
+			name: "failure", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: false, Error: "provider unavailable", RemoteArtifacts: true}
+			}, wantExecution: model.TaskExecutionFailed,
+		},
+		{
+			name: "nested agent", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true, RemoteArtifacts: true, ToolUseSummary: map[string]int{"TaskUpdate": 2, "Agent": 1}}
+			}, withArtifact: true, wantExecution: model.TaskExecutionFailed,
+		},
+		{
+			name: "artifact invalid", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+			}, wantExecution: model.TaskExecutionFailed,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, repo, _, execution := setupCloudCompletionTest(t, test.withArtifact)
+			if err := svc.CompleteCloudExecution(context.Background(), execution.ID, test.result()); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			if err := svc.CompleteCloudExecution(context.Background(), execution.ID, test.result()); err != nil {
+				t.Fatalf("same original result retry: %v", err)
+			}
+			found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+			if err != nil || found.Status != test.wantExecution || found.FinalizationStatus != model.TaskExecutionFinalizationDone {
+				t.Fatalf("execution after retry = %#v, %v", found, err)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionDoesNotInferNilResultFromDiagnosticText(t *testing.T) {
+	svc, repo, _, execution := setupCloudCompletionTest(t, false)
+	result := &agent.ExecutionResult{Success: false, Error: missingExecutionResultDiagnostic}
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored agent.ExecutionResult
+	if err := json.Unmarshal(found.Result, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.RemoteArtifacts {
+		t.Fatal("explicit failure text was mistaken for a nil execution result")
 	}
 }
 

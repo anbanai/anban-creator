@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ import (
 )
 
 var ErrStaleTaskExecution = errors.New("task execution is no longer current")
+var ErrTaskCompletionConflict = errors.New("task completion result conflicts with the terminal execution outcome")
 var ErrFinalizationLeaseLost = errors.New("task execution finalization lease lost")
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 
@@ -28,12 +31,15 @@ func (s *TaskService) CompleteCloudExecution(ctx context.Context, executionID st
 	if err != nil {
 		return err
 	}
+	if !isTerminalExecution(execution.Status) && task.Status != model.TaskStatusRunning {
+		return ErrTaskCompletionConflict
+	}
+	terminal, reason, normalized, err := s.cloudTerminalOutcome(ctx, task, execution, result)
+	if err != nil {
+		return err
+	}
 
 	if !isTerminalExecution(execution.Status) {
-		terminal, reason, normalized, err := s.cloudTerminalOutcome(ctx, task, execution, result)
-		if err != nil {
-			return err
-		}
 		encoded, err := json.Marshal(normalized)
 		if err != nil {
 			return fmt.Errorf("marshal cloud execution result: %w", err)
@@ -56,14 +62,65 @@ func (s *TaskService) CompleteCloudExecution(ctx context.Context, executionID st
 			if !isTerminalExecution(execution.Status) {
 				return fmt.Errorf("cloud execution terminal transition lost from status %s", execution.Status)
 			}
+			if err := ensureCompletionOutcomeMatches(execution, terminal, reason, normalized); err != nil {
+				return err
+			}
 		} else {
 			execution.Status = terminal
 			execution.TerminalReason = reason
 			execution.Result = encoded
 			execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
 		}
+	} else if err := ensureCompletionOutcomeMatches(execution, terminal, reason, normalized); err != nil {
+		return err
 	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
+}
+
+func ensureCompletionOutcomeMatches(execution *model.TaskExecution, terminal, reason string, result *agent.ExecutionResult) error {
+	if execution == nil || execution.Status != terminal || execution.TerminalReason != reason {
+		return ErrTaskCompletionConflict
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal completion retry result: %w", err)
+	}
+	equal, err := semanticJSONEqual(execution.Result, encoded)
+	if err != nil {
+		return ErrTaskCompletionConflict
+	}
+	if !equal {
+		return ErrTaskCompletionConflict
+	}
+	return nil
+}
+
+func semanticJSONEqual(left, right []byte) (bool, error) {
+	decode := func(data []byte) (any, error) {
+		var value any
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("multiple JSON values")
+			}
+			return nil, err
+		}
+		return value, nil
+	}
+	leftValue, err := decode(left)
+	if err != nil {
+		return false, err
+	}
+	rightValue, err := decode(right)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(leftValue, rightValue), nil
 }
 
 func (s *TaskService) currentExecution(ctx context.Context, executionID string) (*model.TaskExecution, *model.Task, error) {
@@ -83,8 +140,12 @@ func (s *TaskService) currentExecution(ctx context.Context, executionID string) 
 
 func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) (string, string, *agent.ExecutionResult, error) {
 	failureReason := "execution_failed"
-	if result == nil {
-		result = normalizeTerminalExecutionResult(nil)
+	missingResult := result == nil
+	result, err := cloneTerminalExecutionResult(result)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if missingResult {
 		result.RemoteArtifacts = true
 	}
 	if result.Success && agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
@@ -127,7 +188,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 
 func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
 	if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
-		return nil
+		return s.ensureTerminalExecutionAuthority(ctx, task.ID, execution.ID)
 	}
 	if err := s.ensureExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
 		return err
@@ -212,6 +273,24 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 	return nil
 }
 
+func (s *TaskService) ensureTerminalExecutionAuthority(ctx context.Context, taskID, executionID string) error {
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		execution, err := tx.TaskExecutions().FindByIDForUpdate(ctx, executionID)
+		if err != nil {
+			return fmt.Errorf("verify terminal execution authority: %w", err)
+		}
+		task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("verify terminal task authority: %w", err)
+		}
+		if execution.TaskID != taskID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
+			(task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled) {
+			return ErrStaleTaskExecution
+		}
+		return nil
+	})
+}
+
 func (s *TaskService) ensureFinalizationAuthority(ctx context.Context, taskID, executionID string, leaseLost <-chan error) error {
 	if err := finalizationLeaseError(leaseLost); err != nil {
 		return err
@@ -252,8 +331,7 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			if err := s.updateExecutionResultForExecution(ctx, task.ID, execution.ID, result); err != nil {
 				return err
 			}
-			s.recordTerminalProviderCost(ctx, task, result)
-			return nil
+			return s.recordTerminalProviderCost(ctx, task, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
 		return model.TaskExecutionFinalizationWorkflow, func(ctx context.Context) error {

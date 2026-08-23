@@ -14,14 +14,19 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -319,8 +324,12 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 				if mode == "current" && resp.StatusCode != fiber.StatusOK {
 					t.Fatalf("current execution %s status = %d, want 200", executionID, resp.StatusCode)
 				}
-				if mode != "current" && resp.StatusCode != fiber.StatusForbidden {
-					t.Fatalf("%s status = %d, want 403", mode, resp.StatusCode)
+				wantRejectedStatus := fiber.StatusForbidden
+				if endpoint.name == "complete" && mode == "terminal" {
+					wantRejectedStatus = fiber.StatusConflict
+				}
+				if mode != "current" && resp.StatusCode != wantRejectedStatus {
+					t.Fatalf("%s status = %d, want %d", mode, resp.StatusCode, wantRejectedStatus)
 				}
 				if mode != "current" {
 					persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
@@ -341,8 +350,8 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 }
 
 func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
-	app, _, task, _, _, rawAPIKey, _ := setupExecutionScopedAgentApp(t)
-	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"local progress"}`)
+	app, repo, task, _, _, rawAPIKey, _ := setupExecutionScopedAgentApp(t)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"local progress","logs":["first log","second log"]}`)
 	req.Header.Set("Authorization", "Bearer "+rawAPIKey)
 	resp, err := app.Test(req)
 	if err != nil {
@@ -350,6 +359,372 @@ func TestAgentAPIKeyProgressBehaviorIsPreserved(t *testing.T) {
 	}
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("API-key progress status = %d, want 200", resp.StatusCode)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := persisted.ProgressLog, "first log\nsecond log\nlocal progress\n"; got != want {
+		t.Fatalf("API-key progress log = %q, want %q", got, want)
+	}
+	if persisted.LastHeartbeatAt == nil {
+		t.Fatal("legacy API-key progress did not refresh task heartbeat")
+	}
+}
+
+func TestAgentAPIKeyCompletionRequiresCurrentExecutionWithoutSideEffects(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		target      string
+		requestedID func(string) string
+		mutate      func(t *testing.T, repo repository.Repository, task *model.Task, executionID string)
+		wantStatus  int
+	}{
+		{name: "missing identity", requestedID: func(string) string { return "" }, wantStatus: fiber.StatusBadRequest},
+		{name: "unknown identity", requestedID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
+		{name: "replaced task execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			replacement := uuid.NewString()
+			task.CurrentExecutionID = &replacement
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "terminal task", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusConflict, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			task.Status = model.TaskStatusFailed
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "completed execution", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusConflict, mutate: func(t *testing.T, repo repository.Repository, _ *model.Task, executionID string) {
+			transitioned, err := repo.TaskExecutions().Transition(context.Background(), executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "already terminal"})
+			if err != nil || !transitioned {
+				t.Fatalf("terminal execution transition = %v/%v", transitioned, err)
+			}
+		}},
+		{name: "wrong target", target: "kubernetes", requestedID: func(current string) string { return current }, wantStatus: fiber.StatusForbidden},
+		{name: "missing execution record", requestedID: func(string) string { return "missing-execution" }, wantStatus: fiber.StatusForbidden, mutate: func(t *testing.T, repo repository.Repository, task *model.Task, _ string) {
+			missing := "missing-execution"
+			task.CurrentExecutionID = &missing
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			target := tt.target
+			if target == "" {
+				target = model.ExecutionTargetLocalClaimed
+			}
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", target, model.TaskExecutionRunning)
+			if tt.mutate != nil {
+				tt.mutate(t, repo, task, executionID)
+			}
+			beforeTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestedID := tt.requestedID(executionID)
+			body := `{"task_id":"` + task.ID + `"`
+			if requestedID != "" {
+				body += `,"execution_id":"` + requestedID + `"`
+			}
+			body += `,"result":{"success":false,"error":"late"}}`
+			req := agentJSONRequest("/agent/complete", body)
+			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, responseBody, tt.wantStatus)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Status != beforeTask.Status || !sameStringPointer(persisted.Result, beforeTask.Result) || !sameTimePointer(persisted.CompletedAt, beforeTask.CompletedAt) || persisted.ErrorMessage != beforeTask.ErrorMessage || persisted.BillingTerminalReason != beforeTask.BillingTerminalReason || !sameStringPointer(persisted.CurrentExecutionID, beforeTask.CurrentExecutionID) {
+				t.Fatalf("rejected completion changed task: before=%#v after=%#v", beforeTask, persisted)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedExecution.Status != beforeExecution.Status || !sameTimePointer(persistedExecution.CompletedAt, beforeExecution.CompletedAt) || string(persistedExecution.Result) != string(beforeExecution.Result) || persistedExecution.FinalizationStatus != beforeExecution.FinalizationStatus {
+				t.Fatalf("rejected completion changed execution: before=%#v after=%#v", beforeExecution, persistedExecution)
+			}
+		})
+	}
+}
+
+func sameStringPointer(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameTimePointer(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
+func TestAgentExecutionJWTRejectsConflictingCompletionBodyExecution(t *testing.T) {
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","result":{"success":false,"error":"must reject"}}`
+	req := agentJSONRequest("/agent/complete", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.TaskStatusRunning || persisted.Result != nil || persisted.CompletedAt != nil {
+		t.Fatalf("conflicting JWT completion changed task: status=%q result=%v completed_at=%v", persisted.Status, persisted.Result, persisted.CompletedAt)
+	}
+}
+
+func TestAgentAPIKeyCurrentLocalCompletionFailureFinalizesTask(t *testing.T) {
+	app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed"}}`
+	req := agentJSONRequest("/agent/complete", body)
+	req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.TaskStatusFailed || persisted.ErrorMessage != "agent failed" {
+		t.Fatalf("task = status:%q error:%q, want failed/agent failed", persisted.Status, persisted.ErrorMessage)
+	}
+}
+
+func TestAgentCompletionResponseLossRetryIsIdempotentForJWTAndAPIKey(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		target     string
+		credential func(token, apiKey string) string
+	}{
+		{name: "cloud JWT", target: "kubernetes", credential: func(token, _ string) string { return token }},
+		{name: "local API key", target: model.ExecutionTargetLocalClaimed, credential: func(_, apiKey string) string { return apiKey }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, repo, task, executionID, token, apiKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning)
+			body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed","tool_use_summary":{"Write":1}}}`
+			credential := test.credential(token, apiKey)
+			for attempt := 1; attempt <= 2; attempt++ {
+				req := agentJSONRequest("/agent/complete", body)
+				req.Header.Set("Authorization", "Bearer "+credential)
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != fiber.StatusOK {
+					responseBody, _ := io.ReadAll(resp.Body)
+					t.Fatalf("attempt %d status/body = %d/%s, want 200", attempt, resp.StatusCode, responseBody)
+				}
+			}
+
+			conflict := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"different result"}}`
+			req := agentJSONRequest("/agent/complete", conflict)
+			req.Header.Set("Authorization", "Bearer "+credential)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusConflict {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("conflict status/body = %d/%s, want 409", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil || persisted.Status != model.TaskStatusFailed || persisted.ErrorMessage != "agent failed" {
+				t.Fatalf("terminal task after retries = %#v, %v", persisted, err)
+			}
+		})
+	}
+}
+
+func TestAgentCompletionJWTRejectsLocalExecutionTarget(t *testing.T) {
+	app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning)
+	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","result":{"success":false,"error":"wrong target"}}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 403", resp.StatusCode, body)
+	}
+}
+
+var errInjectedCompletionFindExecution = errors.New("injected completion execution lookup failure")
+
+type completionCorruptResultRepository struct {
+	repository.Repository
+	suffix  string
+	corrupt bool
+}
+
+func (r *completionCorruptResultRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&completionCorruptResultRepository{Repository: tx, suffix: r.suffix, corrupt: r.corrupt})
+	})
+}
+
+func (r *completionCorruptResultRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &completionCorruptResultTaskExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), parent: r}
+}
+
+type completionCorruptResultTaskExecutions struct {
+	repository.TaskExecutionRepository
+	parent *completionCorruptResultRepository
+}
+
+func (r *completionCorruptResultTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || !r.parent.corrupt {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append(append([]byte(nil), execution.Result...), r.parent.suffix...)
+	return &cloned, nil
+}
+
+func (r *completionCorruptResultTaskExecutions) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByIDForUpdate(ctx, id)
+	if err != nil || !r.parent.corrupt {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append(append([]byte(nil), execution.Result...), r.parent.suffix...)
+	return &cloned, nil
+}
+
+func TestAgentCompletionCorruptStoredResultReturns409ForJWTAndAPIKey(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		target     string
+		credential func(token, apiKey string) string
+	}{
+		{name: "cloud JWT", target: "kubernetes", credential: func(token, _ string) string { return token }},
+		{name: "local API key", target: model.ExecutionTargetLocalClaimed, credential: func(_, apiKey string) string { return apiKey }},
+	} {
+		for _, suffix := range []string{" trailing", ` {"second":true}`} {
+			t.Run(test.name+suffix, func(t *testing.T) {
+				var corruptRepo *completionCorruptResultRepository
+				app, _, task, executionID, token, apiKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+					t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning,
+					func(base repository.Repository) repository.Repository {
+						corruptRepo = &completionCorruptResultRepository{Repository: base, suffix: suffix}
+						return corruptRepo
+					}, nil,
+				)
+				body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed"}}`
+				credential := test.credential(token, apiKey)
+				first := agentJSONRequest("/agent/complete", body)
+				first.Header.Set("Authorization", "Bearer "+credential)
+				firstResp, err := app.Test(first)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if firstResp.StatusCode != fiber.StatusOK {
+					responseBody, _ := io.ReadAll(firstResp.Body)
+					t.Fatalf("first completion status/body = %d/%s, want 200", firstResp.StatusCode, responseBody)
+				}
+				corruptRepo.corrupt = true
+				retry := agentJSONRequest("/agent/complete", body)
+				retry.Header.Set("Authorization", "Bearer "+credential)
+				resp, err := app.Test(retry)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != fiber.StatusConflict {
+					responseBody, _ := io.ReadAll(resp.Body)
+					t.Fatalf("retry status/body = %d/%s, want 409", resp.StatusCode, responseBody)
+				}
+			})
+		}
+	}
+}
+
+type completionFindExecutionErrorRepository struct {
+	repository.Repository
+	findCalls int
+}
+
+func (r *completionFindExecutionErrorRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &completionFindExecutionErrorTaskExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), parent: r}
+}
+
+type completionFindExecutionErrorTaskExecutions struct {
+	repository.TaskExecutionRepository
+	parent *completionFindExecutionErrorRepository
+}
+
+func (r *completionFindExecutionErrorTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	r.parent.findCalls++
+	if r.parent.findCalls == 2 {
+		return nil, errInjectedCompletionFindExecution
+	}
+	return r.TaskExecutionRepository.FindByID(ctx, id)
+}
+
+func TestAgentCompletionRepositoryErrorAfterAuthorizationReturns500(t *testing.T) {
+	app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning,
+		func(base repository.Repository) repository.Repository {
+			return &completionFindExecutionErrorRepository{Repository: base}
+		}, nil,
+	)
+	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","result":{"success":false,"error":"agent failed"}}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != fiber.StatusInternalServerError || !strings.Contains(string(body), "complete failed") {
+		t.Fatalf("status/body = %d/%s, want redacted 500", resp.StatusCode, body)
+	}
+}
+
+func TestAgentCompletionErrorResponseDistinguishesStaleFromInternal(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "stale CAS loss", err: fmt.Errorf("finalize: %w", service.ErrStaleTaskExecution), wantStatus: fiber.StatusConflict, wantBody: "task execution is no longer current"},
+		{name: "completion conflict", err: fmt.Errorf("finalize: %w", service.ErrTaskCompletionConflict), wantStatus: fiber.StatusConflict, wantBody: "completion result conflicts with terminal outcome"},
+		{name: "ordinary repository error", err: errors.New("database unavailable"), wantStatus: fiber.StatusInternalServerError, wantBody: "complete failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			status, body := agentCompletionErrorResponse(tt.err)
+			if status != tt.wantStatus || body != tt.wantBody {
+				t.Fatalf("response = %d/%q, want %d/%q", status, body, tt.wantStatus, tt.wantBody)
+			}
+		})
 	}
 }
 
@@ -420,6 +795,22 @@ func TestAgentArtifactManifestPersistenceFailureIsRedacted(t *testing.T) {
 }
 
 func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPack(t, model.PlatformArticle, "")
+}
+
+func setupExecutionScopedAgentAppForPack(t *testing.T, taskType, packID string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPackAndTarget(t, taskType, packID, "kubernetes")
+}
+
+func setupExecutionScopedAgentAppForPackAndTarget(t *testing.T, taskType, packID, target string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPackTargetAndStatus(t, taskType, packID, target, model.TaskExecutionRunning)
+}
+
+func setupExecutionScopedAgentAppForPackTargetAndStatus(t *testing.T, taskType, packID, target, executionStatus string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
+	return setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(t, taskType, packID, target, executionStatus, nil, nil)
+}
+
+func setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(t *testing.T, taskType, packID, target, executionStatus string, decorate func(repository.Repository) repository.Repository, pubsub *service.RedisPubSub) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
 	t.Helper()
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
@@ -428,20 +819,41 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12]}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "P", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: taskType, Name: "P", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: taskType, Status: model.TaskStatusRunning, ExecutionTarget: target, CurrentExecutionID: &executionID}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}); err != nil {
+	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: target, Status: executionStatus, Started: true, StartedAt: &now, RuntimeInstanceID: "pod-1"}
+	if packID != "" {
+		pack, ok := agentpack.Default().Pack(packID)
+		if !ok {
+			t.Fatalf("embedded %s Pack missing", packID)
+		}
+		execution.AgentPackID = pack.ID
+		execution.AgentPackVersion = pack.Version
+		execution.AgentPackDigest = pack.Digest
+		execution.RuntimeAdapter = pack.Runtime.Adapter
+		execution.RuntimeProfile = pack.Runtime.Profile
+		progressContract, err := json.Marshal(pack.Progress)
+		if err != nil {
+			t.Fatalf("marshal progress contract: %v", err)
+		}
+		execution.AgentPackProgressContract = datatypes.JSON(progressContract)
+	}
+	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
 	store := &executionScopeTestStore{fakeAgentArtifactStorage: &fakeAgentArtifactStorage{}}
-	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	taskServiceRepo := repo
+	if decorate != nil {
+		taskServiceRepo = decorate(repo)
+	}
+	taskSvc := newHandlerTaskService(t, taskServiceRepo, noopTaskEnqueuer{}, store, &logger, "", pubsub, nil)
 	apiKeys := service.NewAPIKeyService(repo, &logger)
 	_, rawAPIKey, err := apiKeys.Create(ctx, userID, "local")
 	if err != nil {
@@ -467,6 +879,196 @@ func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Reposito
 	return app, repo, task, executionID, token, rawAPIKey, store.fakeAgentArtifactStorage
 }
 
+type beforeStructuredProgressTxRepository struct {
+	repository.Repository
+	once   sync.Once
+	before func()
+}
+
+var errInjectedHandlerProgressCASLookup = errors.New("injected handler progress CAS lookup failure")
+
+type progressCASLookupErrorRepository struct {
+	repository.Repository
+}
+
+func (r *progressCASLookupErrorRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&progressCASLookupErrorTx{Repository: tx})
+	})
+}
+
+type progressCASLookupErrorTx struct {
+	repository.Repository
+}
+
+func (r *progressCASLookupErrorTx) Tasks() repository.TaskRepository {
+	return &progressCASLookupErrorTasks{TaskRepository: r.Repository.Tasks()}
+}
+
+type progressCASLookupErrorTasks struct {
+	repository.TaskRepository
+}
+
+func (r *progressCASLookupErrorTasks) AdvanceStructuredProgress(context.Context, string, string, int, model.ProgressPayload) (bool, model.ProgressPayload, error) {
+	return false, model.ProgressPayload{}, nil
+}
+
+func (r *progressCASLookupErrorTasks) FindByIDForUpdate(context.Context, string) (*model.Task, error) {
+	return nil, errInjectedHandlerProgressCASLookup
+}
+
+func newAgentProgressTestPubSub(t *testing.T) (*service.RedisPubSub, *miniredis.Miniredis) {
+	t.Helper()
+	miniRedis := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	return service.NewRedisPubSub(rdb, &logger), miniRedis
+}
+
+func subscribeAgentProgressTest(t *testing.T, ctx context.Context, pubsub *service.RedisPubSub, miniRedis *miniredis.Miniredis, taskID string) *service.ProgressSubscriber {
+	t.Helper()
+	subscriber := pubsub.SubscribeProgress(ctx, taskID)
+	t.Cleanup(func() { _ = subscriber.Close() })
+	channel := "anban:task:progress:" + taskID
+	deadline := time.Now().Add(time.Second)
+	for miniRedis.PubSubNumSub(channel)[channel] != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out establishing progress subscription")
+		}
+	}
+	return subscriber
+}
+
+func assertNoAgentProgressEvent(t *testing.T, subscriber *service.ProgressSubscriber) {
+	t.Helper()
+	select {
+	case event := <-subscriber.Events():
+		t.Fatalf("rejected structured request published SSE payload: %s", event.Payload)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+func (r *beforeStructuredProgressTxRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	r.once.Do(r.before)
+	return r.Repository.WithTx(ctx, fn)
+}
+
+func TestAgentStructuredProgressRejectsExecutionThatBecomesStaleAfterAuthorization(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(context.Context, repository.Repository, *model.Task, string) error
+	}{
+		{
+			name: "execution replaced",
+			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task, _ string) error {
+				_, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, uuid.NewString())
+				return err
+			},
+		},
+		{
+			name: "task terminal",
+			mutate: func(ctx context.Context, repo repository.Repository, task *model.Task, _ string) error {
+				return repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusCancelled)
+			},
+		},
+		{
+			name: "execution terminal",
+			mutate: func(ctx context.Context, repo repository.Repository, _ *model.Task, executionID string) error {
+				changed, err := repo.TaskExecutions().Transition(ctx, executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{})
+				if err != nil {
+					return err
+				}
+				if !changed {
+					return errors.New("execution terminal transition lost")
+				}
+				return nil
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
+			var hookErr error
+			var hookCalls int
+			var taskForHook *model.Task
+			var executionIDForHook string
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
+				func(base repository.Repository) repository.Repository {
+					return &beforeStructuredProgressTxRepository{Repository: base, before: func() {
+						hookCalls++
+						hookErr = tt.mutate(ctx, base, taskForHook, executionIDForHook)
+					}}
+				}, pubsub,
+			)
+			taskForHook = task
+			executionIDForHook = executionID
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+			body := `{"task_id":"` + task.ID + `","message":"raw message","logs":["raw log"],"stage":"writing","state":"complete","title":"朋友圈正文","description":"must not persist","progress_percent":55}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hookErr != nil || hookCalls != 1 {
+				t.Fatalf("transaction hook calls/error = %d/%v", hookCalls, hookErr)
+			}
+			if resp.StatusCode != fiber.StatusConflict {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want 409", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("stale structured request caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoAgentProgressEvent(t, subscriber)
+		})
+	}
+}
+
+func TestAgentStructuredProgressCASLookupErrorReturns500WithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	pubsub, miniRedis := newAgentProgressTestPubSub(t)
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
+		func(base repository.Repository) repository.Repository {
+			return &progressCASLookupErrorRepository{Repository: base}
+		}, pubsub,
+	)
+	subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"raw message","logs":["raw log"],"stage":"writing","state":"complete","title":"朋友圈正文","progress_percent":55}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 500", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("CAS lookup error caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	assertNoAgentProgressEvent(t, subscriber)
+}
+
 func TestAgentProgressRefreshesTaskAndExecutionHeartbeats(t *testing.T) {
 	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
 	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`"}`)
@@ -488,6 +1090,343 @@ func TestAgentProgressRefreshesTaskAndExecutionHeartbeats(t *testing.T) {
 	}
 	if foundTask.LastHeartbeatAt == nil || foundExecution.LastHeartbeatAt == nil {
 		t.Fatalf("heartbeats task=%v execution=%v", foundTask.LastHeartbeatAt, foundExecution.LastHeartbeatAt)
+	}
+}
+
+func TestAgentStructuredProgressPersistsFrozenPackStage(t *testing.T) {
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+
+	body := `{"task_id":"` + task.ID + `","stage":"writing","state":"complete","title":"朋友圈正文","description":"正文已生成","progress_percent":55}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("structured progress status/body = %d/%s", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := persisted.LatestProgress.Data()
+	if persisted.LastHeartbeatAt == nil || persisted.Progress != 55 || latest.Stage != "writing" || latest.State != "complete" || latest.Title != "朋友圈正文" || latest.Description != "正文已生成" || latest.Percent != 55 {
+		t.Fatalf("persisted structured progress = heartbeat:%v progress:%d latest:%#v", persisted.LastHeartbeatAt, persisted.Progress, latest)
+	}
+}
+
+func TestAgentAPIKeyStructuredProgressRequiresCurrentLocalExecution(t *testing.T) {
+	tests := []struct {
+		name            string
+		executionID     func(current string) string
+		staleCurrent    bool
+		executionStatus string
+		wantStatus      int
+	}{
+		{name: "current", executionID: func(current string) string { return current }, wantStatus: fiber.StatusOK},
+		{name: "missing", executionID: func(string) string { return "" }, wantStatus: fiber.StatusBadRequest},
+		{name: "mismatched", executionID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
+		{name: "stale", executionID: func(current string) string { return current }, staleCurrent: true, wantStatus: fiber.StatusForbidden},
+		{name: "non-running execution", executionID: func(current string) string { return current }, executionStatus: model.TaskExecutionFailed, wantStatus: fiber.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executionStatus := tt.executionStatus
+			if executionStatus == "" {
+				executionStatus = model.TaskExecutionRunning
+			}
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformMoments, "moments", model.ExecutionTargetLocalClaimed, executionStatus)
+			if tt.staleCurrent {
+				stale := uuid.NewString()
+				task.CurrentExecutionID = &stale
+			}
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+			requestedExecutionID := tt.executionID(executionID)
+			body := `{"task_id":"` + task.ID + `","execution_id":"` + requestedExecutionID + `","message":"must not persist when rejected","logs":["must not persist when rejected"],"stage":"writing","state":"complete","title":"朋友圈正文","description":"正文已生成","progress_percent":55}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want %d", resp.StatusCode, responseBody, tt.wantStatus)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			latestProgress := persisted.LatestProgress.Data()
+			if tt.wantStatus == fiber.StatusOK {
+				if persisted.Progress != 55 || persisted.LastHeartbeatAt == nil || persistedExecution.LastHeartbeatAt == nil {
+					t.Fatalf("progress/heartbeats = %d/%v/%v, want 55 and both heartbeats", persisted.Progress, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+				}
+			} else if persisted.Progress != 0 || persisted.ProgressSequence != 0 || latestProgress != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("rejected request caused side effects: progress=%d sequence=%d latest=%#v log=%q heartbeats=%v/%v", persisted.Progress, persisted.ProgressSequence, latestProgress, persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+		})
+	}
+}
+
+func TestAgentExecutionJWTRejectsConflictingProgressBodyExecution(t *testing.T) {
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","stage":"writing","state":"complete","title":"朋友圈正文","progress_percent":55}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 403", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Progress != 0 || persisted.LastHeartbeatAt != nil {
+		t.Fatalf("conflicting JWT body caused side effects: progress=%d heartbeat=%v", persisted.Progress, persisted.LastHeartbeatAt)
+	}
+}
+
+func TestAgentStructuredProgressRejectsUnknownFrozenPackStage(t *testing.T) {
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+
+	body := `{"task_id":"` + task.ID + `","stage":"not_declared","state":"complete","title":"未知","progress_percent":70}`
+	req := agentJSONRequest("/agent/progress", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode < 400 || resp.StatusCode >= 500 {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unknown stage status/body = %d/%s, want 4xx", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("structured validation failure refreshed heartbeat: task=%v execution=%v", persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	if persisted.Progress != 0 || persisted.LatestProgress.Data().Stage != "" || persisted.ProgressLog != "" {
+		t.Fatalf("unknown stage changed progress: %d/%#v/%q", persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog)
+	}
+}
+
+func TestAgentStructuredProgressIntentRequiresStage(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields string
+	}{
+		{name: "whitespace stage", fields: `"stage":"   ","state":"active","message":"must not persist"`},
+		{name: "state only", fields: `"state":"active","message":"must not persist"`},
+		{name: "title only", fields: `"title":"朋友圈正文","message":"must not persist"`},
+		{name: "description only", fields: `"description":"正文已生成","message":"must not persist"`},
+		{name: "percent only", fields: `"progress_percent":55,"message":"must not persist"`},
+		{name: "missing state", fields: `"stage":"writing","title":"朋友圈正文","progress_percent":35,"message":"must not persist"`},
+		{name: "invalid state", fields: `"stage":"writing","state":"paused","title":"朋友圈正文","progress_percent":35,"message":"must not persist"`},
+		{name: "invalid title", fields: `"stage":"writing","state":"active","title":"错误标题","progress_percent":35,"message":"must not persist"`},
+		{name: "invalid percent", fields: `"stage":"writing","state":"active","title":"朋友圈正文","progress_percent":36,"message":"must not persist"`},
+		{name: "null stage", fields: `"stage":null,"message":"must not persist"`},
+		{name: "null state", fields: `"stage":"writing","state":null,"title":"朋友圈正文","progress_percent":35,"message":"must not persist"`},
+		{name: "missing title", fields: `"stage":"writing","state":"active","progress_percent":35,"message":"must not persist"`},
+		{name: "null title", fields: `"stage":"writing","state":"active","title":null,"progress_percent":35,"message":"must not persist"`},
+		{name: "null description", fields: `"stage":"writing","state":"active","title":"朋友圈正文","description":null,"progress_percent":35,"message":"must not persist"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+			body := `{"task_id":"` + task.ID + `",` + tt.fields + `}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("structured intent status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Progress != 0 || persisted.LatestProgress.Data().Stage != "" || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("invalid structured intent changed task: progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+		})
+	}
+}
+
+type frozenProgressContractRepository struct {
+	repository.Repository
+	contract datatypes.JSON
+}
+
+func (r *frozenProgressContractRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &frozenProgressContractExecutions{TaskExecutionRepository: r.Repository.TaskExecutions(), contract: r.contract}
+}
+
+type frozenProgressContractExecutions struct {
+	repository.TaskExecutionRepository
+	contract datatypes.JSON
+}
+
+func (r *frozenProgressContractExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	copy := *execution
+	copy.AgentPackProgressContract = append(datatypes.JSON(nil), r.contract...)
+	return &copy, nil
+}
+
+func TestAgentStructuredProgressRequiresExplicitPercentForZeroPercentStage(t *testing.T) {
+	contract := datatypes.JSON(`[{"id":"zero","title":"Zero","active_percent":0,"complete_percent":0}]`)
+	for _, tt := range []struct {
+		name         string
+		percentField string
+	}{
+		{name: "missing"},
+		{name: "null", percentField: `,"progress_percent":null`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning,
+				func(base repository.Repository) repository.Repository {
+					return &frozenProgressContractRepository{Repository: base, contract: contract}
+				}, pubsub,
+			)
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+			body := `{"task_id":"` + task.ID + `","stage":"zero","state":"active","title":"Zero","message":"must not persist"` + tt.percentField + `}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("missing/null percent caused side effects: sequence=%d log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoAgentProgressEvent(t, subscriber)
+		})
+	}
+}
+
+func TestAgentExplicitNullStageIsStructuredAndHasNoSideEffects(t *testing.T) {
+	ctx := context.Background()
+	pubsub, miniRedis := newAgentProgressTestPubSub(t)
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+		t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning, nil, pubsub,
+	)
+	subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+	req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","stage":null,"message":"must not persist"}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+	}
+	persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+		t.Fatalf("null stage caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+	}
+	assertNoAgentProgressEvent(t, subscriber)
+}
+
+func TestAgentStructuredProgressRejectsNonCanonicalOrDuplicateJSONKeys(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fields string
+	}{
+		{
+			name:   "casing only",
+			fields: `"Stage":"writing","State":"active","Title":"朋友圈正文","Progress_Percent":35`,
+		},
+		{
+			name:   "canonical null mixed-case bypass",
+			fields: `"stage":null,"Stage":"writing","state":"active","title":"朋友圈正文","progress_percent":35`,
+		},
+		{
+			name:   "exact duplicate canonical key",
+			fields: `"stage":"writing","stage":"writing","state":"active","title":"朋友圈正文","progress_percent":35`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pubsub, miniRedis := newAgentProgressTestPubSub(t)
+			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				t, model.PlatformMoments, "moments", "kubernetes", model.TaskExecutionRunning, nil, pubsub,
+			)
+			subscriber := subscribeAgentProgressTest(t, ctx, pubsub, miniRedis, task.ID)
+			req := agentJSONRequest("/agent/progress", `{"task_id":"`+task.ID+`","message":"must not persist",`+tt.fields+`}`)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest {
+				responseBody, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status/body = %d/%s, want 400", resp.StatusCode, responseBody)
+			}
+			persisted, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ProgressSequence != 0 || persisted.Progress != 0 || persisted.LatestProgress.Data() != (model.ProgressPayload{}) || persisted.ProgressLog != "" || persisted.LastHeartbeatAt != nil || persistedExecution.LastHeartbeatAt != nil {
+				t.Fatalf("invalid structured keys caused side effects: sequence=%d progress=%d latest=%#v log=%q heartbeats=%v/%v", persisted.ProgressSequence, persisted.Progress, persisted.LatestProgress.Data(), persisted.ProgressLog, persisted.LastHeartbeatAt, persistedExecution.LastHeartbeatAt)
+			}
+			assertNoAgentProgressEvent(t, subscriber)
+		})
 	}
 }
 
@@ -896,7 +1835,8 @@ func TestAgentClaim_RequiresCurrentAgentPackContract(t *testing.T) {
 	app, _, rawKey, _, _ := setupAgentClaimApp(t)
 	for _, body := range []string{
 		`{"executor_info":{"hostname":"legacy"}}`,
-		`{"agent_pack_contract_version":2,"executor_info":{"hostname":"future"}}`,
+		`{"agent_pack_contract_version":1,"executor_info":{"hostname":"legacy-v1"}}`,
+		`{"agent_pack_contract_version":3,"executor_info":{"hostname":"future"}}`,
 	} {
 		req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+rawKey)
@@ -919,7 +1859,7 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	taskID := seedClaimableLocalTask(t, repo, userID, projectID)
 
 	// First claim: should return 200 + config carrying the task id.
-	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1,"executor_info":{"hostname":"mbp"}}`))
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2,"executor_info":{"hostname":"mbp"}}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -937,9 +1877,16 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 	if !strings.Contains(string(body), `"agent_flag"`) {
 		t.Fatalf("response body missing agent_flag field: %s", body)
 	}
+	claimed, err := repo.Tasks().FindByID(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.CurrentExecutionID == nil || !strings.Contains(string(body), `"execution_id":"`+*claimed.CurrentExecutionID+`"`) {
+		t.Fatalf("response body does not carry current execution id %v: %s", claimed.CurrentExecutionID, body)
+	}
 
 	// Second claim: nothing claimable → 204 No Content.
-	req2 := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
+	req2 := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2}`))
 	req2.Header.Set("Authorization", "Bearer "+rawKey)
 	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := app.Test(req2)
@@ -956,7 +1903,7 @@ func TestAgentClaim_ReturnsConfigThenNoContent(t *testing.T) {
 func TestAgentClaim_NoContentWhenEmpty(t *testing.T) {
 	app, _, rawKey, _, _ := setupAgentClaimApp(t)
 	// No task seeded.
-	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":1}`))
+	req := httptest.NewRequest("POST", "/agent/claim", strings.NewReader(`{"agent_pack_contract_version":2}`))
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)

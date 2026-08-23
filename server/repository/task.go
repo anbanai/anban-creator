@@ -17,7 +17,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
+var (
+	ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
+	ErrLocalTaskExecutionCASLost     = errors.New("local task execution finalization CAS lost")
+)
 
 type taskRepository struct {
 	db *gorm.DB
@@ -170,6 +173,50 @@ func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, pa
 		Update("latest_progress", datatypes.NewJSONType(payload)).Error
 }
 
+// AdvanceStructuredProgress uses the declared stage/state sequence as its CAS
+// high-water mark. Numeric progress is retained independently as a maximum so
+// Pack stages with equal or zero percentages still advance deterministically.
+func (r *taskRepository) AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Task{}).
+			Where("id = ? AND progress_sequence < ? AND current_execution_id = ? AND status = ?", id, sequence, executionID, model.TaskStatusRunning).
+			Updates(map[string]any{
+				"progress_sequence": sequence,
+				"progress": gorm.Expr(
+					"CASE WHEN progress < ? THEN ? ELSE progress END",
+					payload.Percent,
+					payload.Percent,
+				),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		var finalProgress int
+		if err := tx.Model(&model.Task{}).Select("progress").Where("id = ?", id).Scan(&finalProgress).Error; err != nil {
+			return err
+		}
+		payload.Percent = finalProgress
+		message, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal structured progress: %w", err)
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", id).Updates(map[string]any{
+			"latest_progress": datatypes.NewJSONType(payload),
+			"progress_log":    gorm.Expr("CONCAT(COALESCE(progress_log, ''), ?)", string(message)+"\n"),
+		}).Error; err != nil {
+			return err
+		}
+		advanced = true
+		persisted = payload
+		return nil
+	})
+	return advanced, persisted, err
+}
+
 // GetTypeAndProgress loads only the type and progress columns for a task,
 // avoiding the longtext progress_log transfer on hot paths.
 func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (string, int, error) {
@@ -274,25 +321,35 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID,
 	var won bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, result, usage, costStatus)
 		return err
 	})
 	return won, err
 }
 
-func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	locked, err := lockActiveTaskExecutionFirst(ctx, r.db, executionID, id, activeTaskExecutionLock{
+		target: model.ExecutionTargetLocalClaimed,
+	})
+	if err != nil {
+		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
+	}
+	if !locked {
+		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
+	}
+
 	now := time.Now()
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
 		Updates(map[string]any{
-			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+			"status": status, "error_message": errorMsg, "completed_at": now, "result": taskResult,
 			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
 		})
 	if res.Error != nil {
 		return false, res.Error
 	}
 	if res.RowsAffected == 0 {
-		return false, nil
+		return false, fmt.Errorf("%w: task %s no longer owns execution %s", ErrLocalTaskExecutionCASLost, id, executionID)
 	}
 	executionStatus := model.TaskExecutionFailed
 	if status == model.TaskStatusCompleted {
@@ -300,19 +357,23 @@ func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executio
 	} else if status == model.TaskStatusCancelled {
 		executionStatus = model.TaskExecutionCancelled
 	}
-	executionResult := datatypes.JSON([]byte(result))
+	fullExecutionResult := datatypes.JSON([]byte(executionResult))
+	finalizationStatus := model.TaskExecutionFinalizationTerminal
+	if status == model.TaskStatusCancelled {
+		finalizationStatus = model.TaskExecutionFinalizationDone
+	}
 	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
 		Updates(map[string]any{
-			"status": executionStatus, "terminal_reason": errorMsg, "result": executionResult,
-			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationDone,
+			"status": executionStatus, "terminal_reason": errorMsg, "result": fullExecutionResult,
+			"completed_at": now, "finalization_status": finalizationStatus,
 			"cleanup_status": model.TaskExecutionCleanupDone,
 		})
 	if execRes.Error != nil {
 		return false, execRes.Error
 	}
 	if execRes.RowsAffected != 1 {
-		return false, fmt.Errorf("local task execution %s is missing or not running", executionID)
+		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
 	}
 	return true, nil
 }
@@ -683,6 +744,7 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 			"terminal_model_usage":   datatypes.NewJSONType([]model.ModelTokenUsage{}),
 			"cost_status":            "",
 			"progress":               0,
+			"progress_sequence":      0,
 			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
 			"workflow_status":        nil,
 			"publish_approval_state": "",

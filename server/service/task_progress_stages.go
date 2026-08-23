@@ -2,15 +2,15 @@ package service
 
 import "github.com/anbanai/anban-creator/server/model"
 
-// stagePercentByType maps task.Type → stage name → percent.
-// Used as a fallback when update_task_progress is called without an explicit
-// progress_percent, so the progress bar advances without requiring every
-// skill to pass a number. Stages not listed here leave percent unchanged.
+// legacyStagePercentByType maps task.Type → stage name → percent for Codex,
+// DSH, and other compatibility hosts without Claude SDK Task lifecycle hooks.
+// It is used only when update_task_progress omits progress_percent. Managed
+// Claude progress is resolved from the frozen Agent Pack execution contract.
+// Stages not listed here leave percent unchanged.
 //
-// Stage names are extracted from plugins/agents/{article,seednote,moments}.md.
-// Agent-backed content pipelines go through TaskService.UpdateProgress; other
-// pipelines such as live-slicer and video have their own services.
-var stagePercentByType = map[string]map[string]int{
+// Stage names match the compatibility agents that explicitly call the MCP
+// tool. Other pipelines such as live-slicer and video have their own services.
+var legacyStagePercentByType = map[string]map[string]int{
 	model.ScopeArticle: {
 		"research":     10,
 		"outline":      20,
@@ -63,10 +63,10 @@ var stagePercentByType = map[string]map[string]int{
 	},
 }
 
-// defaultPercentForStage returns the percent for a (taskType, stage) pair.
-// Returns 0 when type or stage is unknown — caller must not overwrite.
-func defaultPercentForStage(taskType, stage string) int {
-	if m, ok := stagePercentByType[taskType]; ok {
+// legacyDefaultPercentForStage returns the compatibility percent for a
+// (taskType, stage) pair. It returns 0 for unknown entries.
+func legacyDefaultPercentForStage(taskType, stage string) int {
+	if m, ok := legacyStagePercentByType[taskType]; ok {
 		return m[stage]
 	}
 	return 0

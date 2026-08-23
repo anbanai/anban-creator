@@ -51,6 +51,14 @@ export interface ArtifactManifestFile {
   role?: string;
 }
 
+export interface StageProgressEvent {
+  stage: string;
+  state: "active" | "complete";
+  title: string;
+  description?: string;
+  progress_percent: number;
+}
+
 type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 const sleep: Sleep = (milliseconds, signal) => new Promise((resolve, reject) => {
   const onAbort = () => {
@@ -87,6 +95,17 @@ export class Reporter {
   async progress(message: string, signal?: AbortSignal): Promise<void> {
     if (!message.trim()) return;
     await this.post("/api/v1/agent/progress", this.identity({ message: message.trim() }), signal);
+  }
+
+  async stageProgress(event: StageProgressEvent, signal?: AbortSignal): Promise<void> {
+    const body = this.identity({
+      stage: event.stage,
+      state: event.state,
+      title: event.title,
+      description: event.description ?? "",
+      progress_percent: event.progress_percent,
+    });
+    await postJSONWithRetry(() => this.post("/api/v1/agent/progress", body, signal), undefined, signal);
   }
 
   async heartbeat(signal?: AbortSignal): Promise<void> {

@@ -307,8 +307,8 @@ func (r *taskFileRepository) DeleteQueuedObjectCleanup(ctx context.Context, id s
 }
 
 // PublishCurrentExecution is the guarded Task 8 publication contract. It locks
-// the task row and validates the current running attempt in the same transaction
-// that swaps the published artifact set.
+// the execution before its task and validates the current running attempt in
+// the same transaction that swaps the published artifact set.
 func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID, executionID string) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return ErrTaskFileExecutionNotCurrent
@@ -708,9 +708,20 @@ func taskFileMutableDeliveryFieldsEqual(persisted, incoming *model.TaskFile) boo
 		persisted.WechatURL == incoming.WechatURL
 }
 
+// lockCurrentArtifactExecution is the shared execution->task lock boundary for
+// every execution-scoped artifact mutation. Status-specific policy remains in
+// the caller so publish, collect, discard, and running mutations keep distinct
+// state machines without changing the global row-lock order.
 func lockCurrentArtifactExecution(tx *gorm.DB, taskID, executionID string) (*model.Task, *model.TaskExecution, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return nil, nil, ErrTaskFileExecutionNotCurrent
+	}
+	var execution model.TaskExecution
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND task_id = ?", executionID, taskID).First(&execution).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrTaskFileExecutionNotCurrent
+		}
+		return nil, nil, err
 	}
 	var task model.Task
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", taskID).First(&task).Error; err != nil {
@@ -718,10 +729,6 @@ func lockCurrentArtifactExecution(tx *gorm.DB, taskID, executionID string) (*mod
 	}
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
 		return nil, nil, ErrTaskFileExecutionNotCurrent
-	}
-	var execution model.TaskExecution
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND task_id = ?", executionID, taskID).First(&execution).Error; err != nil {
-		return nil, nil, err
 	}
 	return &task, &execution, nil
 }

@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -24,6 +29,75 @@ type localCompletionRace struct {
 	secondFinalize  chan struct{}
 	winnerCommitted chan struct{}
 	winnerModel     string
+	loseWithCASErr  bool
+}
+
+type executionCASLossRepository struct {
+	repository.Repository
+	executionID string
+	once        sync.Once
+	injectErr   error
+}
+
+type executionResultOverrideRepository struct {
+	repository.Repository
+	executionID string
+	result      []byte
+}
+
+func (r *executionResultOverrideRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&executionResultOverrideRepository{Repository: tx, executionID: r.executionID, result: r.result})
+	})
+}
+
+func (r *executionResultOverrideRepository) TaskExecutions() repository.TaskExecutionRepository {
+	return &executionResultOverrideTaskExecutions{
+		TaskExecutionRepository: r.Repository.TaskExecutions(),
+		executionID:             r.executionID,
+		result:                  r.result,
+	}
+}
+
+type executionResultOverrideTaskExecutions struct {
+	repository.TaskExecutionRepository
+	executionID string
+	result      []byte
+}
+
+func (r *executionResultOverrideTaskExecutions) FindByID(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByID(ctx, id)
+	if err != nil || id != r.executionID {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append([]byte(nil), r.result...)
+	return &cloned, nil
+}
+
+func (r *executionResultOverrideTaskExecutions) FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error) {
+	execution, err := r.TaskExecutionRepository.FindByIDForUpdate(ctx, id)
+	if err != nil || id != r.executionID {
+		return execution, err
+	}
+	cloned := *execution
+	cloned.Result = append([]byte(nil), r.result...)
+	return &cloned, nil
+}
+
+func (r *executionCASLossRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	r.once.Do(func() {
+		transitioned, err := r.Repository.TaskExecutions().Transition(ctx, r.executionID, []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{TerminalReason: "lost before finalization"})
+		if err != nil {
+			r.injectErr = err
+		} else if !transitioned {
+			r.injectErr = errors.New("execution CAS-loss injection did not transition")
+		}
+	})
+	if r.injectErr != nil {
+		return r.injectErr
+	}
+	return r.Repository.WithTx(ctx, fn)
 }
 
 type localCompletionRaceRepository struct {
@@ -32,18 +106,26 @@ type localCompletionRaceRepository struct {
 }
 
 func (r *localCompletionRaceRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
-	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
-		wrapped := &localCompletionRaceRepository{Repository: tx}
+	var wrapped *localCompletionRaceRepository
+	err := r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		wrapped = &localCompletionRaceRepository{Repository: tx}
 		wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: tx.Tasks(), race: r.tasks.race}
 		return fn(wrapped)
 	})
+	if err == nil && wrapped != nil && wrapped.tasks.winner {
+		close(r.tasks.race.winnerCommitted)
+	}
+	return err
 }
 
-func newLocalCompletionRaceRepository(base repository.Repository) *localCompletionRaceRepository {
+func newLocalCompletionRaceRepository(base repository.Repository, loseWithCASErr ...bool) *localCompletionRaceRepository {
 	race := &localCompletionRace{
 		readsReady:      make(chan struct{}),
 		secondFinalize:  make(chan struct{}),
 		winnerCommitted: make(chan struct{}),
+	}
+	if len(loseWithCASErr) > 0 {
+		race.loseWithCASErr = loseWithCASErr[0]
 	}
 	wrapped := &localCompletionRaceRepository{Repository: base}
 	wrapped.tasks = &localCompletionRaceTaskRepository{TaskRepository: base.Tasks(), race: race}
@@ -51,17 +133,19 @@ func newLocalCompletionRaceRepository(base repository.Repository) *localCompleti
 }
 
 func (r *localCompletionRaceTaskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, usage, costStatus)
+	return r.finalizeLocalTask(ctx, false, id, executionID, status, errorMsg, result, result, usage, costStatus)
 }
 
-func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, result, usage, costStatus)
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
 }
 
-func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	finalize := r.TaskRepository.FinalizeLocalTask
-	if inTx {
-		finalize = r.TaskRepository.FinalizeLocalTaskInTx
+func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+	finalize := func() (bool, error) {
+		if inTx {
+			return r.TaskRepository.FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+		}
+		return r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, taskResult, usage, costStatus)
 	}
 	switch r.race.finalizeCalls.Add(1) {
 	case 1:
@@ -69,24 +153,26 @@ func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Contex
 			r.race.winnerModel = usage[0].Model
 		}
 		<-r.race.secondFinalize
-		won, err := finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
-		if won {
-			close(r.race.winnerCommitted)
-		}
+		won, err := finalize()
+		r.winner = won
 		return won, err
 	case 2:
 		close(r.race.secondFinalize)
 		<-r.race.winnerCommitted
+		if r.race.loseWithCASErr {
+			return false, fmt.Errorf("%w: concurrent winner committed", repository.ErrLocalTaskExecutionCASLost)
+		}
 		return false, nil
 	}
-	return finalize(ctx, id, executionID, status, errorMsg, result, usage, costStatus)
+	return finalize()
 }
 
 func (r *localCompletionRaceRepository) Tasks() repository.TaskRepository { return r.tasks }
 
 type localCompletionRaceTaskRepository struct {
 	repository.TaskRepository
-	race *localCompletionRace
+	race   *localCompletionRace
+	winner bool
 }
 
 func (r *localCompletionRaceTaskRepository) FindByID(ctx context.Context, id string) (*model.Task, error) {
@@ -163,6 +249,9 @@ func TestClaimLocalTaskAllowsLegacyUnprofiledTask(t *testing.T) {
 	if cfg == nil || cfg.TaskID != task.ID {
 		t.Fatalf("ClaimLocalTask config = %#v, want task %q", cfg, task.ID)
 	}
+	if cfg.ExecutionID == "" {
+		t.Fatal("ClaimLocalTask config execution_id is empty")
+	}
 
 	got, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
@@ -170,6 +259,9 @@ func TestClaimLocalTaskAllowsLegacyUnprofiledTask(t *testing.T) {
 	}
 	if got.Status != model.TaskStatusRunning || got.ExecutionTarget != model.ExecutionTargetLocalClaimed || got.CurrentExecutionID == nil {
 		t.Fatalf("claimed task = %#v", got)
+	}
+	if cfg.ExecutionID != *got.CurrentExecutionID {
+		t.Fatalf("config execution_id = %q, want current execution %q", cfg.ExecutionID, *got.CurrentExecutionID)
 	}
 }
 
@@ -466,6 +558,18 @@ func claimOneLocalMontage(t *testing.T, svc *TaskService, repo repository.Reposi
 	return task.ID
 }
 
+func completeLocalForCurrentExecution(ctx context.Context, svc *TaskService, repo repository.Repository, taskID string, result *agent.ExecutionResult) error {
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	executionID := ""
+	if task != nil && task.CurrentExecutionID != nil {
+		executionID = *task.CurrentExecutionID
+	}
+	return svc.CompleteLocalTask(ctx, taskID, executionID, result)
+}
+
 // TestCompleteLocalTask_Success verifies a claimed local task transitions to
 // completed (terminal) and records completed_at — the core fix for the
 // "local tasks never complete" gap.
@@ -477,7 +581,7 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -493,6 +597,128 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	}
 }
 
+func TestCompleteLocalTask_ExplicitCurrentExecutionSucceeds(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%v err=%v", task, err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed", got.Status)
+	}
+}
+
+func TestCompleteLocalTask_ReplacementExecutionCannotFinalizeOldResult(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%v err=%v", task, err)
+	}
+	oldExecutionID := *task.CurrentExecutionID
+	newExecutionID := uuid.New().String()
+	task.CurrentExecutionID = &newExecutionID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	miniRedis := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	svc.pubsub = NewRedisPubSub(redisClient, svc.logger)
+	if _, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved {
+		t.Fatalf("reserve slot = %v/%v", reserved, err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, oldExecutionID, &agent.ExecutionResult{Success: false, Error: "stale result"}); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("CompleteLocalTask stale result error = %v, want ErrStaleTaskExecution", err)
+	}
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TaskStatusRunning || got.Result != nil || got.CompletedAt != nil || got.BillingTerminalReason != "" {
+		t.Fatalf("stale completion changed replacement task: status=%q result=%v completed_at=%v", got.Status, got.Result, got.CompletedAt)
+	}
+	if count, err := redisClient.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+		t.Fatalf("slot count = %d/%v, want reserved slot retained", count, err)
+	}
+	if dispatched := len(svc.enqueuer.(*mockEnqueuer).enqueued); dispatched != 0 {
+		t.Fatalf("stale completion dispatched %d next tasks, want 0", dispatched)
+	}
+}
+
+func TestCompleteLocalTask_ExecutionCASLossWithInconsistentTerminalStateConflictsWithoutSideEffects(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		name := "failure"
+		if success {
+			name = "success"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			if success {
+				addLocalSeednoteDeliverables(t, repo, taskID)
+			}
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("claimed task = %#v, %v", task, err)
+			}
+
+			miniRedis := miniredis.RunT(t)
+			redisClient := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+			t.Cleanup(func() { _ = redisClient.Close() })
+			svc.pubsub = NewRedisPubSub(redisClient, svc.logger)
+			if _, reserved, err := svc.pubsub.TryReserveSlot(ctx, projectID, 10); err != nil || !reserved {
+				t.Fatalf("reserve slot = %v/%v", reserved, err)
+			}
+			executionID := *task.CurrentExecutionID
+			svc.repo = &executionCASLossRepository{Repository: repo, executionID: executionID}
+			result := &agent.ExecutionResult{Success: success, Error: "agent failed"}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("CompleteLocalTask error = %v, want ErrTaskCompletionConflict", err)
+			}
+
+			persistedTask, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedTask.Status != model.TaskStatusRunning || persistedTask.Result != nil || persistedTask.CompletedAt != nil || persistedTask.BillingTerminalReason != "" {
+				t.Fatalf("CAS-loss changed task/billing: %#v", persistedTask)
+			}
+			if persistedExecution.Status != model.TaskExecutionFailed || persistedExecution.CompletedAt == nil || persistedExecution.TerminalReason != "lost before finalization" {
+				t.Fatalf("injected terminal execution = %#v", persistedExecution)
+			}
+			if count, err := redisClient.Get(ctx, projectRunningCountPrefix+projectID).Int(); err != nil || count != 1 {
+				t.Fatalf("slot count = %d/%v, want reserved slot retained", count, err)
+			}
+			if got := len(svc.enqueuer.(*mockEnqueuer).enqueued); got != 0 {
+				t.Fatalf("CAS-loss dispatched %d next tasks, want 0", got)
+			}
+		})
+	}
+}
+
 func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -503,7 +729,7 @@ func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: taskID, Role: model.FileRoleOther, FileName: "CLAUDE.md", FilePath: "CLAUDE.md"}); err != nil {
 		t.Fatalf("create runtime file: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -533,7 +759,7 @@ func TestCompleteLocalTask_MontageRejectsZeroByteDeliverables(t *testing.T) {
 	if err := repo.TaskFiles().BatchCreate(ctx, files); err != nil {
 		t.Fatalf("create zero-byte montage files: %v", err)
 	}
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -557,7 +783,7 @@ func TestCompleteLocalTask_NestedAgentOnlyFails(t *testing.T) {
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -582,7 +808,7 @@ func TestCompleteLocalTask_Failure(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: false, Error: "boom"}); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: false, Error: "boom"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -605,7 +831,7 @@ func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 
-	if err := svc.CompleteLocalTask(ctx, taskID, nil); err != nil {
+	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, nil); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
 	}
 
@@ -631,10 +857,8 @@ func TestCompleteLocalTaskNilResultPersistsTerminalCostEvidence(t *testing.T) {
 	}
 }
 
-// TestCompleteLocalTask_GuardedToNonLocal confirms a cloud (or already-terminal)
-// task is a no-op — so the shared agent binary calling /complete in cloud mode
-// cannot double-finalize. This is the safety property that lets one endpoint
-// serve both execution modes.
+// TestCompleteLocalTask_GuardedToNonLocal confirms the local completion method
+// rejects a task owned by another execution mode without changing it.
 func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -654,8 +878,8 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 		t.Fatalf("create cloud task: %v", err)
 	}
 
-	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, &agent.ExecutionResult{Success: true}); err != nil {
-		t.Fatalf("CompleteLocalTask on cloud task: %v", err)
+	if err := svc.CompleteLocalTask(ctx, cloudTask.ID, uuid.NewString(), &agent.ExecutionResult{Success: true}); !errors.Is(err, ErrStaleTaskExecution) {
+		t.Fatalf("CompleteLocalTask on cloud task error = %v, want ErrStaleTaskExecution", err)
 	}
 	got, err := repo.Tasks().FindByID(ctx, cloudTask.ID)
 	if err != nil {
@@ -666,29 +890,214 @@ func TestCompleteLocalTask_GuardedToNonLocal(t *testing.T) {
 	}
 }
 
-// TestCompleteLocalTask_Idempotent confirms a second complete call on an already
-// terminal task is a no-op (no error, status stable).
-func TestCompleteLocalTask_Idempotent(t *testing.T) {
+func TestCompleteLocalTask_AcknowledgesSameTerminalDuplicateAndRejectsConflict(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
 	addLocalSeednoteDeliverables(t, repo, taskID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load current execution: task=%#v err=%v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+	first := &agent.ExecutionResult{Success: true, LogText: "done", ToolUseSummary: map[string]int{"Write": 1}}
 
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true}); err != nil {
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, first); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
-	// Second call must not error and must not flip status.
-	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: false, Error: "late"}); err != nil {
-		t.Fatalf("second complete: %v", err)
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{
+		Success: true, LogText: "done", ToolUseSummary: map[string]int{"Write": 1},
+	}); err != nil {
+		t.Fatalf("same completion retry: %v", err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: false, Error: "late"}); err == nil {
+		t.Fatal("conflicting completion retry = nil, want conflict")
 	}
 	got, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if got.Status != model.TaskStatusCompleted {
-		t.Fatalf("status = %q, want completed (idempotent)", got.Status)
+	if got.Status != model.TaskStatusCompleted || got.Result == nil || !strings.Contains(*got.Result, `"log_text":"done"`) {
+		t.Fatalf("terminal retry changed task: status=%q result=%v", got.Status, got.Result)
+	}
+}
+
+func TestCompleteLocalTaskStoresFullExecutionEvidenceAndPublicTaskResult(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+	claimed, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || claimed.CurrentExecutionID == nil {
+		t.Fatalf("claimed task = %#v, %v", claimed, err)
+	}
+	executionID := *claimed.CurrentExecutionID
+	result := &agent.ExecutionResult{
+		Success: true, LogText: "done", Model: "claude-opus-4-1",
+		ModelUsage:      []agent.ModelTokenUsage{{Provider: "anthropic", Model: "claude-opus-4-1", InputTokens: 17}},
+		CostStatus:      agent.CostStatusUnreconciled,
+		CostDiagnostics: []agent.CostDiagnostic{{Code: "provider_usage_delayed"}},
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.Result == nil {
+		t.Fatalf("terminal task = %#v, %v", task, err)
+	}
+	execution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var publicResult, fullResult agent.ExecutionResult
+	if err := json.Unmarshal([]byte(*task.Result), &publicResult); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(execution.Result, &fullResult); err != nil {
+		t.Fatal(err)
+	}
+	if publicResult.Model != "" || len(publicResult.ModelUsage) != 0 || publicResult.CostStatus != "" || len(publicResult.CostDiagnostics) != 0 {
+		t.Fatalf("public result leaked private evidence: %#v", publicResult)
+	}
+	if fullResult.Model != result.Model || !reflect.DeepEqual(fullResult.ModelUsage, result.ModelUsage) || fullResult.CostStatus != result.CostStatus || !reflect.DeepEqual(fullResult.CostDiagnostics, result.CostDiagnostics) {
+		t.Fatalf("full execution result = %#v, want %#v", fullResult, *result)
+	}
+
+	changedModel := *result
+	changedModel.Model = "claude-sonnet-4"
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &changedModel); !errors.Is(err, ErrTaskCompletionConflict) {
+		t.Fatalf("model-only retry = %v, want ErrTaskCompletionConflict", err)
+	}
+	changedDiagnostics := *result
+	changedDiagnostics.CostDiagnostics = []agent.CostDiagnostic{{Code: "different"}}
+	if err := svc.CompleteLocalTask(ctx, taskID, executionID, &changedDiagnostics); !errors.Is(err, ErrTaskCompletionConflict) {
+		t.Fatalf("diagnostics-only retry = %v, want ErrTaskCompletionConflict", err)
+	}
+}
+
+func TestCompleteLocalTaskRejectsInvalidStoredExecutionResultAsConflict(t *testing.T) {
+	for _, suffix := range []string{" trailing", ` {"second":true}`} {
+		t.Run(suffix, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			claimed, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || claimed.CurrentExecutionID == nil {
+				t.Fatalf("claimed task = %#v, %v", claimed, err)
+			}
+			executionID := *claimed.CurrentExecutionID
+			result := &agent.ExecutionResult{Success: false, Error: "provider unavailable"}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			stored, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.repo = &executionResultOverrideRepository{
+				Repository: repo, executionID: executionID,
+				result: append(append([]byte(nil), stored.Result...), suffix...),
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, executionID, result); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("retry with corrupt stored result = %v, want ErrTaskCompletionConflict", err)
+			}
+		})
+	}
+}
+
+func TestCompleteLocalTaskAcceptsSameOriginalResultAfterServerNormalization(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		addArtifacts bool
+		result       func() *agent.ExecutionResult
+	}{
+		{
+			name: "failure", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: false, Error: "provider unavailable"}
+			},
+		},
+		{
+			name: "nested agent", addArtifacts: true, result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1, "TaskUpdate": 2}}
+			},
+		},
+		{
+			name: "artifact invalid", result: func() *agent.ExecutionResult {
+				return &agent.ExecutionResult{Success: true}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			if test.addArtifacts {
+				addLocalSeednoteDeliverables(t, repo, taskID)
+			}
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, test.result()); err != nil {
+				t.Fatalf("first completion: %v", err)
+			}
+			if err := svc.CompleteLocalTask(ctx, taskID, *task.CurrentExecutionID, test.result()); err != nil {
+				t.Fatalf("same original result retry: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompleteLocalTaskConcurrentIdenticalOutcomeAcknowledgesBothCallers(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		for _, loseWithCASErr := range []bool{false, true} {
+			name := fmt.Sprintf("success=%v/CAS-error=%v", success, loseWithCASErr)
+			t.Run(name, func(t *testing.T) {
+				svc, baseRepo := setupTaskServiceWithEnqueuer(t)
+				ctx := context.Background()
+				userID := uuid.NewString()
+				projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
+				taskID := claimOneLocal(t, svc, baseRepo, userID, projectID)
+				if success {
+					addLocalSeednoteDeliverables(t, baseRepo, taskID)
+				}
+				claimed, err := baseRepo.Tasks().FindByID(ctx, taskID)
+				if err != nil || claimed.CurrentExecutionID == nil {
+					t.Fatalf("claimed task = %#v, %v", claimed, err)
+				}
+				executionID := *claimed.CurrentExecutionID
+				raceRepo := newLocalCompletionRaceRepository(baseRepo, loseWithCASErr)
+				svc.repo = raceRepo
+				newResult := func() *agent.ExecutionResult {
+					return &agent.ExecutionResult{
+						Success: success, Error: "same-error", LogText: "same-result",
+						ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "same", InputTokens: 11}},
+						CostStatus: agent.CostStatusReconciled,
+					}
+				}
+
+				errCh := make(chan error, 2)
+				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, executionID, newResult()) }()
+				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, executionID, newResult()) }()
+				for range 2 {
+					if err := <-errCh; err != nil {
+						t.Fatalf("identical concurrent completion = %v, want nil", err)
+					}
+				}
+				if calls := raceRepo.tasks.race.finalizeCalls.Load(); calls != 2 {
+					t.Fatalf("finalize calls = %d, want 2 competing callers", calls)
+				}
+			})
+		}
 	}
 }
 
@@ -726,12 +1135,22 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 			errCh := make(chan error, len(results))
 			for _, result := range results {
 				result := result
-				go func() { errCh <- svc.CompleteLocalTask(ctx, taskID, result) }()
+				go func() { errCh <- completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, result) }()
 			}
+			var successCount, conflictCount int
 			for range results {
-				if err := <-errCh; err != nil {
+				err := <-errCh
+				switch {
+				case err == nil:
+					successCount++
+				case errors.Is(err, ErrTaskCompletionConflict):
+					conflictCount++
+				default:
 					t.Fatalf("concurrent CompleteLocalTask: %v", err)
 				}
+			}
+			if successCount != 1 || conflictCount != 1 {
+				t.Fatalf("completion results = success:%d conflict:%d, want 1/1", successCount, conflictCount)
 			}
 
 			got, err := baseRepo.Tasks().FindByID(ctx, taskID)
@@ -762,8 +1181,8 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 				ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "late", InputTokens: 99}},
 				CostStatus: agent.CostStatusUnreconciled,
 			}
-			if err := svc.CompleteLocalTask(ctx, taskID, late); err != nil {
-				t.Fatalf("idempotent retry: %v", err)
+			if err := completeLocalForCurrentExecution(ctx, svc, baseRepo, taskID, late); !errors.Is(err, ErrTaskCompletionConflict) {
+				t.Fatalf("terminal retry error = %v, want ErrTaskCompletionConflict", err)
 			}
 			retried, err := baseRepo.Tasks().FindByID(ctx, taskID)
 			if err != nil {
@@ -771,6 +1190,74 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 			}
 			if retried.Result == nil || *retried.Result != *got.Result || retried.CostStatus != got.CostStatus {
 				t.Fatal("idempotent retry overwrote terminal evidence")
+			}
+		})
+	}
+}
+
+// SQL-order tests in repository prove the MySQL execution->task lock order.
+// This test separately exercises cross-path goroutine interleaving under the
+// race detector without treating SQLite's single-writer behavior as MySQL
+// deadlock evidence.
+func TestCompleteLocalTaskConcurrentWithAgentRecordersLeavesLegalTerminalState(t *testing.T) {
+	for _, recorder := range []string{"legacy heartbeat", "structured progress"} {
+		t.Run(recorder, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			userID := uuid.NewString()
+			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+			taskID := claimOneLocal(t, svc, repo, userID, projectID)
+			addLocalSeednoteDeliverables(t, repo, taskID)
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil || task.CurrentExecutionID == nil {
+				t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+			}
+			executionID := *task.CurrentExecutionID
+			errs := make(chan error, 2)
+			go func() {
+				errs <- svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: true, LogText: "done"})
+			}()
+			go func() {
+				if recorder == "legacy heartbeat" {
+					errs <- svc.UpdateAgentHeartbeat(ctx, taskID, executionID)
+					return
+				}
+				errs <- svc.UpdateProgressFromAgent(ctx, taskID, executionID, "writing", "active", "笔记创作", "writing", 35)
+			}()
+
+			for range 2 {
+				err := <-errs
+				if err != nil && !errors.Is(err, ErrStaleTaskExecution) && !strings.Contains(err.Error(), "database table is locked") {
+					t.Fatalf("completion vs %s error = %v, want nil, stale, or SQLite table lock", recorder, err)
+				}
+			}
+
+			persistedTask, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedTask.Status == model.TaskStatusRunning {
+				// SQLite may reject one concurrent writer instead of waiting. Keep
+				// that ordinary DB error intact, then finish the legal completion
+				// state after the competing transaction has ended.
+				if err := svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+					t.Fatalf("retry completion after SQLite contention: %v", err)
+				}
+				persistedTask, err = repo.Tasks().FindByID(ctx, taskID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persistedTask.Status != model.TaskStatusCompleted || persistedTask.Result == nil || persistedTask.CompletedAt == nil {
+				t.Fatalf("task after completion vs %s = status:%q result:%v completed:%v", recorder, persistedTask.Status, persistedTask.Result, persistedTask.CompletedAt)
+			}
+			if persistedExecution.Status != model.TaskExecutionSucceeded || persistedExecution.CompletedAt == nil || persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+				t.Fatalf("execution after completion vs %s = status:%q completed:%v finalization:%q", recorder, persistedExecution.Status, persistedExecution.CompletedAt, persistedExecution.FinalizationStatus)
 			}
 		})
 	}

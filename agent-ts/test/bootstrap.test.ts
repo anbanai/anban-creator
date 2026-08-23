@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { executionProfileFingerprint, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -79,9 +79,132 @@ describe("validateBootstrapResponse", () => {
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard" },
+      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
     }] };
 
     expect(() => validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog)).toThrow("Agent Pack identity");
+  });
+
+  test("rejects malformed Agent Pack progress contracts", () => {
+    const response = validateBootstrapResponse("execution-1", validResponse());
+    const basePack = {
+      id: "article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "article" }, bindings: { task_types: ["article"] },
+      runtime: { profile: "article", adapter: "standard" },
+    };
+    const invalidProgress = [
+      undefined,
+      [{ id: "", title: "Research", active_percent: 10, complete_percent: 100 }],
+      [{ id: "research", title: "", active_percent: 10, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: 10.5, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: -1, complete_percent: 100 }],
+      [{ id: "research", title: "Research", active_percent: 30, complete_percent: 20 }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 101 }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: "output/a.md" }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: [1] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 90 }],
+      [
+        { id: "research", title: "Research", active_percent: 10, complete_percent: 60 },
+        { id: "writing", title: "Writing", active_percent: 20, complete_percent: 50 },
+        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+      ],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["/tmp/a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["../a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output/tmp/../a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output//a.md"] }],
+      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output\\a.md"] }],
+    ];
+
+    for (const progress of invalidProgress) {
+      const catalog = { packs: [{ ...basePack, ...(progress === undefined ? {} : { progress }) }] } as unknown as AgentPackCatalog;
+      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("progress");
+    }
+  });
+
+  test("resolves a task-specific progress contract without mutating the Catalog Pack", () => {
+    const response = validateBootstrapResponse("execution-1", {
+      ...validResponse(),
+      task_type: "viral_analysis",
+      agent_pack_id: "seednote",
+      runtime_profile: "seednote",
+      agent_flag: "anban:seednote",
+    });
+    const defaultProgress = [
+      { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
+      { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
+      { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/content.md", "output/image-plan.md"] },
+    ];
+    const viralProgress = [
+      { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
+      { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/source-analysis.md", "output/viral-template.json"] },
+    ];
+    const pack = {
+      id: "seednote", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
+      runtime: { profile: "seednote", adapter: "standard" },
+      progress: defaultProgress,
+      progress_by_task_type: { viral_analysis: viralProgress },
+    };
+
+    const resolved = validateAgentPackCatalog(response, { packs: [pack] } as unknown as AgentPackCatalog);
+
+    expect(resolved).not.toBe(pack);
+    expect(resolved.progress).toEqual(viralProgress);
+    expect(pack.progress).toBe(defaultProgress);
+
+    resolved.progress[0]!.title = "Changed";
+    resolved.progress[1]!.required_artifacts!.push("output/changed.json");
+    expect(viralProgress[0]!.title).toBe("Research");
+    expect(viralProgress[1]!.required_artifacts).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
+  });
+
+  test("shared progress resolution selects overrides and falls back to an isolated default", () => {
+    const pack = {
+      id: "seednote", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
+      runtime: { profile: "seednote", adapter: "standard" },
+      progress: [
+        { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
+        { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
+        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+      ],
+      progress_by_task_type: {
+        viral_analysis: [
+          { id: "research", title: "Viral Research", active_percent: 5, complete_percent: 80 },
+          { id: "delivery", title: "Viral Delivery", active_percent: 90, complete_percent: 100 },
+        ],
+      },
+    } as AgentPackCatalog["packs"][number];
+
+    expect(resolveAgentPackForTaskType(pack, "viral_analysis").progress.map((stage) => stage.id)).toEqual(["research", "delivery"]);
+    const fallback = resolveAgentPackForTaskType(pack, "seednote");
+    expect(fallback.progress.map((stage) => stage.id)).toEqual(["research", "writing", "delivery"]);
+    expect(fallback.progress).not.toBe(pack.progress);
+  });
+
+  test("rejects malformed task-specific progress contracts", () => {
+    const response = validateBootstrapResponse("execution-1", validResponse());
+    const basePack = {
+      id: "article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "article" }, bindings: { task_types: ["article"] },
+      runtime: { profile: "article", adapter: "standard" },
+      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
+    };
+    const invalidOverrides = [
+      [],
+      { unknown: [{ id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 }] },
+      { article: [] },
+      { article: [
+        { id: "research", title: "Research", active_percent: 10, complete_percent: 60 },
+        { id: "delivery", title: "Delivery", active_percent: 40, complete_percent: 100 },
+      ] },
+      { article: [{ id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["../secret.txt"] }] },
+    ];
+
+    for (const progress_by_task_type of invalidOverrides) {
+      const catalog = { packs: [{ ...basePack, progress_by_task_type }] } as unknown as AgentPackCatalog;
+      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("progress");
+    }
   });
 
   test("accepts all Claude profile env values without rewriting them", () => {

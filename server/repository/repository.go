@@ -101,6 +101,10 @@ type TaskRepository interface {
 	// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
 	// so Studio can render the current stage without parsing progress_log.
 	UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error
+	// AdvanceStructuredProgress atomically advances the structured progress sequence
+	// and its latest payload/log for the current running execution. Lower,
+	// duplicate, stale-execution, and terminal-task events are ignored.
+	AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error)
 	// GetTypeAndProgress loads only the type and progress columns for a task.
 	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
 	// including the longtext progress_log — would be wasteful.
@@ -108,7 +112,7 @@ type TaskRepository interface {
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
 	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
@@ -220,10 +224,18 @@ type TaskExecutionRepository interface {
 	CompleteDispatch(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	FailDispatch(ctx context.Context, id, token, reason string, diagnostics, result []byte) (bool, error)
 	FindByID(ctx context.Context, id string) (*model.TaskExecution, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
 	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
 	SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
+	// LockActiveForProgress validates and locks the execution before progress
+	// code touches its task. Cross-table callers must preserve execution->task
+	// order to avoid deadlocks with legacy heartbeat reports.
+	LockActiveForProgress(ctx context.Context, id, taskID string) (bool, error)
+	// LockCurrentForArtifactMutation validates and locks a running execution
+	// before service code locks its task and mutates execution-scoped artifacts.
+	LockCurrentForArtifactMutation(ctx context.Context, id, taskID string) (bool, error)
 	UpdateHeartbeat(ctx context.Context, id string, now time.Time) error
 	Transition(ctx context.Context, id string, from []string, to string, change model.ExecutionTransition) (bool, error)
 	ClaimFinalization(ctx context.Context, id, token string, lease time.Duration) (bool, error)

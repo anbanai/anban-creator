@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -30,23 +29,122 @@ func TestTaskFileMutationMySQLLockOrderContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var task model.Task
-	_ = db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", "t1").First(&task).Error
-	var execution model.TaskExecution
-	_ = db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND task_id = ?", "e1", "t1").First(&execution).Error
+	_, _, _ = lockCurrentArtifactExecution(db, "t1", "e1")
 	assertTaskFileMutationLockOrder(t, logs.String())
 }
 
 func assertTaskFileMutationLockOrder(t *testing.T, sql string) {
 	t.Helper()
 	taskAt, executionAt := strings.Index(sql, "FROM `tasks`"), strings.Index(sql, "FROM `task_executions`")
-	if taskAt < 0 || executionAt <= taskAt {
+	if executionAt < 0 || taskAt <= executionAt {
 		t.Fatalf("task-file mutation lock order SQL contract invalid:\n%s", sql)
 	}
 	taskLockOffset := strings.Index(sql[taskAt:], "FOR UPDATE")
 	executionLockOffset := strings.Index(sql[executionAt:], "FOR UPDATE")
-	if taskLockOffset < 0 || executionLockOffset < 0 || taskAt+taskLockOffset >= executionAt {
+	if taskLockOffset < 0 || executionLockOffset < 0 || executionAt+executionLockOffset >= taskAt {
 		t.Fatalf("task-file mutation lock order SQL contract invalid:\n%s", sql)
+	}
+	if !strings.Contains(sql[executionAt:taskAt], "id = 'e1' AND task_id = 't1'") {
+		t.Fatalf("execution-first lock lost execution/task identity guard:\n%s", sql)
+	}
+}
+
+func openTaskFileMutationMySQLMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock, *bytes.Buffer) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	logs := &bytes.Buffer{}
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{
+		Logger: logger.New(log.New(logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, mock, logs
+}
+
+func TestTaskFileRepositoryPublishMySQLLockOrderContract(t *testing.T) {
+	db, mock, logs := openTaskFileMutationMySQLMockDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).
+			AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).
+			AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `task_files`").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec("UPDATE `task_files` SET .*execution_id <> \\?").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE `task_files` SET .*execution_id = \\?").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE `task_executions` SET .*manifest_status.*WHERE id = \\?").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := New(db).TaskFiles().PublishCurrentExecution(context.Background(), "t1", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskFileMutationLockOrder(t, logs.String())
+}
+
+func TestTaskFileRepositoryDiscardMySQLLockOrderContract(t *testing.T) {
+	db, mock, logs := openTaskFileMutationMySQLMockDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).
+			AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).
+			AddRow("t1", model.TaskStatusRunning, "e1"))
+	mock.ExpectExec("UPDATE `task_files` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE `task_executions` SET .*manifest_status.*WHERE id = \\?").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := New(db).TaskFiles().DiscardCurrentExecution(context.Background(), "t1", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	assertTaskFileMutationLockOrder(t, logs.String())
+}
+
+func TestTaskFileRepositoryExecutionLockErrorRollsBackWithCause(t *testing.T) {
+	db, mock, _ := openTaskFileMutationMySQLMockDB(t)
+	lockErr := errors.New("execution lock interrupted")
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").WillReturnError(lockErr)
+	mock.ExpectRollback()
+
+	err := New(db).TaskFiles().DiscardCurrentExecution(context.Background(), "t1", "e1")
+	if !errors.Is(err, lockErr) || errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+		t.Fatalf("discard error = %v, want lock cause and not stale sentinel", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTaskFileRepositoryTaskLockErrorRollsBackWithCause(t *testing.T) {
+	db, mock, _ := openTaskFileMutationMySQLMockDB(t)
+	lockErr := errors.New("task lock interrupted")
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).
+			AddRow("e1", "t1", model.TaskExecutionRunning))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").WillReturnError(lockErr)
+	mock.ExpectRollback()
+
+	err := New(db).TaskFiles().DiscardCurrentExecution(context.Background(), "t1", "e1")
+	if !errors.Is(err, lockErr) || errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+		t.Fatalf("discard error = %v, want task lock cause and not stale sentinel", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -777,7 +875,7 @@ func TestTaskFileRepositorySealedManifestAllowsMetadataForPreservedMCPIdentity(t
 
 // This behavioral test fixes the operation order with one SQLite connection.
 // The MySQL contract tests below separately prove both methods take the same
-// task-then-execution row locks used for production serialization.
+// execution-then-task row locks used for production serialization.
 func TestTaskFileRepositorySerializedConnectionPreservesMCPUpsertBeforeReplacement(t *testing.T) {
 	db := setupTestDB(t)
 	sqlDB, err := db.DB()
@@ -846,6 +944,92 @@ func TestTaskFileRepositorySerializedConnectionPreservesMCPUpsertBeforeReplaceme
 	}
 	if len(rows) != 1 || rows[0].FilePath != "output/cover.png" || rows[0].OSSKey != mcpPrefix+"output/cover.png" {
 		t.Fatalf("serialized rows = %#v, want committed MCP artifact preserved", rows)
+	}
+}
+
+func TestTaskFileMutationRacingLocalCompletionLeavesLegalTerminalState(t *testing.T) {
+	for _, mutation := range []string{"manifest", "publish"} {
+		t.Run(mutation, func(t *testing.T) {
+			db := setupTestDB(t)
+			sqlDB, err := db.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// SQLite provides no MySQL row-lock proof. One connection gives a
+			// deterministic behavioral interleaving; SQL contracts above prove
+			// both production paths acquire execution before task.
+			sqlDB.SetMaxOpenConns(1)
+			repo := New(db)
+			ctx := context.Background()
+			seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+			if err := db.Model(&model.Task{}).Where("id = ?", "t1").Update("execution_target", model.ExecutionTargetLocalClaimed).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&model.TaskExecution{}).Where("id = ?", "e1").Update("target", model.ExecutionTargetLocalClaimed).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+				ID: "original", TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+				Role: model.FileRoleOther, FilePath: "output/original.md", FileName: "original.md",
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			type completionResult struct {
+				won bool
+				err error
+			}
+			start := make(chan struct{})
+			completed := make(chan completionResult, 1)
+			mutated := make(chan error, 1)
+			go func() {
+				<-start
+				won, err := repo.Tasks().FinalizeLocalTask(ctx, "t1", "e1", model.TaskStatusCompleted, "", `{"success":true}`, nil, "")
+				completed <- completionResult{won: won, err: err}
+			}()
+			go func() {
+				<-start
+				if mutation == "manifest" {
+					mutated <- repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", []*model.TaskFile{{
+						Role: model.FileRoleMarkdown, FilePath: "output/final.md", FileName: "final.md",
+					}})
+					return
+				}
+				mutated <- repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1")
+			}()
+			close(start)
+
+			completion := <-completed
+			mutationErr := <-mutated
+			if completion.err != nil || !completion.won {
+				t.Fatalf("local completion = %v/%v, want true/nil", completion.won, completion.err)
+			}
+			if mutationErr != nil && !errors.Is(mutationErr, ErrTaskFileTaskNotRunning) {
+				t.Fatalf("%s race error = %v, want nil or task-not-running", mutation, mutationErr)
+			}
+
+			task, err := repo.Tasks().FindByID(ctx, "t1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			execution, err := repo.TaskExecutions().FindByID(ctx, "e1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if task.Status != model.TaskStatusCompleted || task.Result == nil || task.CompletedAt == nil || execution.Status != model.TaskExecutionSucceeded || execution.CompletedAt == nil {
+				t.Fatalf("terminal task/execution after %s race = task:%q result:%v completed:%v execution:%q completed:%v", mutation, task.Status, task.Result, task.CompletedAt, execution.Status, execution.CompletedAt)
+			}
+			rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("artifact rows after %s race = %#v, %v", mutation, rows, err)
+			}
+			if mutationErr == nil && mutation == "manifest" && (rows[0].FilePath != "output/final.md" || !execution.ManifestSealed) {
+				t.Fatalf("successful manifest was not committed before completion: row=%#v execution=%#v", rows[0], execution)
+			}
+			if mutationErr == nil && mutation == "publish" && (rows[0].State != model.TaskFileStatePublished || execution.ManifestStatus != model.TaskExecutionManifestPublished) {
+				t.Fatalf("successful publish was not committed before completion: row=%#v execution=%#v", rows[0], execution)
+			}
+		})
 	}
 }
 
@@ -1077,10 +1261,10 @@ func TestTaskFileRepositoryUpsertPendingExecutionMySQLLockOrderContract(t *testi
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectExec("INSERT INTO `task_files`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery("SELECT .* FROM `task_files`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
@@ -1116,10 +1300,10 @@ func TestTaskFileRepositoryUpdatePendingExecutionMetadataMySQLLockOrderContract(
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_files`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key", "content_hash"}).
 			AddRow("file-1", "t1", "e1", model.TaskFileStatePending, model.FileRoleImage, "output/cover.png", "cover.png", "mcp/cover.png", strings.Repeat("a", 64)))
@@ -1159,10 +1343,10 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLSQLContract(t *testing.T)
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, false))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "oss_key"}).
 			AddRow("persisted-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleMarkdown, "output/article.md", "article.md", "old-key"))
@@ -1220,10 +1404,10 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUp
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, true))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).AddRow("t1", model.TaskStatusRunning, "e1"))
 	mock.ExpectQuery("SELECT .* FROM `task_files` WHERE task_id = \\? AND execution_id = \\? AND state = \\?").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "task_id", "execution_id", "state", "role", "file_path", "file_name", "mime_type", "file_size",

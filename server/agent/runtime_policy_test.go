@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +138,6 @@ func TestManagedRequiredMCPToolsKeepsSeednoteResearchOptional(t *testing.T) {
 		"get_project_profile",
 		"list_project_titles",
 		"submit_agent_feedback",
-		"update_task_progress",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedRequiredMCPTools(seednote) = %#v, want %#v", got, want)
@@ -149,10 +149,27 @@ func TestManagedRequiredMCPToolsCoversViralAnalysisRuntime(t *testing.T) {
 		"get_project_profile",
 		"list_project_titles",
 		"submit_agent_feedback",
-		"update_task_progress",
 	}
 	if got := managedRequiredMCPTools(model.TaskTypeViralAnalysis); !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedRequiredMCPTools(viral_analysis) = %#v, want %#v", got, want)
+	}
+}
+
+func TestManagedRequiredMCPToolsExcludeLegacyProgressForEveryManagedTaskType(t *testing.T) {
+	for _, taskType := range []string{
+		model.PlatformArticle,
+		model.PlatformSeednote,
+		model.TaskTypeViralAnalysis,
+		model.PlatformMoments,
+		model.PlatformEcommerce,
+		model.TaskTypeLiveSlicer,
+		model.PlatformMontage,
+	} {
+		t.Run(taskType, func(t *testing.T) {
+			if slices.Contains(managedRequiredMCPTools(taskType), "update_task_progress") {
+				t.Fatalf("managedRequiredMCPTools(%q) retains legacy progress compatibility tool", taskType)
+			}
+		})
 	}
 }
 
@@ -233,7 +250,6 @@ func TestValidateManagedMCPStatusRequiresNamespacedLiveSlicerTools(t *testing.T)
 		"prepare_file_upload",
 		"query_live_analysis_task",
 		"submit_agent_feedback",
-		"update_task_progress",
 	}
 	if got := managedRequiredMCPTools(model.TaskTypeLiveSlicer); !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedRequiredMCPTools(live-slicer) = %#v, want %#v", got, want)
@@ -290,9 +306,9 @@ func (s *managedMCPStatusSequence) GetMcpStatus(context.Context) (*claudecode.Mc
 func TestWaitForManagedMCPReadyPollsPendingUntilConnected(t *testing.T) {
 	client := &managedMCPStatusSequence{statuses: []*claudecode.McpStatusResponse{
 		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusPending}}},
-		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: []claudecode.McpToolInfo{{Name: "update_task_progress"}}}}},
+		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: []claudecode.McpToolInfo{{Name: "analyze_video"}}}}},
 	}}
-	if err := waitForManagedMCPReady(context.Background(), client, "article", time.Second, time.Millisecond); err != nil {
+	if err := waitForManagedMCPReady(context.Background(), client, model.PlatformMontage, time.Second, time.Millisecond); err != nil {
 		t.Fatalf("waitForManagedMCPReady: %v", err)
 	}
 	if client.calls != 2 {

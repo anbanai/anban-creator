@@ -35,6 +35,8 @@ billing_operations:
 progress:
   - id: prepare
     title: Prepare
+    active_percent: 90
+    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md
@@ -80,6 +82,8 @@ func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 		{name: "missing skill", manifest: strings.ReplaceAll(validFixtureManifest, "demo-skill", "missing-skill"), want: "missing Skill"},
 		{name: "plugin task binding", manifest: strings.Replace(validFixtureManifest, "kind: managed", "kind: plugin", 1), want: "plugin Pack must not bind task types"},
 		{name: "product surface without billing", manifest: strings.Replace(validFixtureManifest, "billing_operations:\n  demo-task: task.demo\n", "", 1), want: "product surfaces require billing operation"},
+		{name: "artifact path with backslash", manifest: strings.Replace(validFixtureManifest, "path: output/final.md", `path: output\final.md`, 1), want: "invalid artifact contract"},
+		{name: "non canonical artifact path", manifest: strings.Replace(validFixtureManifest, "path: output/final.md", "path: output//final.md", 1), want: "invalid artifact contract"},
 	}
 
 	for _, tt := range tests {
@@ -90,6 +94,229 @@ func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
+	tests := []struct {
+		name     string
+		progress string
+		want     string
+	}{
+		{
+			name: "rejects duplicate progress ids",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20}
+  - {id: research, title: Duplicate, active_percent: 30, complete_percent: 40}`,
+			want: "duplicate progress stage id",
+		},
+		{
+			name: "rejects empty progress stage",
+			progress: `progress:
+  - {id: "", title: Research, active_percent: 10, complete_percent: 20}`,
+			want: "progress stage id and title must not be empty",
+		},
+		{
+			name: "rejects active percentage after completion",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 80, complete_percent: 20}`,
+			want: "active_percent must be <= complete_percent",
+		},
+		{
+			name: "rejects out of range percentage",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 101, complete_percent: 101}`,
+			want: "active_percent must be between 0 and 100",
+		},
+		{
+			name: "rejects decreasing completion percentage",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 40}
+  - {id: writing, title: Writing, active_percent: 25, complete_percent: 30}
+  - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}`,
+			want: "complete_percent must be non-decreasing",
+		},
+		{
+			name: "rejects progress contract that does not finish at 100",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20}
+  - {id: writing, title: Writing, active_percent: 30, complete_percent: 60}`,
+			want: "final complete_percent must be 100",
+		},
+		{
+			name: "rejects unsafe required artifact",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [../secret.txt]}`,
+			want: "required artifact must be under output/",
+		},
+		{
+			name: "rejects cleaned traversal component",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/tmp/../topic-analysis.md]}`,
+			want: "required artifact must be under output/",
+		},
+		{
+			name: "rejects required artifact with backslash",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output\topic-analysis.md]}`,
+			want: "required artifact must be under output/",
+		},
+		{
+			name: "rejects non canonical required artifact",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output//topic-analysis.md]}`,
+			want: "required artifact must be under output/",
+		},
+		{
+			name:     "rejects empty progress",
+			progress: "progress: []",
+			want:     "progress must not be empty",
+		},
+		{
+			name: "accepts ordered stage contract",
+			progress: `progress:
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/topic-analysis.md]}
+  - {id: writing, title: Writing, active_percent: 30, complete_percent: 100}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100", tt.progress, 1)
+			root := writePackFixture(t, manifest)
+			catalog, err := LoadCatalog(root)
+			if tt.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadCatalog: %v", err)
+			}
+			stage, ok := catalog.Packs[0].ProgressStage("research")
+			if !ok || stage.CompletePercent != 20 || len(stage.RequiredArtifacts) != 1 {
+				t.Fatalf("ProgressStage(research) = %#v, %v", stage, ok)
+			}
+			if _, ok := catalog.Packs[0].ProgressStage("missing"); ok {
+				t.Fatal("ProgressStage(missing) unexpectedly resolved")
+			}
+		})
+	}
+}
+
+func TestLoadCatalogResolvesProgressContractByTaskType(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "task_types: [demo-task]", "task_types: [demo-task, viral-analysis]", 1)
+	manifest = strings.Replace(manifest, "  demo-task: task.demo", "  demo-task: task.demo\n  viral-analysis: task.viral-analysis", 1)
+	manifest = strings.Replace(manifest, "artifacts:\n", `progress_by_task_type:
+  viral-analysis:
+    - {id: research, title: Research, active_percent: 10, complete_percent: 40}
+    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100, required_artifacts: [output/source-analysis.md, output/viral-template.json]}
+artifacts:
+`, 1)
+	root := writePackFixture(t, manifest)
+
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	pack := catalog.Packs[0]
+	defaultProgress := pack.ProgressForTaskType("demo-task")
+	if len(defaultProgress) != 1 || defaultProgress[0].ID != "prepare" {
+		t.Fatalf("default progress = %#v", defaultProgress)
+	}
+	viralProgress := pack.ProgressForTaskType("viral-analysis")
+	if len(viralProgress) != 2 || viralProgress[0].ID != "research" || viralProgress[1].ID != "delivery" {
+		t.Fatalf("viral progress = %#v", viralProgress)
+	}
+	if got := viralProgress[1].RequiredArtifacts; len(got) != 2 || got[0] != "output/source-analysis.md" || got[1] != "output/viral-template.json" {
+		t.Fatalf("viral delivery artifacts = %#v", got)
+	}
+}
+
+func TestLoadCatalogValidatesProgressContractsByTaskType(t *testing.T) {
+	tests := []struct {
+		name     string
+		override string
+		want     string
+	}{
+		{
+			name: "rejects unbound task type",
+			override: `progress_by_task_type:
+  unknown-task:
+    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}`,
+			want: `progress override references unbound task type "unknown-task"`,
+		},
+		{
+			name: "rejects empty override",
+			override: `progress_by_task_type:
+  demo-task: []`,
+			want: `progress override for task type "demo-task" must not be empty`,
+		},
+		{
+			name: "rejects duplicate stage ids",
+			override: `progress_by_task_type:
+  demo-task:
+    - {id: research, title: Research, active_percent: 10, complete_percent: 30}
+    - {id: research, title: Duplicate, active_percent: 40, complete_percent: 100}`,
+			want: `progress override for task type "demo-task": duplicate progress stage id "research"`,
+		},
+		{
+			name: "rejects decreasing completion percentage",
+			override: `progress_by_task_type:
+  demo-task:
+    - {id: research, title: Research, active_percent: 10, complete_percent: 60}
+    - {id: delivery, title: Delivery, active_percent: 40, complete_percent: 100}`,
+			want: `progress stage "delivery" active_percent must be >= previous complete_percent`,
+		},
+		{
+			name: "rejects contract that does not finish at 100",
+			override: `progress_by_task_type:
+  demo-task:
+    - {id: research, title: Research, active_percent: 10, complete_percent: 40}`,
+			want: "progress final complete_percent must be 100",
+		},
+		{
+			name: "rejects unsafe required artifact",
+			override: `progress_by_task_type:
+  demo-task:
+    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100, required_artifacts: [../secret.txt]}`,
+			want: "required artifact must be under output/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := strings.Replace(validFixtureManifest, "artifacts:\n", tt.override+"\nartifacts:\n", 1)
+			root := writePackFixture(t, manifest)
+			_, err := LoadCatalog(root)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsProgressOverrideWithoutDefaultContract(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
+	manifest = strings.Replace(manifest, "artifacts:\n", `progress_by_task_type:
+  demo-task:
+    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}
+artifacts:
+`, 1)
+	root := writePackFixture(t, manifest)
+
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "progress_by_task_type requires non-empty progress") {
+		t.Fatalf("LoadCatalog error = %v, want override default progress rejection", err)
+	}
+}
+
+func TestLoadCatalogAllowsOmittedProgressContract(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
+	root := writePackFixture(t, manifest)
+
+	if _, err := LoadCatalog(root); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
 	}
 }
 
@@ -1033,6 +1260,8 @@ billing_operations:
 progress:
   - id: prepare
     title: Prepare
+    active_percent: 90
+    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md

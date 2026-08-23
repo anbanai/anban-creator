@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -230,10 +231,90 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	for _, artifact := range manifest.Artifacts {
-		clean := filepath.ToSlash(filepath.Clean(artifact.Path))
-		if artifact.Role == "" || artifact.MIMEType == "" || !strings.HasPrefix(clean, "output/") || strings.Contains(clean, "../") {
+		if artifact.Role == "" || artifact.MIMEType == "" || validateOutputArtifactPath(artifact.Path) != nil {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
 		}
+	}
+	if len(manifest.ProgressByTaskType) > 0 && len(manifest.Progress) == 0 {
+		return fmt.Errorf("progress_by_task_type requires non-empty progress")
+	}
+	if err := validateProgressContract(manifest.Progress, manifest.Progress != nil); err != nil {
+		return err
+	}
+	overrideTaskTypes := make([]string, 0, len(manifest.ProgressByTaskType))
+	for taskType := range manifest.ProgressByTaskType {
+		overrideTaskTypes = append(overrideTaskTypes, taskType)
+	}
+	sort.Strings(overrideTaskTypes)
+	for _, taskType := range overrideTaskTypes {
+		if !taskTypes[taskType] {
+			return fmt.Errorf("progress override references unbound task type %q", taskType)
+		}
+		progress := manifest.ProgressByTaskType[taskType]
+		if len(progress) == 0 {
+			return fmt.Errorf("progress override for task type %q must not be empty", taskType)
+		}
+		if err := validateProgressContract(progress, true); err != nil {
+			return fmt.Errorf("progress override for task type %q: %w", taskType, err)
+		}
+	}
+	return nil
+}
+
+func validateProgressContract(progress []ProgressStage, declared bool) error {
+	if declared && len(progress) == 0 {
+		return fmt.Errorf("progress must not be empty")
+	}
+	seenProgress := make(map[string]struct{}, len(progress))
+	previousComplete := -1
+	for _, stage := range progress {
+		if strings.TrimSpace(stage.ID) == "" || strings.TrimSpace(stage.Title) == "" {
+			return fmt.Errorf("progress stage id and title must not be empty")
+		}
+		if _, exists := seenProgress[stage.ID]; exists {
+			return fmt.Errorf("duplicate progress stage id %q", stage.ID)
+		}
+		seenProgress[stage.ID] = struct{}{}
+		if stage.ActivePercent < 0 || stage.ActivePercent > 100 {
+			return fmt.Errorf("progress stage %q active_percent must be between 0 and 100", stage.ID)
+		}
+		if stage.CompletePercent < 0 || stage.CompletePercent > 100 {
+			return fmt.Errorf("progress stage %q complete_percent must be between 0 and 100", stage.ID)
+		}
+		if stage.ActivePercent > stage.CompletePercent {
+			return fmt.Errorf("progress stage %q active_percent must be <= complete_percent", stage.ID)
+		}
+		if stage.CompletePercent < previousComplete {
+			return fmt.Errorf("progress stage %q complete_percent must be non-decreasing", stage.ID)
+		}
+		if stage.ActivePercent < previousComplete {
+			return fmt.Errorf("progress stage %q active_percent must be >= previous complete_percent", stage.ID)
+		}
+		previousComplete = stage.CompletePercent
+		for _, artifact := range stage.RequiredArtifacts {
+			if err := validateOutputArtifactPath(artifact); err != nil {
+				return fmt.Errorf("progress stage %q required artifact %q: %w", stage.ID, artifact, err)
+			}
+		}
+	}
+	if len(progress) > 0 && progress[len(progress)-1].CompletePercent != 100 {
+		return fmt.Errorf("progress final complete_percent must be 100")
+	}
+	return nil
+}
+
+func validateOutputArtifactPath(raw string) error {
+	if strings.TrimSpace(raw) == "" || filepath.IsAbs(raw) || strings.Contains(raw, "\\") {
+		return fmt.Errorf("required artifact must be under output/")
+	}
+	for _, component := range strings.Split(raw, "/") {
+		if component == ".." {
+			return fmt.Errorf("required artifact must be under output/")
+		}
+	}
+	clean := pathpkg.Clean(raw)
+	if clean != raw || pathpkg.IsAbs(clean) || clean == "." || clean == "output" || !strings.HasPrefix(clean, "output/") {
+		return fmt.Errorf("required artifact must be under output/")
 	}
 	return nil
 }

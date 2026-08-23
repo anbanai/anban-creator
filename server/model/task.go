@@ -12,6 +12,7 @@ import (
 // (which also contains "Using tool: ..." noise from the agent executor).
 type ProgressPayload struct {
 	Stage       string `json:"stage,omitempty"`
+	State       string `json:"state,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Percent     int    `json:"percent,omitempty"`
@@ -134,6 +135,7 @@ type Task struct {
 	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Progress             int                                   `gorm:"default:0" json:"progress,omitempty"`
+	ProgressSequence     int                                   `gorm:"default:0" json:"-"`
 	LatestProgress       datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
 	Result               *string                               `gorm:"type:json" json:"result,omitempty"`
 	TerminalModelUsage   datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
