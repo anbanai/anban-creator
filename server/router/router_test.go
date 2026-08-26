@@ -335,6 +335,108 @@ func TestSeednoteLoginRoutesAreAdminOnlySurface(t *testing.T) {
 	}
 }
 
+func TestSeednoteAdminRoutesUseJWTAndAdminAuthorization(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+
+	adminID, regularID := uuid.NewString(), uuid.NewString()
+	for _, user := range []*model.User{
+		{ID: adminID, Email: "admin@example.com", Tier: model.TierPro, InviteCode: "ADMIN123", IsAdmin: true},
+		{ID: regularID, Email: "user@example.com", Tier: model.TierFree, InviteCode: "USER123"},
+	} {
+		if err := repo.Users().Create(t.Context(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jwtSvc, err := auth.NewJWTService("seednote-admin-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:         &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}},
+		Logger:         &logger,
+		Repo:           repo,
+		JWTService:     jwtSvc,
+		ProjectHandler: handler.NewProjectHandler(nil, &logger),
+	})
+
+	adminToken, err := jwtSvc.GenerateAccessToken(adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regularToken, err := jwtSvc.GenerateAccessToken(regularID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		token      string
+		wantStatus int
+	}{
+		{name: "missing token", wantStatus: http.StatusUnauthorized},
+		{name: "regular user", token: regularToken, wantStatus: http.StatusForbidden},
+		{name: "administrator", token: adminToken, wantStatus: http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/seednote/login-status", nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestIlinkRoutesRemainJWTProtected(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+	jwtSvc, err := auth.NewJWTService("ilink-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:       &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}},
+		Logger:       &logger,
+		Repo:         repo,
+		JWTService:   jwtSvc,
+		IlinkHandler: handler.NewIlinkHandler(nil, &logger),
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/ilink/status", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
 func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
