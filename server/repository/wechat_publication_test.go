@@ -218,3 +218,106 @@ func TestWechatPreflightTransitionsRequireExpectedStatusAndVersion(t *testing.T)
 		}
 	})
 }
+
+func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+
+	t.Run("reconciliation CAS loss preserves newer publish claim", func(t *testing.T) {
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			DraftMediaID: "draft-1", Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		stale, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		if won, err := repo.WechatPublications().ClaimPublish(ctx, publication.ID, "newer-claim", now, now.Add(-time.Minute), &now); err != nil || !won {
+			t.Fatalf("ClaimPublish won=%v err=%v", won, err)
+		}
+		stale.Status = model.WechatPublicationStatusNeedsSelection
+		stale.Source = model.WechatPublicationSourceWechatConsole
+		stale.Candidates = []byte(`[{"article_id":"stale"}]`)
+		won, err := repo.WechatPublications().UpdateReconciliation(ctx, stale, model.WechatPublicationStatusDrafted, stale.UpdatedAt)
+		if err != nil || won {
+			t.Fatalf("UpdateReconciliation won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.Status != model.WechatPublicationStatusPublishSubmitting || stored.ClaimToken != "newer-claim" || stored.SubmitAttemptedAt == nil || stored.Source != model.WechatPublicationSourceAnbanAPI {
+			t.Fatalf("stored=%#v err=%v", stored, err)
+		}
+	})
+
+	t.Run("reconciliation update cannot clear provider identity or claim evidence", func(t *testing.T) {
+		now := time.Now()
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			DraftMediaID: "draft-2", Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusPublishSubmitting,
+			PublishID: "publish-2", MsgDataID: "msg-data-2", ClaimToken: "claim-2", ClaimedAt: &now, SubmitAttemptedAt: &now,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		desired, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedUpdatedAt := desired.UpdatedAt
+		desired.Status, desired.Source = model.WechatPublicationStatusNeedsSelection, model.WechatPublicationSourceWechatConsole
+		desired.PublishID, desired.MsgDataID, desired.ClaimToken, desired.ClaimedAt, desired.SubmitAttemptedAt = "", "", "", nil, nil
+		desired.Candidates = []byte(`[{"article_id":"candidate"}]`)
+		won, err := repo.WechatPublications().UpdateReconciliation(ctx, desired, model.WechatPublicationStatusPublishSubmitting, expectedUpdatedAt)
+		if err != nil || !won {
+			t.Fatalf("UpdateReconciliation won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.Status != model.WechatPublicationStatusNeedsSelection || stored.PublishID != "publish-2" || stored.MsgDataID != "msg-data-2" || stored.ClaimToken != "claim-2" || stored.ClaimedAt == nil || stored.SubmitAttemptedAt == nil {
+			t.Fatalf("stored=%#v err=%v", stored, err)
+		}
+	})
+
+	t.Run("published transition is narrow and version guarded", func(t *testing.T) {
+		now := time.Now()
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			DraftMediaID: "draft-3", Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusPublishSubmitting,
+			PublishID: "publish-3", MsgDataID: "msg-data-3", ClaimToken: "claim-3", ClaimedAt: &now, SubmitAttemptedAt: &now,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		desired, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedUpdatedAt := desired.UpdatedAt
+		desired.Status, desired.Source = model.WechatPublicationStatusPublished, model.WechatPublicationSourceAnbanAPI
+		desired.ArticleID, desired.ArticleURL, desired.ArticleIndex, desired.PublishedAt = "article-3", "https://mp.weixin.qq.com/s/article-3", 1, &now
+		desired.PublishID, desired.MsgDataID, desired.ClaimToken, desired.ClaimedAt, desired.SubmitAttemptedAt = "", "", "", nil, nil
+		won, err := repo.WechatPublications().TransitionToPublished(ctx, desired, model.WechatPublicationStatusPublishSubmitting, expectedUpdatedAt)
+		if err != nil || !won {
+			t.Fatalf("TransitionToPublished won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.Status != model.WechatPublicationStatusPublished || stored.ArticleID != "article-3" || stored.PublishID != "publish-3" || stored.MsgDataID != "msg-data-3" || stored.ClaimToken != "claim-3" || stored.ClaimedAt == nil || stored.SubmitAttemptedAt == nil {
+			t.Fatalf("stored=%#v err=%v", stored, err)
+		}
+
+		stale := *desired
+		stale.UpdatedAt = expectedUpdatedAt
+		stale.ArticleID = "stale-article"
+		won, err = repo.WechatPublications().TransitionToPublished(ctx, &stale, model.WechatPublicationStatusPublishSubmitting, expectedUpdatedAt)
+		if err != nil || won {
+			t.Fatalf("stale TransitionToPublished won=%v err=%v", won, err)
+		}
+		stored, err = repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.ArticleID != "article-3" {
+			t.Fatalf("stale transition changed stored=%#v err=%v", stored, err)
+		}
+	})
+}

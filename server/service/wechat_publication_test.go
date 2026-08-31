@@ -36,6 +36,7 @@ type fakeWechatPublicationAPI struct {
 	publishedListRequests                                               []appwechat.FreePublishBatchGetRequest
 	publishedListError                                                  error
 	onSubmit                                                            func()
+	onGet                                                               func()
 	onPublishedList                                                     func(int)
 }
 
@@ -67,14 +68,23 @@ func (f *fakeWechatPublicationAPI) SubmitFreePublish(context.Context, appwechat.
 }
 func (f *fakeWechatPublicationAPI) GetFreePublish(context.Context, appwechat.FreePublishGetRequest) (*appwechat.FreePublishGetResponse, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.getCalls++
+	getError := f.getError
+	var response *appwechat.FreePublishGetResponse
 	if len(f.getResponses) == 0 {
-		return nil, f.getError
+		f.mu.Unlock()
+		if f.onGet != nil {
+			f.onGet()
+		}
+		return nil, getError
 	}
-	response := f.getResponses[0]
+	response = f.getResponses[0]
 	f.getResponses = f.getResponses[1:]
-	return response, f.getError
+	f.mu.Unlock()
+	if f.onGet != nil {
+		f.onGet()
+	}
+	return response, getError
 }
 func (f *fakeWechatPublicationAPI) BatchGetFreePublishes(_ context.Context, request appwechat.FreePublishBatchGetRequest) (*appwechat.FreePublishBatchGetResponse, error) {
 	f.mu.Lock()
@@ -154,11 +164,34 @@ type failingWechatPublicationRepository struct {
 	claimPublishErr  error
 }
 
+type pausingFindPendingWechatPublicationRepository struct {
+	repository.WechatPublicationRepository
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *pausingFindPendingWechatPublicationRepository) FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error) {
+	publications, err := r.WechatPublicationRepository.FindPendingByProject(ctx, projectID)
+	r.once.Do(func() {
+		close(r.entered)
+		<-r.release
+	})
+	return publications, err
+}
+
 func (r failingWechatPublicationRepository) Update(ctx context.Context, publication *model.WechatPublication) error {
 	if r.updateErr != nil {
 		return r.updateErr
 	}
 	return r.WechatPublicationRepository.Update(ctx, publication)
+}
+
+func (r failingWechatPublicationRepository) UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error) {
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	return r.WechatPublicationRepository.UpdateReconciliation(ctx, publication, expectedStatus, expectedUpdatedAt)
 }
 
 func (r failingWechatPublicationRepository) UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error) {
@@ -734,6 +767,67 @@ func TestPollPublishMapsStatusesAndDurableSchedule(t *testing.T) {
 	}
 }
 
+func TestPollReconciliationOutcomesDoNotOverwriteConcurrentBinding(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *appwechat.FreePublishGetResponse
+		getError error
+	}{
+		{name: "provider error", getError: errors.New("provider unavailable")},
+		{name: "unsupported", getError: &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unauthorized"}},
+		{name: "empty response"},
+		{name: "still publishing", response: &appwechat.FreePublishGetResponse{PublishID: "publish-1", PublishStatus: appwechat.FreePublishStatusPublishing}},
+		{name: "terminal failure", response: &appwechat.FreePublishGetResponse{PublishID: "publish-1", PublishStatus: appwechat.FreePublishStatusFailed}},
+		{name: "success missing metadata", response: &appwechat.FreePublishGetResponse{PublishID: "publish-1", PublishStatus: appwechat.FreePublishStatusSucceeded}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			publication := f.seedDrafted(t)
+			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
+			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+				t.Fatal(err)
+			}
+			if tt.response != nil {
+				f.api.getResponses = []*appwechat.FreePublishGetResponse{tt.response}
+			}
+			f.api.getError = tt.getError
+			var bindErr error
+			f.api.onGet = func() {
+				latest, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+				if err != nil {
+					bindErr = err
+					return
+				}
+				_, bindErr = f.svc.bindPublished(context.Background(), latest, publishedWechatArticle{
+					ArticleID: "concurrent-poll-winner", URL: "https://mp.weixin.qq.com/s/concurrent-poll-winner", PublishedAt: f.now, Index: 1,
+				}, model.WechatPublicationSourceAnbanAPI)
+			}
+
+			_, _ = f.svc.Poll(context.Background(), publication.ID)
+			if bindErr != nil {
+				t.Fatalf("concurrent bind: %v", bindErr)
+			}
+			stored, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != model.WechatPublicationStatusPublished || stored.ArticleID != "concurrent-poll-winner" || stored.ArticleURL != "https://mp.weixin.qq.com/s/concurrent-poll-winner" {
+				t.Errorf("poll overwrote concurrent binding: %#v", stored)
+			}
+			binding, err := f.repo.WechatPublications().FindByArticleID(context.Background(), f.projectID, "concurrent-poll-winner")
+			if err != nil || binding.ID != publication.ID {
+				t.Errorf("binding=%#v err=%v", binding, err)
+			}
+			tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
+			if err != nil || tracking.ArticleID != "concurrent-poll-winner" {
+				t.Errorf("tracking=%#v err=%v", tracking, err)
+			}
+		})
+	}
+}
+
 func TestPollSuccessBindsPublicationAndCreatesTracking(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
 	p := f.seedDrafted(t)
@@ -920,6 +1014,196 @@ func TestManualReconcileRateLimitIsAtomicAcrossConcurrentRequests(t *testing.T) 
 	}
 	if f.api.publishedListCalls != 1 {
 		t.Fatalf("concurrent provider calls=%d, want 1", f.api.publishedListCalls)
+	}
+}
+
+func TestReconcileDoesNotOverwriteConcurrentPublishClaim(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	drafted := f.seedDrafted(t)
+	findEntered, releaseFind := make(chan struct{}), make(chan struct{})
+	publications := &pausingFindPendingWechatPublicationRepository{
+		WechatPublicationRepository: f.repo.WechatPublications(),
+		entered:                     findEntered,
+		release:                     releaseFind,
+	}
+	f.overridePublications(publications)
+
+	submitEntered, releaseSubmit := make(chan struct{}), make(chan struct{})
+	var releaseFindOnce, releaseSubmitOnce, submitOnce sync.Once
+	releaseReconcile := func() { releaseFindOnce.Do(func() { close(releaseFind) }) }
+	releaseProvider := func() { releaseSubmitOnce.Do(func() { close(releaseSubmit) }) }
+	t.Cleanup(func() {
+		releaseReconcile()
+		releaseProvider()
+	})
+	f.api.onSubmit = func() {
+		submitOnce.Do(func() { close(submitEntered) })
+		<-releaseSubmit
+	}
+
+	reconcileDone := make(chan error, 1)
+	go func() {
+		reconcileDone <- f.svc.Reconcile(context.Background(), f.userID, f.taskID)
+	}()
+	<-findEntered
+
+	type publishResult struct {
+		publication *model.WechatPublication
+		err         error
+	}
+	publishDone := make(chan publishResult, 1)
+	go func() {
+		publication, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+		publishDone <- publishResult{publication: publication, err: err}
+	}()
+	<-submitEntered
+
+	claimed, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.Status != model.WechatPublicationStatusPublishSubmitting || claimed.ClaimToken == "" || claimed.ClaimedAt == nil || claimed.SubmitAttemptedAt == nil {
+		t.Fatalf("persisted publish claim=%#v", claimed)
+	}
+
+	releaseReconcile()
+	if err := <-reconcileDone; err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	afterReconcile, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var duplicateEligible int64
+	if err := f.db.Model(&model.WechatPublication{}).
+		Where("id = ? AND status = ? AND draft_media_id <> ''", drafted.ID, model.WechatPublicationStatusDrafted).
+		Count(&duplicateEligible).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	releaseProvider()
+	published := <-publishDone
+	if !errors.Is(published.err, ErrWechatPublicationPending) {
+		t.Errorf("Publish err=%v, want pending response recovery", published.err)
+	}
+	if afterReconcile.Status != model.WechatPublicationStatusPublishSubmitting ||
+		afterReconcile.ClaimToken != claimed.ClaimToken || afterReconcile.ClaimedAt == nil || !afterReconcile.ClaimedAt.Equal(*claimed.ClaimedAt) ||
+		afterReconcile.SubmitAttemptedAt == nil || !afterReconcile.SubmitAttemptedAt.Equal(*claimed.SubmitAttemptedAt) ||
+		afterReconcile.Source != model.WechatPublicationSourceAnbanAPI {
+		t.Errorf("reconciliation overwrote concurrent publish claim: before=%#v after=%#v", claimed, afterReconcile)
+	}
+	if source := reconciledWechatPublicationSource(afterReconcile); source != model.WechatPublicationSourceAnbanAPI {
+		t.Errorf("reconciliation source=%q, want %q", source, model.WechatPublicationSourceAnbanAPI)
+	}
+	if duplicateEligible != 0 {
+		t.Errorf("publication became eligible for duplicate submission")
+	}
+
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "recovered-after-race", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+			Title: drafted.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/recovered-after-race",
+		}}},
+	}}}
+	project, err := f.repo.Projects().FindByID(context.Background(), f.projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.reconcileProject(context.Background(), project); err != nil {
+		t.Fatalf("later response recovery: %v", err)
+	}
+	recovered, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != model.WechatPublicationStatusPublished || recovered.ArticleID != "recovered-after-race" || recovered.Source != model.WechatPublicationSourceAnbanAPI || recovered.SubmitAttemptedAt == nil {
+		t.Errorf("recovered publication=%#v", recovered)
+	}
+	f.api.mu.Lock()
+	submitCalls := f.api.submitCalls
+	f.api.mu.Unlock()
+	if submitCalls != 1 {
+		t.Errorf("external submit calls=%d, want 1", submitCalls)
+	}
+}
+
+func TestReconciliationOutcomesRequireLoadedPublicationVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  func(*publicationFixture, *model.WechatPublication) *appwechat.FreePublishBatchGetResponse
+		listError error
+		articleID string
+	}{
+		{
+			name: "candidate",
+			response: func(f *publicationFixture, publication *model.WechatPublication) *appwechat.FreePublishBatchGetResponse {
+				return &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+					ArticleID: "stale-candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+						Title: publication.DraftTitle, Content: "<p>different</p>", URL: "https://mp.weixin.qq.com/s/stale-candidate",
+					}}},
+				}}}
+			},
+		},
+		{
+			name: "published binding",
+			response: func(f *publicationFixture, _ *model.WechatPublication) *appwechat.FreePublishBatchGetResponse {
+				return &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+					ArticleID: "stale-exact", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+						Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/stale-exact",
+					}}},
+				}}}
+			},
+			articleID: "stale-exact",
+		},
+		{
+			name:      "unsupported",
+			response:  func(*publicationFixture, *model.WechatPublication) *appwechat.FreePublishBatchGetResponse { return nil },
+			listError: &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unauthorized"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			publication := f.seedDrafted(t)
+			f.api.publishedListResponse = tt.response(f, publication)
+			f.api.publishedListError = tt.listError
+			var claimErr error
+			f.api.onPublishedList = func(call int) {
+				if call != 1 {
+					return
+				}
+				nextCheckAt := nextWechatManualCheck(f.now, *publication.DraftCreatedAt)
+				var won bool
+				won, claimErr = f.repo.WechatPublications().ClaimPublish(
+					context.Background(), publication.ID, "newer-publish-claim", f.now, f.now.Add(-wechatPublicationClaimLease), nextCheckAt,
+				)
+				if claimErr == nil && !won {
+					claimErr = errors.New("newer publish claim did not win")
+				}
+			}
+
+			if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if claimErr != nil {
+				t.Fatal(claimErr)
+			}
+			stored, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != model.WechatPublicationStatusPublishSubmitting || stored.ClaimToken != "newer-publish-claim" || stored.ClaimedAt == nil || stored.SubmitAttemptedAt == nil || stored.Source != model.WechatPublicationSourceAnbanAPI {
+				t.Errorf("newer publish state was overwritten: %#v", stored)
+			}
+			if tt.articleID != "" {
+				if binding, err := f.repo.WechatPublications().FindByArticleID(context.Background(), f.projectID, tt.articleID); !errors.Is(err, gorm.ErrRecordNotFound) {
+					t.Errorf("stale binding survived CAS loss: binding=%#v err=%v", binding, err)
+				}
+				if tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID); !errors.Is(err, gorm.ErrRecordNotFound) {
+					t.Errorf("stale tracking survived CAS loss: tracking=%#v err=%v", tracking, err)
+				}
+			}
+		})
 	}
 }
 

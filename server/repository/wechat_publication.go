@@ -127,6 +127,47 @@ func (r *wechatPublicationRepository) TransitionToPublishSubmitting(ctx context.
 	return rows == 1, err
 }
 
+func (r *wechatPublicationRepository) UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", publication.ID, expectedStatus, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status":             publication.Status,
+				"source":             publication.Source,
+				"wechat_status_code": publication.WechatStatusCode,
+				"next_check_at":      publication.NextCheckAt,
+				"last_checked_at":    publication.LastCheckedAt,
+				"check_attempts":     publication.CheckAttempts,
+				"last_error":         publication.LastError,
+				"candidates":         publication.Candidates,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", publication.ID, expectedStatus, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status":             publication.Status,
+				"source":             publication.Source,
+				"msg_id":             publication.MsgID,
+				"article_id":         publication.ArticleID,
+				"article_url":        publication.ArticleURL,
+				"article_index":      publication.ArticleIndex,
+				"wechat_status_code": publication.WechatStatusCode,
+				"published_at":       publication.PublishedAt,
+				"next_check_at":      publication.NextCheckAt,
+				"last_checked_at":    publication.LastCheckedAt,
+				"check_attempts":     publication.CheckAttempts,
+				"last_error":         publication.LastError,
+				"candidates":         publication.Candidates,
+			})
+	})
+	return rows == 1, err
+}
+
 func runWechatClaimWrite(ctx context.Context, dialect string, operation func() *gorm.DB) (int64, error) {
 	var rows int64
 	err := retryWechatSQLiteBusy(ctx, dialect, func() error {
