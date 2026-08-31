@@ -79,7 +79,7 @@ func (r *wechatPublicationRepository) ClaimProjectReconcile(ctx context.Context,
 		query = query.Where("lease_until_micros <= " + clock)
 		until = clause.Expr{SQL: clock + " + ?", Vars: []any{lease.Microseconds()}}
 	case "sqlite":
-		clock := "CAST(strftime('%s', 'now') AS INTEGER) * 1000000"
+		clock := "CAST((julianday('now') - 2440587.5) * 86400000000 AS INTEGER)"
 		query = query.Where("lease_until_micros <= " + clock)
 		until = clause.Expr{SQL: clock + " + ?", Vars: []any{lease.Microseconds()}}
 	default:
@@ -99,6 +99,30 @@ func (r *wechatPublicationRepository) ClaimArticleBinding(ctx context.Context, p
 		return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model.WechatPublicationBinding{
 			ProjectID: projectID, ArticleID: articleID, PublicationID: publicationID,
 		})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) TransitionToNeedsSelection(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, source string, candidates []byte, nextCheckAt *time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", id, expectedStatus, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status": model.WechatPublicationStatusNeedsSelection, "source": source,
+				"candidates": candidates, "next_check_at": nextCheckAt,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) TransitionToPublishSubmitting(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, lastError string, nextCheckAt *time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", id, expectedStatus, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status":     model.WechatPublicationStatusPublishSubmitting,
+				"last_error": lastError, "next_check_at": nextCheckAt,
+			})
 	})
 	return rows == 1, err
 }

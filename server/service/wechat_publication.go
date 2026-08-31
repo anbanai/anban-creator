@@ -315,7 +315,7 @@ func (s *WechatPublicationService) recoverDraftFromItems(ctx context.Context, pu
 	matches := make([]appwechat.DraftBatchItem, 0, 1)
 	createdAt := valueOrTime(publication.DraftCreatedAt, publication.CreatedAt)
 	for _, item := range items {
-		if item.UpdateTime <= 0 || time.Unix(item.UpdateTime, 0).Before(createdAt) || len(item.Content.NewsItems) == 0 {
+		if item.UpdateTime <= 0 || item.UpdateTime < createdAt.Unix() || len(item.Content.NewsItems) == 0 {
 			continue
 		}
 		article := item.Content.NewsItems[0]
@@ -423,11 +423,19 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		if marshalErr != nil {
 			return publication, marshalErr
 		}
-		publication.Status, publication.Candidates = model.WechatPublicationStatusNeedsSelection, datatypes.JSON(encoded)
-		publication.NextCheckAt = nextWechatManualCheck(s.now(), valueOrTime(publication.DraftCreatedAt, publication.CreatedAt))
-		if err := s.repo.WechatPublications().Update(ctx, publication); err != nil {
+		source := reconciledWechatPublicationSource(publication)
+		nextCheckAt := nextWechatManualCheck(s.now(), valueOrTime(publication.DraftCreatedAt, publication.CreatedAt))
+		won, err := s.repo.WechatPublications().TransitionToNeedsSelection(
+			ctx, publication.ID, publication.Status, publication.UpdatedAt, source, encoded, nextCheckAt,
+		)
+		if err != nil {
 			return publication, err
 		}
+		if !won {
+			return s.reloadAfterPublishPreflightCASLoss(ctx, publication.ID)
+		}
+		publication.Status, publication.Source = model.WechatPublicationStatusNeedsSelection, source
+		publication.Candidates, publication.NextCheckAt = datatypes.JSON(encoded), nextCheckAt
 		return publication, ErrWechatPublicationPending
 	}
 
@@ -452,12 +460,19 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		}
 	}
 	if !draftExists {
-		publication.Status = model.WechatPublicationStatusPublishSubmitting
-		publication.LastError = "WeChat draft disappeared before publish submission"
-		publication.NextCheckAt = nextWechatManualCheck(s.now(), valueOrTime(publication.DraftCreatedAt, publication.CreatedAt))
-		if err := s.repo.WechatPublications().Update(ctx, publication); err != nil {
+		lastError := "WeChat draft disappeared before publish submission"
+		nextCheckAt := nextWechatManualCheck(s.now(), valueOrTime(publication.DraftCreatedAt, publication.CreatedAt))
+		won, err := s.repo.WechatPublications().TransitionToPublishSubmitting(
+			ctx, publication.ID, publication.Status, publication.UpdatedAt, lastError, nextCheckAt,
+		)
+		if err != nil {
 			return publication, err
 		}
+		if !won {
+			return s.reloadAfterPublishPreflightCASLoss(ctx, publication.ID)
+		}
+		publication.Status, publication.LastError = model.WechatPublicationStatusPublishSubmitting, lastError
+		publication.NextCheckAt = nextCheckAt
 		return publication, ErrWechatPublicationPending
 	}
 	if publication.Status != model.WechatPublicationStatusDrafted {
@@ -499,6 +514,9 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		return publication, submitErr
 	}
 	if response == nil || strings.TrimSpace(response.PublishID) == "" {
+		if response != nil {
+			publication.MsgDataID = response.MsgDataID
+		}
 		publication.LastError = "WeChat publish response omitted publish_id"
 		publication.NextCheckAt = nextWechatManualCheck(now, valueOrTime(publication.DraftCreatedAt, publication.CreatedAt))
 		won, persistErr := s.repo.WechatPublications().UpdateClaimed(context.WithoutCancel(ctx), publication, token)
@@ -520,6 +538,21 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		return publication, ErrWechatPublicationConflict
 	}
 	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+}
+
+func (s *WechatPublicationService) reloadAfterPublishPreflightCASLoss(ctx context.Context, publicationID string) (*model.WechatPublication, error) {
+	latest, err := s.repo.WechatPublications().FindByID(ctx, publicationID)
+	if err != nil {
+		return nil, err
+	}
+	switch latest.Status {
+	case model.WechatPublicationStatusPublished, model.WechatPublicationStatusUnsupported:
+		return latest, nil
+	case model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationStatusPublishing, model.WechatPublicationStatusNeedsSelection:
+		return latest, ErrWechatPublicationPending
+	default:
+		return latest, ErrWechatPublicationConflict
+	}
 }
 
 func (s *WechatPublicationService) Poll(ctx context.Context, publicationID string) (*model.WechatPublication, error) {
@@ -845,7 +878,7 @@ func (s *WechatPublicationService) matchPublished(ctx context.Context, publicati
 
 func reconciledWechatPublicationSource(publication *model.WechatPublication) string {
 	if publication.Source == model.WechatPublicationSourceAnbanAPI &&
-		(publication.Status == model.WechatPublicationStatusPublishSubmitting || publication.PublishID != "" || publication.MsgDataID != "") {
+		(publication.Status == model.WechatPublicationStatusPublishSubmitting || publication.PublishID != "" || publication.MsgDataID != "" || publication.LastError != "") {
 		return model.WechatPublicationSourceAnbanAPI
 	}
 	return model.WechatPublicationSourceWechatConsole
@@ -930,7 +963,7 @@ func (s *WechatPublicationService) Select(ctx context.Context, userID, taskID, a
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return publication, err
 	}
-	return s.bindPublished(ctx, publication, *selected, model.WechatPublicationSourceWechatConsole)
+	return s.bindPublished(ctx, publication, *selected, reconciledWechatPublicationSource(publication))
 }
 
 func (s *WechatPublicationService) bindPublished(ctx context.Context, publication *model.WechatPublication, article publishedWechatArticle, source string) (*model.WechatPublication, error) {

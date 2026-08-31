@@ -252,6 +252,41 @@ func TestCreateDraftRecoveryPaginatesAndRejectsUnsafeUpdateTimes(t *testing.T) {
 	}
 }
 
+func TestCreateDraftRecoveryAcceptsProviderTimestampInIntentSecond(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f.now = f.now.Add(750 * time.Millisecond)
+	article := f.draftInput().Articles[0]
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
+		MediaID: "same-second", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}},
+	}}}
+
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DraftMediaID != "same-second" || f.api.addCalls != 0 {
+		t.Fatalf("recovered=%#v addCalls=%d", got, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRecoveryRejectsProviderTimestampInPriorSecond(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f.now = f.now.Add(750 * time.Millisecond)
+	article := f.draftInput().Articles[0]
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
+		MediaID: "prior-second", UpdateTime: f.now.Add(-time.Second).Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}},
+	}}}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "new-draft"}
+
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DraftMediaID != "new-draft" || f.api.addCalls != 1 {
+		t.Fatalf("created=%#v addCalls=%d", got, f.api.addCalls)
+	}
+}
+
 func TestWechatContentFingerprintPreservesMeaningfulInlineSpaces(t *testing.T) {
 	formatted := `<section>
   <p>Hello <strong>world</strong></p>
@@ -334,6 +369,45 @@ func TestPublishResponseLossSchedulesReconciliationWithoutResubmitting(t *testin
 	}
 	if f.api.submitCalls != 1 {
 		t.Fatalf("submit calls=%d, want 1", f.api.submitCalls)
+	}
+}
+
+func TestAmbiguousAPIPublishSelectionPreservesResponseIdentity(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{MsgDataID: "msg-data-from-submit"}
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if !errors.Is(err, ErrWechatPublicationPending) {
+		t.Fatalf("Publish err=%v, want pending", err)
+	}
+	if got.MsgDataID != "msg-data-from-submit" {
+		t.Fatalf("pending MsgDataID=%q", got.MsgDataID)
+	}
+
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "selected-after-response-loss", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+			Title: p.DraftTitle, Digest: "different", ThumbMediaID: "different", Content: "<p>different</p>", URL: "https://mp.weixin.qq.com/s/selected-after-response-loss",
+		}}},
+	}}}
+	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || pending.Status != model.WechatPublicationStatusNeedsSelection {
+		t.Fatalf("pending=%#v err=%v", pending, err)
+	}
+
+	selected, err := f.svc.Select(context.Background(), f.userID, f.taskID, "selected-after-response-loss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Source != model.WechatPublicationSourceAnbanAPI || selected.MsgDataID != "msg-data-from-submit" || selected.MsgID != "msg-data-from-submit_1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || tracking.MsgID != "msg-data-from-submit_1" {
+		t.Fatalf("tracking=%#v err=%v", tracking, err)
 	}
 }
 
@@ -437,6 +511,86 @@ func TestPublishPreflightPersistsPendingWhenDraftDisappeared(t *testing.T) {
 	}
 	if got.Status != model.WechatPublicationStatusPublishSubmitting || got.NextCheckAt == nil || f.api.submitCalls != 0 {
 		t.Fatalf("missing-draft publication=%#v submitCalls=%d", got, f.api.submitCalls)
+	}
+}
+
+func TestPublishPreflightCandidateDoesNotRegressConcurrentBinding(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "stale-candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+			Title: p.DraftTitle, Digest: "different", ThumbMediaID: "different", Content: "<p>different</p>", URL: "https://mp.weixin.qq.com/s/stale-candidate",
+		}}},
+	}}}
+	f.api.onPublishedList = func(call int) {
+		if call != 1 {
+			return
+		}
+		latest, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, err = f.svc.bindPublished(context.Background(), latest, publishedWechatArticle{
+			ArticleID: "concurrent-winner", URL: "https://mp.weixin.qq.com/s/concurrent-winner", PublishedAt: f.now, Index: 1,
+		}, model.WechatPublicationSourceWechatConsole)
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if err != nil {
+		t.Fatalf("Publish err=%v", err)
+	}
+	assertConcurrentPreflightWinner(t, f, got)
+}
+
+func TestPublishPreflightMissingDraftDoesNotRegressConcurrentBinding(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f.seedDrafted(t)
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
+	f.api.onPublishedList = func(call int) {
+		if call != 1 {
+			return
+		}
+		latest, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, err = f.svc.bindPublished(context.Background(), latest, publishedWechatArticle{
+			ArticleID: "concurrent-winner", URL: "https://mp.weixin.qq.com/s/concurrent-winner", PublishedAt: f.now, Index: 1,
+		}, model.WechatPublicationSourceWechatConsole)
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if err != nil {
+		t.Fatalf("Publish err=%v", err)
+	}
+	assertConcurrentPreflightWinner(t, f, got)
+}
+
+func assertConcurrentPreflightWinner(t *testing.T, f *publicationFixture, got *model.WechatPublication) {
+	t.Helper()
+	if got.Status != model.WechatPublicationStatusPublished || got.ArticleID != "concurrent-winner" || f.api.submitCalls != 0 {
+		t.Fatalf("publication=%#v submitCalls=%d", got, f.api.submitCalls)
+	}
+	stored, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || stored.Status != model.WechatPublicationStatusPublished || stored.ArticleID != "concurrent-winner" {
+		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+	bound, err := f.repo.WechatPublications().FindByArticleID(context.Background(), f.projectID, "concurrent-winner")
+	if err != nil || bound.ID != stored.ID {
+		t.Fatalf("bound=%#v err=%v", bound, err)
+	}
+	tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || tracking.ArticleID != "concurrent-winner" {
+		t.Fatalf("tracking=%#v err=%v", tracking, err)
 	}
 }
 

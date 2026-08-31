@@ -210,3 +210,88 @@ go build -o /tmp/anban-creator-server-task2-fix1 ./server
   progress.
 - Studio legacy-call cleanup remains Task 5. Scheduler due-query/bootstrap
   wiring remains Task 6. Neither surface changed in this fix round.
+
+## Fix Round 2
+
+### Findings Addressed
+
+- Draft recovery compares the provider's integer `UpdateTime` with the intent at
+  Unix-second precision. A same-second provider draft is eligible despite local
+  nanoseconds; zero and prior-second timestamps remain ineligible.
+- A submit response that omits `publish_id` now persists any returned
+  `msg_data_id` before entering reconciliation. Candidate selection resolves
+  lifecycle source instead of forcing `wechat_console`, preserving `anban_api`
+  and deriving the exact `msg_data_id + "_1"` tracking identity.
+- Publish preflight candidate and missing-draft transitions use narrow
+  repository CAS updates guarded by publication ID, expected status, and
+  `UpdatedAt`. A lost CAS reloads the durable publication instead of saving a
+  stale full row over concurrent binding and analytics tracking state.
+- SQLite project leases now use a subsecond `julianday('now')` epoch-microsecond
+  clock, so a 60-second lease cannot expire nearly one second early.
+
+### RED Evidence
+
+```text
+TestCreateDraftRecoveryAcceptsProviderTimestampInIntentSecond
+WeChat publication outcome is pending reconciliation
+
+TestAmbiguousAPIPublishSelectionPreservesResponseIdentity
+pending MsgDataID=""
+
+TestAmbiguousAPIPublishSelectionPreservesResponseIdentity
+selected Source="wechat_console", want "anban_api"
+
+TestPublishPreflightCandidateDoesNotRegressConcurrentBinding
+Publish err=WeChat publication outcome is pending reconciliation
+
+TestPublishPreflightMissingDraftDoesNotRegressConcurrentBinding
+Publish err=WeChat publication outcome is pending reconciliation
+
+TestWechatPreflightTransitionsRequireExpectedStatusAndVersion
+TransitionToNeedsSelection and TransitionToPublishSubmitting undefined
+
+TestWechatProjectReconcileLeasePreservesSQLiteSubsecondDuration
+lease duration=59.08395s, want nearly the full minute
+```
+
+### GREEN Evidence
+
+```text
+go test ./server/service ./server/repository \
+  -run 'Test(CreateDraftRecovery(AcceptsProviderTimestampInIntentSecond|RejectsProviderTimestampInPriorSecond)|AmbiguousAPIPublishSelectionPreservesResponseIdentity|PublishPreflight(Candidate|MissingDraft)DoesNotRegressConcurrentBinding|WechatPreflightTransitionsRequireExpectedStatusAndVersion|WechatProjectReconcileLeasePreservesSQLiteSubsecondDuration)$' \
+  -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/repository
+
+go test ./server/service \
+  -run 'Test(ConcurrentSelectionHasOneAtomicArticleBindingWinner|PublishPreflight(Candidate|MissingDraft)DoesNotRegressConcurrentBinding)$' \
+  -count=25
+ok github.com/anbanai/anban-creator/server/service
+
+go test ./server/repository \
+  -run 'TestWechat(ProjectReconcileLeaseHasOneConcurrentWinnerAndExpires|ArticleBindingHasOneConcurrentWinnerPerProject)$' \
+  -count=25
+ok github.com/anbanai/anban-creator/server/repository
+
+go test ./server/service ./server/repository -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/repository
+
+go test ./...
+# all packages passed
+
+go build -o /tmp/anban-creator-server-task2-fix2 ./server
+# exit 0
+```
+
+### Self-Review And Scope
+
+- The stale-object tests execute a real concurrent `bindPublished` transition
+  inside the provider callback and verify publication, binding, and tracking
+  rows all retain the winner.
+- CAS methods update only lifecycle columns and do not carry stale article,
+  binding, or tracking fields into persistence.
+- The SQLite precision test enters a controlled 600-800ms wall-clock window and
+  asserts both the early and late lease boundaries.
+- No live MySQL integration environment was available; MySQL continues to use
+  `CURRENT_TIMESTAMP(6)`. Studio and scheduler scope remain in Tasks 5 and 6.
