@@ -188,3 +188,69 @@ approval fields), not by any task-1 package.
 - SQLite renders empty-string defaults with double quotes while MySQL DDL uses
   single quotes; the equivalence assertion normalizes quote syntax but still
   verifies nullability and semantic defaults.
+
+## Fix Round 2
+
+### Review Findings Addressed
+
+- `getarticletotaldetail` now decodes `is_delay` as a boolean, restores
+  per-item `content_url`, and keeps analytics `MsgID` separate from submit-time
+  `MsgDataID`.
+- Analytics source and jump-position values now preserve the official array and
+  object JSON shapes instead of attempting to decode them as scalar integers.
+- `WechatPublication` explicitly marks its primary key and `CreatedAt` /
+  `UpdatedAt` fields `not null`, matching the migration contract.
+- Migration validation now parses ordered ALTER operations and the complete
+  `wechat_publications` table contract. It checks old-index drop before column
+  renames and new-index creation, every column's null/default declaration, and
+  the precise column-to-index matrix.
+- SQLite schema inspection retains `sql.NullString.Valid`, so an absent default
+  cannot satisfy an explicit `DEFAULT ''`; a dedicated mutation assertion
+  exercises that distinction.
+
+### Tests Added Or Adjusted
+
+- `app/wechat/official_api_test.go`: realistic boolean `is_delay`, composite
+  analytics `msgid`, exact `content_url`, array source data, and object jump
+  positions, all asserted after decoding.
+- `server/migrations/wechat_publication_contract_test.go`: deterministic ALTER
+  operation ordering, canonical column/default/index parsing, and absent versus
+  empty default validation.
+
+### RED Evidence
+
+```text
+go test ./app/wechat ./server/model ./server/migrations -count=1
+FAIL TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers/article_total_detail
+decode WeChat /datacube/getarticletotaldetail response:
+json: cannot unmarshal bool into Go struct field ArticleTotalDetailResponse.is_delay of type int
+```
+
+The timestamp mutation check also failed as intended after temporarily removing
+the two GORM tags:
+
+```text
+go test ./server/migrations -run TestWechatPublicationModelMatchesCanonicalNullabilityAndDefaults -count=1
+model column updated_at ... notNull:false, want notNull=true
+model column created_at ... notNull:false, want notNull=true
+```
+
+### GREEN Evidence
+
+```text
+go test ./app/wechat ./server/model ./server/migrations -count=1
+ok github.com/anbanai/anban-creator/app/wechat
+ok github.com/anbanai/anban-creator/server/model
+ok github.com/anbanai/anban-creator/server/migrations
+
+git diff --check
+```
+
+### Self-Review And Limitation
+
+- The focused API/model/migration suite passes after the correct types and
+  constraints are restored.
+- There is no live MySQL fixture or container in this task, so the MySQL DDL
+  was not executed. The migration is instead checked with deterministic DDL
+  parsing plus SQLite-generated GORM schema inspection; this report makes no
+  claim of live MySQL execution.
