@@ -169,11 +169,12 @@ func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, toke
 		Where("id = ? AND status = ? AND draft_media_id <> ''", id, model.WechatPublicationStatusDrafted).
 		Where("claim_token = '' OR claimed_at IS NULL OR claimed_at < ?", staleBefore).
 		Updates(map[string]any{
-			"status":        model.WechatPublicationStatusPublishSubmitting,
-			"claim_token":   token,
-			"claimed_at":    &now,
-			"next_check_at": nextCheckAt,
-			"last_error":    "",
+			"status":              model.WechatPublicationStatusPublishSubmitting,
+			"claim_token":         token,
+			"claimed_at":          &now,
+			"submit_attempted_at": &now,
+			"next_check_at":       nextCheckAt,
+			"last_error":          "",
 		})
 	return result.RowsAffected == 1, result.Error
 }

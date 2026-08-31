@@ -487,6 +487,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 	if !won {
 		return publication, ErrWechatPublicationConflict
 	}
+	publication.SubmitAttemptedAt = &now
 	response, submitErr := api.SubmitFreePublish(ctx, appwechat.FreePublishSubmitRequest{MediaID: publication.DraftMediaID})
 	publication.Status = model.WechatPublicationStatusPublishSubmitting
 	if submitErr != nil {
@@ -878,7 +879,7 @@ func (s *WechatPublicationService) matchPublished(ctx context.Context, publicati
 
 func reconciledWechatPublicationSource(publication *model.WechatPublication) string {
 	if publication.Source == model.WechatPublicationSourceAnbanAPI &&
-		(publication.Status == model.WechatPublicationStatusPublishSubmitting || publication.PublishID != "" || publication.MsgDataID != "" || publication.LastError != "") {
+		(publication.SubmitAttemptedAt != nil || publication.PublishID != "" || publication.MsgDataID != "") {
 		return model.WechatPublicationSourceAnbanAPI
 	}
 	return model.WechatPublicationSourceWechatConsole

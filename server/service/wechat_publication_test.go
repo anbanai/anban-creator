@@ -151,6 +151,7 @@ type failingWechatPublicationRepository struct {
 	updateErr        error
 	updateClaimedErr error
 	findArticleErr   error
+	claimPublishErr  error
 }
 
 func (r failingWechatPublicationRepository) Update(ctx context.Context, publication *model.WechatPublication) error {
@@ -172,6 +173,13 @@ func (r failingWechatPublicationRepository) FindByArticleID(ctx context.Context,
 		return nil, r.findArticleErr
 	}
 	return r.WechatPublicationRepository.FindByArticleID(ctx, projectID, articleID)
+}
+
+func (r failingWechatPublicationRepository) ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error) {
+	if r.claimPublishErr != nil {
+		return false, r.claimPublishErr
+	}
+	return r.WechatPublicationRepository.ClaimPublish(ctx, id, token, now, staleBefore, nextCheckAt)
 }
 
 func (f *publicationFixture) overridePublications(publications repository.WechatPublicationRepository) {
@@ -426,6 +434,53 @@ func TestPublishTransportAmbiguityPersistsPendingBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestAmbiguousTransportSubmitReconcilesAsAnbanAPI(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	f.api.submitError = errors.New("connection reset after submit")
+
+	if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationPending) {
+		t.Fatalf("Publish err=%v, want pending", err)
+	}
+	stored, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || stored.SubmitAttemptedAt == nil {
+		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "selected-after-transport-loss", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+			Title: p.DraftTitle, Digest: "different", ThumbMediaID: "different", Content: "<p>different</p>", URL: "https://mp.weixin.qq.com/s/selected-after-transport-loss",
+		}}},
+	}}}
+	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := f.svc.Select(context.Background(), f.userID, f.taskID, "selected-after-transport-loss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Source != model.WechatPublicationSourceAnbanAPI || selected.MsgDataID != "" || selected.MsgID != "" {
+		t.Fatalf("selected=%#v", selected)
+	}
+}
+
+func TestPublishDoesNotSubmitWhenAttemptEvidenceCannotPersist(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f.seedDrafted(t)
+	persistErr := errors.New("persist submit attempt failed")
+	f.overridePublications(failingWechatPublicationRepository{
+		WechatPublicationRepository: f.repo.WechatPublications(),
+		claimPublishErr:             persistErr,
+	})
+
+	if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, persistErr) {
+		t.Fatalf("Publish err=%v", err)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("submit calls=%d, want 0", f.api.submitCalls)
+	}
+}
+
 func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) {
 	persistErr := errors.New("publication persistence failed")
 	t.Run("ambiguous submit", func(t *testing.T) {
@@ -511,6 +566,33 @@ func TestPublishPreflightPersistsPendingWhenDraftDisappeared(t *testing.T) {
 	}
 	if got.Status != model.WechatPublicationStatusPublishSubmitting || got.NextCheckAt == nil || f.api.submitCalls != 0 {
 		t.Fatalf("missing-draft publication=%#v submitCalls=%d", got, f.api.submitCalls)
+	}
+}
+
+func TestMissingDraftPreflightReconcilesAsWechatConsole(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
+
+	if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationPending) {
+		t.Fatalf("Publish err=%v, want pending", err)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("submit calls=%d, want 0", f.api.submitCalls)
+	}
+
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "console-after-missing-draft", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
+			Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/console-after-missing-draft",
+		}}},
+	}}}
+	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || got.Status != model.WechatPublicationStatusPublished || got.Source != model.WechatPublicationSourceWechatConsole {
+		t.Fatalf("reconciled=%#v err=%v", got, err)
 	}
 }
 

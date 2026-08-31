@@ -295,3 +295,80 @@ go build -o /tmp/anban-creator-server-task2-fix2 ./server
   asserts both the early and late lease boundaries.
 - No live MySQL integration environment was available; MySQL continues to use
   `CURRENT_TIMESTAMP(6)`. Studio and scheduler scope remain in Tasks 5 and 6.
+
+## Fix Round 3
+
+### Findings Addressed
+
+- Reconciliation source now depends on durable evidence that
+  `freepublish/submit` was attempted: `submit_attempted_at`, `publish_id`, or
+  `msg_data_id`. Lifecycle status and `last_error` are no longer treated as
+  submit evidence.
+- `ClaimPublish` persists `submit_attempted_at` atomically with the claim before
+  the provider call. A failed claim write returns without calling
+  `SubmitFreePublish`.
+- Missing-draft preflight remains a CAS transition to `publish_submitting`, but
+  does not set submit evidence. A later exact reconciliation is therefore
+  attributed to `wechat_console`.
+- Ambiguous transport outcomes without provider IDs retain durable attempt
+  evidence and reconcile as `anban_api`. Existing `msg_data_id` and composite
+  `msg_id` behavior remains unchanged.
+
+### RED Evidence
+
+```text
+go test ./server/service ./server/model ./server/migrations \
+  -run 'Test(MissingDraftPreflightReconcilesAsWechatConsole|AmbiguousTransportSubmitReconcilesAsAnbanAPI|PublishDoesNotSubmitWhenAttemptEvidenceCannotPersist|WechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract|WechatPublicationMigrationMatchesCanonicalColumnAndIndexContract|WechatPublicationModelMatchesCanonicalNullabilityAndDefaults)$' \
+  -count=1
+
+server/service/wechat_publication_test.go:446:26:
+stored.SubmitAttemptedAt undefined
+
+WechatPublication missing SubmitAttemptedAt
+migration has 30 columns, want 31
+model column submit_attempted_at = migrations.modelColumn{notNull:false,
+defaultValid:false, defaultValue:""}, want notNull=false default valid=false
+value=""
+
+TestMissingDraftPreflightReconcilesAsWechatConsole
+Source="anban_api", want "wechat_console"
+```
+
+### GREEN Evidence
+
+```text
+go test ./server/service ./server/model ./server/migrations \
+  -run 'Test(MissingDraftPreflightReconcilesAsWechatConsole|AmbiguousTransportSubmitReconcilesAsAnbanAPI|PublishDoesNotSubmitWhenAttemptEvidenceCannotPersist|AmbiguousAPIPublishSelectionPreservesResponseIdentity|WechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract|WechatPublicationMigrationMatchesCanonicalColumnAndIndexContract|WechatPublicationModelMatchesCanonicalNullabilityAndDefaults)$' \
+  -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/model
+ok github.com/anbanai/anban-creator/server/migrations
+
+go test ./server/service ./server/repository \
+  -run 'Test(PublishUsesSingleCASWinnerAndKeepsStringIdentifiers|PublishResponseLossSchedulesReconciliationWithoutResubmitting|PublishTransportAmbiguityPersistsPendingBeforeReturning|PublishPreflightFindsPublishedArticleAcrossPagesBeforeSubmit|PublishPreflightPersistsPendingWhenDraftDisappeared|PublishPreflightCandidateDoesNotRegressConcurrentBinding|PublishPreflightMissingDraftDoesNotRegressConcurrentBinding|PublishUnsupportedAndMissingDraftNeverBlindSubmit|PollRecoversStalePublishSubmittingWithoutResubmit|WechatPreflightTransitionsRequireExpectedStatusAndVersion)$' \
+  -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/repository
+
+go test ./server/service ./server/repository ./server/model ./server/migrations -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/repository
+ok github.com/anbanai/anban-creator/server/model
+ok github.com/anbanai/anban-creator/server/migrations
+
+go test ./...
+# all packages passed
+
+go build -o /tmp/anban-creator-server-task2-fix3 ./server
+# exit 0
+```
+
+### Self-Review And Scope
+
+- The attempt timestamp is intentionally nullable and unindexed. It is durable
+  causal evidence used while reconciling a known publication, not a query key.
+- The provider call remains strictly after the successful atomic claim write;
+  missing-draft and lost-CAS paths never acquire attempt evidence.
+- No live MySQL integration environment was available. The canonical MySQL
+  migration contract and GORM/SQLite model behavior are covered; Studio and
+  scheduler scope remain in Tasks 5 and 6.

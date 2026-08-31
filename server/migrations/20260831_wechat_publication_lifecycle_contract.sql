@@ -42,6 +42,7 @@ CREATE TABLE `wechat_publications` (
   `candidates` json NULL,
   `claim_token` char(36) NOT NULL DEFAULT '',
   `claimed_at` datetime(3) NULL,
+  `submit_attempted_at` datetime(3) NULL,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`id`),
