@@ -19,7 +19,6 @@ import (
 	wechatcache "github.com/silenceper/wechat/v2/cache"
 	"github.com/silenceper/wechat/v2/officialaccount"
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
-	"github.com/silenceper/wechat/v2/officialaccount/datacube"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/freepublish"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
@@ -159,15 +158,6 @@ type ListPublishedResult struct {
 	Items      []PublishedItem `json:"items"`
 }
 
-// ArticleTotalItem is the official cumulative metric series for one published
-// article returned by WeChat DataCube.
-type ArticleTotalItem struct {
-	RefDate string                         `json:"ref_date"`
-	MsgID   string                         `json:"msgid"`
-	Title   string                         `json:"title"`
-	Details []datacube.ArticleTotalDetails `json:"details"`
-}
-
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	oa := s.getOfficialAccount()
@@ -250,30 +240,6 @@ func mapPublishedItems(items []freepublish.ArticleListItem) []PublishedItem {
 		}
 	}
 	return result
-}
-
-// GetArticleTotal returns cumulative official-account article metrics for the
-// requested publication date. WeChat requires beginDate and endDate in
-// YYYY-MM-DD format and limits the available historical window.
-func (s *Service) GetArticleTotal(beginDate, endDate string) ([]ArticleTotalItem, error) {
-	cube := s.getOfficialAccount().GetDataCube()
-	result, err := cube.GetArticleTotal(beginDate, endDate)
-	if err != nil {
-		if wErr := ParseWechatError(err); wErr != nil {
-			return nil, wErr
-		}
-		return nil, fmt.Errorf("get article total: %w", err)
-	}
-	items := make([]ArticleTotalItem, 0, len(result.List))
-	for _, item := range result.List {
-		items = append(items, ArticleTotalItem{
-			RefDate: item.RefDate,
-			MsgID:   item.MsgID,
-			Title:   item.Title,
-			Details: item.Details,
-		})
-	}
-	return items, nil
 }
 
 // UploadMaterialFromBytes 从字节数据上传素材

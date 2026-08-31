@@ -2,40 +2,47 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
 	"time"
 
+	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-
-	"github.com/anbanai/anban-creator/server/model"
-	"github.com/anbanai/anban-creator/server/platform"
-	"github.com/anbanai/anban-creator/server/repository"
 )
 
-type fakeWechatAnalyticsPlatform struct {
-	article      *platform.WechatPublishedArticle
-	totals       []platform.WechatArticleTotal
-	err          error
-	resolveCalls int
-	totalCalls   int
+type fakeWechatDetailPlatform struct {
+	response *appwechat.ArticleTotalDetailResponse
+	err      error
+	calls    int
+	dates    []string
 }
 
-func (f *fakeWechatAnalyticsPlatform) ResolvePublishedArticle(context.Context, *model.Project, string) (*platform.WechatPublishedArticle, error) {
-	f.resolveCalls++
-	return f.article, f.err
+func (f *fakeWechatDetailPlatform) FetchArticleTotalDetail(_ context.Context, _ *model.Project, publicationDate string) (*appwechat.ArticleTotalDetailResponse, error) {
+	f.calls++
+	f.dates = append(f.dates, publicationDate)
+	return f.response, f.err
 }
 
-func (f *fakeWechatAnalyticsPlatform) FetchArticleTotals(context.Context, *model.Project, string) ([]platform.WechatArticleTotal, error) {
-	f.totalCalls++
-	return f.totals, f.err
+type wechatTrackingFixture struct {
+	svc         *WechatTrackingService
+	repo        repository.Repository
+	provider    *fakeWechatDetailPlatform
+	now         time.Time
+	userID      string
+	projectID   string
+	taskID      string
+	publication *model.WechatPublication
+	tracking    *model.WechatArticleTracking
 }
 
-func setupWechatTrackingServiceTest(t *testing.T) (*WechatTrackingService, repository.Repository, *fakeWechatAnalyticsPlatform) {
+func newWechatTrackingFixture(t *testing.T, source, msgDataID, msgID, articleURL string, publishedAt time.Time) *wechatTrackingFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -51,97 +58,6 @@ func setupWechatTrackingServiceTest(t *testing.T) (*WechatTrackingService, repos
 		t.Fatal(err)
 	}
 	repo := repository.New(db)
-	provider := &fakeWechatAnalyticsPlatform{}
-	logger := zerolog.New(io.Discard)
-	return NewWechatTrackingService(repo, provider, nil, &logger), repo, provider
-}
-
-func TestWechatTrackingService_BindCapturesFirstSnapshotImmediately(t *testing.T) {
-	svc, repo, provider := setupWechatTrackingServiceTest(t)
-	userID, taskID := createWechatTrackingFixtures(t, repo)
-	now := time.Now()
-	provider.article = &platform.WechatPublishedArticle{
-		ArticleID: "article-1", ArticleURL: "https://mp.weixin.qq.com/s/article-1", ArticleTitle: "首次采集", PublishedAt: now,
-	}
-	provider.totals = []platform.WechatArticleTotal{{
-		MsgID: "article-1", Title: "首次采集",
-		Details: []platform.WechatArticleMetric{{StatDate: now.In(wechatAnalyticsLocation).Format("2006-01-02"), IntPageReadCount: 88, ShareCount: 6}},
-	}}
-
-	if err := svc.BindTask(context.Background(), userID, taskID, "https://mp.weixin.qq.com/s/article-1"); err != nil {
-		t.Fatal(err)
-	}
-	if provider.resolveCalls != 1 || provider.totalCalls != 1 {
-		t.Fatalf("official calls = resolve:%d totals:%d, want 1 each", provider.resolveCalls, provider.totalCalls)
-	}
-	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if analytics.Latest == nil || analytics.Latest.IntPageReadCount != 88 || analytics.Latest.ShareCount != 6 {
-		t.Fatalf("latest metrics = %+v", analytics.Latest)
-	}
-	if analytics.Tracking == nil || analytics.Tracking.RunCount != 1 || analytics.Tracking.LastRunAt == nil {
-		t.Fatalf("tracking = %+v", analytics.Tracking)
-	}
-}
-
-func TestWechatTrackingService_BindSucceedsWhenDelayedEnqueueFails(t *testing.T) {
-	svc, repo, provider := setupWechatTrackingServiceTest(t)
-	userID, taskID := createWechatTrackingFixtures(t, repo)
-	now := time.Now()
-	provider.article = &platform.WechatPublishedArticle{
-		ArticleID: "article-1", ArticleURL: "https://mp.weixin.qq.com/s/article-1", ArticleTitle: "首次采集", PublishedAt: now,
-	}
-	provider.totals = []platform.WechatArticleTotal{{
-		MsgID: "article-1", Title: "首次采集",
-		Details: []platform.WechatArticleMetric{{StatDate: now.In(wechatAnalyticsLocation).Format("2006-01-02"), IntPageReadCount: 88}},
-	}}
-	enqueuer := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
-	svc.enqueuer = enqueuer
-
-	if err := svc.BindTask(context.Background(), userID, taskID, "https://mp.weixin.qq.com/s/article-1"); err != nil {
-		t.Fatal(err)
-	}
-	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if analytics.Latest == nil || analytics.Latest.IntPageReadCount != 88 {
-		t.Fatalf("latest metrics = %+v", analytics.Latest)
-	}
-	if analytics.Tracking == nil || analytics.Tracking.NextRunAt == nil {
-		t.Fatalf("tracking = %+v", analytics.Tracking)
-	}
-}
-
-func TestWechatTrackingService_BindImmediatelyRecordsWaitingWhenOfficialDataIsNotReady(t *testing.T) {
-	svc, repo, provider := setupWechatTrackingServiceTest(t)
-	userID, taskID := createWechatTrackingFixtures(t, repo)
-	provider.article = &platform.WechatPublishedArticle{
-		ArticleID: "article-1", ArticleURL: "https://mp.weixin.qq.com/s/article-1", ArticleTitle: "等待次日数据", PublishedAt: time.Now(),
-	}
-
-	if err := svc.BindTask(context.Background(), userID, taskID, "https://mp.weixin.qq.com/s/article-1"); err != nil {
-		t.Fatal(err)
-	}
-	if provider.totalCalls != 1 {
-		t.Fatalf("official totals calls = %d, want 1 synchronous call", provider.totalCalls)
-	}
-	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if analytics.Latest != nil {
-		t.Fatalf("latest metrics = %+v, want nil before official data is ready", analytics.Latest)
-	}
-	if analytics.Tracking == nil || analytics.Tracking.Status != model.WechatTrackingStatusWaitingData || analytics.Tracking.LastRunAt == nil {
-		t.Fatalf("tracking = %+v", analytics.Tracking)
-	}
-}
-
-func createWechatTrackingFixtures(t *testing.T, repo repository.Repository) (string, string) {
-	t.Helper()
 	ctx := context.Background()
 	userID, projectID, taskID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: uuid.NewString()[:12]}); err != nil {
@@ -153,92 +69,234 @@ func createWechatTrackingFixtures(t *testing.T, repo repository.Repository) (str
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
-	return userID, taskID
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: taskID, UserID: userID, ProjectID: projectID,
+		Source: source, Status: model.WechatPublicationStatusPublished, MsgDataID: msgDataID, MsgID: msgID,
+		ArticleID: "article-1", ArticleURL: articleURL, ArticleIndex: 1, PublishedAt: &publishedAt,
+	}
+	if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	now := publishedAt.Add(12 * time.Hour)
+	next := now
+	tracking := &model.WechatArticleTracking{
+		ID: uuid.NewString(), TaskID: taskID, UserID: userID, ProjectID: projectID, PublicationID: publication.ID,
+		Source: source, Status: model.WechatTrackingStatusWaitingData, ArticleID: publication.ArticleID,
+		MsgDataID: msgDataID, MsgID: msgID, ArticleURL: articleURL, PublishedAt: publishedAt,
+		ExpiresAt: publishedAt.Add(model.WechatTrackingWindow), NextFetchAt: &next,
+	}
+	if err := repo.WechatTrackings().Create(ctx, tracking); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeWechatDetailPlatform{}
+	logger := zerolog.New(io.Discard)
+	svc := NewWechatTrackingService(repo, provider, nil, &logger)
+	svc.now = func() time.Time { return now }
+	return &wechatTrackingFixture{svc: svc, repo: repo, provider: provider, now: now, userID: userID, projectID: projectID, taskID: taskID, publication: publication, tracking: tracking}
 }
 
-func TestWechatTrackingService_RebindReplacesPreviousArticleSnapshots(t *testing.T) {
-	svc, repo, provider := setupWechatTrackingServiceTest(t)
-	userID, taskID := createWechatTrackingFixtures(t, repo)
-	ctx := context.Background()
-	now := time.Now()
-
-	provider.article = &platform.WechatPublishedArticle{
-		ArticleID: "article-a", ArticleURL: "https://mp.weixin.qq.com/s/article-a", ArticleTitle: "Article A", PublishedAt: now,
-	}
-	provider.totals = []platform.WechatArticleTotal{{
-		MsgID: "article-a", Title: "Article A",
-		Details: []platform.WechatArticleMetric{{StatDate: now.Format("2006-01-02"), IntPageReadCount: 10}},
+func TestWechatTrackingCaptureMatchesExactAPICompositeMsgIDAndMapsAllMetrics(t *testing.T) {
+	published := time.Date(2026, 8, 1, 9, 30, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg-data-1", "msg-data-1_1", "https://mp.weixin.qq.com/s/api", published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{
+		{MsgID: "wrong_1", ContentURL: f.tracking.ArticleURL, Title: "same title", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-01", ReadUser: 999}}},
+		{MsgID: "msg-data-1_1", ContentURL: "https://mp.weixin.qq.com/s/other", Title: "other title", DetailList: []appwechat.ArticleTotalDetailMetric{
+			{StatDate: "2026-08-01", ReadUser: 11, ShareUser: 12, CollectionUser: 13, LikeUser: 14, ZaikanUser: 15, CommentCount: 16, ReadFinishRate: 0.625, ReadAvgActiveTime: 37.25, ReadSubscribeUser: 17},
+			{StatDate: "2026-08-02", ReadUser: 21, ShareUser: 22, CollectionUser: 23, LikeUser: 24, ZaikanUser: 25, CommentCount: 26, ReadFinishRate: 0.75, ReadAvgActiveTime: 48.5, ReadSubscribeUser: 27},
+		}},
 	}}
-	if err := svc.BindTask(ctx, userID, taskID, "https://mp.weixin.qq.com/s/article-a"); err != nil {
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
 		t.Fatal(err)
 	}
-
-	provider.article = &platform.WechatPublishedArticle{
-		ArticleID: "article-b", ArticleURL: "https://mp.weixin.qq.com/s/article-b", ArticleTitle: "Article B", PublishedAt: now,
+	if f.provider.calls != 1 || len(f.provider.dates) != 1 || f.provider.dates[0] != "2026-08-01" {
+		t.Fatalf("detail requests = calls:%d dates:%v", f.provider.calls, f.provider.dates)
 	}
-	provider.totals = []platform.WechatArticleTotal{{
-		MsgID: "article-b", Title: "Article B",
-		Details: []platform.WechatArticleMetric{{StatDate: now.Format("2006-01-02"), IntPageReadCount: 20}},
-	}}
-	if err := svc.BindTask(ctx, userID, taskID, "https://mp.weixin.qq.com/s/article-b"); err != nil {
-		t.Fatal(err)
-	}
-
-	analytics, err := svc.GetTaskAnalytics(ctx, userID, taskID)
+	snapshots, err := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if analytics.Tracking == nil || analytics.Tracking.ArticleTitle != "Article B" {
-		t.Fatalf("tracking = %+v", analytics.Tracking)
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshots = %d, want every detail date", len(snapshots))
 	}
-	if analytics.Latest == nil || analytics.Latest.IntPageReadCount != 20 {
-		t.Fatalf("latest = %+v", analytics.Latest)
+	first, second := snapshots[0], snapshots[1]
+	if first.StatDate != "2026-08-01" || first.ReadUsers != 11 || first.ShareUsers != 12 || first.CollectionUsers != 13 || first.LikeUsers != 14 || first.ZaikanUsers != 15 || first.CommentCount != 16 || first.ReadFinishRate != 0.625 || first.AverageReadActiveTime != 37.25 || first.ReadToSubscribeUsers != 17 {
+		t.Fatalf("first metric mapping = %#v", first)
 	}
-	if len(analytics.Series) != 1 || analytics.Series[0].IntPageReadCount != 20 {
-		t.Fatalf("series = %+v", analytics.Series)
+	if second.StatDate != "2026-08-02" || second.ReadUsers != 21 || !json.Valid(second.RawResponse) || len(second.RawResponse) == 0 {
+		t.Fatalf("second metric/raw response = %#v", second)
 	}
-}
-
-func TestWechatTrackingService_BindRejectsForeignArticleURL(t *testing.T) {
-	svc, repo, _ := setupWechatTrackingServiceTest(t)
-	userID, taskID := createWechatTrackingFixtures(t, repo)
-	if err := svc.BindTask(context.Background(), userID, taskID, "https://example.com/s/article"); err == nil {
-		t.Fatal("expected invalid URL error")
+	updated, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	if updated.Status != model.WechatTrackingStatusTracking || updated.LastFetchAt == nil || updated.NextFetchAt == nil || updated.RunCount != 1 {
+		t.Fatalf("tracking after capture = %#v", updated)
 	}
 }
 
-func TestWechatTrackingService_BindDistinguishesNotFoundFromProviderFailure(t *testing.T) {
+func TestWechatTrackingCaptureMatchesManualPublicationByExactContentURLAndPersistsMsgID(t *testing.T) {
+	published := time.Date(2026, 8, 4, 10, 0, 0, 0, wechatAnalyticsLocation)
+	articleURL := "https://mp.weixin.qq.com/s/manual?mid=1&idx=1"
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceWechatConsole, "", "", articleURL, published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{
+		{MsgID: "wrong_1", ContentURL: articleURL + "&share=1", Title: "same title", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-04", ReadUser: 999}}},
+		{MsgID: "manual-msg_1", ContentURL: articleURL, Title: "different title", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-04", ReadUser: 42}}},
+	}}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	publication, _ := f.repo.WechatPublications().FindByID(context.Background(), f.publication.ID)
+	if tracking.MsgID != "manual-msg_1" || publication.MsgID != "manual-msg_1" {
+		t.Fatalf("persisted msgids = tracking:%q publication:%q", tracking.MsgID, publication.MsgID)
+	}
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	if len(snapshots) != 1 || snapshots[0].ReadUsers != 42 {
+		t.Fatalf("manual snapshots = %#v", snapshots)
+	}
+}
+
+func TestWechatTrackingCaptureNeverFallsBackToTitleOrWrongIdentity(t *testing.T) {
 	tests := []struct {
-		name         string
-		providerErr  error
-		wantNotFound bool
+		name       string
+		source     string
+		msgDataID  string
+		msgID      string
+		articleURL string
+		item       appwechat.ArticleTotalDetailItem
 	}{
-		{name: "article not found", providerErr: platform.ErrWechatPublishedArticleNotFound, wantNotFound: true},
-		{name: "upstream unavailable", providerErr: errors.New("upstream timeout")},
+		{name: "api URL and title cannot replace msgid", source: model.WechatPublicationSourceAnbanAPI, msgDataID: "wanted", msgID: "wanted_1", articleURL: "https://mp.weixin.qq.com/s/api", item: appwechat.ArticleTotalDetailItem{MsgID: "other_1", ContentURL: "https://mp.weixin.qq.com/s/api", Title: "same title"}},
+		{name: "manual title cannot replace URL", source: model.WechatPublicationSourceWechatConsole, articleURL: "https://mp.weixin.qq.com/s/manual", item: appwechat.ArticleTotalDetailItem{MsgID: "other_1", ContentURL: "https://mp.weixin.qq.com/s/other", Title: "same title"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc, repo, provider := setupWechatTrackingServiceTest(t)
-			userID, taskID := createWechatTrackingFixtures(t, repo)
-			provider.err = tt.providerErr
-			err := svc.BindTask(context.Background(), userID, taskID, "https://mp.weixin.qq.com/s/article")
-			if err == nil {
-				t.Fatal("expected bind error")
+			published := time.Date(2026, 8, 5, 10, 0, 0, 0, wechatAnalyticsLocation)
+			f := newWechatTrackingFixture(t, tt.source, tt.msgDataID, tt.msgID, tt.articleURL, published)
+			tt.item.DetailList = []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-05", ReadUser: 99}}
+			f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{tt.item}}
+			if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+				t.Fatal(err)
 			}
-			if got := errors.Is(err, ErrWechatArticleNotFound); got != tt.wantNotFound {
-				t.Fatalf("errors.Is(ErrWechatArticleNotFound) = %v, want %v: %v", got, tt.wantNotFound, err)
+			snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+			tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+			if len(snapshots) != 0 || tracking.Status != model.WechatTrackingStatusWaitingData {
+				t.Fatalf("fallback matched: tracking=%#v snapshots=%#v", tracking, snapshots)
 			}
 		})
 	}
 }
 
-func TestWechatDateInWindowUsesWechatCalendarDate(t *testing.T) {
-	// 16:30 UTC is already the next calendar day for WeChat's official APIs.
-	now := time.Date(2026, 8, 13, 16, 30, 0, 0, time.UTC)
-	if !wechatDateInWindow("2026-08-14", now) {
-		t.Fatal("expected publication date to be current in Asia/Shanghai")
+func TestWechatTrackingDelayedAndEmptyResponseRemainWaiting(t *testing.T) {
+	published := time.Date(2026, 8, 6, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{IsDelay: true, List: []appwechat.ArticleTotalDetailItem{}}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
 	}
-	if wechatDateInWindow("2026-08-11", now) {
-		t.Fatal("expected the three-day official data window to be closed")
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	if tracking.Status != model.WechatTrackingStatusWaitingData || tracking.NextFetchAt == nil || tracking.LastFetchAt == nil || tracking.LastError != "" {
+		t.Fatalf("delayed tracking = %#v", tracking)
+	}
+}
+
+func TestWechatTrackingTransientErrorRetriesBut48001BecomesUnsupported(t *testing.T) {
+	published := time.Date(2026, 8, 7, 8, 0, 0, 0, wechatAnalyticsLocation)
+	t.Run("transient", func(t *testing.T) {
+		f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+		f.provider.err = errors.New("timeout")
+		if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+			t.Fatal(err)
+		}
+		tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+		if tracking.Status != model.WechatTrackingStatusError || tracking.NextFetchAt == nil || tracking.LastError == "" {
+			t.Fatalf("transient tracking = %#v", tracking)
+		}
+	})
+	t.Run("unsupported", func(t *testing.T) {
+		f := newWechatTrackingFixture(t, model.WechatPublicationSourceWechatConsole, "", "", "https://mp.weixin.qq.com/s/manual", published)
+		f.provider.err = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
+		if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+			t.Fatal(err)
+		}
+		tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+		if tracking.Status != model.WechatTrackingStatusUnsupported || tracking.NextFetchAt != nil || tracking.MsgID != "" || f.provider.calls != 1 {
+			t.Fatalf("unsupported tracking = %#v calls=%d", tracking, f.provider.calls)
+		}
+	})
+}
+
+func TestWechatTrackingFetchesAtMostOnceDailyAndExpiresAtThirtyDayBoundary(t *testing.T) {
+	published := time.Date(2026, 8, 1, 10, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	current := time.Date(2026, 8, 2, 9, 0, 0, 0, wechatAnalyticsLocation)
+	f.svc.now = func() time.Time { return current }
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(2 * time.Hour)
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.calls != 1 {
+		t.Fatalf("same-day provider calls = %d, want 1", f.provider.calls)
+	}
+	current = published.Add(model.WechatTrackingWindow)
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	if f.provider.calls != 1 || tracking.Status != model.WechatTrackingStatusExpired || tracking.NextFetchAt != nil || tracking.ExpiredAt == nil {
+		t.Fatalf("boundary tracking = %#v calls=%d", tracking, f.provider.calls)
+	}
+}
+
+func TestWechatTrackingUpsertsEveryReturnedDateAndIsIdempotent(t *testing.T) {
+	published := time.Date(2026, 8, 10, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	current := published.Add(12 * time.Hour)
+	f.svc.now = func() time.Time { return current }
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{
+		{StatDate: "2026-08-10", ReadUser: 10}, {StatDate: "2026-08-11", ReadUser: 20},
+	}}}}
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	firstID := first[0].ID
+
+	current = current.Add(24 * time.Hour)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{
+		{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-10", ReadUser: 15}}},
+		{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-12", ReadUser: 30}}},
+	}}
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	if len(snapshots) != 3 || snapshots[0].ID != firstID || snapshots[0].ReadUsers != 15 || snapshots[2].ReadUsers != 30 {
+		t.Fatalf("upserted snapshots = %#v", snapshots)
+	}
+}
+
+func TestWechatTrackingAnalyticsReadReturnsNewMetricsAndTrendForOwnerOnly(t *testing.T) {
+	published := time.Date(2026, 8, 12, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{
+		{StatDate: "2026-08-12", ReadUser: 10, ShareUser: 2}, {StatDate: "2026-08-13", ReadUser: 20, ShareUser: 4},
+	}}}}
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	analytics, err := f.svc.GetTaskAnalytics(context.Background(), f.userID, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Tracking == nil || analytics.Metrics == nil || analytics.Metrics.ReadUsers != 20 || len(analytics.Trend) != 2 || analytics.Trend[0].StatDate != "2026-08-12" {
+		t.Fatalf("analytics = %#v", analytics)
+	}
+	if _, err := f.svc.GetTaskAnalytics(context.Background(), uuid.NewString(), f.taskID); err == nil {
+		t.Fatal("non-owner read succeeded")
 	}
 }

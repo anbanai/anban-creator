@@ -205,6 +205,12 @@ func (r *wechatPublicationRepository) Update(ctx context.Context, publication *m
 	})
 }
 
+func (r *wechatPublicationRepository) UpdateMsgID(ctx context.Context, id, msgID string) error {
+	return retryWechatSQLiteBusy(ctx, r.db.Dialector.Name(), func() error {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("id = ?", id).Update("msg_id", msgID).Error
+	})
+}
+
 func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 		Where("id = ? AND status = ? AND draft_media_id <> ''", id, model.WechatPublicationStatusDrafted).

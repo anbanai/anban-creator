@@ -956,7 +956,7 @@ func TestPollSuccessBindsPublicationAndCreatesTracking(t *testing.T) {
 		t.Fatalf("published = %#v", got)
 	}
 	tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
-	if err != nil || tracking.ArticleID != "article-1" || tracking.MsgID != "msg-data-1_1" || tracking.ArticleURL != got.ArticleURL {
+	if err != nil || tracking.PublicationID != got.ID || tracking.Source != model.WechatPublicationSourceAnbanAPI || tracking.ArticleID != "article-1" || tracking.MsgDataID != "msg-data-1" || tracking.MsgID != "msg-data-1_1" || tracking.ArticleURL != got.ArticleURL || !tracking.PublishedAt.Equal(*got.PublishedAt) || !tracking.ExpiresAt.Equal(got.PublishedAt.Add(model.WechatTrackingWindow)) || tracking.NextFetchAt == nil {
 		t.Fatalf("tracking = %#v err=%v", tracking, err)
 	}
 }

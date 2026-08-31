@@ -1,0 +1,72 @@
+-- Clean cutover from deprecated getarticletotal analytics. No legacy rows are
+-- migrated because their identity and captured-date keys cannot satisfy the
+-- exact publication/detail contract.
+
+DROP TABLE IF EXISTS `wechat_metric_snapshots`;
+DROP TABLE IF EXISTS `wechat_article_trackings`;
+
+CREATE TABLE `wechat_article_trackings` (
+  `id` char(36) NOT NULL,
+  `task_id` char(36) NOT NULL,
+  `user_id` char(36) NOT NULL,
+  `project_id` char(36) NOT NULL,
+  `publication_id` char(36) NOT NULL,
+  `source` varchar(32) NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `article_id` varchar(191) NOT NULL DEFAULT '',
+  `msg_data_id` varchar(191) NOT NULL DEFAULT '',
+  `msg_id` varchar(191) NOT NULL DEFAULT '',
+  `article_url` varchar(1000) NOT NULL DEFAULT '',
+  `published_at` datetime(3) NOT NULL,
+  `expires_at` datetime(3) NOT NULL,
+  `last_fetch_at` datetime(3) NULL,
+  `next_fetch_at` datetime(3) NULL,
+  `expired_at` datetime(3) NULL,
+  `run_count` int NOT NULL DEFAULT 0,
+  `failure_count` int NOT NULL DEFAULT 0,
+  `last_error` text NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_wechat_tracking_source` CHECK (`source` IN ('anban_api','wechat_console')),
+  CONSTRAINT `chk_wechat_tracking_status` CHECK (`status` IN ('waiting_data','tracking','expired','unsupported','error')),
+  UNIQUE KEY `idx_wechat_article_trackings_task_id` (`task_id`),
+  UNIQUE KEY `idx_wechat_article_trackings_publication_id` (`publication_id`),
+  KEY `idx_wechat_article_trackings_user_id` (`user_id`),
+  KEY `idx_wechat_article_trackings_project_id` (`project_id`),
+  KEY `idx_wechat_article_trackings_source` (`source`),
+  KEY `idx_wechat_article_trackings_status` (`status`),
+  KEY `idx_wechat_article_trackings_article_id` (`article_id`),
+  KEY `idx_wechat_article_trackings_msg_data_id` (`msg_data_id`),
+  KEY `idx_wechat_article_trackings_msg_id` (`msg_id`),
+  KEY `idx_wechat_article_trackings_published_at` (`published_at`),
+  KEY `idx_wechat_article_trackings_expires_at` (`expires_at`),
+  KEY `idx_wechat_article_trackings_last_fetch_at` (`last_fetch_at`),
+  KEY `idx_wechat_article_trackings_next_fetch_at` (`next_fetch_at`),
+  KEY `idx_wechat_article_trackings_expired_at` (`expired_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `wechat_metric_snapshots` (
+  `id` char(36) NOT NULL,
+  `tracking_id` char(36) NOT NULL,
+  `task_id` char(36) NOT NULL,
+  `stat_date` char(10) NOT NULL,
+  `captured_at` datetime(3) NOT NULL,
+  `read_users` int NOT NULL DEFAULT 0,
+  `share_users` int NOT NULL DEFAULT 0,
+  `collection_users` int NOT NULL DEFAULT 0,
+  `like_users` int NOT NULL DEFAULT 0,
+  `zaikan_users` int NOT NULL DEFAULT 0,
+  `comment_count` int NOT NULL DEFAULT 0,
+  `read_finish_rate` decimal(10,6) NOT NULL DEFAULT 0,
+  `average_read_active_time` decimal(14,3) NOT NULL DEFAULT 0,
+  `read_to_subscribe_users` int NOT NULL DEFAULT 0,
+  `raw_response` json NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_wechat_tracking_stat_date` (`tracking_id`, `stat_date`),
+  KEY `idx_wechat_metric_snapshots_tracking_id` (`tracking_id`),
+  KEY `idx_wechat_metric_snapshots_task_id` (`task_id`),
+  KEY `idx_wechat_metric_snapshots_captured_at` (`captured_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

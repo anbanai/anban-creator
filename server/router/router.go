@@ -320,7 +320,6 @@ func NewRouter(svc *Services) *fiber.App {
 		}
 		if svc.WechatAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/wechat-analytics", svc.WechatAnalyticsHandler.GetTaskAnalytics)
-			apiV1.Post("/tasks/:id/wechat-analytics/bind", svc.WechatAnalyticsHandler.BindTask)
 		}
 		if svc.ChannelsAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/channels-analytics", svc.ChannelsAnalyticsHandler.GetTaskAnalytics)

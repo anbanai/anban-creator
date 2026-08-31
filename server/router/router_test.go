@@ -65,6 +65,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planSvc := service.NewPlanService(repo, &logger)
 		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
+		wechatTrackingSvc := service.NewWechatTrackingService(repo, nil, nil, &logger)
 		channelsTrackingSvc := service.NewChannelsTrackingService(repo, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
@@ -72,6 +73,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		seednoteAnalyticsHandler := handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, &logger)
+		wechatAnalyticsHandler := handler.NewWechatAnalyticsHandler(wechatTrackingSvc, &logger)
 		channelsAnalyticsHandler := handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
@@ -88,6 +90,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			PlanHandler:              planHandler,
 			TaskHandler:              taskHandler,
 			SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
+			WechatAnalyticsHandler:   wechatAnalyticsHandler,
 			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
 		}
@@ -100,6 +103,25 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 	app := NewRouter(svcs)
 	return app, closeFunc
+}
+
+func TestWechatAnalyticsURLBindRouteIsNotRegistered(t *testing.T) {
+	app, cleanup := setupTestApp(t, true)
+	defer cleanup()
+
+	foundReadRoute := false
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if key == "POST /api/v1/tasks/:id/wechat-analytics/bind" {
+			t.Fatalf("legacy WeChat analytics URL bind route is still registered: %s", key)
+		}
+		if key == "GET /api/v1/tasks/:id/wechat-analytics" {
+			foundReadRoute = true
+		}
+	}
+	if !foundReadRoute {
+		t.Fatal("WeChat analytics read route is not registered")
+	}
 }
 
 // TestHealthCheck tests that the health endpoint returns 200 with a valid database.

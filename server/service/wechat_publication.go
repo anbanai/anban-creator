@@ -1049,11 +1049,12 @@ func (s *WechatPublicationService) bindPublished(ctx context.Context, publicatio
 		}
 		now := s.now()
 		next := now
+		expiresAt := article.PublishedAt.Add(model.WechatTrackingWindow)
 		return tx.WechatTrackings().Create(ctx, &model.WechatArticleTracking{
 			ID: uuid.NewString(), TaskID: publication.TaskID, UserID: publication.UserID, ProjectID: publication.ProjectID,
-			Status: model.WechatTrackingStatusWaitingData, ArticleID: article.ArticleID, MsgID: publication.MsgID,
-			ArticleURL: article.URL, ArticleTitle: coalesceString(article.Title, publication.DraftTitle),
-			PublishedDate: article.PublishedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02"), BoundAt: now, NextRunAt: &next,
+			PublicationID: publication.ID, Source: publication.Source, Status: model.WechatTrackingStatusWaitingData,
+			ArticleID: article.ArticleID, MsgDataID: publication.MsgDataID, MsgID: publication.MsgID, ArticleURL: article.URL,
+			PublishedAt: article.PublishedAt, ExpiresAt: expiresAt, NextFetchAt: &next,
 		})
 	})
 	if errors.Is(err, errWechatPublicationVersionChanged) {
