@@ -254,3 +254,40 @@ git diff --check
   was not executed. The migration is instead checked with deterministic DDL
   parsing plus SQLite-generated GORM schema inspection; this report makes no
   claim of live MySQL execution.
+
+## Fix Round 3
+
+### Review Findings Addressed
+
+- Replaced the dynamic analytics maps with typed nested response structs:
+  `read_user_source` decodes `[]ArticleReadUserSource` with `user_count` and
+  `scene_desc`; `read_jump_position` decodes
+  `[]ArticleReadJumpPosition` with `position` and `rate`.
+- Retained the correct boolean `is_delay`, per-item `content_url`, and composite
+  analytics `MsgID` behavior from Fix Round 2.
+
+### RED Evidence
+
+```text
+go test ./app/wechat -count=1
+FAIL TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers/article_total_detail
+decode WeChat /datacube/getarticletotaldetail response:
+json: cannot unmarshal array into Go struct field
+ArticleTotalDetailMetric.list.detail_list.read_jump_position
+of type wechat.ArticleReadJumpPosition
+```
+
+### GREEN Evidence
+
+```text
+go test ./app/wechat -count=1
+ok github.com/anbanai/anban-creator/app/wechat
+
+git diff --check
+```
+
+### Self-Review
+
+- The official response fixture includes two source records and two jump
+  records; assertions verify every nested field value after real JSON decoding.
+- No `map[string]any` remains in the analytics response contract.

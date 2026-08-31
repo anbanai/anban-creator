@@ -145,28 +145,34 @@ type ArticleTotalDetailItem struct {
 	DetailList  []ArticleTotalDetailMetric `json:"detail_list"`
 }
 
-// ArticleReadUserSources and ArticleReadJumpPosition preserve the structured
-// analytics shapes returned by WeChat, including future source and position
-// keys that are not part of the publication lifecycle contract.
-type ArticleReadUserSources []map[string]any
-type ArticleReadJumpPosition map[string]any
+// ArticleReadUserSource is one source bucket in WeChat article analytics.
+type ArticleReadUserSource struct {
+	UserCount int    `json:"user_count"`
+	SceneDesc string `json:"scene_desc"`
+}
+
+// ArticleReadJumpPosition is one reading-position bucket in WeChat analytics.
+type ArticleReadJumpPosition struct {
+	Position int     `json:"position"`
+	Rate     float64 `json:"rate"`
+}
 
 // ArticleTotalDetailMetric is one official getarticletotaldetail sample.
 type ArticleTotalDetailMetric struct {
-	StatDate          string                  `json:"stat_date"`
-	ReadUser          int                     `json:"read_user"`
-	ReadUserSource    ArticleReadUserSources  `json:"read_user_source"`
-	ShareUser         int                     `json:"share_user"`
-	ZaikanUser        int                     `json:"zaikan_user"`
-	LikeUser          int                     `json:"like_user"`
-	CommentCount      int                     `json:"comment_count"`
-	CollectionUser    int                     `json:"collection_user"`
-	PraiseMoney       int                     `json:"praise_money"`
-	ReadSubscribeUser int                     `json:"read_subscribe_user"`
-	ReadDeliveryRate  float64                 `json:"read_delivery_rate"`
-	ReadFinishRate    float64                 `json:"read_finish_rate"`
-	ReadAvgActiveTime float64                 `json:"read_avg_activetime"`
-	ReadJumpPosition  ArticleReadJumpPosition `json:"read_jump_position"`
+	StatDate          string                    `json:"stat_date"`
+	ReadUser          int                       `json:"read_user"`
+	ReadUserSource    []ArticleReadUserSource   `json:"read_user_source"`
+	ShareUser         int                       `json:"share_user"`
+	ZaikanUser        int                       `json:"zaikan_user"`
+	LikeUser          int                       `json:"like_user"`
+	CommentCount      int                       `json:"comment_count"`
+	CollectionUser    int                       `json:"collection_user"`
+	PraiseMoney       int                       `json:"praise_money"`
+	ReadSubscribeUser int                       `json:"read_subscribe_user"`
+	ReadDeliveryRate  float64                   `json:"read_delivery_rate"`
+	ReadFinishRate    float64                   `json:"read_finish_rate"`
+	ReadAvgActiveTime float64                   `json:"read_avg_activetime"`
+	ReadJumpPosition  []ArticleReadJumpPosition `json:"read_jump_position"`
 }
 
 func (p *OfficialAPI) AddDraft(ctx context.Context, request DraftAddRequest) (*DraftAddResponse, error) {

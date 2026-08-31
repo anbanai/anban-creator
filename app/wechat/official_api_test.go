@@ -72,7 +72,7 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 		},
 		{
 			name: "article total detail", path: "/datacube/getarticletotaldetail", body: `{"begin_date":"2026-08-02","end_date":"2026-08-02"}`,
-			response: `{"is_delay":true,"list":[{"ref_date":"2026-08-02","msgid":"published-msgid_1","content_url":"https://mp.weixin.qq.com/s/published-example","title":"title","publish_type":1,"detail_list":[{"stat_date":"2026-08-02","read_user":12,"read_user_source":[{"source_name":"公众号会话","read_user":3}],"share_user":4,"zaikan_user":5,"like_user":6,"comment_count":7,"collection_user":8,"praise_money":9,"read_subscribe_user":10,"read_delivery_rate":0.11,"read_finish_rate":0.12,"read_avg_activetime":13.5,"read_jump_position":{"first_screen":14,"article_end":2}}]}]}`,
+			response: `{"is_delay":true,"list":[{"ref_date":"2026-08-02","msgid":"published-msgid_1","content_url":"https://mp.weixin.qq.com/s/published-example","title":"title","publish_type":1,"detail_list":[{"stat_date":"2026-08-02","read_user":12,"read_user_source":[{"user_count":3,"scene_desc":"公众号会话"},{"user_count":2,"scene_desc":"朋友圈"}],"share_user":4,"zaikan_user":5,"like_user":6,"comment_count":7,"collection_user":8,"praise_money":9,"read_subscribe_user":10,"read_delivery_rate":0.11,"read_finish_rate":0.12,"read_avg_activetime":13.5,"read_jump_position":[{"position":14,"rate":0.75},{"position":100,"rate":0.25}]}]}]}`,
 			call: func(ctx context.Context, api *OfficialAPI) error {
 				result, err := api.GetArticleTotalDetail(ctx, ArticleTotalDetailRequest{BeginDate: "2026-08-02", EndDate: "2026-08-02"})
 				if err != nil {
@@ -80,7 +80,7 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 				}
 				item := result.List[0]
 				metric := item.DetailList[0]
-				if !result.IsDelay || item.MsgID != "published-msgid_1" || item.ContentURL != "https://mp.weixin.qq.com/s/published-example" || item.PublishType != 1 || metric.ReadUser != 12 || metric.ReadFinishRate != 0.12 || len(metric.ReadUserSource) != 1 || metric.ReadUserSource[0]["source_name"] != "公众号会话" || metric.ReadUserSource[0]["read_user"] != float64(3) || metric.ReadJumpPosition["first_screen"] != float64(14) || metric.ReadJumpPosition["article_end"] != float64(2) {
+				if !result.IsDelay || item.MsgID != "published-msgid_1" || item.ContentURL != "https://mp.weixin.qq.com/s/published-example" || item.PublishType != 1 || metric.ReadUser != 12 || metric.ReadFinishRate != 0.12 || len(metric.ReadUserSource) != 2 || metric.ReadUserSource[0].UserCount != 3 || metric.ReadUserSource[0].SceneDesc != "公众号会话" || metric.ReadUserSource[1].UserCount != 2 || metric.ReadUserSource[1].SceneDesc != "朋友圈" || len(metric.ReadJumpPosition) != 2 || metric.ReadJumpPosition[0].Position != 14 || metric.ReadJumpPosition[0].Rate != 0.75 || metric.ReadJumpPosition[1].Position != 100 || metric.ReadJumpPosition[1].Rate != 0.25 {
 					t.Fatalf("detail contract = %#v", result.List[0])
 				}
 				return nil
