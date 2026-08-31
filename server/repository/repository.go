@@ -292,6 +292,8 @@ type WechatTrackingRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatArticleTracking, error)
 	FindByID(ctx context.Context, id string) (*model.WechatArticleTracking, error)
 	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatArticleTracking, error)
+	TryClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, claimedAt, leaseUntil time.Time, token string) (bool, error)
+	ReleaseDueDispatch(ctx context.Context, id, token string, retryAt time.Time) (bool, error)
 	TryClaimDailyFetch(ctx context.Context, id string, claimedAt, dayStart, nextFetchAt time.Time) (bool, error)
 	Update(ctx context.Context, tracking *model.WechatArticleTracking) error
 }
@@ -309,7 +311,7 @@ type WechatPublicationRepository interface {
 	TransitionToPublishSubmitting(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, lastError string, nextCheckAt *time.Time) (bool, error)
 	UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
 	TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
-	UpdateMsgID(ctx context.Context, id, msgID string) error
+	BindMsgID(ctx context.Context, id, msgID string) (bool, error)
 	Update(ctx context.Context, publication *model.WechatPublication) error
 	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
 	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)

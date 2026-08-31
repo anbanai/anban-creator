@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +24,35 @@ type fakeWechatDetailPlatform struct {
 	err      error
 	calls    int
 	dates    []string
+}
+
+type blockingWechatRecoveryEnqueuer struct {
+	entered chan struct{}
+	release chan struct{}
+	err     error
+	mu      sync.Mutex
+	calls   int
+}
+
+func (e *blockingWechatRecoveryEnqueuer) Enqueue(string, []byte) error {
+	e.mu.Lock()
+	e.calls++
+	e.mu.Unlock()
+	if e.entered != nil {
+		e.entered <- struct{}{}
+	}
+	if e.release != nil {
+		<-e.release
+	}
+	return e.err
+}
+
+func (e *blockingWechatRecoveryEnqueuer) EnqueueIn(string, []byte, time.Duration) error { return nil }
+
+func (e *blockingWechatRecoveryEnqueuer) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.calls
 }
 
 func (f *fakeWechatDetailPlatform) FetchArticleTotalDetail(_ context.Context, _ *model.Project, publicationDate string) (*appwechat.ArticleTotalDetailResponse, error) {
@@ -199,6 +230,26 @@ func TestWechatTrackingDelayedAndEmptyResponseRemainWaiting(t *testing.T) {
 	}
 }
 
+func TestWechatTrackingDelayedResponseCannotMatchOrBindPopulatedData(t *testing.T) {
+	published := time.Date(2026, 8, 6, 8, 0, 0, 0, wechatAnalyticsLocation)
+	articleURL := "https://mp.weixin.qq.com/s/manual-delayed"
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceWechatConsole, "", "", articleURL, published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{IsDelay: true, List: []appwechat.ArticleTotalDetailItem{{
+		MsgID: "manual-delayed_1", ContentURL: articleURL,
+		DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-06", ReadUser: 99}},
+	}}}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	publication, _ := f.repo.WechatPublications().FindByID(context.Background(), f.publication.ID)
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	if tracking.Status != model.WechatTrackingStatusWaitingData || tracking.MsgID != "" || publication.MsgID != "" || len(snapshots) != 0 {
+		t.Fatalf("delayed response mutated identity or metrics: tracking=%#v publication=%#v snapshots=%#v", tracking, publication, snapshots)
+	}
+}
+
 func TestWechatTrackingTransientErrorRetriesBut48001BecomesUnsupported(t *testing.T) {
 	published := time.Date(2026, 8, 7, 8, 0, 0, 0, wechatAnalyticsLocation)
 	t.Run("transient", func(t *testing.T) {
@@ -280,6 +331,145 @@ func TestWechatTrackingUpsertsEveryReturnedDateAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestWechatTrackingIdenticalDuplicateStatDateProducesOneSnapshot(t *testing.T) {
+	published := time.Date(2026, 8, 11, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	metric := appwechat.ArticleTotalDetailMetric{StatDate: "2026-08-11", ReadUser: 10, ShareUser: 2, ReadFinishRate: 0.5}
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{
+		{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{metric}},
+		{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{metric}},
+	}}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	if len(snapshots) != 1 || snapshots[0].ReadUsers != 10 || tracking.Status != model.WechatTrackingStatusTracking {
+		t.Fatalf("identical duplicate result: tracking=%#v snapshots=%#v", tracking, snapshots)
+	}
+}
+
+func TestWechatTrackingConflictingDuplicateStatDateIsOrderIndependentRetryableError(t *testing.T) {
+	metrics := []appwechat.ArticleTotalDetailMetric{
+		{StatDate: "2026-08-11", ReadUser: 10, ShareUser: 2},
+		{StatDate: "2026-08-11", ReadUser: 11, ShareUser: 2},
+	}
+	var wantError string
+	for _, order := range []struct {
+		name    string
+		metrics []appwechat.ArticleTotalDetailMetric
+	}{
+		{name: "AB", metrics: []appwechat.ArticleTotalDetailMetric{metrics[0], metrics[1]}},
+		{name: "BA", metrics: []appwechat.ArticleTotalDetailMetric{metrics[1], metrics[0]}},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			published := time.Date(2026, 8, 11, 8, 0, 0, 0, wechatAnalyticsLocation)
+			f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+			f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{MsgID: "msg_1", DetailList: order.metrics}}}
+
+			if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+				t.Fatal(err)
+			}
+			snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+			tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+			if len(snapshots) != 0 || tracking.Status != model.WechatTrackingStatusError || tracking.NextFetchAt == nil || tracking.LastError == "" {
+				t.Fatalf("conflicting duplicate result: tracking=%#v snapshots=%#v", tracking, snapshots)
+			}
+			if wantError == "" {
+				wantError = tracking.LastError
+			} else if tracking.LastError != wantError {
+				t.Fatalf("order-dependent errors: got %q want %q", tracking.LastError, wantError)
+			}
+		})
+	}
+}
+
+func TestWechatTrackingPersistsExactRawResponseBytesInEverySnapshot(t *testing.T) {
+	published := time.Date(2026, 8, 12, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	raw := []byte(" {\n  \"is_delay\": false, \"unknown\": [1, 2], \"list\": []\n}\n")
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{
+		RawResponse: raw,
+		List: []appwechat.ArticleTotalDetailItem{{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{
+			{StatDate: "2026-08-12", ReadUser: 12}, {StatDate: "2026-08-13", ReadUser: 13},
+		}}},
+	}
+
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshots = %d, want 2", len(snapshots))
+	}
+	for _, snapshot := range snapshots {
+		if !bytes.Equal(snapshot.RawResponse, raw) {
+			t.Fatalf("snapshot raw response = %q, want exact %q", snapshot.RawResponse, raw)
+		}
+	}
+}
+
+func TestWechatTrackingManualMsgIDBindingIsTransactionalCAS(t *testing.T) {
+	published := time.Date(2026, 8, 13, 8, 0, 0, 0, wechatAnalyticsLocation)
+	articleURL := "https://mp.weixin.qq.com/s/manual-cas"
+	tests := []struct {
+		name             string
+		publicationMsgID string
+		missing          bool
+		wantSuccess      bool
+	}{
+		{name: "same publication msgid binds empty tracking", publicationMsgID: "manual-cas_1", wantSuccess: true},
+		{name: "conflicting publication msgid rolls back", publicationMsgID: "other_1"},
+		{name: "missing publication rolls back", missing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newWechatTrackingFixture(t, model.WechatPublicationSourceWechatConsole, "", "", articleURL, published)
+			if tt.missing {
+				f.tracking.PublicationID = uuid.NewString()
+				if err := f.repo.WechatTrackings().Update(context.Background(), f.tracking); err != nil {
+					t.Fatal(err)
+				}
+			} else if tt.publicationMsgID != "" {
+				f.publication.MsgID = tt.publicationMsgID
+				if err := f.repo.WechatPublications().Update(context.Background(), f.publication); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{
+				MsgID: "manual-cas_1", ContentURL: articleURL,
+				DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-13", ReadUser: 13}},
+			}}}
+
+			if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+				t.Fatal(err)
+			}
+			tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+			snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+			if tt.wantSuccess {
+				if tracking.MsgID != "manual-cas_1" || tracking.Status != model.WechatTrackingStatusTracking || len(snapshots) != 1 {
+					t.Fatalf("idempotent CAS result: tracking=%#v snapshots=%#v", tracking, snapshots)
+				}
+				publication, _ := f.repo.WechatPublications().FindByID(context.Background(), f.publication.ID)
+				if publication.MsgID != "manual-cas_1" {
+					t.Fatalf("publication msgid = %q", publication.MsgID)
+				}
+				return
+			}
+			if tracking.MsgID != "" || tracking.Status != model.WechatTrackingStatusError || tracking.LastError == "" || tracking.NextFetchAt == nil || len(snapshots) != 0 {
+				t.Fatalf("rejected CAS result: tracking=%#v snapshots=%#v", tracking, snapshots)
+			}
+			if !tt.missing {
+				publication, _ := f.repo.WechatPublications().FindByID(context.Background(), f.publication.ID)
+				if publication.MsgID != tt.publicationMsgID {
+					t.Fatalf("conflict changed publication msgid to %q", publication.MsgID)
+				}
+			}
+		})
+	}
+}
+
 func TestWechatTrackingAnalyticsReadReturnsNewMetricsAndTrendForOwnerOnly(t *testing.T) {
 	published := time.Date(2026, 8, 12, 8, 0, 0, 0, wechatAnalyticsLocation)
 	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
@@ -298,5 +488,70 @@ func TestWechatTrackingAnalyticsReadReturnsNewMetricsAndTrendForOwnerOnly(t *tes
 	}
 	if _, err := f.svc.GetTaskAnalytics(context.Background(), uuid.NewString(), f.taskID); err == nil {
 		t.Fatal("non-owner read succeeded")
+	}
+}
+
+func TestWechatTrackingRecoverDueCannotRegressConcurrentCapture(t *testing.T) {
+	published := time.Date(2026, 8, 14, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{MsgID: "msg_1", DetailList: []appwechat.ArticleTotalDetailMetric{{StatDate: "2026-08-14", ReadUser: 44}}}}}
+	enqueuer := &blockingWechatRecoveryEnqueuer{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	f.svc.enqueuer = enqueuer
+
+	recoverResult := make(chan error, 1)
+	go func() { recoverResult <- f.svc.RecoverDue(context.Background(), 10) }()
+	<-enqueuer.entered
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(enqueuer.release)
+	if err := <-recoverResult; err != nil {
+		t.Fatal(err)
+	}
+
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	snapshots, _ := f.repo.WechatMetricSnapshots().FindByTaskID(context.Background(), f.taskID)
+	if tracking.Status != model.WechatTrackingStatusTracking || tracking.RunCount != 1 || tracking.LastFetchAt == nil || tracking.RecoveryClaimToken != "" || len(snapshots) != 1 || snapshots[0].ReadUsers != 44 {
+		t.Fatalf("concurrent capture was regressed: tracking=%#v snapshots=%#v", tracking, snapshots)
+	}
+}
+
+func TestWechatTrackingRecoverDueConcurrentCallsEnqueueOnce(t *testing.T) {
+	published := time.Date(2026, 8, 15, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	enqueuer := &blockingWechatRecoveryEnqueuer{}
+	f.svc.enqueuer = enqueuer
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- f.svc.RecoverDue(context.Background(), 10)
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if enqueuer.callCount() != 1 {
+		t.Fatalf("enqueue calls = %d, want 1", enqueuer.callCount())
+	}
+}
+
+func TestWechatTrackingRecoverDueReleasesClaimAfterEnqueueFailure(t *testing.T) {
+	published := time.Date(2026, 8, 16, 8, 0, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg", "msg_1", "https://mp.weixin.qq.com/s/api", published)
+	enqueuer := &blockingWechatRecoveryEnqueuer{err: errors.New("redis unavailable")}
+	f.svc.enqueuer = enqueuer
+	if err := f.svc.RecoverDue(context.Background(), 10); err == nil {
+		t.Fatal("expected enqueue failure")
+	}
+	tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+	if tracking.RecoveryClaimToken != "" || tracking.NextFetchAt == nil || tracking.NextFetchAt.After(f.now) {
+		t.Fatalf("failed enqueue claim was not safely released: %#v", tracking)
 	}
 }

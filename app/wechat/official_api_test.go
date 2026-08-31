@@ -1,6 +1,7 @@
 package wechat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -121,6 +122,23 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestOfficialAPIArticleDetailPreservesExactRawSuccessJSON(t *testing.T) {
+	want := []byte(" {\n  \"is_delay\": false, \"unknown_top\": {\"preserve\": 1}, \"list\": []\n}\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(want)
+	}))
+	defer server.Close()
+	api := NewOfficialAPI(server.Client(), server.URL, func(context.Context) (string, error) { return "token", nil })
+	response, err := api.GetArticleTotalDetail(context.Background(), ArticleTotalDetailRequest{BeginDate: "2026-08-02", EndDate: "2026-08-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(response.RawResponse, want) {
+		t.Fatalf("raw response = %q, want exact %q", response.RawResponse, want)
 	}
 }
 

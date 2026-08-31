@@ -22,6 +22,8 @@ CREATE TABLE `wechat_article_trackings` (
   `last_fetch_at` datetime(3) NULL,
   `next_fetch_at` datetime(3) NULL,
   `expired_at` datetime(3) NULL,
+  `recovery_claim_token` char(36) NOT NULL DEFAULT '',
+  `recovery_claimed_at` datetime(3) NULL,
   `run_count` int NOT NULL DEFAULT 0,
   `failure_count` int NOT NULL DEFAULT 0,
   `last_error` text NOT NULL,
@@ -43,7 +45,9 @@ CREATE TABLE `wechat_article_trackings` (
   KEY `idx_wechat_article_trackings_expires_at` (`expires_at`),
   KEY `idx_wechat_article_trackings_last_fetch_at` (`last_fetch_at`),
   KEY `idx_wechat_article_trackings_next_fetch_at` (`next_fetch_at`),
-  KEY `idx_wechat_article_trackings_expired_at` (`expired_at`)
+  KEY `idx_wechat_article_trackings_expired_at` (`expired_at`),
+  KEY `idx_wechat_article_trackings_recovery_claim_token` (`recovery_claim_token`),
+  KEY `idx_wechat_article_trackings_recovery_claimed_at` (`recovery_claimed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `wechat_metric_snapshots` (
@@ -61,7 +65,7 @@ CREATE TABLE `wechat_metric_snapshots` (
   `read_finish_rate` decimal(10,6) NOT NULL DEFAULT 0,
   `average_read_active_time` decimal(14,3) NOT NULL DEFAULT 0,
   `read_to_subscribe_users` int NOT NULL DEFAULT 0,
-  `raw_response` json NOT NULL,
+  `raw_response` longblob NOT NULL,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`id`),

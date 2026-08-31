@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +29,67 @@ func newWechatTrackingRepositoryTest(t *testing.T) Repository {
 		t.Fatal(err)
 	}
 	return New(db)
+}
+
+func TestWechatTrackingDueDispatchClaimHasOneConcurrentWinnerAndSafeRelease(t *testing.T) {
+	repo := newWechatTrackingRepositoryTest(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	tracking := &model.WechatArticleTracking{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "u", ProjectID: "p", PublicationID: uuid.NewString(),
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatTrackingStatusWaitingData,
+		PublishedAt: now.Add(-time.Hour), ExpiresAt: now.Add(model.WechatTrackingWindow), NextFetchAt: &due,
+	}
+	if err := repo.WechatTrackings().Create(ctx, tracking); err != nil {
+		t.Fatal(err)
+	}
+	leaseUntil := now.Add(15 * time.Minute)
+	tokens := []string{uuid.NewString(), uuid.NewString()}
+	results := make(chan bool, len(tokens))
+	errorsCh := make(chan error, len(tokens))
+	var wg sync.WaitGroup
+	for _, token := range tokens {
+		wg.Add(1)
+		go func(token string) {
+			defer wg.Done()
+			claimed, err := repo.WechatTrackings().TryClaimDueDispatch(ctx, tracking.ID, tracking.UpdatedAt, now, leaseUntil, token)
+			results <- claimed
+			errorsCh <- err
+		}(token)
+	}
+	wg.Wait()
+	close(results)
+	close(errorsCh)
+	winners := 0
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for claimed := range results {
+		if claimed {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("claim winners = %d, want 1", winners)
+	}
+	claimed, err := repo.WechatTrackings().FindByID(ctx, tracking.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.RecoveryClaimToken == "" || claimed.NextFetchAt == nil || !claimed.NextFetchAt.Equal(leaseUntil) {
+		t.Fatalf("claimed tracking = %#v", claimed)
+	}
+	released, err := repo.WechatTrackings().ReleaseDueDispatch(ctx, tracking.ID, claimed.RecoveryClaimToken, now)
+	if err != nil || !released {
+		t.Fatalf("release = %v err=%v", released, err)
+	}
+	after, _ := repo.WechatTrackings().FindByID(ctx, tracking.ID)
+	if after.RecoveryClaimToken != "" || after.NextFetchAt == nil || !after.NextFetchAt.Equal(now) {
+		t.Fatalf("released tracking = %#v", after)
+	}
 }
 
 func TestWechatMetricSnapshotUpsertKeyIsTrackingIDAndStatDate(t *testing.T) {
@@ -104,5 +167,37 @@ func TestWechatTrackingDailyFetchClaimHasOneWinner(t *testing.T) {
 	}
 	if !first || second {
 		t.Fatalf("claims = first:%v second:%v, want one winner", first, second)
+	}
+}
+
+func TestWechatPublicationBindMsgIDAllowsEmptyOrSameAndRejectsMissingOrConflict(t *testing.T) {
+	repo := newWechatTrackingRepositoryTest(t)
+	ctx := context.Background()
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "u", ProjectID: "p",
+		Source: model.WechatPublicationSourceWechatConsole, Status: model.WechatPublicationStatusPublished,
+		ArticleURL: "https://mp.weixin.qq.com/s/manual", ArticleIndex: 1,
+	}
+	if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := repo.WechatPublications().BindMsgID(ctx, publication.ID, "manual_1")
+	if err != nil || !bound {
+		t.Fatalf("empty bind = %v err=%v", bound, err)
+	}
+	bound, err = repo.WechatPublications().BindMsgID(ctx, publication.ID, "manual_1")
+	if err != nil || !bound {
+		t.Fatalf("idempotent bind = %v err=%v", bound, err)
+	}
+	bound, err = repo.WechatPublications().BindMsgID(ctx, publication.ID, "other_1")
+	if err != nil || bound {
+		t.Fatalf("conflicting bind = %v err=%v", bound, err)
+	}
+	stored, _ := repo.WechatPublications().FindByID(ctx, publication.ID)
+	if stored.MsgID != "manual_1" {
+		t.Fatalf("conflicting bind changed msgid to %q", stored.MsgID)
+	}
+	if _, err := repo.WechatPublications().BindMsgID(ctx, uuid.NewString(), "missing_1"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing bind error = %v, want record not found", err)
 	}
 }

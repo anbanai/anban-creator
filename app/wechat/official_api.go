@@ -133,9 +133,15 @@ type ArticleTotalDetailRequest struct {
 	EndDate   string `json:"end_date"`
 }
 type ArticleTotalDetailResponse struct {
-	IsDelay bool                     `json:"is_delay"`
-	List    []ArticleTotalDetailItem `json:"list"`
+	IsDelay     bool                     `json:"is_delay"`
+	List        []ArticleTotalDetailItem `json:"list"`
+	RawResponse json.RawMessage          `json:"-"`
 }
+
+func (r *ArticleTotalDetailResponse) setRawResponse(raw []byte) {
+	r.RawResponse = append(r.RawResponse[:0], raw...)
+}
+
 type ArticleTotalDetailItem struct {
 	RefDate     string                     `json:"ref_date"`
 	MsgID       string                     `json:"msgid"`
@@ -248,6 +254,9 @@ func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("decode WeChat %s response: %w", path, err)
+	}
+	if receiver, ok := target.(interface{ setRawResponse([]byte) }); ok {
+		receiver.setRawResponse(body)
 	}
 	return nil
 }

@@ -205,10 +205,20 @@ func (r *wechatPublicationRepository) Update(ctx context.Context, publication *m
 	})
 }
 
-func (r *wechatPublicationRepository) UpdateMsgID(ctx context.Context, id, msgID string) error {
-	return retryWechatSQLiteBusy(ctx, r.db.Dialector.Name(), func() error {
-		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("id = ?", id).Update("msg_id", msgID).Error
+func (r *wechatPublicationRepository) BindMsgID(ctx context.Context, id, msgID string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND (msg_id = '' OR msg_id = ?)", id, msgID).
+			Update("msg_id", msgID)
 	})
+	if err != nil || rows == 1 {
+		return rows == 1, err
+	}
+	publication, err := r.FindByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return publication.MsgID == msgID, nil
 }
 
 func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error) {

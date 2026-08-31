@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"time"
 
 	appwechat "github.com/anbanai/anban-creator/app/wechat"
@@ -18,6 +20,8 @@ import (
 const WechatCaptureMetricsTaskType = "wechat:capture_metrics"
 
 var wechatAnalyticsLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+var errWechatPublicationMsgIDConflict = errors.New("WeChat publication msgid conflicts with analytics response")
 
 type WechatAnalyticsPlatform interface {
 	FetchArticleTotalDetail(ctx context.Context, project *model.Project, publicationDate string) (*appwechat.ArticleTotalDetailResponse, error)
@@ -95,6 +99,8 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 	}
 	tracking.LastFetchAt = &now
 	tracking.NextFetchAt = &nextFetchAt
+	tracking.RecoveryClaimToken = ""
+	tracking.RecoveryClaimedAt = nil
 	project, err := s.repo.Projects().FindByID(ctx, tracking.ProjectID)
 	if err != nil {
 		return s.recordFetchError(ctx, tracking, now, fmt.Errorf("find project: %w", err))
@@ -118,28 +124,39 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 	if response == nil {
 		response = &appwechat.ArticleTotalDetailResponse{}
 	}
-	raw, err := json.Marshal(response)
-	if err != nil {
-		return s.recordFetchError(ctx, tracking, now, fmt.Errorf("encode official article detail: %w", err))
+	raw := append([]byte(nil), response.RawResponse...)
+	if len(raw) == 0 {
+		raw, err = json.Marshal(response)
+		if err != nil {
+			return s.recordFetchError(ctx, tracking, now, fmt.Errorf("encode official article detail: %w", err))
+		}
 	}
-	matched := matchWechatArticleDetailItems(tracking, response.List)
-	manualMsgID, err := matchedManualMsgID(tracking, matched)
-	if err != nil {
-		return s.recordFetchError(ctx, tracking, now, err)
+	var manualMsgID string
+	var snapshots []*model.WechatMetricSnapshot
+	if !response.IsDelay {
+		matched := matchWechatArticleDetailItems(tracking, response.List)
+		manualMsgID, err = matchedManualMsgID(tracking, matched)
+		if err != nil {
+			return s.recordFetchError(ctx, tracking, now, err)
+		}
+		snapshots, err = detailSnapshots(tracking, matched, raw, now)
+		if err != nil {
+			return s.recordFetchError(ctx, tracking, now, err)
+		}
 	}
-	snapshots := detailSnapshots(tracking, matched, raw, now)
-	tracking.LastFetchAt = &now
-	tracking.RunCount++
-	tracking.FailureCount = 0
-	tracking.LastError = ""
+	updatedTracking := *tracking
+	updatedTracking.LastFetchAt = &now
+	updatedTracking.RunCount++
+	updatedTracking.FailureCount = 0
+	updatedTracking.LastError = ""
 	if len(snapshots) == 0 {
-		tracking.Status = model.WechatTrackingStatusWaitingData
+		updatedTracking.Status = model.WechatTrackingStatusWaitingData
 	} else {
-		tracking.Status = model.WechatTrackingStatusTracking
+		updatedTracking.Status = model.WechatTrackingStatusTracking
 	}
-	s.scheduleNextFetch(tracking, now)
+	s.scheduleNextFetch(&updatedTracking, now)
 	if manualMsgID != "" {
-		tracking.MsgID = manualMsgID
+		updatedTracking.MsgID = manualMsgID
 	}
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		for _, snapshot := range snapshots {
@@ -148,14 +165,22 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 			}
 		}
 		if manualMsgID != "" {
-			if err := tx.WechatPublications().UpdateMsgID(ctx, tracking.PublicationID, manualMsgID); err != nil {
-				return err
+			bound, err := tx.WechatPublications().BindMsgID(ctx, tracking.PublicationID, manualMsgID)
+			if err != nil {
+				return fmt.Errorf("bind manual WeChat publication msgid: %w", err)
+			}
+			if !bound {
+				return errWechatPublicationMsgIDConflict
 			}
 		}
-		return tx.WechatTrackings().Update(ctx, tracking)
+		return tx.WechatTrackings().Update(ctx, &updatedTracking)
 	}); err != nil {
+		if errors.Is(err, errWechatPublicationMsgIDConflict) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return s.recordFetchError(ctx, tracking, now, err)
+		}
 		return fmt.Errorf("persist WeChat article detail: %w", err)
 	}
+	*tracking = updatedTracking
 	s.enqueueNext(tracking, now)
 	return nil
 }
@@ -197,23 +222,39 @@ func matchedManualMsgID(tracking *model.WechatArticleTracking, items []appwechat
 	return msgID, nil
 }
 
-func detailSnapshots(tracking *model.WechatArticleTracking, items []appwechat.ArticleTotalDetailItem, raw []byte, capturedAt time.Time) []*model.WechatMetricSnapshot {
-	var snapshots []*model.WechatMetricSnapshot
+func detailSnapshots(tracking *model.WechatArticleTracking, items []appwechat.ArticleTotalDetailItem, raw []byte, capturedAt time.Time) ([]*model.WechatMetricSnapshot, error) {
+	metricsByDate := make(map[string]appwechat.ArticleTotalDetailMetric)
 	for _, item := range items {
 		for _, detail := range item.DetailList {
 			if detail.StatDate == "" {
 				continue
 			}
-			snapshots = append(snapshots, &model.WechatMetricSnapshot{
-				ID: uuid.NewString(), TrackingID: tracking.ID, TaskID: tracking.TaskID, StatDate: detail.StatDate, CapturedAt: capturedAt,
-				ReadUsers: detail.ReadUser, ShareUsers: detail.ShareUser, CollectionUsers: detail.CollectionUser,
-				LikeUsers: detail.LikeUser, ZaikanUsers: detail.ZaikanUser, CommentCount: detail.CommentCount,
-				ReadFinishRate: detail.ReadFinishRate, AverageReadActiveTime: detail.ReadAvgActiveTime,
-				ReadToSubscribeUsers: detail.ReadSubscribeUser, RawResponse: append([]byte(nil), raw...),
-			})
+			if existing, ok := metricsByDate[detail.StatDate]; ok {
+				if !reflect.DeepEqual(existing, detail) {
+					return nil, fmt.Errorf("official article detail has conflicting metrics for stat_date %s", detail.StatDate)
+				}
+				continue
+			}
+			metricsByDate[detail.StatDate] = detail
 		}
 	}
-	return snapshots
+	dates := make([]string, 0, len(metricsByDate))
+	for statDate := range metricsByDate {
+		dates = append(dates, statDate)
+	}
+	sort.Strings(dates)
+	snapshots := make([]*model.WechatMetricSnapshot, 0, len(dates))
+	for _, statDate := range dates {
+		detail := metricsByDate[statDate]
+		snapshots = append(snapshots, &model.WechatMetricSnapshot{
+			ID: uuid.NewString(), TrackingID: tracking.ID, TaskID: tracking.TaskID, StatDate: detail.StatDate, CapturedAt: capturedAt,
+			ReadUsers: detail.ReadUser, ShareUsers: detail.ShareUser, CollectionUsers: detail.CollectionUser,
+			LikeUsers: detail.LikeUser, ZaikanUsers: detail.ZaikanUser, CommentCount: detail.CommentCount,
+			ReadFinishRate: detail.ReadFinishRate, AverageReadActiveTime: detail.ReadAvgActiveTime,
+			ReadToSubscribeUsers: detail.ReadSubscribeUser, RawResponse: append([]byte(nil), raw...),
+		})
+	}
+	return snapshots, nil
 }
 
 func (s *WechatTrackingService) recordFetchError(ctx context.Context, tracking *model.WechatArticleTracking, now time.Time, cause error) error {
@@ -273,13 +314,20 @@ func (s *WechatTrackingService) RecoverDue(ctx context.Context, limit int) error
 		return err
 	}
 	for _, tracking := range trackings {
-		payload, _ := json.Marshal(map[string]string{"tracking_id": tracking.ID})
-		if err := s.enqueuer.Enqueue(WechatCaptureMetricsTaskType, payload); err != nil {
+		lease := now.Add(15 * time.Minute)
+		token := uuid.NewString()
+		claimed, err := s.repo.WechatTrackings().TryClaimDueDispatch(ctx, tracking.ID, tracking.UpdatedAt, now, lease, token)
+		if err != nil {
 			return err
 		}
-		lease := now.Add(15 * time.Minute)
-		tracking.NextFetchAt = &lease
-		if err := s.repo.WechatTrackings().Update(ctx, tracking); err != nil {
+		if !claimed {
+			continue
+		}
+		payload, _ := json.Marshal(map[string]string{"tracking_id": tracking.ID})
+		if err := s.enqueuer.Enqueue(WechatCaptureMetricsTaskType, payload); err != nil {
+			if _, releaseErr := s.repo.WechatTrackings().ReleaseDueDispatch(ctx, tracking.ID, token, now); releaseErr != nil {
+				return fmt.Errorf("enqueue WeChat analytics capture: %v; release recovery claim: %w", err, releaseErr)
+			}
 			return err
 		}
 	}

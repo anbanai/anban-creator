@@ -2,8 +2,6 @@ package model
 
 import (
 	"time"
-
-	"gorm.io/datatypes"
 )
 
 const (
@@ -30,16 +28,18 @@ type WechatArticleTracking struct {
 	MsgID      string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_id,omitempty"`
 	ArticleURL string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
 
-	PublishedAt  time.Time  `gorm:"index;not null" json:"published_at"`
-	ExpiresAt    time.Time  `gorm:"index;not null" json:"expires_at"`
-	LastFetchAt  *time.Time `gorm:"index" json:"last_fetch_at,omitempty"`
-	NextFetchAt  *time.Time `gorm:"index" json:"next_fetch_at,omitempty"`
-	ExpiredAt    *time.Time `gorm:"index" json:"expired_at,omitempty"`
-	RunCount     int        `gorm:"not null;default:0" json:"run_count"`
-	FailureCount int        `gorm:"not null;default:0" json:"failure_count"`
-	LastError    string     `gorm:"type:text;not null" json:"last_error,omitempty"`
-	CreatedAt    time.Time  `gorm:"not null" json:"created_at"`
-	UpdatedAt    time.Time  `gorm:"not null" json:"updated_at"`
+	PublishedAt        time.Time  `gorm:"index;not null" json:"published_at"`
+	ExpiresAt          time.Time  `gorm:"index;not null" json:"expires_at"`
+	LastFetchAt        *time.Time `gorm:"index" json:"last_fetch_at,omitempty"`
+	NextFetchAt        *time.Time `gorm:"index" json:"next_fetch_at,omitempty"`
+	ExpiredAt          *time.Time `gorm:"index" json:"expired_at,omitempty"`
+	RecoveryClaimToken string     `gorm:"type:char(36);index;not null;default:''" json:"-"`
+	RecoveryClaimedAt  *time.Time `gorm:"index" json:"-"`
+	RunCount           int        `gorm:"not null;default:0" json:"run_count"`
+	FailureCount       int        `gorm:"not null;default:0" json:"failure_count"`
+	LastError          string     `gorm:"type:text;not null" json:"last_error,omitempty"`
+	CreatedAt          time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"not null" json:"updated_at"`
 }
 
 func (WechatArticleTracking) TableName() string { return "wechat_article_trackings" }
@@ -51,18 +51,18 @@ type WechatMetricSnapshot struct {
 	StatDate   string    `gorm:"type:char(10);uniqueIndex:idx_wechat_tracking_stat_date,priority:2;not null" json:"stat_date"`
 	CapturedAt time.Time `gorm:"index;not null" json:"captured_at"`
 
-	ReadUsers             int            `gorm:"not null;default:0" json:"read_users"`
-	ShareUsers            int            `gorm:"not null;default:0" json:"share_users"`
-	CollectionUsers       int            `gorm:"not null;default:0" json:"collection_users"`
-	LikeUsers             int            `gorm:"not null;default:0" json:"like_users"`
-	ZaikanUsers           int            `gorm:"not null;default:0" json:"zaikan_users"`
-	CommentCount          int            `gorm:"not null;default:0" json:"comment_count"`
-	ReadFinishRate        float64        `gorm:"type:decimal(10,6);not null;default:0" json:"read_finish_rate"`
-	AverageReadActiveTime float64        `gorm:"type:decimal(14,3);not null;default:0" json:"average_read_active_time"`
-	ReadToSubscribeUsers  int            `gorm:"not null;default:0" json:"read_to_subscribe_users"`
-	RawResponse           datatypes.JSON `gorm:"type:json;not null" json:"raw_response"`
-	CreatedAt             time.Time      `gorm:"not null" json:"created_at"`
-	UpdatedAt             time.Time      `gorm:"not null" json:"updated_at"`
+	ReadUsers             int       `gorm:"not null;default:0" json:"read_users"`
+	ShareUsers            int       `gorm:"not null;default:0" json:"share_users"`
+	CollectionUsers       int       `gorm:"not null;default:0" json:"collection_users"`
+	LikeUsers             int       `gorm:"not null;default:0" json:"like_users"`
+	ZaikanUsers           int       `gorm:"not null;default:0" json:"zaikan_users"`
+	CommentCount          int       `gorm:"not null;default:0" json:"comment_count"`
+	ReadFinishRate        float64   `gorm:"type:decimal(10,6);not null;default:0" json:"read_finish_rate"`
+	AverageReadActiveTime float64   `gorm:"type:decimal(14,3);not null;default:0" json:"average_read_active_time"`
+	ReadToSubscribeUsers  int       `gorm:"not null;default:0" json:"read_to_subscribe_users"`
+	RawResponse           []byte    `gorm:"type:longblob;not null" json:"raw_response"`
+	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (WechatMetricSnapshot) TableName() string { return "wechat_metric_snapshots" }

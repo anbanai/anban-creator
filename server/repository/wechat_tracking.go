@@ -43,6 +43,34 @@ func (r *wechatTrackingRepository) FindDue(ctx context.Context, now time.Time, l
 	return trackings, query.Find(&trackings).Error
 }
 
+func (r *wechatTrackingRepository) TryClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, claimedAt, leaseUntil time.Time, token string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+			Where("id = ? AND updated_at = ?", id, expectedUpdatedAt).
+			Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
+			Where("next_fetch_at IS NOT NULL AND next_fetch_at <= ?", claimedAt).
+			Updates(map[string]any{
+				"recovery_claim_token": token,
+				"recovery_claimed_at":  claimedAt,
+				"next_fetch_at":        leaseUntil,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatTrackingRepository) ReleaseDueDispatch(ctx context.Context, id, token string, retryAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+			Where("id = ? AND recovery_claim_token = ?", id, token).
+			Updates(map[string]any{
+				"recovery_claim_token": "",
+				"recovery_claimed_at":  nil,
+				"next_fetch_at":        retryAt,
+			})
+	})
+	return rows == 1, err
+}
+
 func (r *wechatTrackingRepository) TryClaimDailyFetch(ctx context.Context, id string, claimedAt, dayStart, nextFetchAt time.Time) (bool, error) {
 	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
@@ -50,7 +78,12 @@ func (r *wechatTrackingRepository) TryClaimDailyFetch(ctx context.Context, id st
 			Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
 			Where("expires_at > ?", claimedAt).
 			Where("last_fetch_at IS NULL OR last_fetch_at < ?", dayStart).
-			Updates(map[string]any{"last_fetch_at": claimedAt, "next_fetch_at": nextFetchAt})
+			Updates(map[string]any{
+				"last_fetch_at":        claimedAt,
+				"next_fetch_at":        nextFetchAt,
+				"recovery_claim_token": "",
+				"recovery_claimed_at":  nil,
+			})
 	})
 	return rows == 1, err
 }
