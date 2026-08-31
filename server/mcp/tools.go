@@ -58,6 +58,7 @@ type Services struct {
 	GenerateImageTimeout   time.Duration
 	ContentRenderSvc       *service.ContentRenderService
 	PublishingSvc          *service.PublishingService
+	WechatPublicationSvc   *service.WechatPublicationService
 	LiveSliceSvc           *service.LiveSliceService
 	SeednoteCapabilitySvc  *service.SeednoteCapabilityService
 	FileUploadSvc          *service.FileUploadService

@@ -4,33 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/anbanai/anban-creator/server/service"
+	appwechat "github.com/anbanai/anban-creator/app/wechat"
 )
 
 // registerPublishingTools registers WeChat draft publishing and listing tools.
 func registerPublishingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "publish_draft",
+		Name:        "create_draft",
 		Description: "Create a WeChat news article draft. Accepts one or more articles with HTML content, title, author, digest, and optional cover image (thumb_media_id). The server handles WeChat API authentication and publishing.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"task_id":    map[string]any{"type": "string", "description": "Article task ID"},
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
-				"articles": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
+				"articles": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "properties": map[string]any{
 					"title":              map[string]any{"type": "string", "description": "Article title"},
 					"author":             map[string]any{"type": "string", "description": "Author name (optional)"},
 					"digest":             map[string]any{"type": "string", "description": "Article digest/summary (optional)"},
 					"content":            map[string]any{"type": "string", "description": "HTML content of the article"},
 					"thumb_media_id":     map[string]any{"type": "string", "description": "Cover image media ID (optional)"},
 					"content_source_url": map[string]any{"type": "string", "description": "Original article URL (optional)"},
-				}}, "description": "Array of articles to publish as a draft"},
+				}, "required": []any{"title", "content"}}, "description": "Array of articles to create as a draft"},
 			},
-			"required": []any{"project_id", "articles"},
+			"required": []any{"task_id", "project_id", "articles"},
 		},
-	}, publishDraftHandler)
+	}, createDraftHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_drafts",
@@ -61,14 +63,28 @@ func registerPublishingTools(server *mcp.Server) {
 	}, listPublishedHandler)
 }
 
-func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.PublishingSvc == nil {
-		return errorResult("publishing service not available"), nil
+type createDraftResult struct {
+	DraftMediaID string `json:"draft_media_id"`
+	Status       string `json:"status"`
+}
+
+func createDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WechatPublicationSvc == nil {
+		return errorResult("WeChat publication service not available"), nil
 	}
-	userID := getUserID(ctx)
+	userID := strings.TrimSpace(getUserID(ctx))
+	if userID == "" {
+		return errorResult("authenticated user is required"), nil
+	}
 	args := parseArgs(req.Params.Arguments)
 
+	taskID, _ := args["task_id"].(string)
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
 	projectID, _ := args["project_id"].(string)
+	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
 	}
@@ -80,7 +96,7 @@ func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return errorResult(fmt.Sprintf("marshal articles: %v", err)), nil
 	}
 
-	var articles []service.DraftArticleInput
+	var articles []appwechat.DraftArticle
 	if err := json.Unmarshal(articlesJSON, &articles); err != nil {
 		return errorResult(fmt.Sprintf("parse articles: %v", err)), nil
 	}
@@ -88,12 +104,12 @@ func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return errorResult("at least one article is required"), nil
 	}
 
-	result, err := svcs.PublishingSvc.PublishDraft(ctx, userID, projectID, articles)
+	publication, err := svcs.WechatPublicationSvc.CreateDraft(ctx, userID, taskID, projectID, appwechat.DraftAddRequest{Articles: articles})
 	if err != nil {
-		return errorResult(fmt.Sprintf("publish draft: %v", err)), nil
+		return errorResult(fmt.Sprintf("create draft: %v", err)), nil
 	}
 
-	return textResult(result)
+	return textResult(createDraftResult{DraftMediaID: publication.DraftMediaID, Status: publication.Status})
 }
 
 func listDraftsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

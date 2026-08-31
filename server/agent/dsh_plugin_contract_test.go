@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.13"
-	dshPluginReleaseDate = "2026-08-18"
+	dshPluginVersion     = "4.1.14"
+	dshPluginReleaseDate = "2026-09-01"
 )
 
 type dshPackageManifest struct {
@@ -509,11 +509,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		return "```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add " + specifier + "\n```"
 	}
 	for _, allowed := range []string{
-		`"@anban/dsh-plugin@4.1.13"`,
-		`"/tmp/anban-dsh-plugin-4.1.13.tgz"`,
-		`"file:/tmp/anban-dsh-plugin-4.1.13.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz"`,
-		`"git+https://github.com/anbanai/creator-skills.git#v4.1.13"`,
+		`"@anban/dsh-plugin@4.1.14"`,
+		`"/tmp/anban-dsh-plugin-4.1.14.tgz"`,
+		`"file:/tmp/anban-dsh-plugin-4.1.14.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz"`,
+		`"git+https://github.com/anbanai/creator-skills.git#v4.1.14"`,
 		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
@@ -531,11 +531,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		"file:/tmp/anban-dsh-plugin.tgz",
 		`"@anban/dsh-plugin"`,
 		`"@anban/dsh-plugin@latest"`,
-		`"@anban/dsh-plugin@^4.1.13"`,
+		`"@anban/dsh-plugin@^4.1.14"`,
 		`"@anban/dsh-plugin@01.2.3"`,
 		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
 		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.14.tgz"`,
+		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.15.tgz"`,
 		`"git+https://github.com/anbanai/creator-skills.git#main"`,
 		`"git+https://github.com/anbanai/creator-skills.git#HEAD"`,
 		`"git+https://github.com/anbanai/creator-skills.git#v01.2.3"`,
@@ -563,14 +563,14 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		}
 	}
 	for _, source := range []string{
-		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
-		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
+		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
+		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
 		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.13/anban-dsh-plugin-4.1.13.tgz\"\n```",
-		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.13\"\n```",
-		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.13.tgz\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz\"\n```",
+		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
+		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
 		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.13.tgz\"\n```",
+		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.14.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
 			t.Errorf("approved prefixed or continued add findings = %v:\n%s", findings, source)
@@ -1027,7 +1027,7 @@ func TestReleaseDesktopArtifactContractSupportsFutureVersionsAndRejectsLiterals(
 		t.Fatalf("future release tarball = %q", resolved)
 	}
 
-	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.13`
+	step.Run = `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.14`
 	if err := validateReleaseCrossPlatformDSHPackStep(step); err == nil {
 		t.Fatal("hardcoded release version satisfied the Desktop pack contract")
 	}

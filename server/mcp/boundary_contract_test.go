@@ -53,7 +53,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"progressUpdateHandler":           "svcs.TaskSvc.UpdateProgress",
 	"projectGetHandler":               "svcs.ProjectSvc.Get",
 	"projectListHandler":              "svcs.ProjectSvc.List",
-	"publishDraftHandler":             "svcs.PublishingSvc.PublishDraft",
+	"createDraftHandler":              "svcs.WechatPublicationSvc.CreateDraft",
 	"queryLiveAnalysisTaskHandler":    "svcs.LiveSliceSvc.QueryLiveAnalysisTask",
 	"renderTemplateHandler":           "svcs.ContentRenderSvc.RenderTemplate",
 	"scoreArticleHandler":             "svcs.ArticleScoreSvc.Score",

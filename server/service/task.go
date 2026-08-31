@@ -48,10 +48,6 @@ func validateAgentExecutionTarget(target string) error {
 	}
 }
 
-type cloudDraftPublisher interface {
-	PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error)
-}
-
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
 
@@ -74,7 +70,6 @@ type TaskService struct {
 	enqueuer                 TaskEnqueuer
 	store                    storage.Provider
 	publishingSvc            *PublishingService
-	cloudPublisher           cloudDraftPublisher
 	taskLogDir               string
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
@@ -125,7 +120,6 @@ func NewTaskService(
 		enqueuer:               enqueuer,
 		store:                  store,
 		publishingSvc:          publishingSvc,
-		cloudPublisher:         publishingSvc,
 		taskLogDir:             taskLogDir,
 		pubsub:                 pubsub,
 		executionTimeout:       60 * time.Minute,

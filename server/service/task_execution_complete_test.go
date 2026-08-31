@@ -649,24 +649,6 @@ func TestFinalizationRenewalLossPreventsStageAdvance(t *testing.T) {
 	}
 }
 
-type ambiguousPublishFake struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func (p *ambiguousPublishFake) PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.calls++
-	return &PublishDraftResult{MediaID: "media-1"}, nil
-}
-
-func (p *ambiguousPublishFake) callCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.calls
-}
-
 type cancelOrderingDispatcher struct {
 	repo            repository.Repository
 	statusAtDelete  string

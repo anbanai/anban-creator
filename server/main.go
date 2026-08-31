@@ -645,6 +645,7 @@ func main() {
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
 			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
+			WechatPublicationSvc:   wechatPublicationSvc,
 			LiveSliceSvc:           liveSliceSvc,
 			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
 			FileUploadSvc:          service.NewFileUploadService(store),

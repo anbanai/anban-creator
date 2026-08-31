@@ -7,7 +7,7 @@ import (
 
 // imgSrcRegexp matches the src attribute of <img ...> tags. It is
 // case-insensitive and tolerates attribute ordering, single/double quotes, and
-// whitespace around `=`. The HTML fed to publish_draft is machine-generated
+// whitespace around `=`. The HTML fed to create_draft is machine-generated
 // (render_template / convert_markdown), so a regexp is sufficient and avoids
 // pulling an HTML parser into the service package. Each match stops at the
 // first `>`, so it cannot bleed across tags.

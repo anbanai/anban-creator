@@ -192,6 +192,9 @@ func firstDraftArticle(request appwechat.DraftAddRequest) (appwechat.DraftArticl
 	if article.Title == "" || strings.TrimSpace(article.Content) == "" {
 		return article, fmt.Errorf("draft title and content are required")
 	}
+	if err := validateContentImageDiversity(article.Content); err != nil {
+		return article, err
+	}
 	return article, nil
 }
 

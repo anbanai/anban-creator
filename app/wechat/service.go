@@ -98,8 +98,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 
 // CreateDraftResult 创建草稿结果
 type CreateDraftResult struct {
-	MediaID  string `json:"media_id"`
-	DraftURL string `json:"draft_url,omitempty"`
+	MediaID string `json:"media_id"`
 }
 
 // CreateDraft 创建草稿
@@ -118,12 +117,8 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 	duration := time.Since(startTime)
 	s.log.Info().Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("article draft created")
 
-	// 构造草稿 URL
-	draftURL := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&createType=0&token=")
-
 	return &CreateDraftResult{
-		MediaID:  mediaID,
-		DraftURL: draftURL,
+		MediaID: mediaID,
 	}, nil
 }
 

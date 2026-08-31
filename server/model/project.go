@@ -63,7 +63,7 @@ type Project struct {
 	Writer string `gorm:"type:varchar(100);default:''" json:"writer"`
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
-	// Author is the 作者（署名）— the published author name, passed to publish_draft.
+	// Author is the 作者（署名）— the published author name, passed to create_draft.
 	Author                string        `gorm:"column:author;type:varchar(50)" json:"author"`
 	ReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView    `gorm:"-" json:"reference_image,omitempty"`
