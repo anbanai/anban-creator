@@ -8,8 +8,10 @@ ALTER TABLE `tasks`
   DROP COLUMN `pending_draft_articles`;
 
 ALTER TABLE `task_executions`
+  DROP INDEX `idx_task_executions_publishing_status`,
   CHANGE COLUMN `publishing_status` `draft_delivery_status` varchar(20) NOT NULL DEFAULT '',
-  CHANGE COLUMN `publishing_result` `draft_delivery_result` json NULL;
+  CHANGE COLUMN `publishing_result` `draft_delivery_result` json NULL,
+  ADD INDEX `idx_task_executions_draft_delivery_status` (`draft_delivery_status`);
 
 CREATE TABLE `wechat_publications` (
   `id` char(36) NOT NULL,

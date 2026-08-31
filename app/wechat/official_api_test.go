@@ -36,11 +36,11 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 		},
 		{
 			name: "freepublish submit", path: "/cgi-bin/freepublish/submit", body: `{"media_id":"draft-media"}`,
-			response: `{"publish_id":"publish-123"}`,
+			response: `{"publish_id":"publish-123","msg_data_id":"submit-msg-data-123"}`,
 			call: func(ctx context.Context, api *OfficialAPI) error {
 				result, err := api.SubmitFreePublish(ctx, FreePublishSubmitRequest{MediaID: "draft-media"})
-				if err == nil && result.PublishID != "publish-123" {
-					t.Fatalf("publish id = %q", result.PublishID)
+				if err == nil && (result.PublishID != "publish-123" || result.MsgDataID != "submit-msg-data-123") {
+					t.Fatalf("submit result = %#v", result)
 				}
 				return err
 			},
@@ -71,11 +71,11 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 			},
 		},
 		{
-			name: "article total detail", path: "/datacube/getarticletotaldetail", body: `{"begin_date":"2026-08-01","end_date":"2026-08-02"}`,
-			response: `{"list":[{"ref_date":"2026-08-02","msgid":"123_1","content_url":"https://mp.weixin.qq.com/s/article","title":"title","details":[{"stat_date":"2026-08-02","int_page_read_count":12,"share_count":3,"add_to_fav_count":2,"like_count":1,"looking_count":2,"comment_count":4,"complete_rate":0.5,"avg_read_time":11,"read_to_subscribe_count":5}]}]}`,
+			name: "article total detail", path: "/datacube/getarticletotaldetail", body: `{"begin_date":"2026-08-02","end_date":"2026-08-02"}`,
+			response: `{"is_delay":0,"list":[{"ref_date":"2026-08-02","msgid":"published-msgid_1","title":"title","publish_type":1,"detail_list":[{"stat_date":"2026-08-02","read_user":12,"read_user_source":3,"share_user":4,"zaikan_user":5,"like_user":6,"comment_count":7,"collection_user":8,"praise_money":9,"read_subscribe_user":10,"read_delivery_rate":0.11,"read_finish_rate":0.12,"read_avg_activetime":13.5,"read_jump_position":14}]}]}`,
 			call: func(ctx context.Context, api *OfficialAPI) error {
-				result, err := api.GetArticleTotalDetail(ctx, ArticleTotalDetailRequest{BeginDate: "2026-08-01", EndDate: "2026-08-02"})
-				if err == nil && (result.List[0].MsgDataID != "123_1" || result.List[0].ContentURL == "" || result.List[0].Details[0].LookingCount != 2 || result.List[0].Details[0].ReadToSubscribeCount != 5) {
+				result, err := api.GetArticleTotalDetail(ctx, ArticleTotalDetailRequest{BeginDate: "2026-08-02", EndDate: "2026-08-02"})
+				if err == nil && (result.IsDelay != 0 || result.List[0].MsgID != "published-msgid_1" || result.List[0].PublishType != 1 || result.List[0].DetailList[0].ReadUser != 12 || result.List[0].DetailList[0].ReadFinishRate != 0.12 || result.List[0].DetailList[0].ReadJumpPosition != 14) {
 					t.Fatalf("detail contract = %#v", result.List[0])
 				}
 				return err

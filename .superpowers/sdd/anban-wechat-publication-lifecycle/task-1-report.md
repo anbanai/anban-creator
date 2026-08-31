@@ -120,3 +120,71 @@ files still reference removed `GetEnablePublishing`, `GetRequirePublishApproval`
   of a compatibility path means a partial deployment will not compile/run.
 - `wechat_publish_mode` is JSON-backed, so model code supplies exact constants
   and validation; request validation belongs to the project API/UI cutover task.
+
+## Fix Round 1
+
+### Review Findings Addressed
+
+- Replaced the invented `details` analytics shape with the official
+  `detail_list` contract. The response now has `is_delay`; each published item
+  has its composite `msgid` in `MsgID` and `publish_type`; samples expose
+  `read_user`, `read_user_source`, `share_user`, `zaikan_user`, `like_user`,
+  `comment_count`, `collection_user`, `praise_money`, `read_subscribe_user`,
+  `read_delivery_rate`, `read_finish_rate`, `read_avg_activetime`, and
+  `read_jump_position`.
+- `FreePublishSubmitResponse` now retains the official string `msg_data_id`
+  alongside `publish_id`. It is distinct from the composite analytics `msgid`.
+- Replaced the analytics `httptest` fixture with a complete official response
+  and asserted a one-day `begin_date == end_date` request range.
+- The DMS migration drops `idx_task_executions_publishing_status` before the
+  column rename and creates only
+  `idx_task_executions_draft_delivery_status` afterward.
+- Aligned GORM tags with the DDL's non-null/default contract for publication
+  identifiers, metadata, errors, and claim token. Added executable SQLite
+  schema checks plus DDL fragment checks for all non-null lifecycle fields.
+
+### Tests Added Or Adjusted
+
+- `app/wechat/official_api_test.go`: submit `msg_data_id`, official
+  `detail_list`, full official metric fixture, one-day request range, and
+  distinct identifier assertions.
+- `server/migrations/wechat_publication_contract_test.go`: index replacement
+  checks and model/DDL nullability/default equivalence matrix.
+
+### RED Evidence
+
+```text
+go test ./app/wechat ./server/migrations -run 'Test(OfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers|WechatPublicationContractMigrationIsACleanCutover|WechatPublicationMigrationMatchesModelNullabilityAndDefaults)' -count=1
+app/wechat/official_api_test.go:42:67: result.MsgDataID undefined
+app/wechat/official_api_test.go:78:30: result.IsDelay undefined
+app/wechat/official_api_test.go:78:61: result.List[0].MsgID undefined
+app/wechat/official_api_test.go:78:108: result.List[0].PublishType undefined
+app/wechat/official_api_test.go:78:143: result.List[0].DetailList undefined
+migration missing "DROP INDEX `idx_task_executions_publishing_status`"
+migration missing "ADD INDEX `idx_task_executions_draft_delivery_status` (`draft_delivery_status`)"
+model column draft_media_id ... want notNull=true default="''"
+```
+
+### GREEN Evidence
+
+```text
+go test ./app/wechat ./server/model ./server/migrations -count=1
+ok github.com/anbanai/anban-creator/app/wechat
+ok github.com/anbanai/anban-creator/server/model
+ok github.com/anbanai/anban-creator/server/migrations
+```
+
+`go test ./...` was also rerun. It remains blocked by unchanged downstream
+legacy service consumers (`GetEnablePublishing`, `PublishingStatus`, and
+approval fields), not by any task-1 package.
+
+### Self-Review
+
+- `git diff --check` passes.
+- Submit-time `MsgDataID` and analytics `MsgID` now use different fields and
+  tags, preventing accidental cross-domain identifier reuse.
+- The migration explicitly replaces the old index rather than relying on a
+  database implementation to rename it implicitly.
+- SQLite renders empty-string defaults with double quotes while MySQL DDL uses
+  single quotes; the equivalence assertion normalizes quote syntax but still
+  verifies nullability and semantic defaults.

@@ -47,20 +47,20 @@ type WechatPublication struct {
 	UserID    string `gorm:"type:char(36);index;not null" json:"user_id"`
 	ProjectID string `gorm:"type:char(36);index;not null" json:"project_id"`
 
-	DraftMediaID            string `gorm:"type:varchar(191);index" json:"draft_media_id,omitempty"`
-	DraftTitle              string `gorm:"type:varchar(500)" json:"draft_title,omitempty"`
-	DraftAuthor             string `gorm:"type:varchar(500)" json:"draft_author,omitempty"`
-	DraftDigest             string `gorm:"type:text" json:"draft_digest,omitempty"`
-	DraftThumbMediaID       string `gorm:"type:varchar(191)" json:"draft_thumb_media_id,omitempty"`
-	DraftContentFingerprint string `gorm:"type:char(64);index" json:"draft_content_fingerprint,omitempty"`
+	DraftMediaID            string `gorm:"type:varchar(191);not null;default:'';index" json:"draft_media_id,omitempty"`
+	DraftTitle              string `gorm:"type:varchar(500);not null;default:''" json:"draft_title,omitempty"`
+	DraftAuthor             string `gorm:"type:varchar(500);not null;default:''" json:"draft_author,omitempty"`
+	DraftDigest             string `gorm:"type:text;not null" json:"draft_digest,omitempty"`
+	DraftThumbMediaID       string `gorm:"type:varchar(191);not null;default:''" json:"draft_thumb_media_id,omitempty"`
+	DraftContentFingerprint string `gorm:"type:char(64);not null;default:'';index" json:"draft_content_fingerprint,omitempty"`
 
 	Source           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
 	Status           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','publish_submitting','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
-	PublishID        string `gorm:"type:varchar(191);index" json:"publish_id,omitempty"`
-	MsgDataID        string `gorm:"type:varchar(191);index" json:"msg_data_id,omitempty"`
-	MsgID            string `gorm:"type:varchar(191);index" json:"msg_id,omitempty"`
-	ArticleID        string `gorm:"type:varchar(191);index" json:"article_id,omitempty"`
-	ArticleURL       string `gorm:"type:varchar(1000)" json:"article_url,omitempty"`
+	PublishID        string `gorm:"type:varchar(191);not null;default:'';index" json:"publish_id,omitempty"`
+	MsgDataID        string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_data_id,omitempty"`
+	MsgID            string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_id,omitempty"`
+	ArticleID        string `gorm:"type:varchar(191);not null;default:'';index" json:"article_id,omitempty"`
+	ArticleURL       string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
 	ArticleIndex     int    `gorm:"not null;default:1" json:"article_index"`
 	WechatStatusCode int    `gorm:"not null;default:0" json:"wechat_status_code"`
 
@@ -69,10 +69,10 @@ type WechatPublication struct {
 	NextCheckAt    *time.Time     `gorm:"index" json:"next_check_at,omitempty"`
 	LastCheckedAt  *time.Time     `gorm:"index" json:"last_checked_at,omitempty"`
 	CheckAttempts  int            `gorm:"not null;default:0" json:"check_attempts"`
-	LastError      string         `gorm:"type:text" json:"last_error,omitempty"`
+	LastError      string         `gorm:"type:text;not null" json:"last_error,omitempty"`
 	Candidates     datatypes.JSON `gorm:"type:json" json:"candidates,omitempty"`
 
-	ClaimToken string     `gorm:"type:char(36);index" json:"-"`
+	ClaimToken string     `gorm:"type:char(36);not null;default:'';index" json:"-"`
 	ClaimedAt  *time.Time `gorm:"index" json:"-"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`

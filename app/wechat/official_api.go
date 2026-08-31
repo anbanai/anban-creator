@@ -77,6 +77,7 @@ type FreePublishSubmitRequest struct {
 }
 type FreePublishSubmitResponse struct {
 	PublishID string `json:"publish_id"`
+	MsgDataID string `json:"msg_data_id"`
 }
 
 // FreePublishStatus values are documented by the official freepublish/get API.
@@ -132,40 +133,33 @@ type ArticleTotalDetailRequest struct {
 	EndDate   string `json:"end_date"`
 }
 type ArticleTotalDetailResponse struct {
-	List []ArticleTotalDetailItem `json:"list"`
+	IsDelay int                      `json:"is_delay"`
+	List    []ArticleTotalDetailItem `json:"list"`
 }
 type ArticleTotalDetailItem struct {
-	RefDate    string                     `json:"ref_date"`
-	MsgDataID  string                     `json:"msgid"`
-	ContentURL string                     `json:"content_url"`
-	Title      string                     `json:"title"`
-	Details    []ArticleTotalDetailMetric `json:"details"`
+	RefDate     string                     `json:"ref_date"`
+	MsgID       string                     `json:"msgid"`
+	Title       string                     `json:"title"`
+	PublishType int                        `json:"publish_type"`
+	DetailList  []ArticleTotalDetailMetric `json:"detail_list"`
 }
 
-// ArticleTotalDetailMetric includes both documented legacy counts and the
-// extended engagement fields exposed by getarticletotaldetail.
+// ArticleTotalDetailMetric is one official getarticletotaldetail sample.
 type ArticleTotalDetailMetric struct {
-	StatDate             string  `json:"stat_date"`
-	TargetUser           int     `json:"target_user"`
-	IntPageReadUser      int     `json:"int_page_read_user"`
-	IntPageReadCount     int     `json:"int_page_read_count"`
-	OriPageReadUser      int     `json:"ori_page_read_user"`
-	OriPageReadCount     int     `json:"ori_page_read_count"`
-	ShareUser            int     `json:"share_user"`
-	ShareCount           int     `json:"share_count"`
-	AddToFavUser         int     `json:"add_to_fav_user"`
-	AddToFavCount        int     `json:"add_to_fav_count"`
-	LikeUser             int     `json:"like_user"`
-	LikeCount            int     `json:"like_count"`
-	LookingUser          int     `json:"looking_user"`
-	LookingCount         int     `json:"looking_count"`
-	CommentUser          int     `json:"comment_user"`
-	CommentCount         int     `json:"comment_count"`
-	ReadToSubscribeUser  int     `json:"read_to_subscribe_user"`
-	ReadToSubscribeCount int     `json:"read_to_subscribe_count"`
-	ReadToSubscribeRate  float64 `json:"read_to_subscribe_rate"`
-	CompleteRate         float64 `json:"complete_rate"`
-	AvgReadTime          float64 `json:"avg_read_time"`
+	StatDate          string  `json:"stat_date"`
+	ReadUser          int     `json:"read_user"`
+	ReadUserSource    int     `json:"read_user_source"`
+	ShareUser         int     `json:"share_user"`
+	ZaikanUser        int     `json:"zaikan_user"`
+	LikeUser          int     `json:"like_user"`
+	CommentCount      int     `json:"comment_count"`
+	CollectionUser    int     `json:"collection_user"`
+	PraiseMoney       int     `json:"praise_money"`
+	ReadSubscribeUser int     `json:"read_subscribe_user"`
+	ReadDeliveryRate  float64 `json:"read_delivery_rate"`
+	ReadFinishRate    float64 `json:"read_finish_rate"`
+	ReadAvgActiveTime float64 `json:"read_avg_activetime"`
+	ReadJumpPosition  int     `json:"read_jump_position"`
 }
 
 func (p *OfficialAPI) AddDraft(ctx context.Context, request DraftAddRequest) (*DraftAddResponse, error) {
