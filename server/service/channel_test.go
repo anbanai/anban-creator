@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -182,5 +183,56 @@ func TestProjectServiceUpdatePersistsWechatPublishMode(t *testing.T) {
 	}
 	if updated.Config.WechatPublishMode != model.WechatPublishModeAPIConfirmed {
 		t.Fatalf("WechatPublishMode = %q", updated.Config.WechatPublishMode)
+	}
+}
+
+func TestProjectServiceCreateRejectsInvalidWechatPublishMode(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	_, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Config:   model.ProjectConfig{WechatPublishMode: "automatic"},
+	})
+	if !errors.Is(err, ErrInvalidWechatPublishMode) {
+		t.Fatalf("Create error = %v, want ErrInvalidWechatPublishMode", err)
+	}
+}
+
+func TestProjectServiceUpdateRejectsInvalidWechatPublishMode(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeManual},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = svc.Update(context.Background(), "user-1", created.ID, &model.Project{
+		Config: model.ProjectConfig{WechatPublishMode: "automatic"},
+	})
+	if !errors.Is(err, ErrInvalidWechatPublishMode) {
+		t.Fatalf("Update error = %v, want ErrInvalidWechatPublishMode", err)
+	}
+}
+
+func TestProjectServiceUpdatePreservesWechatPublishModeWhenOmitted(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeAPIConfirmed},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{Name: "Renamed"})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := updated.Config.WechatPublishMode; got != model.WechatPublishModeAPIConfirmed {
+		t.Fatalf("WechatPublishMode = %q, want %q", got, model.WechatPublishModeAPIConfirmed)
 	}
 }

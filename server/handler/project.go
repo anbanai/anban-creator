@@ -146,6 +146,9 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrInvalidAgentConfig) {
 		return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
 	}
+	if errors.Is(err, service.ErrInvalidWechatPublishMode) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 	return Error(c, fiber.StatusInternalServerError, "failed to update project")
 }
@@ -412,6 +415,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrInvalidAgentConfig) {
 			return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
+		}
+		if errors.Is(err, service.ErrInvalidWechatPublishMode) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())

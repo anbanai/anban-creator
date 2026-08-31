@@ -65,3 +65,21 @@ CREATE TABLE `wechat_publications` (
   KEY `idx_wechat_publications_claim_token` (`claim_token`),
   KEY `idx_wechat_publications_claimed_at` (`claimed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `wechat_project_reconcile_leases` (
+  `project_id` char(36) NOT NULL,
+  `lease_until_micros` bigint NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`project_id`),
+  KEY `idx_wechat_project_reconcile_leases_lease_until_micros` (`lease_until_micros`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `wechat_publication_bindings` (
+  `project_id` char(36) NOT NULL,
+  `article_id` varchar(191) NOT NULL,
+  `publication_id` char(36) NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`project_id`, `article_id`),
+  UNIQUE KEY `idx_wechat_publication_bindings_publication_id` (`publication_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -79,3 +79,28 @@ type WechatPublication struct {
 }
 
 func (WechatPublication) TableName() string { return "wechat_publications" }
+
+// WechatProjectReconcileLease is the project-scoped provider-call throttle.
+// It is deliberately separate from per-publication poll timestamps.
+type WechatProjectReconcileLease struct {
+	ProjectID        string    `gorm:"type:char(36);primaryKey;not null" json:"-"`
+	LeaseUntilMicros int64     `gorm:"not null;index" json:"-"`
+	CreatedAt        time.Time `gorm:"not null" json:"-"`
+	UpdatedAt        time.Time `gorm:"not null" json:"-"`
+}
+
+func (WechatProjectReconcileLease) TableName() string {
+	return "wechat_project_reconcile_leases"
+}
+
+// WechatPublicationBinding atomically assigns one project article to one
+// publication while allowing the provider to reuse an article ID in another
+// official-account project.
+type WechatPublicationBinding struct {
+	ProjectID     string    `gorm:"type:char(36);primaryKey;not null" json:"-"`
+	ArticleID     string    `gorm:"type:varchar(191);primaryKey;not null" json:"-"`
+	PublicationID string    `gorm:"type:char(36);uniqueIndex;not null" json:"-"`
+	CreatedAt     time.Time `gorm:"not null" json:"-"`
+}
+
+func (WechatPublicationBinding) TableName() string { return "wechat_publication_bindings" }

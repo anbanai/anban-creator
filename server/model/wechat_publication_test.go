@@ -93,6 +93,37 @@ func TestWechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract(t *testing.T
 	}
 }
 
+func TestWechatPublicationLeaseAndBindingSchemaEnforceProjectScopedUniqueness(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&WechatProjectReconcileLease{}, &WechatPublicationBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&WechatProjectReconcileLease{ProjectID: "project-1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&WechatProjectReconcileLease{ProjectID: "project-1"}).Error; err == nil {
+		t.Fatal("duplicate project reconcile lease succeeded")
+	}
+	first := &WechatPublicationBinding{ProjectID: "project-1", ArticleID: "article-1", PublicationID: "publication-1"}
+	if err := db.Create(first).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, duplicate := range []WechatPublicationBinding{
+		{ProjectID: "project-1", ArticleID: "article-1", PublicationID: "publication-2"},
+		{ProjectID: "project-1", ArticleID: "article-2", PublicationID: "publication-1"},
+	} {
+		if err := db.Create(&duplicate).Error; err == nil {
+			t.Fatalf("duplicate binding %#v succeeded", duplicate)
+		}
+	}
+	if err := db.Create(&WechatPublicationBinding{ProjectID: "project-2", ArticleID: "article-1", PublicationID: "publication-2"}).Error; err != nil {
+		t.Fatalf("same article ID in another project must be allowed: %v", err)
+	}
+}
+
 func TestPublicationCutoverRemovesTaskPublicationAndRenamesExecutionDelivery(t *testing.T) {
 	taskType := reflect.TypeOf(Task{})
 	for _, obsolete := range []string{"Published", "PublishedAt", "PublishApprovalState", "PendingDraftArticles"} {

@@ -92,6 +92,36 @@ func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.
 	}
 }
 
+func TestProjectHandlerRejectsInvalidWechatPublishMode(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+		"platform":            model.PlatformArticle,
+		"name":                "Article",
+		"wechat_publish_mode": "automatic",
+	})
+	body := decodeBody(t, resp)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid wechat publish mode") {
+		t.Fatalf("create status/body = %d/%#v, want 400 invalid mode", resp.StatusCode, body)
+	}
+
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle,
+		Name: "Article", Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{
+		"wechat_publish_mode": "automatic",
+	})
+	body = decodeBody(t, resp)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid wechat publish mode") {
+		t.Fatalf("update status/body = %d/%#v, want 400 invalid mode", resp.StatusCode, body)
+	}
+}
+
 func TestProjectRequestMapsMontageDefaults(t *testing.T) {
 	req := projectRequest{
 		Platform: model.PlatformMontage,

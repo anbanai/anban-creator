@@ -300,11 +300,12 @@ type WechatPublicationRepository interface {
 	Create(ctx context.Context, publication *model.WechatPublication) error
 	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
-	FindByArticleID(ctx context.Context, articleID string) (*model.WechatPublication, error)
+	FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error)
 	FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
-	ClaimProjectReconcile(ctx context.Context, projectID string, now, staleBefore time.Time) (bool, error)
+	ClaimProjectReconcile(ctx context.Context, projectID string, lease time.Duration) (bool, error)
+	ClaimArticleBinding(ctx context.Context, projectID, articleID, publicationID string) (bool, error)
 	Update(ctx context.Context, publication *model.WechatPublication) error
-	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time) (bool, error)
+	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
 	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
 }
 

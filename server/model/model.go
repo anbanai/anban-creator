@@ -11,6 +11,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&Plan{},
 		&Task{},
 		&WechatPublication{},
+		&WechatProjectReconcileLease{},
+		&WechatPublicationBinding{},
 		&TaskExecution{},
 		&TaskFile{},
 		&TaskFileObjectCleanup{},

@@ -24,12 +24,16 @@ type fakeWechatPublicationAPI struct {
 	addResponse                                                         *appwechat.DraftAddResponse
 	addError                                                            error
 	draftListResponse                                                   *appwechat.DraftBatchGetResponse
+	draftListResponses                                                  map[int64]*appwechat.DraftBatchGetResponse
+	draftListRequests                                                   []appwechat.DraftBatchGetRequest
 	draftListError                                                      error
 	submitResponse                                                      *appwechat.FreePublishSubmitResponse
 	submitError                                                         error
 	getResponses                                                        []*appwechat.FreePublishGetResponse
 	getError                                                            error
 	publishedListResponse                                               *appwechat.FreePublishBatchGetResponse
+	publishedListResponses                                              map[int64]*appwechat.FreePublishBatchGetResponse
+	publishedListRequests                                               []appwechat.FreePublishBatchGetRequest
 	publishedListError                                                  error
 	onSubmit                                                            func()
 	onPublishedList                                                     func(int)
@@ -41,11 +45,16 @@ func (f *fakeWechatPublicationAPI) AddDraft(context.Context, appwechat.DraftAddR
 	f.mu.Unlock()
 	return f.addResponse, f.addError
 }
-func (f *fakeWechatPublicationAPI) BatchGetDrafts(context.Context, appwechat.DraftBatchGetRequest) (*appwechat.DraftBatchGetResponse, error) {
+func (f *fakeWechatPublicationAPI) BatchGetDrafts(_ context.Context, request appwechat.DraftBatchGetRequest) (*appwechat.DraftBatchGetResponse, error) {
 	f.mu.Lock()
 	f.draftListCalls++
+	f.draftListRequests = append(f.draftListRequests, request)
+	response := f.draftListResponse
+	if f.draftListResponses != nil {
+		response = f.draftListResponses[request.Offset]
+	}
 	f.mu.Unlock()
-	return f.draftListResponse, f.draftListError
+	return response, f.draftListError
 }
 func (f *fakeWechatPublicationAPI) SubmitFreePublish(context.Context, appwechat.FreePublishSubmitRequest) (*appwechat.FreePublishSubmitResponse, error) {
 	f.mu.Lock()
@@ -67,20 +76,26 @@ func (f *fakeWechatPublicationAPI) GetFreePublish(context.Context, appwechat.Fre
 	f.getResponses = f.getResponses[1:]
 	return response, f.getError
 }
-func (f *fakeWechatPublicationAPI) BatchGetFreePublishes(context.Context, appwechat.FreePublishBatchGetRequest) (*appwechat.FreePublishBatchGetResponse, error) {
+func (f *fakeWechatPublicationAPI) BatchGetFreePublishes(_ context.Context, request appwechat.FreePublishBatchGetRequest) (*appwechat.FreePublishBatchGetResponse, error) {
 	f.mu.Lock()
 	f.publishedListCalls++
+	f.publishedListRequests = append(f.publishedListRequests, request)
 	call := f.publishedListCalls
+	response := f.publishedListResponse
+	if f.publishedListResponses != nil {
+		response = f.publishedListResponses[request.Offset]
+	}
 	f.mu.Unlock()
 	if f.onPublishedList != nil {
 		f.onPublishedList(call)
 	}
-	return f.publishedListResponse, f.publishedListError
+	return response, f.publishedListError
 }
 
 type publicationFixture struct {
 	svc       *WechatPublicationService
 	repo      repository.Repository
+	db        *gorm.DB
 	api       *fakeWechatPublicationAPI
 	now       time.Time
 	userID    string
@@ -101,9 +116,11 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	t.Cleanup(func() { _ = repo.Close() })
 	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)
 	f := &publicationFixture{
-		repo: repo, api: &fakeWechatPublicationAPI{}, now: now,
+		repo: repo, db: db, api: &fakeWechatPublicationAPI{}, now: now,
 		userID: uuid.NewString(), projectID: uuid.NewString(), taskID: uuid.NewString(),
 	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "draft-1", UpdateTime: now.Unix()}}}
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	ctx := context.Background()
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@publication.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
@@ -118,6 +135,47 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	f.svc = NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return f.api, nil }, &logger)
 	f.svc.now = func() time.Time { return f.now }
 	return f
+}
+
+type publicationRepositoryOverride struct {
+	repository.Repository
+	publications repository.WechatPublicationRepository
+}
+
+func (r publicationRepositoryOverride) WechatPublications() repository.WechatPublicationRepository {
+	return r.publications
+}
+
+type failingWechatPublicationRepository struct {
+	repository.WechatPublicationRepository
+	updateErr        error
+	updateClaimedErr error
+	findArticleErr   error
+}
+
+func (r failingWechatPublicationRepository) Update(ctx context.Context, publication *model.WechatPublication) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	return r.WechatPublicationRepository.Update(ctx, publication)
+}
+
+func (r failingWechatPublicationRepository) UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error) {
+	if r.updateClaimedErr != nil {
+		return false, r.updateClaimedErr
+	}
+	return r.WechatPublicationRepository.UpdateClaimed(ctx, publication, token)
+}
+
+func (r failingWechatPublicationRepository) FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error) {
+	if r.findArticleErr != nil {
+		return nil, r.findArticleErr
+	}
+	return r.WechatPublicationRepository.FindByArticleID(ctx, projectID, articleID)
+}
+
+func (f *publicationFixture) overridePublications(publications repository.WechatPublicationRepository) {
+	f.svc.repo = publicationRepositoryOverride{Repository: f.repo, publications: publications}
 }
 
 func (f *publicationFixture) draftInput() appwechat.DraftAddRequest {
@@ -166,6 +224,31 @@ func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 	again, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, first)
 	if err != nil || again.ID != publication.ID || f.api.draftListCalls != 1 || f.api.addCalls != 0 {
 		t.Fatalf("idempotent replay = %#v err=%v calls=%d/%d", again, err, f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRecoveryPaginatesAndRejectsUnsafeUpdateTimes(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	article := f.draftInput().Articles[0]
+	f.api.draftListResponses = map[int64]*appwechat.DraftBatchGetResponse{
+		0: {TotalCount: 3, ItemCount: 2, Items: []appwechat.DraftBatchItem{
+			{MediaID: "old", UpdateTime: f.now.Add(-time.Minute).Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}}},
+			{MediaID: "missing-time", UpdateTime: 0, Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}}},
+		}},
+		2: {TotalCount: 3, ItemCount: 1, Items: []appwechat.DraftBatchItem{
+			{MediaID: "safe", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}}},
+		}},
+	}
+
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DraftMediaID != "safe" || f.api.addCalls != 0 {
+		t.Fatalf("recovered=%#v addCalls=%d", got, f.api.addCalls)
+	}
+	if len(f.api.draftListRequests) != 2 || f.api.draftListRequests[0].Offset != 0 || f.api.draftListRequests[1].Offset != 2 {
+		t.Fatalf("draft page requests=%#v", f.api.draftListRequests)
 	}
 }
 
@@ -251,6 +334,109 @@ func TestPublishResponseLossSchedulesReconciliationWithoutResubmitting(t *testin
 	}
 	if f.api.submitCalls != 1 {
 		t.Fatalf("submit calls=%d, want 1", f.api.submitCalls)
+	}
+}
+
+func TestPublishTransportAmbiguityPersistsPendingBeforeReturning(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f.seedDrafted(t)
+	f.api.submitError = errors.New("connection reset after submit")
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if !errors.Is(err, ErrWechatPublicationPending) || got.Status != model.WechatPublicationStatusPublishSubmitting || got.NextCheckAt == nil {
+		t.Fatalf("Publish=%#v err=%v", got, err)
+	}
+	stored, findErr := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if findErr != nil || stored.Status != model.WechatPublicationStatusPublishSubmitting || stored.NextCheckAt == nil {
+		t.Fatalf("stored=%#v err=%v", stored, findErr)
+	}
+}
+
+func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) {
+	persistErr := errors.New("publication persistence failed")
+	t.Run("ambiguous submit", func(t *testing.T) {
+		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f.seedDrafted(t)
+		f.api.submitError = errors.New("connection reset")
+		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateClaimedErr: persistErr})
+		if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, persistErr) {
+			t.Fatalf("Publish err=%v", err)
+		}
+	})
+
+	t.Run("poll failure", func(t *testing.T) {
+		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		p := f.seedDrafted(t)
+		p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
+		if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+		f.api.getError = errors.New("provider unavailable")
+		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateErr: persistErr})
+		if _, err := f.svc.Poll(context.Background(), p.ID); !errors.Is(err, persistErr) {
+			t.Fatalf("Poll err=%v", err)
+		}
+	})
+
+	t.Run("unsupported reconcile", func(t *testing.T) {
+		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		f.seedDrafted(t)
+		f.api.publishedListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unsupported"}
+		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateErr: persistErr})
+		if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); !errors.Is(err, persistErr) {
+			t.Fatalf("Reconcile err=%v", err)
+		}
+	})
+
+	t.Run("binding lookup", func(t *testing.T) {
+		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		p := f.seedDrafted(t)
+		f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+			ArticleID: "candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/candidate"}}},
+		}}}
+		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), findArticleErr: persistErr})
+		if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); !errors.Is(err, persistErr) {
+			t.Fatalf("Reconcile err=%v", err)
+		}
+	})
+}
+
+func TestPublishPreflightFindsPublishedArticleAcrossPagesBeforeSubmit(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	f.api.publishedListResponses = map[int64]*appwechat.FreePublishBatchGetResponse{
+		0: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+			ArticleID: "unrelated", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: "Other", Content: "<p>other</p>", URL: "https://mp.weixin.qq.com/s/other"}}},
+		}}},
+		1: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+			ArticleID: "already-published", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/already"}}},
+		}}},
+	}
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.WechatPublicationStatusPublished || got.ArticleID != "already-published" || f.api.submitCalls != 0 {
+		t.Fatalf("preflight publication=%#v submitCalls=%d", got, f.api.submitCalls)
+	}
+	if len(f.api.publishedListRequests) != 2 || f.api.publishedListRequests[1].Offset != 1 {
+		t.Fatalf("published page requests=%#v", f.api.publishedListRequests)
+	}
+}
+
+func TestPublishPreflightPersistsPendingWhenDraftDisappeared(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f.seedDrafted(t)
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
+
+	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if !errors.Is(err, ErrWechatPublicationPending) {
+		t.Fatalf("Publish err=%v, want pending", err)
+	}
+	if got.Status != model.WechatPublicationStatusPublishSubmitting || got.NextCheckAt == nil || f.api.submitCalls != 0 {
+		t.Fatalf("missing-draft publication=%#v submitCalls=%d", got, f.api.submitCalls)
 	}
 }
 
@@ -395,6 +581,64 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 	}
 }
 
+func TestManualReconcileEvaluatesExactUniquenessAcrossAllPages(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	p := f.seedDrafted(t)
+	item := func(id string) appwechat.FreePublishBatchItem {
+		return appwechat.FreePublishBatchItem{ArticleID: id, UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/" + id}}}}
+	}
+	f.api.publishedListResponses = map[int64]*appwechat.FreePublishBatchGetResponse{
+		0: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{item("exact-1")}},
+		1: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{item("exact-2")}},
+	}
+
+	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if got.Status != model.WechatPublicationStatusNeedsSelection || got.ArticleID != "" || f.api.publishedListCalls != 2 {
+		t.Fatalf("cross-page reconcile=%#v calls=%d", got, f.api.publishedListCalls)
+	}
+}
+
+func TestReconcilePreservesAPIOriginAndCompositeMsgID(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	p.Status, p.Source, p.MsgDataID = model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationSourceAnbanAPI, "msg-data-1"
+	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "api-recovered", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/api-recovered"}}},
+	}}}
+
+	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
+	if got.Source != model.WechatPublicationSourceAnbanAPI || got.MsgID != "msg-data-1_1" {
+		t.Fatalf("reconciled API publication=%#v", got)
+	}
+}
+
+func TestPollRecoversStalePublishSubmittingWithoutResubmit(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	p := f.seedDrafted(t)
+	p.Status = model.WechatPublicationStatusPublishSubmitting
+	p.NextCheckAt = nextWechatManualCheck(f.now, *p.DraftCreatedAt)
+	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "recovered", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/recovered"}}},
+	}}}
+
+	got, err := f.svc.Poll(context.Background(), p.ID)
+	if err != nil || got.Status != model.WechatPublicationStatusPublished || f.api.submitCalls != 0 {
+		t.Fatalf("Poll=%#v err=%v submitCalls=%d", got, err, f.api.submitCalls)
+	}
+}
+
 func TestManualReconcileRateLimitAndSchedule(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
 	p := f.seedDrafted(t)
@@ -498,6 +742,75 @@ func TestSelectRefetchesProviderAndRejectsForeignOrBoundArticle(t *testing.T) {
 	}
 }
 
+func TestSelectScansPublishedPagesUntilArticleIDFound(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	p := f.seedDrafted(t)
+	p.Status = model.WechatPublicationStatusNeedsSelection
+	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	f.api.publishedListResponses = map[int64]*appwechat.FreePublishBatchGetResponse{
+		0: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{ArticleID: "other", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/other"}}}}}},
+		1: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{ArticleID: "selected", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/selected"}}}}}},
+	}
+
+	got, err := f.svc.Select(context.Background(), f.userID, f.taskID, "selected")
+	if err != nil || got.ArticleID != "selected" || f.api.publishedListCalls != 2 {
+		t.Fatalf("Select=%#v err=%v calls=%d", got, err, f.api.publishedListCalls)
+	}
+}
+
+func TestConcurrentSelectionHasOneAtomicArticleBindingWinner(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	first := f.seedDrafted(t)
+	first.Status = model.WechatPublicationStatusNeedsSelection
+	if err := f.repo.WechatPublications().Update(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	secondTaskID := uuid.NewString()
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	created := f.now.Add(-time.Hour)
+	second := &model.WechatPublication{ID: uuid.NewString(), TaskID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, DraftMediaID: "draft-2", DraftContentFingerprint: first.DraftContentFingerprint, Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusNeedsSelection, DraftCreatedAt: &created}
+	if err := f.repo.WechatPublications().Create(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "one-owner", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/one-owner"}}},
+	}}}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, taskID := range []string{f.taskID, secondTaskID} {
+		go func(taskID string) {
+			<-start
+			_, err := f.svc.Select(context.Background(), f.userID, taskID, "one-owner")
+			errs <- err
+		}(taskID)
+	}
+	close(start)
+	winners, conflicts := 0, 0
+	for range 2 {
+		err := <-errs
+		switch {
+		case err == nil:
+			winners++
+		case errors.Is(err, ErrWechatPublicationConflict):
+			conflicts++
+		default:
+			t.Fatalf("unexpected selection error: %v", err)
+		}
+	}
+	if winners != 1 || conflicts != 1 {
+		t.Fatalf("selection results winners=%d conflicts=%d", winners, conflicts)
+	}
+	var bindings int64
+	if err := f.db.Model(&model.WechatPublicationBinding{}).Where("project_id = ? AND article_id = ?", f.projectID, "one-owner").Count(&bindings).Error; err != nil || bindings != 1 {
+		t.Fatalf("bindings=%d err=%v", bindings, err)
+	}
+}
+
 func TestWechatPublicationOwnershipAndStateConflicts(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
 	f.seedDrafted(t)
@@ -537,7 +850,7 @@ func TestPublicationSchedulesUseTheContractedDurableCadence(t *testing.T) {
 	}{
 		{time.Hour, 10 * time.Minute, true}, {2 * time.Hour, time.Hour, true},
 		{23 * time.Hour, time.Hour, true}, {24 * time.Hour, 6 * time.Hour, true},
-		{71 * time.Hour, 6 * time.Hour, true}, {72 * time.Hour, 0, false},
+		{71 * time.Hour, time.Hour, true}, {72 * time.Hour, 0, false},
 	} {
 		got := nextWechatManualCheck(now, now.Add(-tc.age))
 		if !tc.scheduled {

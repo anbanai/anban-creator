@@ -139,3 +139,74 @@ git diff --check
 - Scheduler/bootstrap invocation remains intentionally owned by Task 6; the
   service entry points and durable timestamps required for that wiring are in
   place.
+
+## Fix Round 1
+
+### Findings Addressed
+
+- Publish preflight now paginates the published feed, reconciles an already
+  published article before submission, and confirms the durable draft still
+  exists before claiming `freepublish/submit`.
+- Draft recovery, publication reconciliation, and operator selection scan all
+  provider pages. Fingerprint recovery rejects zero timestamps and drafts
+  updated before the persisted intent time, without replacing
+  `DraftCreatedAt`.
+- Project reconciliation uses a dedicated atomic project lease. Published
+  article ownership uses an atomic `(project_id, article_id)` binding, so
+  provider article IDs remain reusable across projects.
+- Persistence failures are returned. Ambiguous submit transport/response
+  outcomes remain durably pending, and API-origin recovery preserves
+  `anban_api`, `msg_data_id`, and the derived composite `msg_id`.
+- Stale `publish_submitting` rows reconcile through polling without resubmitting,
+  and manual cadence is clamped to `DraftCreatedAt + 72h`.
+- Project create/update reject invalid non-empty `wechat_publish_mode` values
+  with HTTP 400. Empty create retains the global manual default; omitted update
+  preserves the stored mode.
+- SQLite concurrency paths use bounded, context-aware retries for transient
+  table locks around guard claims and the adjacent publication reads/writes.
+
+### RED Evidence
+
+Focused RED runs demonstrated that page two was ignored, unsafe pre-intent
+drafts were accepted, publish could submit without preflight, disappeared
+drafts were resubmitted, cross-page ambiguity auto-bound, API origin was
+overwritten, stale submissions could not reconcile, selection stopped after
+page one, and the 72-hour cadence overshot. Repository tests initially lacked
+the project lease and article-binding models and exposed non-atomic ownership.
+
+The project-mode regression tests then failed with invalid create/update modes
+being accepted and an omitted update clearing `api_confirmed`. The first full
+suite run also reproduced an intermittent SQLite table lock in concurrent
+selection; `-count=25` made the incomplete retry boundary deterministic before
+the fix.
+
+### GREEN Evidence
+
+```text
+go test ./server/service -run '^TestConcurrentSelectionHasOneAtomicArticleBindingWinner$' -count=25
+ok github.com/anbanai/anban-creator/server/service
+
+go test ./server/service ./server/repository ./server/handler ./server/model ./server/migrations -count=1
+ok github.com/anbanai/anban-creator/server/service
+ok github.com/anbanai/anban-creator/server/repository
+ok github.com/anbanai/anban-creator/server/handler
+ok github.com/anbanai/anban-creator/server/model
+ok github.com/anbanai/anban-creator/server/migrations
+
+go test ./...
+# all packages passed
+
+go build -o /tmp/anban-creator-server-task2-fix1 ./server
+# exit 0
+```
+
+### Self-Review And Scope
+
+- Guard tables are covered by model, migration-fragment, repository concurrency,
+  cross-project reuse, and service one-winner tests. SQLite executes the lease
+  and binding behavior; no live MySQL integration environment was available.
+- Provider pagination stops from `TotalCount` and per-page `ItemCount`, and
+  fails closed if a provider reports remaining rows without pagination
+  progress.
+- Studio legacy-call cleanup remains Task 5. Scheduler due-query/bootstrap
+  wiring remains Task 6. Neither surface changed in this fix round.

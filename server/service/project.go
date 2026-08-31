@@ -15,12 +15,13 @@ import (
 )
 
 var (
-	ErrProjectNotFound        = errors.New("project not found")
-	ErrProjectOwnedByUser     = errors.New("project not owned by user")
-	ErrProjectDeleteConflict  = errors.New("project delete conflict")
-	ErrProjectUpdateConflict  = errors.New("project update conflict")
-	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
-	ErrInvalidAgentConfig     = errors.New("invalid agent config")
+	ErrProjectNotFound          = errors.New("project not found")
+	ErrProjectOwnedByUser       = errors.New("project not owned by user")
+	ErrProjectDeleteConflict    = errors.New("project delete conflict")
+	ErrProjectUpdateConflict    = errors.New("project update conflict")
+	ErrProjectMontageDefaults   = errors.New("invalid montage project defaults")
+	ErrInvalidAgentConfig       = errors.New("invalid agent config")
+	ErrInvalidWechatPublishMode = errors.New("invalid wechat publish mode")
 )
 
 type projectDeleteConflictError struct {
@@ -49,6 +50,16 @@ func validateProjectAgentConfig(project *model.Project) error {
 	}
 	if err := agentpack.ValidateProjectConfig(pack, project.AgentConfig.Data()); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidAgentConfig, err)
+	}
+	return nil
+}
+
+func validateProjectWechatPublishMode(project *model.Project) error {
+	if project == nil || project.Config.WechatPublishMode == "" {
+		return nil
+	}
+	if !model.IsWechatPublishMode(project.Config.WechatPublishMode) {
+		return fmt.Errorf("%w: %q", ErrInvalidWechatPublishMode, project.Config.WechatPublishMode)
 	}
 	return nil
 }
@@ -103,6 +114,9 @@ func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
 	if !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
+	}
+	if err := validateProjectWechatPublishMode(ch); err != nil {
+		return nil, err
 	}
 	if err := validateProjectMontageDefaults(ch); err != nil {
 		return nil, err
@@ -215,6 +229,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if existing.UserID != userID {
 		return nil, ErrProjectOwnedByUser
 	}
+	if err := validateProjectWechatPublishMode(ch); err != nil {
+		return nil, err
+	}
 	effectivePlatform := existing.Platform
 	if ch.Platform != "" {
 		effectivePlatform = ch.Platform
@@ -313,7 +330,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.
 	existing.Config.WechatAppID = ch.Config.WechatAppID
-	existing.Config.WechatPublishMode = ch.Config.WechatPublishMode
+	if ch.Config.WechatPublishMode != "" {
+		existing.Config.WechatPublishMode = ch.Config.WechatPublishMode
+	}
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}

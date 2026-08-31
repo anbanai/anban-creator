@@ -68,6 +68,21 @@ func TestWechatPublicationContractMigrationIsACleanCutover(t *testing.T) {
 	}
 }
 
+func TestWechatPublicationMigrationCreatesProjectLeaseAndBindingGuards(t *testing.T) {
+	raw := readPublicationMigration(t)
+	for _, fragment := range []string{
+		"CREATE TABLE `wechat_project_reconcile_leases`",
+		"PRIMARY KEY (`project_id`)",
+		"CREATE TABLE `wechat_publication_bindings`",
+		"PRIMARY KEY (`project_id`, `article_id`)",
+		"UNIQUE KEY `idx_wechat_publication_bindings_publication_id` (`publication_id`)",
+	} {
+		if !strings.Contains(raw, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+}
+
 func TestWechatPublicationMigrationMatchesCanonicalColumnAndIndexContract(t *testing.T) {
 	contract := parsePublicationTableContract(t, readPublicationMigration(t))
 	want := publicationColumnContract()
