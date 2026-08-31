@@ -313,8 +313,7 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.
 	existing.Config.WechatAppID = ch.Config.WechatAppID
-	existing.Config.EnablePublishing = ch.Config.EnablePublishing
-	existing.Config.RequirePublishApproval = ch.Config.RequirePublishApproval
+	existing.Config.WechatPublishMode = ch.Config.WechatPublishMode
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}

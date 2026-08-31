@@ -36,23 +36,19 @@ func (f projectMemoryDeleteFake) DeleteProjectMemory(context.Context, string) er
 	return f.err
 }
 
-func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
+func TestProjectRequestMapsWechatPublishMode(t *testing.T) {
 	req := projectRequest{
-		Platform:               "article",
-		Name:                   "Article",
-		EnablePublishing:       true,
-		RequirePublishApproval: true,
+		Platform:          "article",
+		Name:              "Article",
+		WechatPublishMode: model.WechatPublishModeAPIConfirmed,
 	}
 
 	project := req.toProject()
-	if !project.Config.EnablePublishing {
-		t.Fatal("EnablePublishing was not mapped")
+	if project.Config.WechatPublishMode != model.WechatPublishModeAPIConfirmed {
+		t.Fatal("WechatPublishMode was not mapped")
 	}
-	if !project.Config.RequirePublishApproval {
-		t.Fatal("RequirePublishApproval was not mapped")
-	}
-	if got := req.getFieldValue("require_publish_approval"); got != "true" {
-		t.Fatalf("getFieldValue(require_publish_approval) = %q, want true", got)
+	if got := req.getFieldValue("wechat_publish_mode"); got != model.WechatPublishModeAPIConfirmed {
+		t.Fatalf("getFieldValue(wechat_publish_mode) = %q", got)
 	}
 }
 

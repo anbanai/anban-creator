@@ -194,10 +194,9 @@ type projectRequest struct {
 	AgentConfig           map[string]any                   `json:"agent_config,omitempty"`
 	AgentConfigSet        bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
-	WechatAppID            string `json:"wechat_app_id"`
-	WechatSecret           string `json:"wechat_secret"`
-	EnablePublishing       bool   `json:"enable_publishing"`
-	RequirePublishApproval bool   `json:"require_publish_approval"`
+	WechatAppID       string `json:"wechat_app_id"`
+	WechatSecret      string `json:"wechat_secret"`
+	WechatPublishMode string `json:"wechat_publish_mode"`
 }
 
 func hasJSONField(body []byte, field string) bool {
@@ -233,12 +232,7 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:    req.MaxConcurrentTasks,
 		Instructions:          instructions,
 		InstructionsSet:       instructionsSet,
-		Config: model.ProjectConfig{
-			WechatAppID:            req.WechatAppID,
-			WechatSecret:           req.WechatSecret,
-			EnablePublishing:       req.EnablePublishing,
-			RequirePublishApproval: req.RequirePublishApproval,
-		},
+		Config:                model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret, WechatPublishMode: req.WechatPublishMode},
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -834,10 +828,8 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.WechatAppID
 	case "wechat_secret":
 		return req.WechatSecret
-	case "enable_publishing":
-		return fmt.Sprintf("%v", req.EnablePublishing)
-	case "require_publish_approval":
-		return fmt.Sprintf("%v", req.RequirePublishApproval)
+	case "wechat_publish_mode":
+		return req.WechatPublishMode
 	default:
 		return ""
 	}

@@ -367,8 +367,8 @@ func TestStaleCloudFinalizerStopsBeforeTaskAndSettlementSideEffects(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if foundOld.FinalizationStatus != model.TaskExecutionFinalizationResult || foundOld.PublishingStatus != "" {
-		t.Fatalf("stale finalizer advanced execution: stage=%q publishing=%q", foundOld.FinalizationStatus, foundOld.PublishingStatus)
+	if foundOld.FinalizationStatus != model.TaskExecutionFinalizationResult || foundOld.DraftDeliveryStatus != "" {
+		t.Fatalf("stale finalizer advanced execution: stage=%q publishing=%q", foundOld.FinalizationStatus, foundOld.DraftDeliveryStatus)
 	}
 }
 
@@ -456,7 +456,7 @@ func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
 		model.TaskExecutionFinalizationArtifacts,
 		model.TaskExecutionFinalizationResult,
 		model.TaskExecutionFinalizationWorkflow,
-		model.TaskExecutionFinalizationPublishing,
+		model.TaskExecutionFinalizationDraftDelivery,
 		model.TaskExecutionFinalizationTask,
 		model.TaskExecutionFinalizationSettlement,
 		model.TaskExecutionFinalizationSlot,
@@ -665,67 +665,6 @@ func (p *ambiguousPublishFake) callCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.calls
-}
-
-func TestCloudPublishingAmbiguityNeverCallsProviderTwice(t *testing.T) {
-	db := setupTaskTestDB(t)
-	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.SetMaxOpenConns(1)
-	}
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID, projectID, taskID, executionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	project := &model.Project{ID: projectID, UserID: userID, Name: "publish", Platform: model.PlatformArticle, Status: model.ProjectStatusActive, Config: model.ProjectConfig{EnablePublishing: true}}
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, ManifestStatus: model.TaskExecutionManifestPending}
-	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
-		t.Fatal(err)
-	}
-	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{"draft-key": []byte(`{"articles":[{"title":"T","content":"<p>body</p>"}]}`)}}
-	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/draft.json", FileName: "draft.json", FileSize: 50, OSSKey: "draft-key", StorageProvider: "oss"}); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
-	publisher := &ambiguousPublishFake{}
-	svc.cloudPublisher = publisher
-	svc.finalizationAfterEffect = func(stage string) error {
-		if stage == model.TaskExecutionFinalizationPublishing {
-			return errors.New("crash after provider success")
-		}
-		return nil
-	}
-	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
-	if err := svc.CompleteCloudExecution(ctx, executionID, result); err == nil {
-		t.Fatal("expected injected publish crash")
-	}
-	svc.finalizationAfterEffect = nil
-	if err := svc.CompleteCloudExecution(ctx, executionID, result); !errors.Is(err, ErrCloudPublishingAmbiguous) {
-		t.Fatalf("retry error=%v, want ambiguous", err)
-	}
-	if publisher.callCount() != 1 {
-		t.Fatalf("provider calls=%d, want 1", publisher.callCount())
-	}
-	found, _ := repo.TaskExecutions().FindByID(ctx, executionID)
-	if found.PublishingStatus != model.TaskExecutionPublishingInFlight || found.FinalizationStatus != model.TaskExecutionFinalizationWorkflow {
-		t.Fatalf("publishing=%s stage=%s", found.PublishingStatus, found.FinalizationStatus)
-	}
-	if err := svc.ResolveCloudPublishing(ctx, executionID, true); err != nil {
-		t.Fatalf("resolve confirmed provider success: %v", err)
-	}
-	if publisher.callCount() != 1 {
-		t.Fatalf("provider calls after resolution=%d, want 1", publisher.callCount())
-	}
-	found, _ = repo.TaskExecutions().FindByID(ctx, executionID)
-	if found.PublishingStatus != model.TaskExecutionPublishingSucceeded || found.FinalizationStatus != model.TaskExecutionFinalizationDone {
-		t.Fatalf("resolved publishing=%s stage=%s", found.PublishingStatus, found.FinalizationStatus)
-	}
 }
 
 type cancelOrderingDispatcher struct {

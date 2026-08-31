@@ -139,10 +139,6 @@ func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment
 	task.ProgressSequence = 0
 	task.LatestProgress = datatypes.NewJSONType(model.ProgressPayload{})
 	task.WorkflowStatus = nil
-	task.PublishApprovalState = ""
-	task.PendingDraftArticles = nil
-	task.Published = false
-	task.PublishedAt = nil
 	task.SetInputAttachments(attachments)
 	task.ExecutionTarget = model.ExecutionTargetCloud
 	task.LocalClaimDeadline = nil

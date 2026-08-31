@@ -229,37 +229,6 @@ func generateTaskID() string {
 	return uuid.New().String()
 }
 
-// autoPublishWithData publishes pre-extracted article data from persisted task files.
-func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task, project *model.Project, articles []DraftArticleInput, logText string) {
-	taskID := task.ID
-
-	if wasPublishedByAgent(logText) {
-		s.logger.Info().Str("task_id", taskID).Msg("agent already published, setting published flag")
-		if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag")
-		}
-		return
-	}
-
-	s.logger.Info().Str("task_id", taskID).Msg("auto-publishing with pre-extracted articles")
-	result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, project.ID, articles)
-	if err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish article draft failed")
-		return
-	}
-	s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
-
-	if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag after auto-publish")
-	}
-}
-
-// wasPublishedByAgent checks the agent's log text for evidence that the agent
-// already called a publish MCP tool during execution.
-func wasPublishedByAgent(logText string) bool {
-	return strings.Contains(logText, "publish_draft")
-}
-
 func (s *TaskService) extractArticleDraftFromTaskFiles(ctx context.Context, taskID string) ([]DraftArticleInput, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("storage provider is not available")

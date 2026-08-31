@@ -163,30 +163,24 @@ func TestProjectServiceUpdateInstructionsSetControlsClear(t *testing.T) {
 	}
 }
 
-func TestProjectServiceUpdatePersistsRequirePublishApproval(t *testing.T) {
+func TestProjectServiceUpdatePersistsWechatPublishMode(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
 		Name:     "Article",
-		Config: model.ProjectConfig{
-			EnablePublishing:       true,
-			RequirePublishApproval: false,
-		},
+		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeManual},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Config: model.ProjectConfig{
-			EnablePublishing:       true,
-			RequirePublishApproval: true,
-		},
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeAPIConfirmed},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if !updated.Config.RequirePublishApproval {
-		t.Fatal("RequirePublishApproval was not persisted on update")
+	if updated.Config.WechatPublishMode != model.WechatPublishModeAPIConfirmed {
+		t.Fatalf("WechatPublishMode = %q", updated.Config.WechatPublishMode)
 	}
 }

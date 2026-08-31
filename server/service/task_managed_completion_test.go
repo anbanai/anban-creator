@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"path/filepath"
@@ -184,63 +183,6 @@ func TestCompleteCloudExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
 	found, err := f.repo.Tasks().FindByID(context.Background(), f.task.ID)
 	if err != nil || found.ErrorMessage != agent.NestedAgentDelegationError {
 		t.Fatalf("nested-agent failure task=%#v err=%v", found, err)
-	}
-}
-
-func TestCompleteCloudExecutionExtractsPendingArticleDraftForApproval(t *testing.T) {
-	for _, test := range []struct {
-		name, fileName, body, wantTitle, wantContent string
-	}{
-		{
-			name: "draft json", fileName: "draft.json",
-			body:      `{"articles":[{"title":"Managed title","content":"<p>Managed body</p>"}]}`,
-			wantTitle: "Managed title", wantContent: "<p>Managed body</p>",
-		},
-		{
-			name: "persisted html title", fileName: "article.html",
-			body:      `<html><h1><span>Persisted &amp; title</span></h1><p>Body</p></html>`,
-			wantTitle: "Persisted & title", wantContent: `<html><h1><span>Persisted &amp; title</span></h1><p>Body</p></html>`,
-		},
-		{
-			name: "persisted markdown title", fileName: "article.md",
-			body:      "# Persisted Markdown\n\nBody",
-			wantTitle: "Persisted Markdown", wantContent: "# Persisted Markdown\n\nBody",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			f := newManagedCompletionFixture(t, model.PlatformArticle)
-			project := &model.Project{
-				ID: uuid.NewString(), UserID: f.task.UserID, Name: "managed approval",
-				Platform: model.PlatformArticle, Status: model.ProjectStatusActive,
-				Config: model.ProjectConfig{EnablePublishing: true, RequirePublishApproval: true},
-			}
-			if err := f.repo.Projects().Create(context.Background(), project); err != nil {
-				t.Fatal(err)
-			}
-			f.task.ProjectID = project.ID
-			if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
-				t.Fatal(err)
-			}
-			f.addPendingFile(t, test.fileName, int64(len(test.body)), test.body)
-			logger := zerolog.New(io.Discard)
-			f.svc.cloudPublisher = NewPublishingService(f.repo, &logger)
-
-			if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
-				t.Fatal(err)
-			}
-			f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStatePublished)
-			found, err := f.repo.Tasks().FindByID(context.Background(), f.task.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var articles []DraftArticleInput
-			if err := json.Unmarshal(found.PendingDraftArticles, &articles); err != nil {
-				t.Fatal(err)
-			}
-			if found.PublishApprovalState != model.PublishApprovalStatePending || len(articles) != 1 || articles[0].Title != test.wantTitle || articles[0].Content != test.wantContent {
-				t.Fatalf("approval state=%q articles=%#v", found.PublishApprovalState, articles)
-			}
-		})
 	}
 }
 

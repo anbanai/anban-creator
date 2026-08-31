@@ -190,6 +190,34 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestWechatPublicationRoutesReplaceLegacyTaskPublicationRoutes(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config: &config.Config{}, Logger: &logger,
+		WechatPublicationHandler: handler.NewWechatPublicationHandler(nil, &logger),
+	})
+	want := map[string]bool{
+		"GET /api/v1/tasks/:id/wechat-publication":            false,
+		"POST /api/v1/tasks/:id/wechat-publication/publish":   false,
+		"POST /api/v1/tasks/:id/wechat-publication/reconcile": false,
+		"POST /api/v1/tasks/:id/wechat-publication/select":    false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+		if key == "POST /api/v1/tasks/:id/publish-approve" || key == "POST /api/v1/tasks/:id/publish-reject" || key == "PATCH /api/v1/tasks/:id/published" {
+			t.Fatalf("legacy publication route is still registered: %s", key)
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing route %s", route)
+		}
+	}
+}
+
 func TestRouterEnablesRequestBodyStreaming(t *testing.T) {
 	app := NewRouter(&Services{Config: &config.Config{}})
 	if !app.Config().StreamRequestBody {

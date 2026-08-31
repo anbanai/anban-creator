@@ -279,26 +279,9 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 		return s.failLocalTask(ctx, task, executionID, outcome)
 	}
 
-	// Success. Publishing model for local: the desktop agent publishes via the
-	// server MCP (publish_draft) itself, so check whether it already did. The
-	// server-side auto-publish / hold-for-approval fallback is cloud-only (needs
-	// the host WorkDir to extract the draft), so it cannot run here — surface the
-	// case loudly instead of silently skipping so the operator can act.
+	// Draft delivery is an independent durable lifecycle owned by create_draft.
+	// Local completion only finalizes task execution.
 	result = outcome.result
-	published := outcome.published
-	if !published && task.ProjectID != "" {
-		if proj, perr := s.repo.Projects().FindByID(ctx, task.ProjectID); perr == nil && proj != nil && proj.GetEnablePublishing() {
-			if proj.GetRequirePublishApproval() {
-				s.logger.Warn().
-					Str("task_id", taskID).Str("project_id", task.ProjectID).
-					Msg("local task completed on approval-required project without agent publish; server cannot extract draft (no host WorkDir) — operator must review uploaded files")
-			} else {
-				s.logger.Warn().
-					Str("task_id", taskID).Str("project_id", task.ProjectID).
-					Msg("local task completed without agent publish; server-side auto-publish unavailable for local execution (no host WorkDir) — agent should publish via MCP")
-			}
-		}
-	}
 
 	resultJSON, executionResultJSON, err := marshalLocalCompletionEvidence(result)
 	if err != nil {
@@ -327,7 +310,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	if err := s.finalizeLocalTaskFromExecution(ctx, task, execution); err != nil {
 		return err
 	}
-	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
+	s.logger.Info().Str("task_id", taskID).Msg("local task completed")
 	return nil
 }
 
@@ -337,7 +320,6 @@ type localCompletionOutcome struct {
 	executionStatus    string
 	billingReason      string
 	errorMessage       string
-	published          bool
 	artifactValidation *agent.ArtifactValidation
 }
 
@@ -385,7 +367,6 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 	return &localCompletionOutcome{
 		result: result, taskStatus: model.TaskStatusCompleted, executionStatus: model.TaskExecutionSucceeded,
 		billingReason: model.TaskBillingTerminalCompleted,
-		published:     result.LogText != "" && wasPublishedByAgent(result.LogText),
 	}, nil
 }
 

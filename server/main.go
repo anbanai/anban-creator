@@ -329,6 +329,7 @@ func main() {
 	var projectSvc *service.ProjectService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
+	var wechatPublicationSvc *service.WechatPublicationService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var wechatTrackingSvc *service.WechatTrackingService
 	var channelsTrackingSvc *service.ChannelsTrackingService
@@ -342,6 +343,7 @@ func main() {
 		projectSvc = service.NewProjectService(repo, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
+		wechatPublicationSvc = service.NewWechatPublicationService(repo, nil, log)
 		templateSvc = service.NewTemplateService(repo, log)
 		posterSvc = service.NewPosterService(repo, log)
 
@@ -478,6 +480,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
+	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
@@ -514,6 +517,7 @@ func main() {
 		}
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
+		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
@@ -759,6 +763,7 @@ func main() {
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		WechatAnalyticsHandler:   wechatAnalyticsHandler,
+		WechatPublicationHandler: wechatPublicationHandler,
 		ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		AgentProfileHandler:      agentProfileHandler,

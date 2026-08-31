@@ -1436,55 +1436,6 @@ func agentJSONRequest(path, body string) *http.Request {
 	return req
 }
 
-func TestResolvePublishingRequiresAdminKeyAndResumesFinalization(t *testing.T) {
-	db := setupTaskHandlerTestDB(t)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID, taskID, executionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@example.com", Password: "x", InviteCode: uuid.NewString()[:12]}); err != nil {
-		t.Fatal(err)
-	}
-	task := &model.Task{ID: taskID, UserID: userID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	execution := &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionSucceeded, Started: true, FinalizationStatus: model.TaskExecutionFinalizationWorkflow, PublishingStatus: model.TaskExecutionPublishingAmbiguous}
-	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
-	h := NewAgentHandler(taskSvc, nil, nil, "", &logger)
-	h.SetAdminAPIKey("operator-secret")
-	app := fiber.New()
-	app.Post("/admin/executions/:executionID/publishing", h.ResolvePublishing)
-
-	unauthorized := agentJSONRequest("/admin/executions/"+executionID+"/publishing", `{"published":true}`)
-	unauthorized.Header.Set("Authorization", "Bearer execution-jwt")
-	resp, err := app.Test(unauthorized)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != fiber.StatusUnauthorized {
-		t.Fatalf("unauthorized status=%d", resp.StatusCode)
-	}
-
-	authorized := agentJSONRequest("/admin/executions/"+executionID+"/publishing", `{"published":true}`)
-	authorized.Header.Set("X-Admin-API-Key", "operator-secret")
-	resp, err = app.Test(authorized)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("authorized status=%d", resp.StatusCode)
-	}
-	foundExecution, _ := repo.TaskExecutions().FindByID(ctx, executionID)
-	foundTask, _ := repo.Tasks().FindByID(ctx, taskID)
-	if foundExecution.PublishingStatus != model.TaskExecutionPublishingSucceeded || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || !foundTask.Published || foundTask.Status != model.TaskStatusCompleted {
-		t.Fatalf("execution=%+v task=%+v", foundExecution, foundTask)
-	}
-}
-
 func agentMultipartUploadRequest(taskID string) *http.Request {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)

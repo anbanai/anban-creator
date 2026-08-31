@@ -107,7 +107,6 @@ func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (s
 		Status:    model.TaskStatusCompleted,
 		Title:     "早起效率翻倍的方法",
 		Prompt:    "早起效率",
-		Published: false,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
