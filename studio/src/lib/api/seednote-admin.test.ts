@@ -24,8 +24,8 @@ describe('seednoteAdminApi', () => {
     await expect(seednoteAdminApi.loginQRCode()).resolves.toEqual({ qrcode_image: 'cG5n' })
     await expect(seednoteAdminApi.logout()).resolves.toEqual({ logged_in: false })
 
-    expect(http.get).toHaveBeenNthCalledWith(1, '/admin/seednote/login-status')
-    expect(http.get).toHaveBeenNthCalledWith(2, '/admin/seednote/login-qrcode')
-    expect(http.delete).toHaveBeenCalledWith('/admin/seednote/login')
+    expect(http.get).toHaveBeenNthCalledWith(1, '/seednote/account/login-status')
+    expect(http.get).toHaveBeenNthCalledWith(2, '/seednote/account/login-qrcode')
+    expect(http.delete).toHaveBeenCalledWith('/seednote/account/login')
   })
 })

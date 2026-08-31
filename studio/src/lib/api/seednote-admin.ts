@@ -8,11 +8,11 @@ export interface SeednoteLoginStatus {
 
 export const seednoteAdminApi = {
   loginStatus: () =>
-    unwrap<SeednoteLoginStatus>(http.get('/admin/seednote/login-status')),
+    unwrap<SeednoteLoginStatus>(http.get('/seednote/account/login-status')),
 
   loginQRCode: () =>
-    unwrap<{ qrcode_image: string }>(http.get('/admin/seednote/login-qrcode')),
+    unwrap<{ qrcode_image: string }>(http.get('/seednote/account/login-qrcode')),
 
   logout: () =>
-    unwrap<{ logged_in: false }>(http.delete('/admin/seednote/login')),
+    unwrap<{ logged_in: false }>(http.delete('/seednote/account/login')),
 }

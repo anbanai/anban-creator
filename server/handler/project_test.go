@@ -458,9 +458,9 @@ func newSeednoteAdminTestApp(h *ProjectHandler) *fiber.App {
 		}
 		return c.Next()
 	})
-	app.Get("/admin/seednote/login-status", h.AdminSeednoteLoginStatus)
-	app.Get("/admin/seednote/login-qrcode", h.AdminSeednoteLoginQRCode)
-	app.Delete("/admin/seednote/login", h.AdminSeednoteLogout)
+	app.Get("/seednote/account/login-status", h.AdminSeednoteLoginStatus)
+	app.Get("/seednote/account/login-qrcode", h.AdminSeednoteLoginQRCode)
+	app.Delete("/seednote/account/login", h.AdminSeednoteLogout)
 	return app
 }
 
@@ -474,9 +474,9 @@ func TestProjectHandler_SeednoteAdministrationRequiresAdmin(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/admin/seednote/login-status"},
-		{http.MethodGet, "/admin/seednote/login-qrcode"},
-		{http.MethodDelete, "/admin/seednote/login"},
+		{http.MethodGet, "/seednote/account/login-status"},
+		{http.MethodGet, "/seednote/account/login-qrcode"},
+		{http.MethodDelete, "/seednote/account/login"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.Header.Set("X-User-ID", "user-1")
@@ -499,7 +499,7 @@ func TestProjectHandler_AdminSeednoteLoginStatusUnavailableWhenSidecarNotReady(t
 	h.SetSeednoteReadiness(projectReadiness(false))
 	app := newSeednoteAdminTestApp(h)
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/seednote/login-status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/seednote/account/login-status", nil)
 	req.Header.Set("X-User-ID", "admin-1")
 	req.Header.Set("X-Admin", "true")
 	resp, err := app.Test(req)
@@ -554,15 +554,15 @@ func TestProjectHandler_AdminSeednoteLoginOperations(t *testing.T) {
 		return resp
 	}
 
-	status := decodeBody(t, request(http.MethodGet, "/admin/seednote/login-status"))["data"].(map[string]any)
+	status := decodeBody(t, request(http.MethodGet, "/seednote/account/login-status"))["data"].(map[string]any)
 	if status["available"] != true || status["logged_in"] != false || !strings.Contains(status["message"].(string), "获取二维码") {
 		t.Fatalf("status = %#v", status)
 	}
-	qr := decodeBody(t, request(http.MethodGet, "/admin/seednote/login-qrcode"))["data"].(map[string]any)
+	qr := decodeBody(t, request(http.MethodGet, "/seednote/account/login-qrcode"))["data"].(map[string]any)
 	if qr["qrcode_image"] != "cG5n" {
 		t.Fatalf("qrcode_image = %v", qr["qrcode_image"])
 	}
-	logout := decodeBody(t, request(http.MethodDelete, "/admin/seednote/login"))["data"].(map[string]any)
+	logout := decodeBody(t, request(http.MethodDelete, "/seednote/account/login"))["data"].(map[string]any)
 	if logout["logged_in"] != false || !logoutCalled {
 		t.Fatalf("logout = %#v, called=%v", logout, logoutCalled)
 	}

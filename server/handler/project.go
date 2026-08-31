@@ -899,7 +899,7 @@ func requireProjectAdmin(c fiber.Ctx) (bool, error) {
 	return true, nil
 }
 
-// AdminSeednoteLoginStatus handles GET /admin/seednote/login-status.
+// AdminSeednoteLoginStatus handles GET /seednote/account/login-status.
 func (h *ProjectHandler) AdminSeednoteLoginStatus(c fiber.Ctx) error {
 	if ok, err := requireProjectAdmin(c); !ok {
 		return err
@@ -942,7 +942,7 @@ func (h *ProjectHandler) AdminSeednoteLoginStatus(c fiber.Ctx) error {
 	})
 }
 
-// AdminSeednoteLoginQRCode handles GET /admin/seednote/login-qrcode.
+// AdminSeednoteLoginQRCode handles GET /seednote/account/login-qrcode.
 func (h *ProjectHandler) AdminSeednoteLoginQRCode(c fiber.Ctx) error {
 	if ok, err := requireProjectAdmin(c); !ok {
 		return err
@@ -963,7 +963,7 @@ func (h *ProjectHandler) AdminSeednoteLoginQRCode(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"qrcode_image": qrcodeImage})
 }
 
-// AdminSeednoteLogout handles DELETE /admin/seednote/login.
+// AdminSeednoteLogout handles DELETE /seednote/account/login.
 func (h *ProjectHandler) AdminSeednoteLogout(c fiber.Ctx) error {
 	if ok, err := requireProjectAdmin(c); !ok {
 		return err

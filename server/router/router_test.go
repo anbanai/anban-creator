@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -315,13 +316,13 @@ func TestSeednoteLoginRoutesAreAdminOnlySurface(t *testing.T) {
 		ProjectHandler: handler.NewProjectHandler(nil, &logger),
 	})
 	want := map[string]bool{
-		http.MethodGet + " /api/v1/admin/seednote/login-status": false,
-		http.MethodGet + " /api/v1/admin/seednote/login-qrcode": false,
-		http.MethodDelete + " /api/v1/admin/seednote/login":     false,
+		http.MethodGet + " /api/v1/seednote/account/login-status": false,
+		http.MethodGet + " /api/v1/seednote/account/login-qrcode": false,
+		http.MethodDelete + " /api/v1/seednote/account/login":     false,
 	}
 	for _, route := range app.GetRoutes() {
 		key := route.Method + " " + route.Path
-		if route.Path == "/api/v1/seednote/login-status" {
+		if route.Path == "/api/v1/seednote/login-status" || strings.HasPrefix(route.Path, "/api/v1/admin/seednote/") {
 			t.Fatalf("legacy user-facing Seednote login route remains registered: %s", key)
 		}
 		if _, ok := want[key]; ok {
@@ -388,7 +389,7 @@ func TestSeednoteAdminRoutesUseJWTAndAdminAuthorization(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/seednote/login-status", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/seednote/account/login-status", nil)
 			if tc.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tc.token)
 			}

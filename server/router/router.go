@@ -252,9 +252,10 @@ func NewRouter(svc *Services) *fiber.App {
 	// ---------------------------------------------------------------------------
 
 	if svc.ProjectHandler != nil {
-		apiV1.Get("/admin/seednote/login-status", svc.ProjectHandler.AdminSeednoteLoginStatus)
-		apiV1.Get("/admin/seednote/login-qrcode", svc.ProjectHandler.AdminSeednoteLoginQRCode)
-		apiV1.Delete("/admin/seednote/login", svc.ProjectHandler.AdminSeednoteLogout)
+		seednoteAccount := apiV1.Group("/seednote/account")
+		seednoteAccount.Get("/login-status", svc.ProjectHandler.AdminSeednoteLoginStatus)
+		seednoteAccount.Get("/login-qrcode", svc.ProjectHandler.AdminSeednoteLoginQRCode)
+		seednoteAccount.Delete("/login", svc.ProjectHandler.AdminSeednoteLogout)
 	}
 
 	// ---------------------------------------------------------------------------
