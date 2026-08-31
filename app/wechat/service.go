@@ -56,6 +56,14 @@ func (s *Service) getOfficialAccount() *officialaccount.OfficialAccount {
 	return s.oa
 }
 
+// OfficialAPI returns the typed publication-lifecycle transport using this
+// service's managed Official Account access-token cache.
+func (s *Service) OfficialAPI() *OfficialAPI {
+	return NewOfficialAPI(nil, "", func(context.Context) (string, error) {
+		return s.getOfficialAccount().GetAccessToken()
+	})
+}
+
 // UploadMaterialResult 上传素材结果
 type UploadMaterialResult struct {
 	MediaID   string `json:"media_id"`

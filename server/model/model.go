@@ -10,6 +10,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Project{},
 		&Plan{},
 		&Task{},
+		&WechatPublication{},
 		&TaskExecution{},
 		&TaskFile{},
 		&TaskFileObjectCleanup{},
