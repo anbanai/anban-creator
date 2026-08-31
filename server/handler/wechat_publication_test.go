@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -119,5 +120,27 @@ func TestWechatPublicationHandlerMapsOwnershipStateAndRateLimit(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%#v", resp.StatusCode, tc.want, body)
 			}
 		})
+	}
+}
+
+func TestWechatPublicationHandlerDoesNotExposeWrappedLifecycleDetails(t *testing.T) {
+	const internalDetail = "WeChat publication version changed"
+	fake := &fakeWechatPublicationService{err: fmt.Errorf("%s: %w", internalDetail, service.ErrWechatPublicationConflict)}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+uuid.NewString()+"/wechat-publication/publish", nil)
+	req.Header.Set("X-User-ID", uuid.NewString())
+	resp, err := publicationHandlerApp(fake).Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d body=%#v", resp.StatusCode, body)
+	}
+	if body.Msg != service.ErrWechatPublicationConflict.Error() || strings.Contains(body.Msg, internalDetail) {
+		t.Fatalf("handler exposed wrapped lifecycle detail: %#v", body)
 	}
 }

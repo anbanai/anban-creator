@@ -98,15 +98,19 @@ func (h *WechatPublicationHandler) Select(c fiber.Ctx) error {
 func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err error) error {
 	switch {
 	case errors.Is(err, service.ErrWechatPublicationNotFound):
-		return Error(c, fiber.StatusNotFound, err.Error())
+		return Error(c, fiber.StatusNotFound, service.ErrWechatPublicationNotFound.Error())
 	case errors.Is(err, service.ErrWechatPublicationForbidden):
 		return Forbidden(c, "you do not have access to this task")
-	case errors.Is(err, service.ErrWechatPublicationConflict), errors.Is(err, service.ErrWechatPublicationModeConflict), errors.Is(err, service.ErrWechatPublicationPending):
-		return Error(c, fiber.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrWechatPublicationConflict):
+		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationConflict.Error())
+	case errors.Is(err, service.ErrWechatPublicationModeConflict):
+		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationModeConflict.Error())
+	case errors.Is(err, service.ErrWechatPublicationPending):
+		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationPending.Error())
 	case errors.Is(err, service.ErrWechatPublicationRateLimited):
-		return Error(c, fiber.StatusTooManyRequests, err.Error())
+		return Error(c, fiber.StatusTooManyRequests, service.ErrWechatPublicationRateLimited.Error())
 	case errors.Is(err, service.ErrWechatPublicationArticleNotFound):
-		return Error(c, fiber.StatusBadRequest, err.Error())
+		return Error(c, fiber.StatusBadRequest, service.ErrWechatPublicationArticleNotFound.Error())
 	default:
 		if h.logger != nil {
 			h.logger.Error().Err(err).Str("task_id", taskID).Msg("WeChat publication action failed")

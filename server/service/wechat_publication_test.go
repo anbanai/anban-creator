@@ -828,6 +828,114 @@ func TestPollReconciliationOutcomesDoNotOverwriteConcurrentBinding(t *testing.T)
 	}
 }
 
+func TestPollCASLossReturnsConcurrentPublishedWinner(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *appwechat.FreePublishGetResponse
+		getError error
+	}{
+		{name: "provider error", getError: errors.New("provider unavailable")},
+		{name: "empty response"},
+		{
+			name: "successful response binding",
+			response: &appwechat.FreePublishGetResponse{
+				PublishID: "publish-1", PublishStatus: appwechat.FreePublishStatusSucceeded, ArticleID: "stale-provider-result",
+				ArticleDetail: appwechat.FreePublishArticleDetail{Count: 1, Items: []appwechat.FreePublishArticleItem{{Index: 1, ArticleURL: "https://mp.weixin.qq.com/s/stale-provider-result"}}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			publication := f.seedDrafted(t)
+			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
+			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+				t.Fatal(err)
+			}
+			if tt.response != nil {
+				f.api.getResponses = []*appwechat.FreePublishGetResponse{tt.response}
+			}
+			f.api.getError = tt.getError
+			var bindErr error
+			f.api.onGet = func() {
+				latest, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+				if err != nil {
+					bindErr = err
+					return
+				}
+				_, bindErr = f.svc.bindPublished(context.Background(), latest, publishedWechatArticle{
+					ArticleID: "concurrent-poll-winner", URL: "https://mp.weixin.qq.com/s/concurrent-poll-winner", PublishedAt: f.now, Index: 1,
+				}, model.WechatPublicationSourceAnbanAPI)
+			}
+
+			got, err := f.svc.Poll(context.Background(), publication.ID)
+			if bindErr != nil {
+				t.Fatalf("concurrent bind: %v", bindErr)
+			}
+			if err != nil {
+				t.Fatalf("Poll=%#v returned obsolete race error: %v (internal=%t)", got, err, errors.Is(err, errWechatPublicationVersionChanged))
+			}
+			if got.Status != model.WechatPublicationStatusPublished || got.ArticleID != "concurrent-poll-winner" || got.ArticleURL != "https://mp.weixin.qq.com/s/concurrent-poll-winner" {
+				t.Fatalf("Poll=%#v, want durable published winner", got)
+			}
+		})
+	}
+}
+
+func TestPollCASLossReturnsPublicErrorForDurableNonSuccessState(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		wantErr   error
+		lastError string
+	}{
+		{name: "terminal failure", status: model.WechatPublicationStatusPublishFailed, wantErr: ErrWechatPublicationConflict, lastError: "durable publication failure"},
+		{name: "pending selection", status: model.WechatPublicationStatusNeedsSelection, wantErr: ErrWechatPublicationPending},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			publication := f.seedDrafted(t)
+			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
+			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+				t.Fatal(err)
+			}
+			f.api.getError = errors.New("obsolete provider error")
+			var updateErr error
+			f.api.onGet = func() {
+				latest, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+				if err != nil {
+					updateErr = err
+					return
+				}
+				expectedStatus, expectedUpdatedAt := latest.Status, latest.UpdatedAt
+				latest.Status, latest.LastError = tt.status, tt.lastError
+				var won bool
+				won, updateErr = f.repo.WechatPublications().UpdateReconciliation(context.Background(), latest, expectedStatus, expectedUpdatedAt)
+				if updateErr == nil && !won {
+					updateErr = errors.New("concurrent lifecycle update did not win")
+				}
+			}
+
+			got, err := f.svc.Poll(context.Background(), publication.ID)
+			if updateErr != nil {
+				t.Fatal(updateErr)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Poll err=%v, want %v", err, tt.wantErr)
+			}
+			if err != tt.wantErr {
+				t.Fatalf("Poll returned non-canonical lifecycle error: %v", err)
+			}
+			if got.Status != tt.status || got.LastError != tt.lastError {
+				t.Fatalf("Poll=%#v, want durable status %q", got, tt.status)
+			}
+		})
+	}
+}
+
 func TestPollSuccessBindsPublicationAndCreatesTracking(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
 	p := f.seedDrafted(t)
@@ -1277,6 +1385,40 @@ func TestSelectScansPublishedPagesUntilArticleIDFound(t *testing.T) {
 	got, err := f.svc.Select(context.Background(), f.userID, f.taskID, "selected")
 	if err != nil || got.ArticleID != "selected" || f.api.publishedListCalls != 2 {
 		t.Fatalf("Select=%#v err=%v calls=%d", got, err, f.api.publishedListCalls)
+	}
+}
+
+func TestOverlappingSelectionOfSamePublicationIsIdempotent(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusNeedsSelection
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
+		ArticleID: "same-selection", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/same-selection"}}},
+	}}}
+
+	var concurrent *model.WechatPublication
+	var concurrentErr error
+	f.api.onPublishedList = func(call int) {
+		if call == 1 {
+			concurrent, concurrentErr = f.svc.Select(context.Background(), f.userID, f.taskID, "same-selection")
+		}
+	}
+
+	got, err := f.svc.Select(context.Background(), f.userID, f.taskID, "same-selection")
+	if concurrentErr != nil {
+		t.Fatalf("concurrent Select: %v", concurrentErr)
+	}
+	if errors.Is(err, errWechatPublicationVersionChanged) {
+		t.Fatalf("Select exposed internal version sentinel: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Status != model.WechatPublicationStatusPublished || concurrent == nil || concurrent.Status != model.WechatPublicationStatusPublished || got.ID != concurrent.ID || got.ArticleID != "same-selection" {
+		t.Fatalf("selections=%#v and %#v, want the same durable publication", got, concurrent)
 	}
 }
 

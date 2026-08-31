@@ -414,11 +414,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		return publication, err
 	}
 	if len(matches) == 1 {
-		bound, bindErr := s.bindPublished(ctx, publication, matches[0], reconciledWechatPublicationSource(publication))
-		if errors.Is(bindErr, errWechatPublicationVersionChanged) {
-			return s.reloadAfterPublishPreflightCASLoss(ctx, publication.ID)
-		}
-		return bound, bindErr
+		return s.bindPublished(ctx, publication, matches[0], reconciledWechatPublicationSource(publication))
 	}
 	if len(matches) > 1 {
 		candidates = append(candidates, candidateViews(matches, "exact")...)
@@ -437,7 +433,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 			return publication, err
 		}
 		if !won {
-			return s.reloadAfterPublishPreflightCASLoss(ctx, publication.ID)
+			return s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID)
 		}
 		publication.Status, publication.Source = model.WechatPublicationStatusNeedsSelection, source
 		publication.Candidates, publication.NextCheckAt = datatypes.JSON(encoded), nextCheckAt
@@ -474,7 +470,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 			return publication, err
 		}
 		if !won {
-			return s.reloadAfterPublishPreflightCASLoss(ctx, publication.ID)
+			return s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID)
 		}
 		publication.Status, publication.LastError = model.WechatPublicationStatusPublishSubmitting, lastError
 		publication.NextCheckAt = nextCheckAt
@@ -546,15 +542,16 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
 }
 
-func (s *WechatPublicationService) reloadAfterPublishPreflightCASLoss(ctx context.Context, publicationID string) (*model.WechatPublication, error) {
+func (s *WechatPublicationService) reloadWechatPublicationAfterCASLoss(ctx context.Context, publicationID string) (*model.WechatPublication, error) {
 	latest, err := s.repo.WechatPublications().FindByID(ctx, publicationID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reload WeChat publication after CAS loss: %w", err)
 	}
 	switch latest.Status {
-	case model.WechatPublicationStatusPublished, model.WechatPublicationStatusUnsupported:
+	case model.WechatPublicationStatusPublished:
 		return latest, nil
-	case model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationStatusPublishing, model.WechatPublicationStatusNeedsSelection:
+	case model.WechatPublicationStatusDrafting, model.WechatPublicationStatusPublishSubmitting,
+		model.WechatPublicationStatusPublishing, model.WechatPublicationStatusNeedsSelection:
 		return latest, ErrWechatPublicationPending
 	default:
 		return latest, ErrWechatPublicationConflict
@@ -606,11 +603,7 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 			return publication, fmt.Errorf("persist WeChat publish poll failure: %w", persistErr)
 		}
 		if !won {
-			latest, reloadErr := s.repo.WechatPublications().FindByID(context.WithoutCancel(ctx), publication.ID)
-			if reloadErr != nil {
-				return publication, fmt.Errorf("reload WeChat publication after poll CAS loss: %w", reloadErr)
-			}
-			return latest, getErr
+			return s.reloadWechatPublicationAfterCASLoss(context.WithoutCancel(ctx), publication.ID)
 		}
 		return publication, getErr
 	}
@@ -623,11 +616,7 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 			return publication, fmt.Errorf("persist empty WeChat publish status response: %w", err)
 		}
 		if !won {
-			latest, reloadErr := s.repo.WechatPublications().FindByID(context.WithoutCancel(ctx), publication.ID)
-			if reloadErr != nil {
-				return publication, fmt.Errorf("reload WeChat publication after poll CAS loss: %w", reloadErr)
-			}
-			return latest, emptyErr
+			return s.reloadWechatPublicationAfterCASLoss(context.WithoutCancel(ctx), publication.ID)
 		}
 		return publication, emptyErr
 	}
@@ -656,7 +645,7 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 		return nil, err
 	}
 	if !won {
-		return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+		return s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID)
 	}
 	return publication, nil
 }
@@ -837,8 +826,9 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 					return fmt.Errorf("persist unsupported WeChat reconciliation state: %w", persistErr)
 				}
 				if !won {
-					if _, reloadErr := s.repo.WechatPublications().FindByID(context.WithoutCancel(ctx), publication.ID); reloadErr != nil {
-						return fmt.Errorf("reload WeChat publication after reconciliation CAS loss: %w", reloadErr)
+					if _, outcomeErr := s.reloadWechatPublicationAfterCASLoss(context.WithoutCancel(ctx), publication.ID); outcomeErr != nil &&
+						!errors.Is(outcomeErr, ErrWechatPublicationPending) && !errors.Is(outcomeErr, ErrWechatPublicationConflict) {
+						return outcomeErr
 					}
 				}
 			}
@@ -856,7 +846,7 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 		}
 		if len(matches) == 1 {
 			if _, bindErr := s.bindPublished(ctx, publication, matches[0], reconciledWechatPublicationSource(publication)); bindErr != nil {
-				if errors.Is(bindErr, errWechatPublicationVersionChanged) {
+				if errors.Is(bindErr, ErrWechatPublicationPending) {
 					continue
 				}
 				return bindErr
@@ -882,8 +872,9 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 			return err
 		}
 		if !won {
-			if _, reloadErr := s.repo.WechatPublications().FindByID(ctx, publication.ID); reloadErr != nil {
-				return fmt.Errorf("reload WeChat publication after reconciliation CAS loss: %w", reloadErr)
+			if _, outcomeErr := s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID); outcomeErr != nil &&
+				!errors.Is(outcomeErr, ErrWechatPublicationPending) && !errors.Is(outcomeErr, ErrWechatPublicationConflict) {
+				return outcomeErr
 			}
 		}
 	}
@@ -1031,6 +1022,15 @@ func (s *WechatPublicationService) bindPublished(ctx context.Context, publicatio
 				// Idempotent retry of the same binding.
 			} else if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
 				return findErr
+			} else if findErr != nil {
+				latest, reloadErr := tx.WechatPublications().FindByID(ctx, publication.ID)
+				if reloadErr != nil {
+					return reloadErr
+				}
+				if latest.Status == model.WechatPublicationStatusPublished {
+					return errWechatPublicationVersionChanged
+				}
+				return ErrWechatPublicationConflict
 			} else {
 				return ErrWechatPublicationConflict
 			}
@@ -1057,11 +1057,7 @@ func (s *WechatPublicationService) bindPublished(ctx context.Context, publicatio
 		})
 	})
 	if errors.Is(err, errWechatPublicationVersionChanged) {
-		latest, reloadErr := s.repo.WechatPublications().FindByID(ctx, publication.ID)
-		if reloadErr != nil {
-			return publication, reloadErr
-		}
-		return latest, err
+		return s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID)
 	}
 	if err != nil {
 		return publication, err
