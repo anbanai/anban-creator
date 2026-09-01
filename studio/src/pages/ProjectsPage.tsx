@@ -497,7 +497,6 @@ export default function ProjectsPage() {
       image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
-      enable_publishing: values.enable_publishing || undefined,
       require_publish_approval: undefined,
       wechat_publish_mode: values.platform === 'article' ? values.wechat_publish_mode : undefined,
     }
@@ -523,13 +522,6 @@ export default function ProjectsPage() {
         asset_guidance: values.montage_defaults?.asset_guidance?.trim() || undefined,
         delivery_targets: values.montage_defaults?.delivery_targets || [],
       }
-    }
-    // Disable publishing flag when unchecked (credentials preserved)
-    if (values.platform === 'article' && values.wechat_publish_mode === 'disabled') {
-      payload.enable_publishing = false
-      // Approval gate is moot when publishing is off; reset it so the stored
-      // config stays consistent (avoids a lingering require flag with no publishing).
-      payload.require_publish_approval = false
     }
     const referenceImage = referenceSelectionFromValue(values.reference_image)
     if (editingProject) {
@@ -656,7 +648,7 @@ export default function ProjectsPage() {
                         )
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
-                        form.setValue('enable_publishing', false)
+                        form.setValue('wechat_publish_mode', v === 'article' ? 'manual' : 'disabled')
                       }}
                       disabled={!!editingProject}
                     >
