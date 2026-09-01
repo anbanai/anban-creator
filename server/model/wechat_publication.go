@@ -53,6 +53,7 @@ type WechatPublication struct {
 	DraftDigest             string `gorm:"type:text;not null" json:"draft_digest,omitempty"`
 	DraftThumbMediaID       string `gorm:"type:varchar(191);not null;default:''" json:"draft_thumb_media_id,omitempty"`
 	DraftContentFingerprint string `gorm:"type:char(64);not null;default:'';index" json:"draft_content_fingerprint,omitempty"`
+	DraftRequestFingerprint string `gorm:"type:char(64);not null;default:''" json:"draft_request_fingerprint,omitempty"`
 
 	Source           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
 	Status           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','publish_submitting','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`

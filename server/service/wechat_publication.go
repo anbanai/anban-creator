@@ -26,11 +26,13 @@ import (
 var (
 	ErrWechatPublicationNotFound        = errors.New("WeChat publication not found")
 	ErrWechatPublicationForbidden       = errors.New("WeChat publication does not belong to user")
+	ErrWechatPublicationProjectMismatch = errors.New("WeChat publication task and project do not match")
 	ErrWechatPublicationConflict        = errors.New("WeChat publication state changed concurrently")
 	ErrWechatPublicationModeConflict    = errors.New("WeChat publication action is not allowed by project mode")
 	ErrWechatPublicationPending         = errors.New("WeChat publication outcome is pending reconciliation")
 	ErrWechatPublicationRateLimited     = errors.New("WeChat publication reconciliation is rate limited")
 	ErrWechatPublicationArticleNotFound = errors.New("published article was not found in the configured WeChat account")
+	ErrWechatPublicationInvalidPayload  = errors.New("invalid WeChat draft payload")
 	errWechatPublicationVersionChanged  = errors.New("WeChat publication version changed")
 )
 
@@ -181,21 +183,35 @@ func (s *WechatPublicationService) Get(ctx context.Context, userID, taskID strin
 }
 
 func firstDraftArticle(request appwechat.DraftAddRequest) (appwechat.DraftArticle, error) {
-	if len(request.Articles) == 0 {
-		return appwechat.DraftArticle{}, fmt.Errorf("at least one draft article is required")
+	if len(request.Articles) != 1 {
+		return appwechat.DraftArticle{}, fmt.Errorf("%w: exactly one draft article is required", ErrWechatPublicationInvalidPayload)
 	}
-	article := request.Articles[0]
+	article := normalizeDraftArticle(request.Articles[0])
+	if article.Title == "" || strings.TrimSpace(article.Content) == "" {
+		return article, fmt.Errorf("%w: draft title and content are required", ErrWechatPublicationInvalidPayload)
+	}
+	if err := validateContentImageDiversity(article.Content); err != nil {
+		return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+	}
+	return article, nil
+}
+
+func normalizeDraftArticle(article appwechat.DraftArticle) appwechat.DraftArticle {
 	article.Title = strings.TrimSpace(article.Title)
 	article.Author = strings.TrimSpace(article.Author)
 	article.Digest = strings.TrimSpace(article.Digest)
+	article.ContentSourceURL = strings.TrimSpace(article.ContentSourceURL)
 	article.ThumbMediaID = strings.TrimSpace(article.ThumbMediaID)
-	if article.Title == "" || strings.TrimSpace(article.Content) == "" {
-		return article, fmt.Errorf("draft title and content are required")
-	}
-	if err := validateContentImageDiversity(article.Content); err != nil {
-		return article, err
-	}
-	return article, nil
+	article.URL = strings.TrimSpace(article.URL)
+	return article
+}
+
+func wechatDraftRequestFingerprint(article appwechat.DraftArticle) string {
+	article = normalizeDraftArticle(article)
+	article.Content = WechatContentFingerprint(article.Content)
+	encoded, _ := json.Marshal(article)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID string, request appwechat.DraftAddRequest) (*model.WechatPublication, error) {
@@ -204,7 +220,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		return nil, err
 	}
 	if project.ID != projectID {
-		return nil, ErrWechatPublicationForbidden
+		return nil, ErrWechatPublicationProjectMismatch
 	}
 	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
 		return nil, ErrWechatPublicationModeConflict
@@ -213,7 +229,9 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	if err != nil {
 		return nil, err
 	}
+	request.Articles[0] = article
 	fingerprint := WechatContentFingerprint(article.Content)
+	requestFingerprint := wechatDraftRequestFingerprint(article)
 
 	existing, findErr := s.repo.WechatPublications().FindByTaskID(ctx, task.ID)
 	fresh := errors.Is(findErr, gorm.ErrRecordNotFound)
@@ -221,7 +239,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		return nil, findErr
 	}
 	if !fresh {
-		if existing.DraftContentFingerprint != fingerprint {
+		if existing.DraftContentFingerprint != fingerprint || existing.DraftRequestFingerprint != requestFingerprint {
 			return existing, ErrWechatPublicationConflict
 		}
 		if existing.DraftMediaID != "" {
@@ -235,7 +253,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		existing = &model.WechatPublication{
 			ID: uuid.NewString(), TaskID: task.ID, UserID: userID, ProjectID: project.ID,
 			DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
-			DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: fingerprint,
+			DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: fingerprint, DraftRequestFingerprint: requestFingerprint,
 			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
 			DraftCreatedAt: &now, ClaimToken: uuid.NewString(), ClaimedAt: &now,
 		}
@@ -319,11 +337,12 @@ func (s *WechatPublicationService) recoverDraftFromItems(ctx context.Context, pu
 	matches := make([]appwechat.DraftBatchItem, 0, 1)
 	createdAt := valueOrTime(publication.DraftCreatedAt, publication.CreatedAt)
 	for _, item := range items {
-		if item.UpdateTime <= 0 || item.UpdateTime < createdAt.Unix() || len(item.Content.NewsItems) == 0 {
+		if item.UpdateTime <= 0 || item.UpdateTime < createdAt.Unix() || len(item.Content.NewsItems) != 1 {
 			continue
 		}
-		article := item.Content.NewsItems[0]
-		if WechatContentFingerprint(article.Content) == publication.DraftContentFingerprint {
+		article := normalizeDraftArticle(item.Content.NewsItems[0])
+		if WechatContentFingerprint(article.Content) == publication.DraftContentFingerprint &&
+			wechatDraftRequestFingerprint(article) == publication.DraftRequestFingerprint {
 			matches = append(matches, item)
 		}
 	}

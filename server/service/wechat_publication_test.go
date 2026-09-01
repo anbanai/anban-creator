@@ -222,8 +222,125 @@ func (f *publicationFixture) overridePublications(publications repository.Wechat
 func (f *publicationFixture) draftInput() appwechat.DraftAddRequest {
 	return appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
 		Title: " Durable lifecycle ", Author: "Author", Digest: "Digest", ThumbMediaID: "thumb-1",
-		Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`,
+		Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, ContentSourceURL: "https://example.com/source",
+		ShowCoverPic: 1, NeedOpenComment: 1, OnlyFansCanComment: 1, URL: "https://example.com/article",
 	}}}
+}
+
+func TestCreateDraftRejectsMultipleArticlesBeforeProviderCalls(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	request := f.draftInput()
+	request.Articles = append(request.Articles, request.Articles[0])
+
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request); err == nil {
+		t.Fatal("CreateDraft accepted multiple articles")
+	}
+	if f.api.draftListCalls != 0 || f.api.addCalls != 0 {
+		t.Fatalf("provider calls: list=%d add=%d, want 0/0", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftUsesEveryMaterialFieldForIdempotency(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*appwechat.DraftArticle)
+	}{
+		{name: "title", mutate: func(article *appwechat.DraftArticle) { article.Title = "Different title" }},
+		{name: "author", mutate: func(article *appwechat.DraftArticle) { article.Author = "Different author" }},
+		{name: "digest", mutate: func(article *appwechat.DraftArticle) { article.Digest = "Different digest" }},
+		{name: "content", mutate: func(article *appwechat.DraftArticle) { article.Content = "<p>Different body</p>" }},
+		{name: "content source URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = "https://example.com/other-source" }},
+		{name: "thumb media ID", mutate: func(article *appwechat.DraftArticle) { article.ThumbMediaID = "thumb-2" }},
+		{name: "show cover pic", mutate: func(article *appwechat.DraftArticle) { article.ShowCoverPic = 0 }},
+		{name: "need open comment", mutate: func(article *appwechat.DraftArticle) { article.NeedOpenComment = 0 }},
+		{name: "only fans can comment", mutate: func(article *appwechat.DraftArticle) { article.OnlyFansCanComment = 0 }},
+		{name: "URL", mutate: func(article *appwechat.DraftArticle) { article.URL = "https://example.com/other-article" }},
+	}
+
+	for _, tt := range mutations {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+			request := f.draftInput()
+			first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			changed := f.draftInput()
+			tt.mutate(&changed.Articles[0])
+			replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, changed)
+			if !errors.Is(err, ErrWechatPublicationConflict) {
+				t.Fatalf("changed request returned err=%v, want conflict", err)
+			}
+			if replayed == nil || replayed.ID != first.ID {
+				t.Fatalf("conflict publication = %#v, want ID %q", replayed, first.ID)
+			}
+			if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
+				t.Fatalf("provider calls: list=%d add=%d, want 1/1", f.api.draftListCalls, f.api.addCalls)
+			}
+		})
+	}
+}
+
+func TestCreateDraftExactReplayIsIdempotent(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+	request := f.draftInput()
+
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	if err != nil || replayed.ID != first.ID || replayed.DraftMediaID != first.DraftMediaID {
+		t.Fatalf("exact replay = %#v err=%v, want publication %#v", replayed, err, first)
+	}
+	if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
+		t.Fatalf("provider calls: list=%d add=%d, want 1/1", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRecoveryRequiresAllMaterialMetadata(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*appwechat.DraftArticle)
+	}{
+		{name: "title", mutate: func(article *appwechat.DraftArticle) { article.Title = "Different title" }},
+		{name: "author", mutate: func(article *appwechat.DraftArticle) { article.Author = "Different author" }},
+		{name: "digest", mutate: func(article *appwechat.DraftArticle) { article.Digest = "Different digest" }},
+		{name: "content source URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = "https://example.com/other-source" }},
+		{name: "thumb media ID", mutate: func(article *appwechat.DraftArticle) { article.ThumbMediaID = "thumb-2" }},
+		{name: "show cover pic", mutate: func(article *appwechat.DraftArticle) { article.ShowCoverPic = 0 }},
+		{name: "need open comment", mutate: func(article *appwechat.DraftArticle) { article.NeedOpenComment = 0 }},
+		{name: "only fans can comment", mutate: func(article *appwechat.DraftArticle) { article.OnlyFansCanComment = 0 }},
+		{name: "URL", mutate: func(article *appwechat.DraftArticle) { article.URL = "https://example.com/other-article" }},
+	}
+
+	for _, tt := range mutations {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			candidate := f.draftInput().Articles[0]
+			tt.mutate(&candidate)
+			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
+				MediaID: "wrong-metadata", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{candidate}},
+			}}}
+			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "new-draft"}
+
+			publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if publication.DraftMediaID != "new-draft" {
+				t.Fatalf("draft media ID = %q, want new-draft", publication.DraftMediaID)
+			}
+			if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
+				t.Fatalf("provider calls: list=%d add=%d, want 1/1", f.api.draftListCalls, f.api.addCalls)
+			}
+		})
+	}
 }
 
 func (f *publicationFixture) seedDrafted(t *testing.T) *model.WechatPublication {
@@ -243,11 +360,10 @@ func (f *publicationFixture) seedDrafted(t *testing.T) *model.WechatPublication 
 
 func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	recoveredArticle := f.draftInput().Articles[0]
+	recoveredArticle.Content = `<section class="body"> <p>Hello <strong>world</strong></p> </section>`
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{ItemCount: 1, Items: []appwechat.DraftBatchItem{{
-		MediaID: "recovered-media", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{{
-			Title: "Durable lifecycle", Author: "Author", Digest: "Digest", ThumbMediaID: "thumb-1",
-			Content: `<section class="body"> <p>Hello <strong>world</strong></p> </section>`,
-		}}},
+		MediaID: "recovered-media", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{recoveredArticle}},
 	}}}
 
 	first := f.draftInput()

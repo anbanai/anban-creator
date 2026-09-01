@@ -24,6 +24,7 @@ CREATE TABLE `wechat_publications` (
   `draft_digest` text NOT NULL,
   `draft_thumb_media_id` varchar(191) NOT NULL DEFAULT '',
   `draft_content_fingerprint` char(64) NOT NULL DEFAULT '',
+  `draft_request_fingerprint` char(64) NOT NULL DEFAULT '',
   `source` varchar(32) NOT NULL,
   `status` varchar(32) NOT NULL,
   `publish_id` varchar(191) NOT NULL DEFAULT '',

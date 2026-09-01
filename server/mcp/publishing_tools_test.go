@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,10 +25,14 @@ import (
 type mcpWechatPublicationAPI struct {
 	addCalls       int
 	draftListCalls int
+	addError       error
 }
 
 func (f *mcpWechatPublicationAPI) AddDraft(context.Context, appwechat.DraftAddRequest) (*appwechat.DraftAddResponse, error) {
 	f.addCalls++
+	if f.addError != nil {
+		return nil, f.addError
+	}
 	return &appwechat.DraftAddResponse{MediaID: "draft-media-1"}, nil
 }
 
@@ -104,6 +110,38 @@ func validCreateDraftArgs(f *publishingToolFixture) map[string]any {
 	}
 }
 
+type createDraftToolFailure struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Hint      string `json:"hint"`
+	Retryable bool   `json:"retryable"`
+}
+
+func decodeCreateDraftToolFailure(t *testing.T, result *mcp.CallToolResult) createDraftToolFailure {
+	t.Helper()
+	if result == nil || !result.IsError || len(result.Content) != 1 {
+		t.Fatalf("result = %#v, want one tool error", result)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		t.Fatalf("create_draft error is not JSON: %q: %v", text, err)
+	}
+	for _, field := range []string{"code", "message", "hint", "retryable"} {
+		if _, ok := raw[field]; !ok {
+			t.Fatalf("create_draft error = %#v, missing %q", raw, field)
+		}
+	}
+	var failure createDraftToolFailure
+	if err := json.Unmarshal([]byte(text), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code == "" || failure.Message == "" || failure.Hint == "" {
+		t.Fatalf("incomplete create_draft error = %#v", failure)
+	}
+	return failure
+}
+
 func TestCreateDraftToolIsCleanCutover(t *testing.T) {
 	tools := listRegisteredTools(t, registerPublishingTools)
 	var create *mcp.Tool
@@ -128,6 +166,10 @@ func TestCreateDraftToolIsCleanCutover(t *testing.T) {
 		if !found {
 			t.Errorf("create_draft required = %#v, missing %q", required, field)
 		}
+	}
+	articles := schema["properties"].(map[string]any)["articles"].(map[string]any)
+	if fmt.Sprint(articles["minItems"]) != "1" || fmt.Sprint(articles["maxItems"]) != "1" {
+		t.Fatalf("articles cardinality = min:%#v max:%#v, want exactly one", articles["minItems"], articles["maxItems"])
 	}
 }
 
@@ -161,12 +203,13 @@ func TestCreateDraftHandlerRequiresAuthenticatedIDsAndArticle(t *testing.T) {
 		name string
 		user string
 		args map[string]any
-		want string
+		code string
 	}{
-		{name: "authenticated user", args: validCreateDraftArgs(f), want: "authenticated user is required"},
-		{name: "task ID", user: f.userID, args: map[string]any{"project_id": f.projectID, "articles": []any{map[string]any{"title": "Title", "content": "Body"}}}, want: "task_id is required"},
-		{name: "project ID", user: f.userID, args: map[string]any{"task_id": f.taskID, "articles": []any{map[string]any{"title": "Title", "content": "Body"}}}, want: "project_id is required"},
-		{name: "article", user: f.userID, args: map[string]any{"task_id": f.taskID, "project_id": f.projectID, "articles": []any{}}, want: "at least one article is required"},
+		{name: "authenticated user", args: validCreateDraftArgs(f), code: "create_draft_auth_required"},
+		{name: "task ID", user: f.userID, args: map[string]any{"project_id": f.projectID, "articles": []any{map[string]any{"title": "Title", "content": "Body"}}}, code: "create_draft_invalid_payload"},
+		{name: "project ID", user: f.userID, args: map[string]any{"task_id": f.taskID, "articles": []any{map[string]any{"title": "Title", "content": "Body"}}}, code: "create_draft_invalid_payload"},
+		{name: "missing article", user: f.userID, args: map[string]any{"task_id": f.taskID, "project_id": f.projectID, "articles": []any{}}, code: "create_draft_invalid_payload"},
+		{name: "multiple articles", user: f.userID, args: map[string]any{"task_id": f.taskID, "project_id": f.projectID, "articles": []any{map[string]any{"title": "One", "content": "Body"}, map[string]any{"title": "Two", "content": "Body"}}}, code: "create_draft_invalid_payload"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -178,11 +221,9 @@ func TestCreateDraftHandlerRequiresAuthenticatedIDsAndArticle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result == nil || !result.IsError || len(result.Content) == 0 {
-				t.Fatalf("result = %#v, want tool error", result)
-			}
-			if got := result.Content[0].(*mcp.TextContent).Text; got != tt.want {
-				t.Fatalf("error = %q, want %q", got, tt.want)
+			failure := decodeCreateDraftToolFailure(t, result)
+			if failure.Code != tt.code || failure.Retryable {
+				t.Fatalf("failure = %#v, want code %q and retryable=false", failure, tt.code)
 			}
 		})
 	}
@@ -210,10 +251,11 @@ func TestCreateDraftHandlerRejectsOwnershipAndProjectMismatchBeforeWechat(t *tes
 		user      string
 		taskID    string
 		projectID string
+		code      string
 	}{
-		{name: "foreign task", user: uuid.NewString(), taskID: f.taskID, projectID: f.projectID},
-		{name: "foreign project", user: f.userID, taskID: foreignProjectTaskID, projectID: foreignProjectID},
-		{name: "task project mismatch", user: f.userID, taskID: f.taskID, projectID: otherProjectID},
+		{name: "foreign task", user: uuid.NewString(), taskID: f.taskID, projectID: f.projectID, code: "create_draft_forbidden"},
+		{name: "foreign project", user: f.userID, taskID: foreignProjectTaskID, projectID: foreignProjectID, code: "create_draft_forbidden"},
+		{name: "task project mismatch", user: f.userID, taskID: f.taskID, projectID: otherProjectID, code: "create_draft_project_mismatch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,8 +266,9 @@ func TestCreateDraftHandlerRejectsOwnershipAndProjectMismatchBeforeWechat(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result == nil || !result.IsError {
-				t.Fatalf("result = %#v, want ownership error", result)
+			failure := decodeCreateDraftToolFailure(t, result)
+			if failure.Code != tt.code || failure.Retryable {
+				t.Fatalf("failure = %#v, want code %q and retryable=false", failure, tt.code)
 			}
 		})
 	}
@@ -248,9 +291,100 @@ func TestCreateDraftHandlerRejectsDuplicateContentImagesBeforeWechat(t *testing.
 	if result == nil || !result.IsError {
 		t.Fatalf("result = %#v, want duplicate-image error", result)
 	}
+	if failure := decodeCreateDraftToolFailure(t, result); failure.Code != "create_draft_invalid_payload" || failure.Retryable {
+		t.Fatalf("failure = %#v, want invalid payload", failure)
+	}
 	if f.api.addCalls != 0 || f.api.draftListCalls != 0 {
 		t.Fatalf("duplicate images reached WeChat: add=%d list=%d", f.api.addCalls, f.api.draftListCalls)
 	}
+}
+
+func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
+	t.Run("not found", func(t *testing.T) {
+		f := newPublishingToolFixture(t)
+		args := validCreateDraftArgs(f)
+		args["task_id"] = uuid.NewString()
+		result, err := createDraftHandler(withMCPUserID(context.Background(), f.userID), createDraftToolRequest(t, args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		failure := decodeCreateDraftToolFailure(t, result)
+		if failure.Code != "create_draft_not_found" || failure.Retryable {
+			t.Fatalf("failure = %#v", failure)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		f := newPublishingToolFixture(t)
+		project, err := f.repo.Projects().FindByID(context.Background(), f.projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		project.Config.WechatPublishMode = model.WechatPublishModeDisabled
+		if err := f.repo.Projects().Update(context.Background(), project); err != nil {
+			t.Fatal(err)
+		}
+		result, err := createDraftHandler(withMCPUserID(context.Background(), f.userID), createDraftToolRequest(t, validCreateDraftArgs(f)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		failure := decodeCreateDraftToolFailure(t, result)
+		if failure.Code != "create_draft_disabled" || failure.Retryable {
+			t.Fatalf("failure = %#v", failure)
+		}
+	})
+
+	t.Run("request conflict", func(t *testing.T) {
+		f := newPublishingToolFixture(t)
+		ctx := withMCPUserID(context.Background(), f.userID)
+		if result, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f))); err != nil || result.IsError {
+			t.Fatalf("first create = %#v err=%v", result, err)
+		}
+		changed := validCreateDraftArgs(f)
+		changed["articles"] = []any{map[string]any{"title": "Different", "content": "<p>Body</p>"}}
+		result, err := createDraftHandler(ctx, createDraftToolRequest(t, changed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		failure := decodeCreateDraftToolFailure(t, result)
+		if failure.Code != "create_draft_conflict" || failure.Retryable {
+			t.Fatalf("failure = %#v", failure)
+		}
+	})
+
+	t.Run("pending reconciliation", func(t *testing.T) {
+		f := newPublishingToolFixture(t)
+		ctx := withMCPUserID(context.Background(), f.userID)
+		f.api.addError = errors.New("ambiguous provider response")
+		if _, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f))); err != nil {
+			t.Fatal(err)
+		}
+		f.api.addError = nil
+		result, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		failure := decodeCreateDraftToolFailure(t, result)
+		if failure.Code != "create_draft_pending_reconciliation" || !failure.Retryable {
+			t.Fatalf("failure = %#v", failure)
+		}
+	})
+
+	t.Run("provider failure is sanitized", func(t *testing.T) {
+		f := newPublishingToolFixture(t)
+		f.api.addError = errors.New("provider secret token abc")
+		result, err := createDraftHandler(withMCPUserID(context.Background(), f.userID), createDraftToolRequest(t, validCreateDraftArgs(f)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		failure := decodeCreateDraftToolFailure(t, result)
+		if failure.Code != "create_draft_provider_failure" || !failure.Retryable {
+			t.Fatalf("failure = %#v", failure)
+		}
+		if strings.Contains(failure.Message, "secret token") || strings.Contains(failure.Hint, "secret token") {
+			t.Fatalf("provider details leaked: %#v", failure)
+		}
+	})
 }
 
 func TestCreateDraftHandlerReturnsOnlyLifecycleDraftFields(t *testing.T) {
