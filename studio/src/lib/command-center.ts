@@ -212,7 +212,7 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
             : 'ok',
   }
 
-  const publishableProjects = projects.filter((project) => project.config.enable_publishing)
+  const publishableProjects = projects.filter((project) => (project.config.wechat_publish_mode ?? (project.config.enable_publishing ? 'manual' : 'disabled')) !== 'disabled')
   const approvalProjects = publishableProjects.filter((project) => project.config.require_publish_approval)
   const projectStatus: ReadinessStatus = projects.length > 0 ? 'ready' : 'not_ready'
   const publishingStatus: ReadinessStatus =
@@ -254,8 +254,8 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
       description:
         publishingStatus === 'ready'
           ? approvalProjects.length > 0
-            ? `${publishableProjects.length} 个项目可发布，${approvalProjects.length} 个发布需审核`
-            : `${publishableProjects.length} 个项目可发布到草稿箱`
+            ? `${publishableProjects.length} 个项目已配置公众号发布流程，${approvalProjects.length} 个发布需审核`
+            : `${publishableProjects.length} 个项目已配置公众号发布流程`
           : publishingStatus === 'not_ready'
             ? '需要检查发布配置'
             : '创建项目后检查发布配置',

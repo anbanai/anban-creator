@@ -249,6 +249,7 @@ export const projectSchema = z.object({
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
   enable_publishing: z.boolean().default(false),
   require_publish_approval: z.boolean().default(false),
+  wechat_publish_mode: z.enum(['disabled', 'manual', 'api_confirmed']).optional(),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
@@ -270,7 +271,7 @@ export const projectSchema = z.object({
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: imageRatioSchema.optional(),
 }).refine((data) => {
-  if (data.enable_publishing) {
+  if (data.platform === 'article' && ((data.wechat_publish_mode && data.wechat_publish_mode !== 'disabled') || data.enable_publishing)) {
     return !!data.wechat_app_id?.trim()
   }
   return true

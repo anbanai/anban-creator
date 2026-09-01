@@ -357,6 +357,7 @@ func main() {
 			)
 			log.Info().Msg("Asynq client initialized")
 		}
+		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
@@ -692,7 +693,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -1075,7 +1076,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1095,6 +1096,16 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		}
 	}
 
+	publicationHandlers := scheduler.WechatPublicationHandlers{}
+	if wechatPublicationSvc != nil {
+		publicationHandlers.Poll = func(ctx context.Context, publicationID string) error {
+			_, err := wechatPublicationSvc.Poll(ctx, publicationID)
+			return err
+		}
+		publicationHandlers.Reconcile = func(ctx context.Context, projectID string) error {
+			return wechatPublicationSvc.ReconcileProject(ctx, projectID)
+		}
+	}
 	srv := scheduler.NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error {
 			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
@@ -1110,6 +1121,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		cfg.Redis.DB,
 		cfg.Asynq.Concurrency,
 		log,
+		publicationHandlers,
 	)
 
 	go func() {

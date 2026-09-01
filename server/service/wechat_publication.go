@@ -58,7 +58,25 @@ type WechatPublicationService struct {
 	repo       repository.Repository
 	apiFactory WechatPublicationAPIFactory
 	logger     *zerolog.Logger
+	enqueuer   TaskEnqueuer
 	now        func() time.Time
+}
+
+// SetEnqueuer wires durable polling into the server's async worker. The
+// publication row remains the source of truth, so enqueue failures never lose
+// the pending next_check_at timestamp and can be recovered on the next scan.
+func (s *WechatPublicationService) SetEnqueuer(enqueuer TaskEnqueuer) { s.enqueuer = enqueuer }
+
+func (s *WechatPublicationService) enqueuePoll(publicationID string, at *time.Time) {
+	if s.enqueuer == nil || publicationID == "" || at == nil {
+		return
+	}
+	delay := time.Until(*at)
+	if delay < 0 {
+		delay = 0
+	}
+	payload, _ := json.Marshal(map[string]string{"publication_id": publicationID})
+	_ = s.enqueuer.EnqueueIn("wechat:publication_poll", payload, delay)
 }
 
 func NewWechatPublicationService(repo repository.Repository, factory WechatPublicationAPIFactory, logger *zerolog.Logger) *WechatPublicationService {
@@ -561,6 +579,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 	if !won {
 		return publication, ErrWechatPublicationConflict
 	}
+	s.enqueuePoll(publication.ID, publication.NextCheckAt)
 	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
 }
 

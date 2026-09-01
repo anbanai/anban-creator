@@ -16,6 +16,7 @@ export type {
 export type {
   ProjectPlatform,
   ProjectStatus,
+  WechatPublishMode,
   ProjectConfig,
   Project,
   ProjectStats,
@@ -78,6 +79,11 @@ export type {
   WechatTrackingInfo,
   WechatTrackingStatus,
 } from './wechat-analytics'
+export type {
+  WechatPublicationStatus,
+  WechatPublicationCandidate,
+  WechatPublication,
+} from './wechat-publication'
 
 export type {
   ChannelsAnalytics,

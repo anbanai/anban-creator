@@ -15,11 +15,13 @@ import (
 
 // Task type constants for Asynq.
 const (
-	TypeContentGenerate        = "content:generate"
-	TypePlanTrigger            = "plan:trigger"
-	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
-	TypeWechatCaptureMetrics   = "wechat:capture_metrics"
-	TypeChannelsCaptureMetrics = "channels:capture_metrics"
+	TypeContentGenerate            = "content:generate"
+	TypePlanTrigger                = "plan:trigger"
+	TypeSeednoteCaptureMetrics     = "seednote:capture_metrics"
+	TypeWechatCaptureMetrics       = "wechat:capture_metrics"
+	TypeChannelsCaptureMetrics     = "channels:capture_metrics"
+	TypeWechatPublicationPoll      = "wechat:publication_poll"
+	TypeWechatPublicationReconcile = "wechat:publication_reconcile"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -115,6 +117,13 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 type WechatTrackingHandler func(ctx context.Context, trackingID string) error
 type ChannelsTrackingHandler func(ctx context.Context, trackingID string) error
+type WechatPublicationPollHandler func(ctx context.Context, publicationID string) error
+type WechatPublicationReconcileHandler func(ctx context.Context, projectID string) error
+
+type WechatPublicationHandlers struct {
+	Poll      WechatPublicationPollHandler
+	Reconcile WechatPublicationReconcileHandler
+}
 
 // NewTaskProcessor creates a configured Asynq task processor with registered handlers.
 func NewTaskProcessor(
@@ -127,6 +136,7 @@ func NewTaskProcessor(
 	redisDB int,
 	concurrency int,
 	logger *zerolog.Logger,
+	publicationHandlers ...WechatPublicationHandlers,
 ) *TaskProcessor {
 	mux := asynq.NewServeMux()
 
@@ -196,6 +206,33 @@ func NewTaskProcessor(
 		}
 		return channelsCaptureHandler(ctx, trackingID)
 	})
+	if len(publicationHandlers) > 0 {
+		handlers := publicationHandlers[0]
+		mux.HandleFunc(TypeWechatPublicationPoll, func(ctx context.Context, t *asynq.Task) error {
+			var payload struct {
+				PublicationID string `json:"publication_id"`
+			}
+			if err := json.Unmarshal(t.Payload(), &payload); err != nil || payload.PublicationID == "" {
+				return fmt.Errorf("invalid WeChat publication poll payload")
+			}
+			if handlers.Poll == nil {
+				return fmt.Errorf("WeChat publication poll handler unavailable")
+			}
+			return handlers.Poll(ctx, payload.PublicationID)
+		})
+		mux.HandleFunc(TypeWechatPublicationReconcile, func(ctx context.Context, t *asynq.Task) error {
+			var payload struct {
+				ProjectID string `json:"project_id"`
+			}
+			if err := json.Unmarshal(t.Payload(), &payload); err != nil || payload.ProjectID == "" {
+				return fmt.Errorf("invalid WeChat publication reconcile payload")
+			}
+			if handlers.Reconcile == nil {
+				return fmt.Errorf("WeChat publication reconcile handler unavailable")
+			}
+			return handlers.Reconcile(ctx, payload.ProjectID)
+		})
+	}
 
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{

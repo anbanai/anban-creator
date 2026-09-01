@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -15,7 +15,7 @@ import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
@@ -35,7 +35,6 @@ import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Checkbox } from '@/components/ui/checkbox'
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { taskFailureMessage } from '@/lib/studio-ux'
@@ -309,53 +308,6 @@ export default function TaskDetailPage() {
     onError: (err, taskId) => {
       if (!isTaskActive(taskId)) return
       toast.error(getApiErrorMessage(err, '取消任务失败，请稍后重试'))
-    },
-    onSettled: (_data, _error, taskId) => Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
-    ]),
-  })
-
-  const togglePublished = useMutation({
-    mutationFn: ({ taskId, published }: { taskId: string; published: boolean }) =>
-      api.tasks.markPublished(taskId, published),
-    onError: (err, { taskId }) => {
-      if (!isTaskActive(taskId)) return
-      toast.error(getApiErrorMessage(err, '切换发布状态失败，请稍后重试'))
-    },
-    onSettled: (_data, _error, { taskId }) => Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) }),
-    ]),
-  })
-
-  // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
-  const approvePublish = useMutation({
-    mutationFn: (taskId: string) => api.tasks.publishApprove(taskId),
-    onSuccess: (_data, taskId) => {
-      if (!isTaskActive(taskId)) return
-      toast.success('已放行，正在发布到公众号草稿箱')
-    },
-    onError: (err, taskId) => {
-      if (!isTaskActive(taskId)) return
-      toast.error(getApiErrorMessage(err, '放行失败，请稍后重试'))
-    },
-    onSettled: (_data, _error, taskId) => Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all }),
-    ]),
-  })
-
-  const rejectPublish = useMutation({
-    mutationFn: (taskId: string) => api.tasks.publishReject(taskId),
-    onSuccess: (_data, taskId) => {
-      if (!isTaskActive(taskId)) return
-      toast.success('已驳回发布审核')
-    },
-    onError: (err, taskId) => {
-      if (!isTaskActive(taskId)) return
-      toast.error(getApiErrorMessage(err, '驳回失败，请稍后重试'))
     },
     onSettled: (_data, _error, taskId) => Promise.all([
       queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
@@ -713,18 +665,6 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          {task.status === 'completed' ? (
-            <label className="flex h-7 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-2.5 text-sm font-medium">
-              <Checkbox
-                checked={task.published}
-                disabled={togglePublished.isPending}
-                onCheckedChange={(published) => {
-                  void submit(async () => togglePublished.mutateAsync({ taskId: task.id, published })).catch(() => {})
-                }}
-              />
-              <span>已发布</span>
-            </label>
-          ) : null}
           {canCancel && (
             <Button
               variant="destructive"
@@ -737,7 +677,7 @@ export default function TaskDetailPage() {
             </Button>
           )}
           {canClone && task.status !== 'failed' && (
-            <Button variant={task.status === 'completed' && !task.published ? 'outline' : 'default'} size="sm" onClick={() => setShowResumeDialog(true)}>
+            <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
               <Send className="h-4 w-4" />
               继续执行
             </Button>
@@ -805,72 +745,6 @@ export default function TaskDetailPage() {
             </div>
           )}
         </section>
-      )}
-
-      {/* Publish-approval gate (Batch 4A): the project requires human review
-          before publishing, so a completed article draft is held here until the
-          user explicitly approves (→ WeChat draft box) or rejects it. */}
-      {task.publish_approval_state === 'pending' && (
-        <Card className="border-amber-500/40 bg-amber-500/10">
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-              <div>
-                <p className="text-sm font-medium text-foreground">发布待审核</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  文章草稿已完成，已暂停自动发布。确认无误后放行，将发布到公众号草稿箱（非直接群发）。
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                size="sm"
-                loading={approvePublish.isPending}
-                onClick={() => {
-                  void submit(async () => approvePublish.mutateAsync(task.id)).catch(() => {})
-                }}
-              >
-                <Send className="h-4 w-4" />
-                放行发布
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                loading={rejectPublish.isPending}
-                onClick={() => { void submit(async () => rejectPublish.mutateAsync(task.id)).catch(() => {}) }}
-              >
-                <Ban className="h-4 w-4" />
-                驳回
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {task.publish_approval_state === 'approved' && (
-        <Card className="border-emerald-500/40 bg-emerald-500/10">
-          <CardContent className="flex items-start gap-3">
-            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
-            <div>
-              <p className="text-sm font-medium text-foreground">已通过发布审核</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {task.published
-                  ? '草稿已放行，已发布到公众号草稿箱。'
-                  : '草稿已放行，正在发布到公众号草稿箱…'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {task.publish_approval_state === 'rejected' && (
-        <Card className="bg-muted/30">
-          <CardContent className="flex items-start gap-3">
-            <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium text-foreground">已驳回发布</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后继续执行或克隆任务。</p>
-            </div>
-          </CardContent>
-        </Card>
       )}
 
       {task.status === 'completed' && (
@@ -1006,7 +880,7 @@ export default function TaskDetailPage() {
       )}
 
       {task.type === 'article' && task.status === 'completed' && (
-        <WechatAnalyticsPanel taskId={task.id} />
+        <WechatAnalyticsPanel taskId={task.id} projectConfig={project?.config} />
       )}
 
       {task.type === 'montage' && task.status === 'completed' && (

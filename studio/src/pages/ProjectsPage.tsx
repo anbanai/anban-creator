@@ -97,6 +97,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   image_ratio: '3:4',
   enable_publishing: false,
   require_publish_approval: false,
+  wechat_publish_mode: 'manual',
 }
 
 function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): ProjectPlatform {
@@ -143,8 +144,9 @@ function projectToForm(ch: Project): ProjectFormValues {
     },
     reference_image: ch.reference_image ?? null,
     image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || 'auto',
-    enable_publishing: ch.config?.enable_publishing ?? false,
+    enable_publishing: ch.config?.enable_publishing ?? (ch.config?.wechat_publish_mode ? ch.config.wechat_publish_mode !== 'disabled' : false),
     require_publish_approval: ch.config?.require_publish_approval ?? false,
+    wechat_publish_mode: ch.config?.wechat_publish_mode ?? (ch.config?.enable_publishing ? 'manual' : 'disabled'),
   }
 }
 
@@ -188,7 +190,8 @@ export default function ProjectsPage() {
   const isMontage = selectedPlatform === 'montage'
   const supportsVisualReference = !isMontage
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
-  const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
+  const publishMode = useWatch({ control: form.control, name: 'wechat_publish_mode' })
+  const enablePublishing = publishMode !== 'disabled'
   const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
   const authorValue = useWatch({ control: form.control, name: 'author' })
   const writerValue = useWatch({ control: form.control, name: 'writer' })
@@ -495,7 +498,8 @@ export default function ProjectsPage() {
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
-      require_publish_approval: values.require_publish_approval || undefined,
+      require_publish_approval: undefined,
+      wechat_publish_mode: values.platform === 'article' ? values.wechat_publish_mode : undefined,
     }
     if (values.platform === 'ecommerce') {
       payload.ecommerce_defaults = {
@@ -521,7 +525,7 @@ export default function ProjectsPage() {
       }
     }
     // Disable publishing flag when unchecked (credentials preserved)
-    if (!values.enable_publishing) {
+    if (values.platform === 'article' && values.wechat_publish_mode === 'disabled') {
       payload.enable_publishing = false
       // Approval gate is moot when publishing is off; reset it so the stored
       // config stays consistent (avoids a lingering require flag with no publishing).
@@ -763,65 +767,23 @@ export default function ProjectsPage() {
                     <h4 className="mb-3 text-sm font-medium text-muted-foreground">发布配置</h4>
                   </div>
 
-                  <FormField
-                    control={form.control}
-                    name="enable_publishing"
-                    render={({ field }) => (
-                      <FormItem>
-                        <div className="flex items-center gap-2">
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                            />
-                          </FormControl>
-                          <FormLabel className="!mt-0 font-normal cursor-pointer" onClick={() => field.onChange(!field.value)}>
-                            启用自动发布
-                          </FormLabel>
-                        </div>
-                        <FormDescription>
-                          {field.value
-                            ? '开启后，任务完成后将自动发布到公众号'
-                            : '未配置微信凭证，将无法使用自动发布到公众号功能'}
-                          {field.value && (
-                            <span className="mt-1 block">
-                              请前往<a href="https://developers.weixin.qq.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">微信开发者</a>添加 API IP 白名单：47.108.177.204
-                            </span>
-                          )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <FormField control={form.control} name="wechat_publish_mode" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>公众号发布模式</FormLabel>
+                      <FormControl>
+                        <ToggleGroup value={[field.value ?? 'manual']} onValueChange={(value) => { const selected = value[0]; if (selected) field.onChange(selected) }} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <ToggleGroupItem value="disabled" className="h-auto justify-start px-3 py-2 text-left">不投递草稿</ToggleGroupItem>
+                          <ToggleGroupItem value="manual" className="h-auto justify-start px-3 py-2 text-left">进入草稿箱</ToggleGroupItem>
+                          <ToggleGroupItem value="api_confirmed" className="h-auto justify-start px-3 py-2 text-left">确认后正式发布</ToggleGroupItem>
+                        </ToggleGroup>
+                      </FormControl>
+                      <FormDescription>默认进入草稿箱；正式发布前必须在公众号后台完成，或由你在任务详情确认。</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
 
                   {enablePublishing && (
                     <>
-                      <FormField
-                        control={form.control}
-                        name="require_publish_approval"
-                        render={({ field }) => (
-                          <FormItem>
-                            <div className="flex items-center gap-2">
-                              <FormControl>
-                                <Switch
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                              <FormLabel className="!mt-0 cursor-pointer font-normal" onClick={() => field.onChange(!field.value)}>
-                                发布前需人工审核
-                              </FormLabel>
-                            </div>
-                            <FormDescription>
-                              {field.value
-                                ? '任务完成后暂停自动发布，进入「待审核发布」状态，需在任务详情手动放行后才发布到草稿箱'
-                                : '任务完成后直接自动发布到公众号草稿箱'}
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
                       <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
                         <FormItem>
                           <FormLabel>微信 AppID</FormLabel>
