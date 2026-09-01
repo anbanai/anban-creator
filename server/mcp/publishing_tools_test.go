@@ -387,6 +387,35 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 	})
 }
 
+func TestCreateDraftHandlerReturnsPersistedUnsupportedCapabilityFailure(t *testing.T) {
+	f := newPublishingToolFixture(t)
+	ctx := withMCPUserID(context.Background(), f.userID)
+	f.api.addError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
+
+	result, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := decodeCreateDraftToolFailure(t, result)
+	if failure.Code != "create_draft_unsupported" || failure.Retryable || !strings.Contains(strings.ToLower(failure.Hint), "capability") {
+		t.Fatalf("failure = %#v, want nonretryable account capability hint", failure)
+	}
+	firstAddCalls, firstListCalls := f.api.addCalls, f.api.draftListCalls
+
+	f.api.addError = nil
+	result, err = createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure = decodeCreateDraftToolFailure(t, result)
+	if failure.Code != "create_draft_unsupported" || failure.Retryable {
+		t.Fatalf("persisted failure = %#v", failure)
+	}
+	if f.api.addCalls != firstAddCalls || f.api.draftListCalls != firstListCalls {
+		t.Fatalf("persisted unsupported row reached provider again: add=%d/%d list=%d/%d", f.api.addCalls, firstAddCalls, f.api.draftListCalls, firstListCalls)
+	}
+}
+
 func TestCreateDraftHandlerReturnsOnlyLifecycleDraftFields(t *testing.T) {
 	f := newPublishingToolFixture(t)
 	result, err := createDraftHandler(withMCPUserID(context.Background(), f.userID), createDraftToolRequest(t, validCreateDraftArgs(f)))

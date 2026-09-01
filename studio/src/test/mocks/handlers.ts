@@ -95,8 +95,6 @@ export const mockTasks: PaginatedResponse<Task> = {
       project_id: 'ch-1',
       execution_profile: 'effective',
       result: null,
-      published: false,
-      published_at: null,
       billing_price_credits: 6000,
       created_at: '2025-01-15T10:00:00Z',
       started_at: '2025-01-15T10:00:05Z',
@@ -333,9 +331,6 @@ export const handlers = [
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),
 
-  http.patch('/api/v1/tasks/:id/published', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: { published: true } })
-  }),
 
   http.get('/api/v1/tasks/:id/files', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: [] })

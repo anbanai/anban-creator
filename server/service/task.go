@@ -1728,16 +1728,23 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		}
 	}
 
-	if err := s.repo.TaskFiles().DeleteByTaskID(ctx, id); err != nil {
-		return fmt.Errorf("delete task files: %w", err)
-	}
-
-	deleted, err := s.repo.Tasks().DeleteIfDeleting(ctx, id)
-	if err != nil {
-		return fmt.Errorf("delete task: %w", err)
-	}
-	if !deleted {
-		return fmt.Errorf("delete task: deletion authority was lost")
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskFiles().DeleteByTaskID(ctx, id); err != nil {
+			return fmt.Errorf("delete task files: %w", err)
+		}
+		if err := tx.WechatPublications().DeleteLifecycleByTaskID(ctx, id); err != nil {
+			return fmt.Errorf("delete WeChat publication lifecycle: %w", err)
+		}
+		deleted, err := tx.Tasks().DeleteIfDeleting(ctx, id)
+		if err != nil {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		if !deleted {
+			return fmt.Errorf("delete task: deletion authority was lost")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	s.deregisterCancel(id)
 	return nil

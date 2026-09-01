@@ -95,8 +95,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   },
   reference_image: null,
   image_ratio: '3:4',
-  enable_publishing: false,
-  require_publish_approval: false,
   wechat_publish_mode: 'manual',
 }
 
@@ -144,9 +142,7 @@ function projectToForm(ch: Project): ProjectFormValues {
     },
     reference_image: ch.reference_image ?? null,
     image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || 'auto',
-    enable_publishing: ch.config?.enable_publishing ?? (ch.config?.wechat_publish_mode ? ch.config.wechat_publish_mode !== 'disabled' : false),
-    require_publish_approval: ch.config?.require_publish_approval ?? false,
-    wechat_publish_mode: ch.config?.wechat_publish_mode ?? (ch.config?.enable_publishing ? 'manual' : 'disabled'),
+    wechat_publish_mode: ch.config?.wechat_publish_mode ?? 'manual',
   }
 }
 
@@ -497,7 +493,6 @@ export default function ProjectsPage() {
       image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
-      require_publish_approval: undefined,
       wechat_publish_mode: values.platform === 'article' ? values.wechat_publish_mode : undefined,
     }
     if (values.platform === 'ecommerce') {

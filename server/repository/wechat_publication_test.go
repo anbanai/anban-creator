@@ -224,6 +224,75 @@ func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T)
 	repo := New(db)
 	ctx := context.Background()
 
+	t.Run("draft recovery records provider media and releases its claim", func(t *testing.T) {
+		claimedAt := time.Now().Add(-time.Minute)
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+			LastError: "ambiguous draft/add outcome", ClaimToken: "draft-claim", ClaimedAt: &claimedAt,
+			PublishID: "preserved-publish-id", MsgDataID: "preserved-msg-data-id",
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastCheckedAt := time.Now()
+		nextCheckAt := lastCheckedAt.Add(10 * time.Minute)
+		won, err := repo.WechatPublications().TransitionDraftRecovered(
+			ctx, stored.ID, stored.UpdatedAt, "recovered-draft-media", &nextCheckAt, &lastCheckedAt,
+		)
+		if err != nil || !won {
+			t.Fatalf("TransitionDraftRecovered won=%v err=%v", won, err)
+		}
+		stored, err = repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.DraftMediaID != "recovered-draft-media" || stored.Status != model.WechatPublicationStatusDrafted || stored.LastError != "" ||
+			stored.NextCheckAt == nil || !stored.NextCheckAt.Equal(nextCheckAt) || stored.LastCheckedAt == nil || !stored.LastCheckedAt.Equal(lastCheckedAt) ||
+			stored.ClaimToken != "" || stored.ClaimedAt != nil || stored.PublishID != "preserved-publish-id" || stored.MsgDataID != "preserved-msg-data-id" {
+			t.Fatalf("stored=%#v", stored)
+		}
+	})
+
+	t.Run("draft recovery rejects a stale version", func(t *testing.T) {
+		claimedAt := time.Now().Add(-time.Minute)
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+			LastError: "ambiguous draft/add outcome", ClaimToken: "newer-draft-claim", ClaimedAt: &claimedAt,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		stale, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&model.WechatPublication{}).Where("id = ?", publication.ID).Update("last_error", "newer reconciliation state").Error; err != nil {
+			t.Fatal(err)
+		}
+		lastCheckedAt := time.Now()
+		nextCheckAt := lastCheckedAt.Add(10 * time.Minute)
+		won, err := repo.WechatPublications().TransitionDraftRecovered(
+			ctx, stale.ID, stale.UpdatedAt, "stale-draft-media", &nextCheckAt, &lastCheckedAt,
+		)
+		if err != nil || won {
+			t.Fatalf("TransitionDraftRecovered won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.DraftMediaID != "" || stored.Status != model.WechatPublicationStatusDrafting || stored.LastError != "newer reconciliation state" ||
+			stored.ClaimToken != "newer-draft-claim" || stored.ClaimedAt == nil {
+			t.Fatalf("stored=%#v", stored)
+		}
+	})
+
 	t.Run("reconciliation CAS loss preserves newer publish claim", func(t *testing.T) {
 		publication := &model.WechatPublication{
 			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",

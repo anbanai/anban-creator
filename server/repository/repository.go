@@ -305,16 +305,21 @@ type WechatPublicationRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
 	FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error)
 	FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatPublication, error)
+	ClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, now, leaseUntil time.Time) (bool, error)
+	ReleaseDueDispatch(ctx context.Context, id string, leaseUntil, retryAt time.Time) (bool, error)
 	ClaimProjectReconcile(ctx context.Context, projectID string, lease time.Duration) (bool, error)
 	ClaimArticleBinding(ctx context.Context, projectID, articleID, publicationID string) (bool, error)
 	TransitionToNeedsSelection(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, source string, candidates []byte, nextCheckAt *time.Time) (bool, error)
 	TransitionToPublishSubmitting(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, lastError string, nextCheckAt *time.Time) (bool, error)
+	TransitionDraftRecovered(ctx context.Context, id string, expectedUpdatedAt time.Time, draftMediaID string, nextCheckAt, lastCheckedAt *time.Time) (bool, error)
 	UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
 	TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
 	BindMsgID(ctx context.Context, id, msgID string) (bool, error)
 	Update(ctx context.Context, publication *model.WechatPublication) error
 	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
 	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
+	DeleteLifecycleByTaskID(ctx context.Context, taskID string) error
 }
 
 type WechatMetricSnapshotRepository interface {

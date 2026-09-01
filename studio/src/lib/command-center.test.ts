@@ -21,8 +21,6 @@ function task(overrides: Partial<Task>): Task {
     plan_id: null,
     project_id: 'project-1',
     result: null,
-    published: false,
-    published_at: null,
     billing_price_credits: 5000,
     created_at: '2026-07-06T01:00:00.000Z',
     started_at: '',
@@ -81,7 +79,6 @@ describe('command center rules', () => {
       tasks: [
         task({ id: 'running', status: 'running', progress: 42 }),
         task({ id: 'failed', status: 'failed', error_message: '模型超时' }),
-        task({ id: 'approval', publish_approval_state: 'pending' }),
       ],
       plans: [
         plan({ id: 'soon', title: '上午发布', next_run_at: '2026-07-06T08:00:00.000Z' }),
@@ -95,18 +92,16 @@ describe('command center rules', () => {
 
     expect(signals.runningTasks).toHaveLength(1)
     expect(signals.failedTasks).toHaveLength(1)
-    expect(signals.pendingApprovalTasks).toHaveLength(1)
     expect(signals.upcomingPlans.map((item) => item.id)).toEqual(['soon'])
     expect(signals.walletRisk.level).toBe('low')
     expect(signals.readiness.projectsReady).toBe(true)
   })
 
-  it('prioritizes recovery and approval before general creation actions', () => {
+  it('prioritizes recovery before general creation actions', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [
         task({ id: 'failed', status: 'failed', title: '失败任务', error_message: '执行失败' }),
-        task({ id: 'approval', title: '待审批任务', publish_approval_state: 'pending' }),
       ],
       plans: [],
       projects: [project()],
@@ -117,7 +112,6 @@ describe('command center rules', () => {
 
     expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
       'recover-failed-task',
-      'review-publish-approval',
       'review-wallet',
       'create-task',
     ])
@@ -195,7 +189,7 @@ describe('command center rules', () => {
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [],
       plans: [],
-      projects: [project({ config: { enable_publishing: true, require_publish_approval: true } })],
+      projects: [project({ platform: 'article', config: { wechat_publish_mode: 'api_confirmed' } })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
       localExecutorReady: true,
@@ -206,7 +200,7 @@ describe('command center rules', () => {
     expect(signals.readiness.checks.projects.status).toBe('ready')
     expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
     expect(signals.readiness.checks.localExecutor.status).toBe('ready')
-    expect(signals.readiness.checks.publishing.description).toContain('发布需审核')
+    expect(signals.readiness.checks.publishing.description).toBe('1 个项目已配置公众号发布流程')
   })
 
   it('places setup review before generic creation when platform keys are not ready', () => {

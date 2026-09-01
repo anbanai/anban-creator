@@ -491,6 +491,7 @@ func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 	project := &model.Project{
 		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformArticle,
 		ReferenceImageAssetID: "asset-old", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -532,6 +533,7 @@ func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWritin
 	project := &model.Project{
 		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
 		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}
 	if err := base.Projects().Create(t.Context(), project); err != nil {
 		t.Fatal(err)

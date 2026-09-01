@@ -39,8 +39,6 @@ vi.mock('@/lib/api', async () => {
             plan_id: null,
             project_id: 'project-1',
             result: null,
-            published: false,
-            published_at: null,
             created_at: new Date().toISOString(),
             started_at: '',
             completed_at: '',

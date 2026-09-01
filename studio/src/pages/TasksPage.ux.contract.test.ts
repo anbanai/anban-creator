@@ -12,7 +12,7 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).not.toContain('恢复工作台')
     expect(source).toContain('需要处理')
     expect(source).toContain('个失败任务')
-    expect(source).toContain('待发布确认')
+    expect(source).not.toContain('待发布确认')
     expect(source).toContain("to=\"/tasks?status=failed\"")
   })
 
@@ -73,8 +73,8 @@ describe('TasksPage recovery workspace contract', () => {
     const helperSource = readFileSync(join(here, '../lib/studio-ux.ts'), 'utf8')
 
     expect(source).toContain('taskActionSignal')
-    expect(helperSource).toContain('处理发布审批')
+    expect(helperSource).not.toContain('处理发布审批')
     expect(helperSource).toContain('查看失败原因')
-    expect(helperSource).toContain('可下载、发布或复用')
+    expect(helperSource).toContain('可查看、下载或复用')
   })
 })

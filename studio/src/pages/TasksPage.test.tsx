@@ -65,28 +65,23 @@ const fixtures = vi.hoisted(() => {
     project_id: project.id,
     execution_profile: 'effective',
     result: null,
-    published: false,
-    published_at: null,
     billing_price_credits: 6000,
     created_at: '2026-07-06T01:00:00.000Z',
     started_at: '',
     completed_at: '',
   }
-  const approvalTask = {
+  const completedTask = {
     id: 'approval-task',
     type: 'article',
-    title: '待确认草稿',
-    prompt: '审批任务',
+    title: '已完成文章',
+    prompt: '文章任务',
     status: 'completed',
     progress: 100,
     plan_id: null,
     project_id: project.id,
     execution_profile: 'effective',
     result: null,
-    published: false,
-    published_at: null,
     billing_price_credits: 6000,
-    publish_approval_state: 'pending',
     workflow_status: {
       version: 'creation_workflow_v1',
       current_stage: 'review',
@@ -97,7 +92,7 @@ const fixtures = vi.hoisted(() => {
     started_at: '',
     completed_at: '2026-07-06T02:10:00.000Z',
   }
-  return { project, failedTask, approvalTask }
+  return { project, failedTask, completedTask }
 })
 
 vi.mock('@/lib/api', async () => {
@@ -114,7 +109,6 @@ vi.mock('@/lib/api', async () => {
         bulkClone: vi.fn(),
         bulkDelete: vi.fn(),
         downloadBulkZipBlob: vi.fn(),
-        markPublished: vi.fn(),
       },
       projects: {
         ...actual.api.projects,
@@ -276,17 +270,17 @@ describe('TasksPage URL-driven recovery filters', () => {
     })
   })
 
-  it('uses publish approval recovery labels and task card action signals', async () => {
+  it('keeps publication controls out of task cards', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
-      items: [fixtures.failedTask as Task, fixtures.approvalTask as Task],
+      items: [fixtures.failedTask as Task, fixtures.completedTask as Task],
       total: 2,
     })
 
     renderTasksPage()
 
-    expect(await screen.findByRole('link', { name: /待发布确认/ })).toBeInTheDocument()
-    expect(await screen.findByText('处理发布审批')).toBeInTheDocument()
-    expect((await screen.findAllByText('审核后放行到公众号草稿箱')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('已完成文章')).toBeInTheDocument()
+    expect(screen.queryByText('标记发布')).not.toBeInTheDocument()
+    expect(screen.queryByText('待发布确认')).not.toBeInTheDocument()
   })
 
   it('shows the task total including image operation charges', async () => {

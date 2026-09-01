@@ -103,6 +103,7 @@ func TestWechatPublicationHandlerMapsOwnershipStateAndRateLimit(t *testing.T) {
 		{"pending", service.ErrWechatPublicationPending, http.StatusConflict},
 		{"rate limit", service.ErrWechatPublicationRateLimited, http.StatusTooManyRequests},
 		{"article absent", service.ErrWechatPublicationArticleNotFound, http.StatusBadRequest},
+		{"scheduler unavailable", service.ErrWechatPublicationSchedulerUnavailable, http.StatusServiceUnavailable},
 		{"provider", errors.New("provider down"), http.StatusInternalServerError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

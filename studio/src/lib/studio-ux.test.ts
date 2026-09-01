@@ -44,8 +44,6 @@ function task(overrides: Partial<Task> = {}): Task {
     plan_id: null,
     project_id: 'project-1',
     result: null,
-    published: false,
-    published_at: null,
     billing_price_credits: 6000,
     created_at: '2026-07-01T00:00:00.000Z',
     started_at: '',
@@ -155,9 +153,10 @@ describe('studio business UX helpers', () => {
       hint: '未返回失败详情',
       tone: 'risk',
     })
-    expect(taskActionSignal(task({ publish_approval_state: 'pending' }))).toMatchObject({
-      label: '处理发布审批',
-      tone: 'publishing',
+    expect(taskActionSignal(task({ status: 'completed' }))).toMatchObject({
+      label: '查看产物',
+      hint: '可查看、下载或复用',
+      tone: 'success',
     })
   })
 

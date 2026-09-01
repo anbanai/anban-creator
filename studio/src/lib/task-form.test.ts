@@ -40,8 +40,6 @@ function task(overrides: Partial<Task> = {}): Task {
     status: 'completed',
     project_id: 'project-1',
     execution_profile: 'effective',
-    published: false,
-    published_at: null,
     billing_price_credits: 0,
     created_at: '2026-07-22T00:00:00Z',
     started_at: '2026-07-22T00:00:01Z',

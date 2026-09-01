@@ -61,6 +61,64 @@ func (r *wechatPublicationRepository) FindPendingByProject(ctx context.Context, 
 	return publications, err
 }
 
+func (r *wechatPublicationRepository) DeleteLifecycleByTaskID(ctx context.Context, taskID string) error {
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&model.WechatMetricSnapshot{}).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&model.WechatArticleTracking{}).Error; err != nil {
+		return err
+	}
+	publicationIDs := r.db.WithContext(ctx).Model(&model.WechatPublication{}).Select("id").Where("task_id = ?", taskID)
+	if err := r.db.WithContext(ctx).Where("publication_id IN (?)", publicationIDs).Delete(&model.WechatPublicationBinding{}).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&model.WechatPublication{}).Error
+}
+
+func (r *wechatPublicationRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatPublication, error) {
+	var publications []*model.WechatPublication
+	query := r.db.WithContext(ctx).
+		Where("next_check_at IS NOT NULL AND next_check_at <= ?", now).
+		Where("status IN ?", []string{
+			model.WechatPublicationStatusDrafting,
+			model.WechatPublicationStatusDrafted,
+			model.WechatPublicationStatusPublishSubmitting,
+			model.WechatPublicationStatusPublishing,
+			model.WechatPublicationStatusNeedsSelection,
+		}).
+		Order("next_check_at ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	return publications, query.Find(&publications).Error
+}
+
+func (r *wechatPublicationRepository) ClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, now, leaseUntil time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND updated_at = ?", id, expectedUpdatedAt).
+			Where("next_check_at IS NOT NULL AND next_check_at <= ?", now).
+			Where("status IN ?", []string{
+				model.WechatPublicationStatusDrafting,
+				model.WechatPublicationStatusDrafted,
+				model.WechatPublicationStatusPublishSubmitting,
+				model.WechatPublicationStatusPublishing,
+				model.WechatPublicationStatusNeedsSelection,
+			}).
+			Update("next_check_at", leaseUntil)
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) ReleaseDueDispatch(ctx context.Context, id string, leaseUntil, retryAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND next_check_at = ?", id, leaseUntil).
+			Update("next_check_at", retryAt)
+	})
+	return rows == 1, err
+}
+
 func (r *wechatPublicationRepository) ClaimProjectReconcile(ctx context.Context, projectID string, lease time.Duration) (bool, error) {
 	if projectID == "" || lease <= 0 {
 		return false, fmt.Errorf("project reconcile lease requires project_id and positive duration")
@@ -122,6 +180,23 @@ func (r *wechatPublicationRepository) TransitionToPublishSubmitting(ctx context.
 			Updates(map[string]any{
 				"status":     model.WechatPublicationStatusPublishSubmitting,
 				"last_error": lastError, "next_check_at": nextCheckAt,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) TransitionDraftRecovered(ctx context.Context, id string, expectedUpdatedAt time.Time, draftMediaID string, nextCheckAt, lastCheckedAt *time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", id, model.WechatPublicationStatusDrafting, expectedUpdatedAt).
+			Updates(map[string]any{
+				"draft_media_id":  draftMediaID,
+				"status":          model.WechatPublicationStatusDrafted,
+				"last_error":      "",
+				"next_check_at":   nextCheckAt,
+				"last_checked_at": lastCheckedAt,
+				"claim_token":     "",
+				"claimed_at":      nil,
 			})
 	})
 	return rows == 1, err

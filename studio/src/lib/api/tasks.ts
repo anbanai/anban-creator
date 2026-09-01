@@ -6,6 +6,10 @@ export interface ResumeTaskRequest {
   input_attachments: InputAttachment[]
 }
 
+export interface ReconcileWechatResponse {
+  reconciled: boolean
+}
+
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
     const result = await unwrap<Task | Task[]>(http.post('/tasks', data))
@@ -54,16 +58,9 @@ export const tasksApi = {
   publishWechat: (id: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/publish`)),
   reconcileWechat: (id: string) =>
-    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/reconcile`)),
+    unwrap<ReconcileWechatResponse>(http.post(`/tasks/${id}/wechat-publication/reconcile`)),
   selectWechatArticle: (id: string, articleId: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/select`, { article_id: articleId })),
-
-  /** @deprecated Legacy clients only; publication lifecycle uses the methods above. */
-  markPublished: (id: string, published: boolean) =>
-    unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
-  /** @deprecated Legacy approval surface retained for old test fixtures. */
-  publishApprove: (id: string) => unwrap<{ approved: boolean }>(http.post(`/tasks/${id}/publish-approve`)),
-  publishReject: (id: string, reason?: string) => unwrap<{ rejected: boolean }>(http.post(`/tasks/${id}/publish-reject`, { reason })),
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

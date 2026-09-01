@@ -35,8 +35,6 @@ const snapshotTask: Task = {
   project_id: 'project-1',
   execution_profile: 'effective',
   result: null,
-  published: false,
-  published_at: null,
   billing_price_credits: 5000,
   billing_total_credits: 6800,
   plan_id: null,

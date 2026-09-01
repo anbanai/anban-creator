@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Ban, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -18,7 +18,6 @@ import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
-import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -58,7 +57,6 @@ export default function TasksPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
   const [bulkExecutionProfile, setBulkExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
-  const { submit } = useSubmitLock()
 
   useEffect(() => {
     const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
@@ -156,15 +154,6 @@ export default function TasksPage() {
       return next.length === prev.length ? prev : next
     })
   }, [tasks])
-
-  const togglePublished = useMutation({
-    mutationFn: ({ id, published }: { id: string; published: boolean }) =>
-      api.tasks.markPublished(id, published),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    },
-    onError: () => toast.error('更新发布状态失败'),
-  })
 
   const bulkDownloadMutation = useMutation({
     mutationFn: (taskIds: string[]) => api.tasks.downloadBulkZipBlob(taskIds),
@@ -295,7 +284,6 @@ export default function TasksPage() {
   const queueStats = useMemo(() => ({
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
-    approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
   }), [tasks])
 
   return (
@@ -303,8 +291,8 @@ export default function TasksPage() {
       <PageHeader
         title="任务"
         description={
-          queueStats.active > 0 || queueStats.failed > 0 || queueStats.approval > 0
-            ? <>{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}{queueStats.approval > 0 ? ` · ${queueStats.approval} 个待发布` : ''}</>
+          queueStats.active > 0 || queueStats.failed > 0
+            ? <>{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
             : '查看进度、产物与发布状态。'
         }
       >
@@ -314,18 +302,13 @@ export default function TasksPage() {
         </Button>
       </PageHeader>
 
-      {(queueStats.failed > 0 || queueStats.approval > 0) && (
+      {queueStats.failed > 0 && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border py-3 text-sm">
           <span className="font-medium text-foreground">需要处理</span>
           {queueStats.failed > 0 && (
             <Link to="/tasks?status=failed" className="inline-flex items-center gap-1.5 text-destructive hover:underline">
               <AlertTriangle className="h-4 w-4" />
               {queueStats.failed} 个失败任务
-            </Link>
-          )}
-          {queueStats.approval > 0 && (
-            <Link to="/tasks?status=completed" className="text-primary hover:underline">
-              {queueStats.approval} 个待发布确认
             </Link>
           )}
         </div>
@@ -530,9 +513,6 @@ export default function TasksPage() {
                         {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
                           <span>本地{task.execution_target === 'local' ? '待认领' : '运行中'}</span>
                         )}
-                        {task.publish_approval_state === 'rejected' && (
-                          <span>已驳回发布</span>
-                        )}
                         <span>创建：{formatDateTimeCN(task.created_at)}</span>
                         {task.completed_at && (
                           <span>完成：{formatDateTimeCN(task.completed_at)}</span>
@@ -541,29 +521,6 @@ export default function TasksPage() {
                           累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
                         </span>
                       </div>
-                      {task.status === 'completed' && (
-                        <button
-                          type="button"
-                          disabled={togglePublished.isPending}
-                          onClick={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            void submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published })).catch(() => {})
-                          }}
-                          className={`mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
-                            task.published
-                              ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                              : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                          }`}
-                        >
-                          {togglePublished.isPending ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : task.published ? (
-                            <Check className="h-3 w-3" />
-                          ) : null}
-                          {task.published ? '已发布' : '标记发布'}
-                        </button>
-                      )}
                       {task.status === 'running' && (
                         <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                           <div

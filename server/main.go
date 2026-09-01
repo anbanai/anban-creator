@@ -706,6 +706,11 @@ func main() {
 		analyticsRecoveryCtx, analyticsRecoveryCancel := context.WithCancel(context.Background())
 		defer analyticsRecoveryCancel()
 		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, log)
+		if wechatPublicationSvc != nil {
+			publicationRecoveryCtx, publicationRecoveryCancel := context.WithCancel(context.Background())
+			defer publicationRecoveryCancel()
+			go startWechatPublicationRecovery(publicationRecoveryCtx, wechatPublicationSvc, log)
+		}
 	}
 	var runtimeReconcilerDone <-chan struct{}
 	if runtimeReconciler != nil {
@@ -1099,8 +1104,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	publicationHandlers := scheduler.WechatPublicationHandlers{}
 	if wechatPublicationSvc != nil {
 		publicationHandlers.Poll = func(ctx context.Context, publicationID string) error {
-			_, err := wechatPublicationSvc.Poll(ctx, publicationID)
-			return err
+			return wechatPublicationSvc.ProcessPoll(ctx, publicationID)
 		}
 		publicationHandlers.Reconcile = func(ctx context.Context, projectID string) error {
 			return wechatPublicationSvc.ReconcileProject(ctx, projectID)
@@ -1151,6 +1155,25 @@ func startAnalyticsRecovery(ctx context.Context, seednote, wechat, channels anal
 	}
 	run()
 	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func startWechatPublicationRecovery(ctx context.Context, publications analyticsRecoveryService, log *zerolog.Logger) {
+	run := func() {
+		if err := publications.RecoverDue(ctx, 100); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("WeChat publication recovery failed")
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {

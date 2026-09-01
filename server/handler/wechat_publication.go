@@ -109,6 +109,8 @@ func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err e
 		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationPending.Error())
 	case errors.Is(err, service.ErrWechatPublicationRateLimited):
 		return Error(c, fiber.StatusTooManyRequests, service.ErrWechatPublicationRateLimited.Error())
+	case errors.Is(err, service.ErrWechatPublicationSchedulerUnavailable):
+		return Error(c, fiber.StatusServiceUnavailable, service.ErrWechatPublicationSchedulerUnavailable.Error())
 	case errors.Is(err, service.ErrWechatPublicationArticleNotFound):
 		return Error(c, fiber.StatusBadRequest, service.ErrWechatPublicationArticleNotFound.Error())
 	default:

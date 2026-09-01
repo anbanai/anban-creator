@@ -9,11 +9,6 @@ export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
   wechat_publish_mode?: WechatPublishMode
-  enable_publishing?: boolean
-  // Publish-approval gate (Batch 4A): when true (and enable_publishing true),
-  // a completed article task holds its draft for human review instead of
-  // auto-publishing. See server model.ProjectConfig.RequirePublishApproval.
-  require_publish_approval?: boolean
 }
 
 export interface Project {
@@ -97,8 +92,6 @@ export interface CreateProjectRequest {
   wechat_app_id?: string
   wechat_secret?: string
   wechat_publish_mode?: WechatPublishMode
-  enable_publishing?: boolean
-  require_publish_approval?: boolean
 }
 
 export interface CreateProjectResponse {

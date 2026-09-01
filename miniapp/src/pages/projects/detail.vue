@@ -214,19 +214,23 @@
           </view>
 
           <view v-if="isNew || sections.publishing" class="project-detail__fields">
-            <!-- Auto-publish switch (article only — xls/ecommerce don't publish) -->
+            <!-- WeChat publication lifecycle mode -->
             <view v-if="isArticle" class="field-group">
-              <view class="switch-row">
-                <text class="field-label" style="margin-bottom: 0;">自动发布到微信</text>
-                <AbSwitch v-model="form.enable_publishing" />
-              </view>
-              <text v-if="form.enable_publishing" class="field-hint">
-                开启后任务完成将自动发布到公众号。
+              <text class="field-label">公众号发布模式</text>
+              <AbSelect
+                v-model="form.wechat_publish_mode"
+                :options="wechatPublishModeOptions"
+              />
+              <text v-if="form.wechat_publish_mode === 'manual'" class="field-hint">
+                任务自动进入草稿箱，请在公众号后台正式发布，系统会自动识别。
+              </text>
+              <text v-else-if="form.wechat_publish_mode === 'api_confirmed'" class="field-hint">
+                任务自动进入草稿箱，确认后可由 Anban 正式发布。
               </text>
             </view>
 
-            <!-- WeChat credentials (shown when auto-publish is on) -->
-            <template v-if="isArticle && form.enable_publishing">
+            <!-- WeChat credentials (shown when draft delivery is enabled) -->
+            <template v-if="isArticle && form.wechat_publish_mode !== 'disabled'">
               <view class="field-group">
                 <text class="field-label">微信 AppID</text>
                 <AbInput
@@ -511,6 +515,7 @@ import type {
   ImageCapabilityOption,
   EcommerceProjectDefaults,
   PlatformConfig,
+  WechatPublishMode,
 } from '@/types'
 import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
@@ -520,7 +525,6 @@ import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbSelect from '@/components/common/AbSelect.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
-import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
 import ImageCapabilitySelector from '@/components/business/ImageCapabilitySelector.vue'
 import ImageAspectRatioField from '@/components/business/ImageAspectRatioField.vue'
@@ -533,6 +537,12 @@ const platformOptions = [
   { value: 'article', label: '公众号', description: '长图文深度文章' },
   { value: 'moments', label: '朋友圈', description: '私域内容，生活化表达' },
   { value: 'ecommerce', label: '电商出图', description: '商品主图/详情/封面' },
+]
+
+const wechatPublishModeOptions = [
+  { value: 'disabled', label: '不投递草稿' },
+  { value: 'manual', label: '进入草稿箱，后台发布' },
+  { value: 'api_confirmed', label: '确认后由 Anban 发布' },
 ]
 
 const steps = ['选择平台', '基础信息', '发布配置', '高级设置']
@@ -569,7 +579,7 @@ const form = reactive({
   reference_image: null as ReferenceImageSelection | null,
   image_ratio: 'auto',
   image_capability_key: '',
-  enable_publishing: false,
+  wechat_publish_mode: 'manual' as WechatPublishMode,
   wechat_app_id: '',
   wechat_secret: '',
 })
@@ -724,7 +734,7 @@ async function loadProject(id: string) {
     form.image_ratio = ch.image_ratio || selectedChannelConfig.value?.default_image_ratio || 'auto'
     form.image_capability_key = ch.ecommerce_defaults?.image_capability_key || defaultImageCapability.value
     existingEcommerceDefaults.value = ch.ecommerce_defaults || {}
-    form.enable_publishing = ch.config?.enable_publishing || false
+    form.wechat_publish_mode = ch.config?.wechat_publish_mode || 'manual'
     form.wechat_app_id = ch.config?.wechat_app_id || ''
     form.wechat_secret = ch.config?.wechat_secret || ''
     projectArchived.value = ch.status === 'archived'
@@ -928,8 +938,12 @@ function validate(): boolean {
     uni.showToast({ title: '该图像能力已停用，请重新选择', icon: 'none' })
     return false
   }
-  if (form.enable_publishing && isArticle.value && !form.wechat_app_id?.trim()) {
-    errors.wechat_app_id = '启用自动发布时，微信 AppID 为必填项'
+  if (form.wechat_publish_mode !== 'disabled' && isArticle.value && !form.wechat_app_id?.trim()) {
+    errors.wechat_app_id = '启用公众号草稿投递时，微信 AppID 为必填项'
+    return false
+  }
+  if (isNew.value && form.wechat_publish_mode !== 'disabled' && isArticle.value && !form.wechat_secret?.trim()) {
+    errors.wechat_secret = '启用公众号草稿投递时，微信 AppSecret 为必填项'
     return false
   }
   return true
@@ -960,7 +974,7 @@ function buildPayload(): CreateProjectRequest {
       ...existingEcommerceDefaults.value,
       image_capability_key: form.image_capability_key || undefined,
     } : undefined,
-    enable_publishing: form.enable_publishing || undefined,
+    wechat_publish_mode: isArticle.value ? form.wechat_publish_mode : undefined,
     wechat_app_id: form.wechat_app_id || undefined,
     wechat_secret: form.wechat_secret || undefined,
   }

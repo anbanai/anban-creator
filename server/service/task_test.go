@@ -69,6 +69,8 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.BillingSettlementOutbox{},
 		&model.TopicPool{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
+		&model.WechatPublication{}, &model.WechatPublicationBinding{},
+		&model.WechatArticleTracking{}, &model.WechatMetricSnapshot{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}

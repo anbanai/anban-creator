@@ -80,13 +80,6 @@ export interface Task {
   agent_profile_snapshot?: AgentProfileSnapshot
   agent_profile_fingerprint?: string
   result?: string | null
-  published: boolean
-  published_at: string | null
-  // Publish-approval gate state (Batch 4A). Empty unless the owning project has
-  // require_publish_approval + enable_publishing AND the task completed with
-  // draft data: "pending" = held for human review, "approved"/"rejected" =
-  // acted on. Drives the approval card on the task detail page.
-  publish_approval_state?: PublishApprovalState
   workflow_status?: WorkflowStatus | string | null
   overrides?: StyleOverrides
   project_snapshot?: ProjectSnapshot
@@ -127,9 +120,6 @@ export interface TaskBillingChargeDetail {
   reversal_of_id?: string
   created_at?: string
 }
-
-// Publish-approval gate state (mirrors server model.PublishApprovalState*).
-export type PublishApprovalState = '' | 'pending' | 'approved' | 'rejected'
 
 export interface ReferenceUsageSummaryData {
   version: '1.0'

@@ -141,6 +141,8 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 		return createDraftFailure{Code: "create_draft_forbidden", Message: "task or project is not owned by the authenticated user", Hint: "Use resources owned by the authenticated user", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationModeConflict):
 		return createDraftFailure{Code: "create_draft_disabled", Message: "draft creation is disabled for this project", Hint: "Enable the project's WeChat draft mode before retrying", Retryable: false}
+	case errors.Is(err, service.ErrWechatPublicationDraftUnsupported):
+		return createDraftFailure{Code: "create_draft_unsupported", Message: "the configured WeChat account does not support draft creation", Hint: "Use an Official Account with the WeChat draft API capability", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationConflict):
 		return createDraftFailure{Code: "create_draft_conflict", Message: "a different draft request already exists for this task", Hint: "Replay the original request or use a new task", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationPending):

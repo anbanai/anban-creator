@@ -1,4 +1,4 @@
-import { get, post, patch, del } from './request'
+import { get, post, del } from './request'
 import type {
   Task,
   TaskFile,
@@ -31,9 +31,6 @@ export const tasksApi = {
 
   delete: (id: string) =>
     del<void>(`/tasks/${id}`),
-
-  markPublished: (id: string, published: boolean) =>
-    patch<void>(`/tasks/${id}/published`, { published }),
 
   getFiles: (id: string) =>
     get<TaskFile[]>(`/tasks/${id}/files`),

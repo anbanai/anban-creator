@@ -56,6 +56,12 @@ const statusCopy: Record<string, string> = {
   unsupported: "账号不支持官方接口",
 };
 
+const terminalPublicationStatuses = new Set([
+  "published",
+  "publish_failed",
+  "unsupported",
+]);
+
 export default function WechatAnalyticsPanel({
   taskId,
   projectConfig,
@@ -65,11 +71,16 @@ export default function WechatAnalyticsPanel({
 }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const mode = projectConfig?.wechat_publish_mode ?? "manual";
   const publicationQuery = useQuery({
     queryKey: ["wechat-publication", taskId],
     queryFn: () => api.tasks.getWechatPublication(taskId),
-    enabled: Boolean(taskId),
+    enabled: Boolean(taskId) && mode !== "disabled",
     retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && !terminalPublicationStatuses.has(status) ? 5_000 : false;
+    },
   });
   const publication = publicationQuery.data;
   const reconcile = useMutation({
@@ -96,12 +107,24 @@ export default function WechatAnalyticsPanel({
         queryKey: ["wechat-publication", taskId],
       }),
   });
+  if (mode === "disabled") return null;
   if (publicationQuery.isLoading)
     return (
       <Card>
         <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           公众号发布状态加载中
+        </CardContent>
+      </Card>
+    );
+  const publicationErrorStatus = (
+    publicationQuery.error as { response?: { status?: number } } | null
+  )?.response?.status;
+  if (publicationQuery.isError && publicationErrorStatus === 404)
+    return (
+      <Card>
+        <CardContent className="text-sm text-muted-foreground">
+          该任务尚未创建公众号草稿。
         </CardContent>
       </Card>
     );
@@ -121,7 +144,7 @@ export default function WechatAnalyticsPanel({
         </CardContent>
       </Card>
     );
-  const mode = projectConfig?.wechat_publish_mode ?? "manual";
+  const mutationFailed = reconcile.isError || publish.isError || select.isError;
   return (
     <div className="space-y-4">
       <PublicationCard
@@ -131,6 +154,12 @@ export default function WechatAnalyticsPanel({
         onPublish={() => setConfirmOpen(true)}
         pending={reconcile.isPending || publish.isPending}
       />
+      {mutationFailed && (
+        <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+          <AlertTriangle className="h-4 w-4" />
+          公众号发布操作失败，请稍后重试。
+        </p>
+      )}
       {publication.status === "needs_selection" && (
         <CandidatePicker
           publication={publication}
@@ -184,6 +213,8 @@ function PublicationCard({
 }) {
   const status = publication.status;
   const canPublish = mode === "api_confirmed" && status === "drafted";
+  const canReconcile =
+    status !== "publishing" && !terminalPublicationStatuses.has(status);
   return (
     <Card
       className={
@@ -241,7 +272,7 @@ function PublicationCard({
               打开文章
             </Button>
           )}
-          {status !== "published" && status !== "unsupported" && (
+          {canReconcile && (
             <Button
               size="sm"
               variant="outline"

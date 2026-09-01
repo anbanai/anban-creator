@@ -435,7 +435,6 @@ function openTaskActions(task: Task) {
   const actions: string[] = ['查看详情']
   if (task.status === 'completed') {
     actions.push('下载 ZIP')
-    actions.push(task.published ? '取消发布标记' : '标记发布')
   }
   if (task.status === 'running' || task.status === 'pending') {
     actions.push('取消任务')
@@ -459,8 +458,6 @@ function handleTaskAction(label: string, task: Task) {
     goToDetail(task.id)
   } else if (label === '下载 ZIP') {
     downloadSingleZip(task.id)
-  } else if (label === '标记发布' || label === '取消发布标记') {
-    togglePublished(task)
   } else if (label === '取消任务') {
     cancelTask(task.id)
   } else if (label === '重试任务') {
@@ -479,21 +476,6 @@ async function downloadSingleZip(taskId: string) {
   } catch (err: any) {
     uni.hideLoading()
     uni.showToast({ title: err?.message || '下载失败', icon: 'none' })
-  }
-}
-
-async function togglePublished(task: Task) {
-  const next = !task.published
-  try {
-    await tasksApi.markPublished(task.id, next)
-    // Optimistically update local list; polling will confirm.
-    const idx = items.value.findIndex((t) => t.id === task.id)
-    if (idx >= 0) {
-      items.value[idx] = { ...items.value[idx], published: next }
-    }
-    uni.showToast({ title: next ? '已标记发布' : '已取消发布', icon: 'success' })
-  } catch (err: any) {
-    uni.showToast({ title: err?.message || '更新发布状态失败', icon: 'none' })
   }
 }
 

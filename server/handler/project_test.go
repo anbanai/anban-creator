@@ -642,8 +642,9 @@ func TestProjectCreateFinalizesReferenceSessionAndPersistsAssetID(t *testing.T) 
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/projects", userID, map[string]any{
-		"platform": model.PlatformArticle,
-		"name":     "公众号项目",
+		"platform":            model.PlatformArticle,
+		"name":                "公众号项目",
+		"wechat_publish_mode": model.WechatPublishModeDisabled,
 		"reference_image": map[string]any{
 			"upload_session_id": refID,
 		},
@@ -712,6 +713,7 @@ func TestProjectUpdateReferenceNullClearsAndOmissionPreserves(t *testing.T) {
 	if err := repo.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "brand",
 		ReferenceImageAssetID: asset.ID, Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -743,6 +745,7 @@ func TestProjectUpdateReferenceSelectionReplacesAndFinalizes(t *testing.T) {
 	if err := repo.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "brand",
 		ReferenceImageAssetID: "old-asset", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +834,8 @@ func TestProjectReferenceViewsAreSignedForCreateUpdateGetAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-		"platform": model.PlatformArticle, "name": "brand", "reference_image": map[string]any{"asset_id": asset.ID},
+		"platform": model.PlatformArticle, "name": "brand", "wechat_publish_mode": model.WechatPublishModeDisabled,
+		"reference_image": map[string]any{"asset_id": asset.ID},
 	})
 	if created.StatusCode != fiber.StatusOK {
 		t.Fatalf("create status=%d body=%v", created.StatusCode, decodeBody(t, created))
@@ -961,6 +965,7 @@ func TestProjectUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testi
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
 		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1023,6 +1028,7 @@ func TestProjectUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
 		ReferenceImageAssetID: assetIDs[0], Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1073,6 +1079,7 @@ func TestProjectUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
 		Name: "before", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1113,6 +1120,7 @@ func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 		Platform: model.PlatformArticle,
 		Name:     "公众号项目",
 		Status:   model.ProjectStatusActive,
+		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
 	}); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}

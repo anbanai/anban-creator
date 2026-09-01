@@ -113,8 +113,6 @@ const fixtures = vi.hoisted(() => {
     project_id: articleProject.id,
     execution_profile: 'effective',
     result: null,
-    published: false,
-    published_at: null,
     billing_price_credits: 6000,
     created_at: '2026-07-01T00:00:00.000Z',
     started_at: '2026-07-01T00:01:00.000Z',
