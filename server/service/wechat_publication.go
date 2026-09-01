@@ -79,6 +79,18 @@ func (s *WechatPublicationService) enqueuePoll(publicationID string, at *time.Ti
 	_ = s.enqueuer.EnqueueIn("wechat:publication_poll", payload, delay)
 }
 
+func (s *WechatPublicationService) enqueueReconcile(projectID string, at *time.Time) {
+	if s.enqueuer == nil || projectID == "" || at == nil {
+		return
+	}
+	delay := time.Until(*at)
+	if delay < 0 {
+		delay = 0
+	}
+	payload, _ := json.Marshal(map[string]string{"project_id": projectID})
+	_ = s.enqueuer.EnqueueIn("wechat:publication_reconcile", payload, delay)
+}
+
 func NewWechatPublicationService(repo repository.Repository, factory WechatPublicationAPIFactory, logger *zerolog.Logger) *WechatPublicationService {
 	if factory == nil {
 		publisher := NewPublishingService(repo, logger)
@@ -514,6 +526,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		}
 		publication.Status, publication.LastError = model.WechatPublicationStatusPublishSubmitting, lastError
 		publication.NextCheckAt = nextCheckAt
+		s.enqueueReconcile(publication.ProjectID, nextCheckAt)
 		return publication, ErrWechatPublicationPending
 	}
 	if publication.Status != model.WechatPublicationStatusDrafted {
@@ -551,6 +564,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 			return s.repo.WechatPublications().FindByID(context.WithoutCancel(ctx), publication.ID)
 		}
 		if _, ok := publicationWechatErrCode(submitErr); !ok {
+			s.enqueueReconcile(publication.ProjectID, publication.NextCheckAt)
 			return publication, ErrWechatPublicationPending
 		}
 		return publication, submitErr
@@ -568,6 +582,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 		if !won {
 			return publication, ErrWechatPublicationConflict
 		}
+		s.enqueueReconcile(publication.ProjectID, publication.NextCheckAt)
 		return publication, ErrWechatPublicationPending
 	}
 	publication.Status, publication.PublishID, publication.MsgDataID = model.WechatPublicationStatusPublishing, response.PublishID, response.MsgDataID
