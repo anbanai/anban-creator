@@ -164,22 +164,7 @@ type Task struct {
 	MaxRetries            int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount   int        `gorm:"default:0" json:"rate_limit_retry_count"`
 
-	Published   bool       `gorm:"default:false" json:"published"`
-	PublishedAt *time.Time `gorm:"index" json:"published_at,omitempty"`
-	// PublishApprovalState drives the publish-approval gate (Batch 4A): "", then
-	// "pending" when a completed article task froze its draft data awaiting human
-	// review, "approved"/"rejected" once acted on. Only meaningful when the owning
-	// project has RequirePublishApproval && EnablePublishing. Empty for all other
-	// tasks and all pre-gate projects, so existing rows need no migration.
-	PublishApprovalState string `gorm:"type:varchar(20);default:''" json:"publish_approval_state,omitempty"`
-	// PendingDraftArticles is the frozen []service.DraftArticleInput (marshaled)
-	// captured at task completion when the approval gate holds. Stored here so the
-	// resume path (ApprovePublish) can publish without re-extracting from an
-	// executor filesystem. Opaque datatypes.JSON rather than
-	// JSONType[T] because the element type lives in package service — model may
-	// not import service (cycle). The service boundary (un)marshals it.
-	PendingDraftArticles datatypes.JSON `gorm:"type:json" json:"pending_draft_articles,omitempty"`
-	WorkflowStatus       *string        `gorm:"type:json" json:"workflow_status,omitempty"`
+	WorkflowStatus *string `gorm:"type:json" json:"workflow_status,omitempty"`
 
 	// Local-execution (desktop) claim protocol. ExecutionTarget selects where the
 	// task runs: ExecutionTargetCloud (empty, default) → cloud Asynq/Docker;

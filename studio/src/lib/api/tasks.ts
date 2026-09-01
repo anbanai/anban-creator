@@ -1,9 +1,13 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { AgentExecutionProfileID, Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment } from '@/types'
+import type { AgentExecutionProfileID, Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment, WechatPublication } from '@/types'
 
 export interface ResumeTaskRequest {
   prompt?: string
   input_attachments: InputAttachment[]
+}
+
+export interface ReconcileWechatResponse {
+  reconciled: boolean
 }
 
 export const tasksApi = {
@@ -49,16 +53,14 @@ export const tasksApi = {
   bulkDelete: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
 
-  markPublished: (id: string, published: boolean) =>
-    unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
-
-  // Publish-approval gate (Batch 4A): resume a held publish (publishes the
-  // frozen draft to the WeChat draft box asynchronously) or close the gate
-  // without publishing. Only valid while publish_approval_state === 'pending'.
-  publishApprove: (id: string) =>
-    unwrap<{ approved: boolean }>(http.post(`/tasks/${id}/publish-approve`)),
-  publishReject: (id: string, reason?: string) =>
-    unwrap<{ rejected: boolean }>(http.post(`/tasks/${id}/publish-reject`, { reason })),
+  getWechatPublication: (id: string) =>
+    unwrap<WechatPublication>(http.get(`/tasks/${id}/wechat-publication`)),
+  publishWechat: (id: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/publish`)),
+  reconcileWechat: (id: string) =>
+    unwrap<ReconcileWechatResponse>(http.post(`/tasks/${id}/wechat-publication/reconcile`)),
+  selectWechatArticle: (id: string, articleId: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/select`, { article_id: articleId })),
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

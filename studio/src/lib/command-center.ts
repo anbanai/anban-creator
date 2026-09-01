@@ -37,7 +37,6 @@ export interface CommandCenterSignals {
   plans: Plan[]
   runningTasks: Task[]
   failedTasks: Task[]
-  pendingApprovalTasks: Task[]
   recentCompletedTasks: Task[]
   upcomingPlans: Plan[]
   walletRisk: CommandCenterWalletRisk
@@ -59,7 +58,6 @@ export interface BuildCommandCenterSignalsInput {
 export interface NextBestAction {
   id:
     | 'recover-failed-task'
-    | 'review-publish-approval'
     | 'create-first-project'
     | 'review-wallet'
     | 'review-upcoming-plan'
@@ -182,9 +180,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     .filter((task) => task.status === 'running' || task.status === 'pending')
     .sort(byNewestCreatedAt)
   const failedTasks = tasks.filter((task) => task.status === 'failed').sort(byNewestCreatedAt)
-  const pendingApprovalTasks = tasks
-    .filter((task) => task.publish_approval_state === 'pending')
-    .sort(byNewestCreatedAt)
   const recentCompletedTasks = tasks
     .filter((task) => task.status === 'completed')
     .sort(byNewestCreatedAt)
@@ -212,8 +207,9 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
             : 'ok',
   }
 
-  const publishableProjects = projects.filter((project) => project.config.enable_publishing)
-  const approvalProjects = publishableProjects.filter((project) => project.config.require_publish_approval)
+  const publishableProjects = projects.filter(
+    (project) => project.platform === 'article' && (project.config.wechat_publish_mode ?? 'manual') !== 'disabled',
+  )
   const projectStatus: ReadinessStatus = projects.length > 0 ? 'ready' : 'not_ready'
   const publishingStatus: ReadinessStatus =
     projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'
@@ -253,9 +249,7 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
       label: '发布能力',
       description:
         publishingStatus === 'ready'
-          ? approvalProjects.length > 0
-            ? `${publishableProjects.length} 个项目可发布，${approvalProjects.length} 个发布需审核`
-            : `${publishableProjects.length} 个项目可发布到草稿箱`
+          ? `${publishableProjects.length} 个项目已配置公众号发布流程`
           : publishingStatus === 'not_ready'
             ? '需要检查发布配置'
             : '创建项目后检查发布配置',
@@ -270,7 +264,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     plans,
     runningTasks,
     failedTasks,
-    pendingApprovalTasks,
     recentCompletedTasks,
     upcomingPlans,
     walletRisk,
@@ -287,7 +280,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
 export function buildNextBestActions(signals: CommandCenterSignals): NextBestAction[] {
   const actions: NextBestAction[] = []
   const failedTask = signals.failedTasks[0]
-  const approvalTask = signals.pendingApprovalTasks[0]
   const upcomingPlan = signals.upcomingPlans[0]
   const defaultProject = signals.projects[0]
   const setupNeedsAttention = signals.readiness.checks.apiKeys.status !== 'ready'
@@ -299,16 +291,6 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
       description: failedTask.title || failedTask.prompt || '查看失败原因并重新推进',
       href: `/tasks/${failedTask.id}`,
       kind: 'risk',
-    })
-  }
-
-  if (approvalTask) {
-    actions.push({
-      id: 'review-publish-approval',
-      label: '处理发布审批',
-      description: approvalTask.title || approvalTask.prompt || '确认是否推送到发布渠道',
-      href: `/tasks/${approvalTask.id}`,
-      kind: 'publishing',
     })
   }
 

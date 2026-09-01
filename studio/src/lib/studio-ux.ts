@@ -128,9 +128,6 @@ export function taskActionSignal(task: Task): TaskActionSignal {
       ? { label: '查看失败原因', hint: '进入详情后可继续执行或克隆', tone: 'risk' }
       : { label: '查看任务状态', hint: '未返回失败详情', tone: 'risk' }
   }
-  if (task.publish_approval_state === 'pending') {
-    return { label: '处理发布审批', hint: '审核后放行到公众号草稿箱', tone: 'publishing' }
-  }
   if (task.status === 'running' || task.status === 'pending') {
     return {
       label: task.status === 'running' ? '查看运行进度' : '等待执行',
@@ -142,7 +139,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
   if (task.status === 'completed') {
     return {
       label: readiness || '查看产物',
-      hint: task.published ? '已标记发布' : '可下载、发布或复用',
+      hint: '可查看、下载或复用',
       tone: 'success',
     }
   }

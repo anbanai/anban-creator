@@ -45,8 +45,6 @@ export interface Task {
   plan_id?: string | number | null
   project_id: string
   result: TaskResult
-  published: boolean
-  published_at: string | null
   workflow_status?: WorkflowStatus | string | null
   // 公众号人设：署名 + 写作风格模仿 + 可选头像
   byline?: string

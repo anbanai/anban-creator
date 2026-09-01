@@ -92,9 +92,10 @@ vi.mock('@/lib/api', async () => {
         clone: vi.fn(),
         resume: vi.fn(),
         delete: vi.fn(),
-        markPublished: vi.fn(),
-        publishApprove: vi.fn(),
-        publishReject: vi.fn(),
+        getWechatPublication: vi.fn(),
+        reconcileWechat: vi.fn(),
+        publishWechat: vi.fn(),
+        selectWechatArticle: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
         downloadZipBlob: vi.fn(),
       },
@@ -228,9 +229,15 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
     vi.mocked(api.tasks.cancel).mockResolvedValue(undefined)
     vi.mocked(api.tasks.delete).mockResolvedValue(undefined)
-    vi.mocked(api.tasks.markPublished).mockResolvedValue(taskWith({ id: 'task-1', status: 'completed', published: false }))
-    vi.mocked(api.tasks.publishApprove).mockResolvedValue({ approved: true })
-    vi.mocked(api.tasks.publishReject).mockResolvedValue({ rejected: true })
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1',
+      task_id: 'task-1',
+      project_id: 'ch-1',
+      source: 'wechat_console',
+      status: 'drafted',
+      draft_media_id: 'draft-media-1',
+      draft_title: '测试文章',
+    })
     vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.projects.list).mockResolvedValue(mockProjects)
@@ -628,28 +635,6 @@ describe('TaskDetailPage', () => {
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks')
     expect(toastSuccessMock).not.toHaveBeenCalledWith('任务已删除')
     expect(streamSignals.get('task-2')).toHaveProperty('aborted', false)
-  })
-
-  it('does not show a stale published-state error after switching tasks', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', published: false, result: null })
-    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', published: false, result: null })
-    const publishRequest = deferred<Task>()
-    vi.mocked(api.tasks.markPublished).mockReturnValue(publishRequest.promise)
-    const view = renderWithCachedTasks(taskA, taskB)
-
-    fireEvent.click(await screen.findByRole('checkbox', { name: '已发布' }))
-    await waitFor(() => expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true))
-
-    routeState.taskId = 'task-2'
-    view.rerender(<TaskDetailPage />)
-    expect(await screen.findByRole('heading', { name: '已完成任务 B' })).toBeInTheDocument()
-
-    await act(async () => {
-      publishRequest.reject(new Error('task A publish failed'))
-      await expect(publishRequest.promise).rejects.toThrow('task A publish failed')
-    })
-
-    expect(toastErrorMock).not.toHaveBeenCalled()
   })
 
   it('drops running task SSE state when switching directly to a cached completed task', async () => {
@@ -1130,7 +1115,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'seednote',
       status: 'completed',
-      published: false,
       result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
@@ -1154,18 +1138,38 @@ describe('TaskDetailPage', () => {
     expect(analyticsHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('shows WeChat link binding for a completed article without requiring published state', async () => {
+  it('shows the WeChat publication lifecycle without URL binding', async () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      published: false,
       result: null,
     }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('公众号文章数据')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '公众号文章链接' })).toBeInTheDocument()
+    expect(await screen.findByText('已进入草稿箱')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '立即检测' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
+  })
+
+  it('waits for project configuration before querying WeChat publication', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      result: null,
+    }))
+    let resolveProject!: (value: typeof mockProjectDetail) => void
+    vi.mocked(api.projects.get).mockImplementation(() => new Promise((resolve) => {
+      resolveProject = resolve
+    }))
+
+    render(<TaskDetailPage />)
+
+    await screen.findByRole('heading', { name: '测试任务' })
+    expect(api.tasks.getWechatPublication).not.toHaveBeenCalled()
+
+    resolveProject(mockProjectDetail)
+    await waitFor(() => expect(api.tasks.getWechatPublication).toHaveBeenCalledWith('task-1'))
   })
 
   it('shows Channels link binding for a completed montage task', async () => {
@@ -1278,88 +1282,13 @@ describe('TaskDetailPage', () => {
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
-  it.each([
-    { published: false, nextPublished: true },
-    { published: true, nextPublished: false },
-  ])('updates completed published state from $published to $nextPublished', async ({ published, nextPublished }) => {
-    mockTask(taskWith({
-      id: 'task-1',
-      status: 'completed',
-      published,
-      result: null,
-    }))
+  it('shows the complete terminal action group for a completed task', async () => {
+    mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
 
     render(<TaskDetailPage />)
 
-    const checkbox = await screen.findByRole('checkbox', { name: '已发布' })
-    if (published) expect(checkbox).toBeChecked()
-    else expect(checkbox).not.toBeChecked()
-    fireEvent.click(checkbox)
-
-    await waitFor(() => {
-      expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', nextPublished)
-    })
-  })
-
-  it('disables the published checkbox while pending and refetches unchanged server state after an error', async () => {
-    const serverTask = taskWith({ id: 'task-1', status: 'completed', published: true, result: null })
-    vi.mocked(api.tasks.get)
-      .mockResolvedValueOnce(serverTask)
-      .mockResolvedValue(serverTask)
-    const request = deferred<Task>()
-    vi.mocked(api.tasks.markPublished).mockReturnValue(request.promise)
-
-    render(<TaskDetailPage />)
-
-    const checkbox = await screen.findByRole('checkbox', { name: '已发布' })
-    fireEvent.click(checkbox)
-    await waitFor(() => expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', false))
-    expect(checkbox).toHaveAttribute('aria-disabled', 'true')
-    expect(checkbox).toBeChecked()
-
-    await act(async () => {
-      request.reject(new Error('publish failed'))
-      await expect(request.promise).rejects.toThrow('publish failed')
-    })
-
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
-    await waitFor(() => expect(api.tasks.get).toHaveBeenCalledTimes(2))
-    expect(checkbox).not.toHaveAttribute('aria-disabled', 'true')
-    expect(checkbox).toBeChecked()
-  })
-
-  it('reconciles an error-after-commit publish response with the persisted server state', async () => {
-    const originalTask = taskWith({ id: 'task-1', status: 'completed', published: false, result: null })
-    const persistedTask = taskWith({ ...originalTask, published: true })
-    vi.mocked(api.tasks.get)
-      .mockResolvedValueOnce(originalTask)
-      .mockResolvedValue(persistedTask)
-    vi.mocked(api.tasks.markPublished).mockRejectedValue(new Error('tracking failed after commit'))
-
-    render(<TaskDetailPage />)
-
-    const checkbox = await screen.findByRole('checkbox', { name: '已发布' })
-    expect(checkbox).not.toBeChecked()
-    fireEvent.click(checkbox)
-
-    await waitFor(() => expect(api.tasks.markPublished).toHaveBeenCalledWith('task-1', true))
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
-    await waitFor(() => expect(api.tasks.get).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(checkbox).toBeChecked())
-  })
-
-  it.each([
-    { published: false },
-    { published: true },
-  ])('shows the complete terminal action group for a completed task with published=$published', async ({ published }) => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', published, result: null }))
-
-    render(<TaskDetailPage />)
-
-    const checkbox = await screen.findByRole('checkbox', { name: '已发布' })
-    if (published) expect(checkbox).toBeChecked()
-    else expect(checkbox).not.toBeChecked()
-    expect(screen.getByRole('button', { name: '继续执行' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()

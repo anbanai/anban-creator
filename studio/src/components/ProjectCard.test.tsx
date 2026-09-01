@@ -21,7 +21,7 @@ function project(overrides: Partial<Project> = {}): Project {
 
     image_ratio: '',
     max_concurrent_tasks: 1,
-    config: { enable_publishing: true, require_publish_approval: true },
+    config: { wechat_publish_mode: 'api_confirmed' },
     status: 'active',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',

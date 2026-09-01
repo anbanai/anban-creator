@@ -190,7 +190,7 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 	}
 	switch pack.ID {
 	case "article":
-		for _, want := range []string{"发布前总验收、`publish_draft` 成功、最终 feedback 全部结束后才完成"} {
+		for _, want := range []string{"发布前总验收、`create_draft` 成功、最终 feedback 全部结束后才完成"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing article delivery boundary %q", path, want)
 			}

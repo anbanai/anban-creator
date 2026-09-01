@@ -42,6 +42,7 @@ type Services struct {
 	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	WechatAnalyticsHandler   *handler.WechatAnalyticsHandler
+	WechatPublicationHandler *handler.WechatPublicationHandler
 	ChannelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	AgentProfileHandler      *handler.AgentProfileHandler
@@ -197,8 +198,6 @@ func NewRouter(svc *Services) *fiber.App {
 		app.Post("/api/v1/agent/progress", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Progress)
 		app.Post("/api/v1/agent/claim", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Claim)
 		app.Post("/api/v1/agent/complete", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Complete)
-		adminAgentLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
-		app.Post("/api/v1/admin/agent/executions/:executionID/publishing", adminAgentLimiter, svc.AgentHandler.ResolvePublishing)
 	}
 
 	if svc.AgentPackHandler != nil {
@@ -322,7 +321,6 @@ func NewRouter(svc *Services) *fiber.App {
 		}
 		if svc.WechatAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/wechat-analytics", svc.WechatAnalyticsHandler.GetTaskAnalytics)
-			apiV1.Post("/tasks/:id/wechat-analytics/bind", svc.WechatAnalyticsHandler.BindTask)
 		}
 		if svc.ChannelsAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/channels-analytics", svc.ChannelsAnalyticsHandler.GetTaskAnalytics)
@@ -332,16 +330,18 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
 		apiV1.Post("/tasks/:id/clone", svc.TaskHandler.Clone)
 		apiV1.Post("/tasks/:id/resume", svc.TaskHandler.Resume)
-		// Publish-approval gate (Batch 4A): resume or close a held publish.
-		apiV1.Post("/tasks/:id/publish-approve", svc.TaskHandler.PublishApprove)
-		apiV1.Post("/tasks/:id/publish-reject", svc.TaskHandler.PublishReject)
-		apiV1.Patch("/tasks/:id/published", svc.TaskHandler.MarkPublished)
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
 		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
 		apiV1.Get("/usage/stats", svc.TaskHandler.UsageStats)
+	}
+	if svc.WechatPublicationHandler != nil {
+		apiV1.Get("/tasks/:id/wechat-publication", svc.WechatPublicationHandler.Get)
+		apiV1.Post("/tasks/:id/wechat-publication/publish", svc.WechatPublicationHandler.Publish)
+		apiV1.Post("/tasks/:id/wechat-publication/reconcile", svc.WechatPublicationHandler.Reconcile)
+		apiV1.Post("/tasks/:id/wechat-publication/select", svc.WechatPublicationHandler.Select)
 	}
 
 	// Local file serving (only when using local storage provider).

@@ -2,11 +2,12 @@ import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
 export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce'
 export type ProjectStatus = 'active' | 'archived'
+export type WechatPublishMode = 'disabled' | 'manual' | 'api_confirmed'
 
 export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
-  enable_publishing?: boolean
+  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface EcommerceProjectDefaults {
@@ -87,7 +88,7 @@ export interface CreateProjectRequest {
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
-  enable_publishing?: boolean
+  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface AnalyzeImageResponse {

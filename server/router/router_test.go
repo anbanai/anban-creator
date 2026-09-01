@@ -66,6 +66,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planSvc := service.NewPlanService(repo, &logger)
 		taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
 		seednoteTrackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, &logger)
+		wechatTrackingSvc := service.NewWechatTrackingService(repo, nil, nil, &logger)
 		channelsTrackingSvc := service.NewChannelsTrackingService(repo, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
@@ -73,6 +74,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		seednoteAnalyticsHandler := handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, &logger)
+		wechatAnalyticsHandler := handler.NewWechatAnalyticsHandler(wechatTrackingSvc, &logger)
 		channelsAnalyticsHandler := handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
@@ -89,6 +91,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			PlanHandler:              planHandler,
 			TaskHandler:              taskHandler,
 			SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
+			WechatAnalyticsHandler:   wechatAnalyticsHandler,
 			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
 		}
@@ -101,6 +104,25 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 	app := NewRouter(svcs)
 	return app, closeFunc
+}
+
+func TestWechatAnalyticsURLBindRouteIsNotRegistered(t *testing.T) {
+	app, cleanup := setupTestApp(t, true)
+	defer cleanup()
+
+	foundReadRoute := false
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if key == "POST /api/v1/tasks/:id/wechat-analytics/bind" {
+			t.Fatalf("legacy WeChat analytics URL bind route is still registered: %s", key)
+		}
+		if key == "GET /api/v1/tasks/:id/wechat-analytics" {
+			foundReadRoute = true
+		}
+	}
+	if !foundReadRoute {
+		t.Fatal("WeChat analytics read route is not registered")
+	}
 }
 
 // TestHealthCheck tests that the health endpoint returns 200 with a valid database.
@@ -187,6 +209,34 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	for _, route := range app.GetRoutes() {
 		if route.Method == "POST" && route.Path == "/api/v1/files/"+"upload" {
 			t.Fatalf("legacy upload route is still registered: %+v", route)
+		}
+	}
+}
+
+func TestWechatPublicationRoutesReplaceLegacyTaskPublicationRoutes(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config: &config.Config{}, Logger: &logger,
+		WechatPublicationHandler: handler.NewWechatPublicationHandler(nil, &logger),
+	})
+	want := map[string]bool{
+		"GET /api/v1/tasks/:id/wechat-publication":            false,
+		"POST /api/v1/tasks/:id/wechat-publication/publish":   false,
+		"POST /api/v1/tasks/:id/wechat-publication/reconcile": false,
+		"POST /api/v1/tasks/:id/wechat-publication/select":    false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+		if key == "POST /api/v1/tasks/:id/publish-approve" || key == "POST /api/v1/tasks/:id/publish-reject" || key == "PATCH /api/v1/tasks/:id/published" {
+			t.Fatalf("legacy publication route is still registered: %s", key)
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing route %s", route)
 		}
 	}
 }

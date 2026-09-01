@@ -247,8 +247,7 @@ export const projectSchema = z.object({
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
-  enable_publishing: z.boolean().default(false),
-  require_publish_approval: z.boolean().default(false),
+  wechat_publish_mode: z.enum(['disabled', 'manual', 'api_confirmed']).default('manual'),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
@@ -270,12 +269,12 @@ export const projectSchema = z.object({
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: imageRatioSchema.optional(),
 }).refine((data) => {
-  if (data.enable_publishing) {
+  if (data.platform === 'article' && data.wechat_publish_mode !== 'disabled') {
     return !!data.wechat_app_id?.trim()
   }
   return true
 }, {
-  message: "启用自动发布时，微信 AppID 为必填项",
+  message: "启用公众号草稿投递时，微信 AppID 为必填项",
   path: ["wechat_app_id"],
 })
 export type ProjectFormValues = z.infer<typeof projectSchema>

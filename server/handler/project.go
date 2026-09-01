@@ -146,6 +146,9 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrInvalidAgentConfig) {
 		return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
 	}
+	if errors.Is(err, service.ErrInvalidWechatPublishMode) || errors.Is(err, service.ErrWechatCredentialsRequired) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 	return Error(c, fiber.StatusInternalServerError, "failed to update project")
 }
@@ -194,10 +197,9 @@ type projectRequest struct {
 	AgentConfig           map[string]any                   `json:"agent_config,omitempty"`
 	AgentConfigSet        bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
-	WechatAppID            string `json:"wechat_app_id"`
-	WechatSecret           string `json:"wechat_secret"`
-	EnablePublishing       bool   `json:"enable_publishing"`
-	RequirePublishApproval bool   `json:"require_publish_approval"`
+	WechatAppID       string `json:"wechat_app_id"`
+	WechatSecret      string `json:"wechat_secret"`
+	WechatPublishMode string `json:"wechat_publish_mode"`
 }
 
 func hasJSONField(body []byte, field string) bool {
@@ -233,12 +235,7 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:    req.MaxConcurrentTasks,
 		Instructions:          instructions,
 		InstructionsSet:       instructionsSet,
-		Config: model.ProjectConfig{
-			WechatAppID:            req.WechatAppID,
-			WechatSecret:           req.WechatSecret,
-			EnablePublishing:       req.EnablePublishing,
-			RequirePublishApproval: req.RequirePublishApproval,
-		},
+		Config:                model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret, WechatPublishMode: req.WechatPublishMode},
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -418,6 +415,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrInvalidAgentConfig) {
 			return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
+		}
+		if errors.Is(err, service.ErrInvalidWechatPublishMode) || errors.Is(err, service.ErrWechatCredentialsRequired) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
@@ -834,10 +834,8 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.WechatAppID
 	case "wechat_secret":
 		return req.WechatSecret
-	case "enable_publishing":
-		return fmt.Sprintf("%v", req.EnablePublishing)
-	case "require_publish_approval":
-		return fmt.Sprintf("%v", req.RequirePublishApproval)
+	case "wechat_publish_mode":
+		return req.WechatPublishMode
 	default:
 		return ""
 	}

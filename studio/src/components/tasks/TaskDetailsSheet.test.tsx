@@ -53,8 +53,6 @@ const articleTask: Task = {
     instruction: '保留柔和自然光',
   }],
   result: null,
-  published: false,
-  published_at: null,
   billing_price_credits: 6000,
   created_at: '2026-07-15T01:02:03.000Z',
   started_at: '2026-07-15T01:03:04.000Z',

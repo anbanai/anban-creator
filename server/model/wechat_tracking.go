@@ -1,64 +1,68 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	WechatTrackingStatusWaitingData = "waiting_data"
 	WechatTrackingStatusTracking    = "tracking"
-	WechatTrackingStatusStopped     = "stopped"
-	WechatTrackingStatusFailed      = "failed"
+	WechatTrackingStatusExpired     = "expired"
+	WechatTrackingStatusUnsupported = "unsupported"
+	WechatTrackingStatusError       = "error"
 )
 
-const (
-	WechatStopReasonDataWindowEnded = "data_window_ended"
-	WechatStopReasonTooManyFailures = "too_many_failures"
-	WechatTrackingMaxDays           = 3
-	WechatTrackingMaxFailures       = 3
-)
+const WechatTrackingWindow = 30 * 24 * time.Hour
 
 type WechatArticleTracking struct {
-	ID                string     `gorm:"type:char(36);primaryKey" json:"id"`
-	TaskID            string     `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
-	UserID            string     `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID         string     `gorm:"type:char(36);index;not null" json:"project_id"`
-	Status            string     `gorm:"type:varchar(32);index;not null" json:"status"`
-	ArticleID         string     `gorm:"type:varchar(191);index" json:"article_id"`
-	MsgID             string     `gorm:"type:varchar(191);index" json:"msg_id"`
-	ArticleURL        string     `gorm:"type:varchar(1000);not null" json:"article_url"`
-	ArticleTitle      string     `gorm:"type:varchar(500)" json:"article_title"`
-	PublishedDate     string     `gorm:"type:char(10);index;not null" json:"published_date"`
-	BoundAt           time.Time  `gorm:"index" json:"bound_at"`
-	LastRunAt         *time.Time `gorm:"index" json:"last_run_at,omitempty"`
-	NextRunAt         *time.Time `gorm:"index" json:"next_run_at,omitempty"`
-	TrackingStoppedAt *time.Time `gorm:"index" json:"tracking_stopped_at,omitempty"`
-	RunCount          int        `gorm:"default:0" json:"run_count"`
-	FailureCount      int        `gorm:"default:0" json:"failure_count"`
-	StopReason        string     `gorm:"type:varchar(64)" json:"stop_reason"`
-	LastError         string     `gorm:"type:text" json:"last_error"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID            string `gorm:"type:char(36);primaryKey;not null" json:"id"`
+	TaskID        string `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
+	UserID        string `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID     string `gorm:"type:char(36);index;not null" json:"project_id"`
+	PublicationID string `gorm:"type:char(36);uniqueIndex;not null" json:"publication_id"`
+	Source        string `gorm:"type:varchar(32);index;not null;check:chk_wechat_tracking_source,source IN ('anban_api','wechat_console')" json:"source"`
+	Status        string `gorm:"type:varchar(32);index;not null;check:chk_wechat_tracking_status,status IN ('waiting_data','tracking','expired','unsupported','error')" json:"status"`
+
+	ArticleID  string `gorm:"type:varchar(191);index;not null;default:''" json:"article_id,omitempty"`
+	MsgDataID  string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_data_id,omitempty"`
+	MsgID      string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_id,omitempty"`
+	ArticleURL string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
+
+	PublishedAt        time.Time  `gorm:"index;not null" json:"published_at"`
+	ExpiresAt          time.Time  `gorm:"index;not null" json:"expires_at"`
+	LastFetchAt        *time.Time `gorm:"index" json:"last_fetch_at,omitempty"`
+	NextFetchAt        *time.Time `gorm:"index" json:"next_fetch_at,omitempty"`
+	ExpiredAt          *time.Time `gorm:"index" json:"expired_at,omitempty"`
+	RecoveryClaimToken string     `gorm:"type:char(36);index;not null;default:''" json:"-"`
+	RecoveryClaimedAt  *time.Time `gorm:"index" json:"-"`
+	RunCount           int        `gorm:"not null;default:0" json:"run_count"`
+	FailureCount       int        `gorm:"not null;default:0" json:"failure_count"`
+	LastError          string     `gorm:"type:text;not null" json:"last_error,omitempty"`
+	CreatedAt          time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"not null" json:"updated_at"`
 }
 
 func (WechatArticleTracking) TableName() string { return "wechat_article_trackings" }
 
 type WechatMetricSnapshot struct {
-	ID               string    `gorm:"type:char(36);primaryKey" json:"id"`
-	TrackingID       string    `gorm:"type:char(36);uniqueIndex:idx_wechat_tracking_date,priority:1;index;not null" json:"tracking_id"`
-	TaskID           string    `gorm:"type:char(36);index;not null" json:"task_id"`
-	CapturedAt       time.Time `gorm:"index" json:"captured_at"`
-	CapturedDate     string    `gorm:"type:char(10);uniqueIndex:idx_wechat_tracking_date,priority:2;not null" json:"captured_date"`
-	StatDate         string    `gorm:"type:char(10);index" json:"stat_date"`
-	TargetUser       int       `json:"target_user"`
-	IntPageReadUser  int       `json:"int_page_read_user"`
-	IntPageReadCount int       `json:"int_page_read_count"`
-	OriPageReadUser  int       `json:"ori_page_read_user"`
-	OriPageReadCount int       `json:"ori_page_read_count"`
-	ShareUser        int       `json:"share_user"`
-	ShareCount       int       `json:"share_count"`
-	AddToFavUser     int       `json:"add_to_fav_user"`
-	AddToFavCount    int       `json:"add_to_fav_count"`
-	RawData          string    `gorm:"type:json" json:"raw_data,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID         string    `gorm:"type:char(36);primaryKey;not null" json:"id"`
+	TrackingID string    `gorm:"type:char(36);uniqueIndex:idx_wechat_tracking_stat_date,priority:1;index;not null" json:"tracking_id"`
+	TaskID     string    `gorm:"type:char(36);index;not null" json:"task_id"`
+	StatDate   string    `gorm:"type:char(10);uniqueIndex:idx_wechat_tracking_stat_date,priority:2;not null" json:"stat_date"`
+	CapturedAt time.Time `gorm:"index;not null" json:"captured_at"`
+
+	ReadUsers             int       `gorm:"not null;default:0" json:"read_users"`
+	ShareUsers            int       `gorm:"not null;default:0" json:"share_users"`
+	CollectionUsers       int       `gorm:"not null;default:0" json:"collection_users"`
+	LikeUsers             int       `gorm:"not null;default:0" json:"like_users"`
+	ZaikanUsers           int       `gorm:"not null;default:0" json:"zaikan_users"`
+	CommentCount          int       `gorm:"not null;default:0" json:"comment_count"`
+	ReadFinishRate        float64   `gorm:"type:decimal(10,6);not null;default:0" json:"read_finish_rate"`
+	AverageReadActiveTime float64   `gorm:"type:decimal(14,3);not null;default:0" json:"average_read_active_time"`
+	ReadToSubscribeUsers  int       `gorm:"not null;default:0" json:"read_to_subscribe_users"`
+	RawResponse           []byte    `gorm:"type:longblob;not null" json:"raw_response"`
+	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (WechatMetricSnapshot) TableName() string { return "wechat_metric_snapshots" }

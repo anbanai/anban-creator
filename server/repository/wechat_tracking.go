@@ -34,13 +34,58 @@ func (r *wechatTrackingRepository) FindByID(ctx context.Context, id string) (*mo
 func (r *wechatTrackingRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatArticleTracking, error) {
 	var trackings []*model.WechatArticleTracking
 	query := r.db.WithContext(ctx).
-		Where("next_run_at IS NOT NULL AND next_run_at <= ?", now).
-		Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking}).
-		Order("next_run_at ASC")
+		Where("next_fetch_at IS NOT NULL AND next_fetch_at <= ?", now).
+		Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
+		Order("next_fetch_at ASC")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
 	return trackings, query.Find(&trackings).Error
+}
+
+func (r *wechatTrackingRepository) TryClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, claimedAt, leaseUntil time.Time, token string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+			Where("id = ? AND updated_at = ?", id, expectedUpdatedAt).
+			Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
+			Where("next_fetch_at IS NOT NULL AND next_fetch_at <= ?", claimedAt).
+			Updates(map[string]any{
+				"recovery_claim_token": token,
+				"recovery_claimed_at":  claimedAt,
+				"next_fetch_at":        leaseUntil,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatTrackingRepository) ReleaseDueDispatch(ctx context.Context, id, token string, retryAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+			Where("id = ? AND recovery_claim_token = ?", id, token).
+			Updates(map[string]any{
+				"recovery_claim_token": "",
+				"recovery_claimed_at":  nil,
+				"next_fetch_at":        retryAt,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatTrackingRepository) TryClaimDailyFetch(ctx context.Context, id string, claimedAt, dayStart, nextFetchAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+			Where("id = ?", id).
+			Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
+			Where("expires_at > ?", claimedAt).
+			Where("last_fetch_at IS NULL OR last_fetch_at < ?", dayStart).
+			Updates(map[string]any{
+				"last_fetch_at":        claimedAt,
+				"next_fetch_at":        nextFetchAt,
+				"recovery_claim_token": "",
+				"recovery_claimed_at":  nil,
+			})
+	})
+	return rows == 1, err
 }
 
 func (r *wechatTrackingRepository) Update(ctx context.Context, tracking *model.WechatArticleTracking) error {
@@ -59,18 +104,18 @@ func (r *wechatMetricSnapshotRepository) Create(ctx context.Context, snapshot *m
 
 func (r *wechatMetricSnapshotRepository) UpsertByTrackingAndDate(ctx context.Context, snapshot *model.WechatMetricSnapshot) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "tracking_id"}, {Name: "captured_date"}},
+		Columns: []clause.Column{{Name: "tracking_id"}, {Name: "stat_date"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"captured_at", "stat_date", "target_user", "int_page_read_user", "int_page_read_count",
-			"ori_page_read_user", "ori_page_read_count", "share_user", "share_count",
-			"add_to_fav_user", "add_to_fav_count", "raw_data",
+			"captured_at", "read_users", "share_users", "collection_users", "like_users",
+			"zaikan_users", "comment_count", "read_finish_rate", "average_read_active_time",
+			"read_to_subscribe_users", "raw_response", "updated_at",
 		}),
 	}).Create(snapshot).Error
 }
 
 func (r *wechatMetricSnapshotRepository) FindByTaskID(ctx context.Context, taskID string) ([]*model.WechatMetricSnapshot, error) {
 	var snapshots []*model.WechatMetricSnapshot
-	err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("captured_at ASC").Find(&snapshots).Error
+	err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("stat_date ASC").Find(&snapshots).Error
 	return snapshots, err
 }
 

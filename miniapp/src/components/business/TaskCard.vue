@@ -36,11 +36,8 @@
       />
     </view>
 
-    <!-- Published status -->
+    <!-- Completion time -->
     <view class="task-card__footer" v-if="task.status === 'completed'">
-      <text :class="['task-card__published', task.published ? 'published' : 'unpublished']">
-        {{ task.published ? '✓ 已发布' : '未发布' }}
-      </text>
       <text class="task-card__time">{{ timeText }}</text>
     </view>
 
@@ -166,12 +163,6 @@ function onPreviewImage(index: number) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  &__published {
-    font-size: $ab-text-xs;
-    &.published { color: $ab-success; }
-    &.unpublished { color: $ab-text-tertiary; }
   }
 
   &__time {

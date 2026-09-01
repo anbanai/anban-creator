@@ -3,15 +3,12 @@ import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 
 export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage'
 export type ProjectStatus = 'active' | 'archived'
+export type WechatPublishMode = 'disabled' | 'manual' | 'api_confirmed'
 
 export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
-  enable_publishing?: boolean
-  // Publish-approval gate (Batch 4A): when true (and enable_publishing true),
-  // a completed article task holds its draft for human review instead of
-  // auto-publishing. See server model.ProjectConfig.RequirePublishApproval.
-  require_publish_approval?: boolean
+  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface Project {
@@ -94,8 +91,7 @@ export interface CreateProjectRequest {
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
-  enable_publishing?: boolean
-  require_publish_approval?: boolean
+  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface CreateProjectResponse {

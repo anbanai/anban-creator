@@ -23,17 +23,12 @@ type PublishingService struct {
 }
 
 type draftClient interface {
-	CreateDraft([]draft.Article) (*draft.DraftResult, error)
 	ListDrafts(offset, count int64) (*draft.ListDraftsResult, error)
 	ListPublished(offset, count int64) (*draft.ListPublishedResult, error)
 }
 
 type appDraftClient struct {
 	service *draft.Service
-}
-
-func (c *appDraftClient) CreateDraft(articles []draft.Article) (*draft.DraftResult, error) {
-	return c.service.CreateDraft(articles)
 }
 
 func (c *appDraftClient) ListDrafts(offset, count int64) (*draft.ListDraftsResult, error) {
@@ -54,23 +49,6 @@ func NewPublishingService(repo repository.Repository, logger *zerolog.Logger) *P
 	}
 	s.createDraftServiceFn = s.defaultCreateDraftService
 	return s
-}
-
-// DraftArticleInput holds the fields for a single article in a draft publish request.
-type DraftArticleInput struct {
-	Title            string `json:"title"`
-	Author           string `json:"author,omitempty"`
-	Digest           string `json:"digest,omitempty"`
-	Content          string `json:"content,omitempty"`
-	ThumbMediaID     string `json:"thumb_media_id,omitempty"`
-	ShowCoverPic     int    `json:"show_cover_pic,omitempty"`
-	ContentSourceURL string `json:"content_source_url,omitempty"`
-}
-
-// PublishDraftResult holds the result of a draft publish operation.
-type PublishDraftResult struct {
-	MediaID  string `json:"media_id"`
-	DraftURL string `json:"draft_url,omitempty"`
 }
 
 // buildAppConfig creates an app config from a project (nil image config since
@@ -112,60 +90,6 @@ func (s *PublishingService) getProject(ctx context.Context, userID, projectID st
 		return nil, fmt.Errorf("project missing WeChat credentials")
 	}
 	return ch, nil
-}
-
-// PublishDraft creates a WeChat article draft for the given project.
-func (s *PublishingService) PublishDraft(ctx context.Context, userID, projectID string, articles []DraftArticleInput) (*PublishDraftResult, error) {
-	ch, err := s.getProject(ctx, userID, projectID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Pre-publish gate: reject drafts whose body images collapse to a single
-	// URL — the mechanical backstop for "all content images identical" caused
-	// by agents reusing one image when generation fails. This runs before the
-	// draft client is built so a bad draft never reaches the WeChat API.
-	for i, a := range articles {
-		if err := validateContentImageDiversity(a.Content); err != nil {
-			s.logger.Warn().
-				Str("user_id", userID).
-				Str("project_id", projectID).
-				Int("article_index", i).
-				Msg("publish_draft rejected: duplicate content images")
-			return nil, err
-		}
-	}
-
-	ds, err := s.createDraftServiceFn(ch)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert inputs to draft.Article.
-	draftArticles := make([]draft.Article, len(articles))
-	for i, a := range articles {
-		draftArticles[i] = draft.Article{
-			Title:            a.Title,
-			Author:           a.Author,
-			Digest:           a.Digest,
-			Content:          a.Content,
-			ThumbMediaID:     a.ThumbMediaID,
-			ShowCoverPic:     a.ShowCoverPic,
-			ContentSourceURL: a.ContentSourceURL,
-		}
-	}
-
-	result, err := ds.CreateDraft(draftArticles)
-	if err != nil {
-		return nil, fmt.Errorf("create draft: %w", err)
-	}
-
-	s.logger.Info().Str("user_id", userID).Str("project_id", projectID).Str("media_id", result.MediaID).Msg("article draft published")
-
-	return &PublishDraftResult{
-		MediaID:  result.MediaID,
-		DraftURL: result.DraftURL,
-	}, nil
 }
 
 // ListDrafts returns a paginated list of WeChat drafts for the given project.

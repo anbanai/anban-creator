@@ -1524,7 +1524,7 @@ func TestDispatchCloudTaskFailureFinalizationResumesWithoutRedispatch(t *testing
 	}
 	execution := mustCurrentExecution(t, repo, task.ID)
 	currentTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
-	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationPublishing || currentTask.Status != model.TaskStatusRunning {
+	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationDraftDelivery || currentTask.Status != model.TaskStatusRunning {
 		t.Fatalf("durable interrupted state: execution=%s finalization=%s task=%s", execution.Status, execution.FinalizationStatus, currentTask.Status)
 	}
 	if err := db.Exec("DROP TRIGGER reject_task_failure").Error; err != nil {

@@ -182,7 +182,7 @@ All routes are registered in `server/router/router.go`. Everything under `/api/v
 - `/api/v1/projects/:project_id/topics` — Topic pool (create/list/delete/reset)
 - `GET /api/v1/image-capabilities` — Tier-filtered public image capability catalog
 - `/api/v1/plans` — Plan CRUD + pause/resume
-- `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), Seednote analytics, and WeChat article analytics
+- `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, WeChat publication lifecycle, Seednote analytics, and WeChat article analytics
 - `/api/v1/ilink/*` — ilink 微信助手 binding + commands + task terminal notifications
 - `/api/v1/timeline`, `/api/v1/usage/stats` — Timeline view, usage stats
 - `/api/v1/billing/*` — Wallet, immutable SKU catalog, quotes, transactions, and referral status

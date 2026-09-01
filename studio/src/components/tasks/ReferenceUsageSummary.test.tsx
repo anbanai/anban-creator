@@ -56,8 +56,6 @@ const seednoteTask: Task = {
   project_id: 'project-1',
   execution_profile: 'effective',
   result: null,
-  published: false,
-  published_at: null,
   billing_price_credits: 5000,
   created_at: '2026-07-10T00:00:00.000Z',
   started_at: '2026-07-10T00:00:01.000Z',

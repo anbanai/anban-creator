@@ -47,7 +47,7 @@ const {
 
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
-    config: { enable_publishing: true },
+    config: { wechat_publish_mode: 'manual' },
     status: 'active',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
@@ -153,8 +153,6 @@ const {
       project_id: 'project-1',
       execution_profile: 'effective',
       result: null,
-      published: false,
-      published_at: null,
       billing_price_credits: 6000,
       created_at: '2026-07-07T00:00:00.000Z',
       started_at: '',

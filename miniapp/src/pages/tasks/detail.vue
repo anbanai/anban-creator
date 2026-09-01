@@ -390,7 +390,7 @@
           </view>
         </template>
 
-        <!-- Completed: published + share + delete + preview -->
+        <!-- Completed: share + delete + preview -->
         <template v-if="task.status === 'completed'">
           <view class="task-detail__bottom-row">
             <AbButton
@@ -401,15 +401,6 @@
               style="flex: 1;"
             >
               删除
-            </AbButton>
-            <AbButton
-              type="ghost"
-              size="md"
-              :loading="actionLoading"
-              @click="onTogglePublished"
-              style="flex: 1;"
-            >
-              {{ task.published ? '取消发布' : '标记已发布' }}
             </AbButton>
           </view>
           <view class="task-detail__bottom-row" style="margin-top: 12rpx;">
@@ -694,7 +685,6 @@ const nextActions = computed<NextAction[]>(() => {
     if (resultText.value) {
       actions.push({ key: 'copy-result', label: '复制内容', desc: '带走正文或任务要求', tone: 'neutral' })
     }
-    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: '同步内容状态', tone: 'warning' })
     actions.push({ key: 'share', label: '分享结果', desc: '通过微信菜单转发', tone: 'neutral' })
     actions.push({ key: 'follow-up', label: '基于结果再创作', desc: '复用产出生成新任务', tone: 'primary' })
     return actions
@@ -791,9 +781,6 @@ function runNextAction(key: string) {
       break
     case 'copy-error':
       copyText(errorMessage.value, '错误信息已复制')
-      break
-    case 'published':
-      void onTogglePublished()
       break
     case 'share':
       onShare()
@@ -1016,26 +1003,6 @@ async function onDelete() {
       }
     },
   })
-}
-
-async function onTogglePublished() {
-  if (!task.value) return
-  actionLoading.value = true
-  try {
-    const newPublished = !task.value.published
-    await tasksApi.markPublished(taskId.value, newPublished)
-    if (task.value) {
-      task.value.published = newPublished
-    }
-    uni.showToast({
-      title: newPublished ? '已标记为已发布' : '已取消发布',
-      icon: 'success',
-    })
-  } catch {
-    uni.showToast({ title: '操作失败', icon: 'none' })
-  } finally {
-    actionLoading.value = false
-  }
 }
 
 function onShare() {

@@ -542,13 +542,13 @@ func (r *taskExecutionRepository) ReleaseFinalization(ctx context.Context, id, t
 		Updates(map[string]any{"finalization_token": "", "finalization_at": nil}).Error
 }
 
-func (r *taskExecutionRepository) TransitionPublishing(ctx context.Context, id, from, to string, publishResult []byte) (bool, error) {
-	updates := map[string]any{"publishing_status": to}
-	if len(publishResult) > 0 {
-		updates["publishing_result"] = publishResult
+func (r *taskExecutionRepository) TransitionDraftDelivery(ctx context.Context, id, from, to string, deliveryResult []byte) (bool, error) {
+	updates := map[string]any{"draft_delivery_status": to}
+	if len(deliveryResult) > 0 {
+		updates["draft_delivery_result"] = deliveryResult
 	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
-		Where("id = ? AND publishing_status = ?", id, from).
+		Where("id = ? AND draft_delivery_status = ?", id, from).
 		Updates(updates)
 	return result.RowsAffected == 1, result.Error
 }

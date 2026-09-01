@@ -48,10 +48,6 @@ func validateAgentExecutionTarget(target string) error {
 	}
 }
 
-type cloudDraftPublisher interface {
-	PublishDraft(context.Context, string, string, []DraftArticleInput) (*PublishDraftResult, error)
-}
-
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
 
@@ -74,7 +70,6 @@ type TaskService struct {
 	enqueuer                 TaskEnqueuer
 	store                    storage.Provider
 	publishingSvc            *PublishingService
-	cloudPublisher           cloudDraftPublisher
 	taskLogDir               string
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
@@ -125,7 +120,6 @@ func NewTaskService(
 		enqueuer:               enqueuer,
 		store:                  store,
 		publishingSvc:          publishingSvc,
-		cloudPublisher:         publishingSvc,
 		taskLogDir:             taskLogDir,
 		pubsub:                 pubsub,
 		executionTimeout:       60 * time.Minute,
@@ -1610,19 +1604,6 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 	return stats, nil
 }
 
-// SetPublished toggles the published flag on a task. Analytics bindings are
-// managed independently by their platform-specific tracking services.
-func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool) error {
-	task, err := s.repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("find task: %w", err)
-	}
-	if task.UserID != userID {
-		return fmt.Errorf("task does not belong to user")
-	}
-	return s.repo.Tasks().SetPublished(ctx, task.ID, published)
-}
-
 // Delete permanently removes a task and its associated files.
 // Running/pending tasks are cancelled first. User cancellation does not reverse
 // the fixed task charge.
@@ -1747,16 +1728,23 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		}
 	}
 
-	if err := s.repo.TaskFiles().DeleteByTaskID(ctx, id); err != nil {
-		return fmt.Errorf("delete task files: %w", err)
-	}
-
-	deleted, err := s.repo.Tasks().DeleteIfDeleting(ctx, id)
-	if err != nil {
-		return fmt.Errorf("delete task: %w", err)
-	}
-	if !deleted {
-		return fmt.Errorf("delete task: deletion authority was lost")
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.TaskFiles().DeleteByTaskID(ctx, id); err != nil {
+			return fmt.Errorf("delete task files: %w", err)
+		}
+		if err := tx.WechatPublications().DeleteLifecycleByTaskID(ctx, id); err != nil {
+			return fmt.Errorf("delete WeChat publication lifecycle: %w", err)
+		}
+		deleted, err := tx.Tasks().DeleteIfDeleting(ctx, id)
+		if err != nil {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		if !deleted {
+			return fmt.Errorf("delete task: deletion authority was lost")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	s.deregisterCancel(id)
 	return nil

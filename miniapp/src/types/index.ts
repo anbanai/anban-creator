@@ -25,6 +25,7 @@ export type {
 export type {
   ProjectPlatform,
   ProjectStatus,
+  WechatPublishMode,
   ProjectConfig,
   EcommerceProjectDefaults,
   Project,

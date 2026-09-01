@@ -46,8 +46,6 @@ describe('tasksApi', () => {
           status: 'completed',
           project_id: 'project-1',
           result: serializedResult,
-          published: false,
-          published_at: null,
           created_at: '2026-07-15T00:00:00Z',
           started_at: '2026-07-15T00:00:01Z',
           completed_at: '2026-07-15T00:01:00Z',

@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	ErrProjectNotFound        = errors.New("project not found")
-	ErrProjectOwnedByUser     = errors.New("project not owned by user")
-	ErrProjectDeleteConflict  = errors.New("project delete conflict")
-	ErrProjectUpdateConflict  = errors.New("project update conflict")
-	ErrProjectMontageDefaults = errors.New("invalid montage project defaults")
-	ErrInvalidAgentConfig     = errors.New("invalid agent config")
+	ErrProjectNotFound           = errors.New("project not found")
+	ErrProjectOwnedByUser        = errors.New("project not owned by user")
+	ErrProjectDeleteConflict     = errors.New("project delete conflict")
+	ErrProjectUpdateConflict     = errors.New("project update conflict")
+	ErrProjectMontageDefaults    = errors.New("invalid montage project defaults")
+	ErrInvalidAgentConfig        = errors.New("invalid agent config")
+	ErrInvalidWechatPublishMode  = errors.New("invalid wechat publish mode")
+	ErrWechatCredentialsRequired = errors.New("wechat credentials required")
 )
 
 type projectDeleteConflictError struct {
@@ -49,6 +51,26 @@ func validateProjectAgentConfig(project *model.Project) error {
 	}
 	if err := agentpack.ValidateProjectConfig(pack, project.AgentConfig.Data()); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidAgentConfig, err)
+	}
+	return nil
+}
+
+func validateProjectWechatPublishMode(project *model.Project) error {
+	if project == nil || project.Config.WechatPublishMode == "" {
+		return nil
+	}
+	if !model.IsWechatPublishMode(project.Config.WechatPublishMode) {
+		return fmt.Errorf("%w: %q", ErrInvalidWechatPublishMode, project.Config.WechatPublishMode)
+	}
+	return nil
+}
+
+func validateProjectWechatCredentials(project *model.Project) error {
+	if project == nil || project.Platform != model.PlatformArticle || project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
+		return nil
+	}
+	if strings.TrimSpace(project.Config.WechatAppID) == "" || strings.TrimSpace(project.Config.WechatSecret) == "" {
+		return fmt.Errorf("%w: wechat_app_id and wechat_secret are required when wechat_publish_mode is %q", ErrWechatCredentialsRequired, project.GetWechatPublishMode())
 	}
 	return nil
 }
@@ -104,10 +126,19 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
+	if err := validateProjectWechatPublishMode(ch); err != nil {
+		return nil, err
+	}
+	if ch.Platform == model.PlatformArticle && ch.Config.WechatPublishMode == "" {
+		ch.Config.WechatPublishMode = model.WechatPublishModeManual
+	}
 	if err := validateProjectMontageDefaults(ch); err != nil {
 		return nil, err
 	}
 	if err := validateProjectAgentConfig(ch); err != nil {
+		return nil, err
+	}
+	if err := validateProjectWechatCredentials(ch); err != nil {
 		return nil, err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
@@ -215,6 +246,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if existing.UserID != userID {
 		return nil, ErrProjectOwnedByUser
 	}
+	if err := validateProjectWechatPublishMode(ch); err != nil {
+		return nil, err
+	}
 	effectivePlatform := existing.Platform
 	if ch.Platform != "" {
 		effectivePlatform = ch.Platform
@@ -310,13 +344,19 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.AgentConfigSet {
 		existing.AgentConfig = ch.AgentConfig
 	}
-	// Merge Config: unconditionally update AppID to support credential clearing.
-	// Only update Secret if non-empty to preserve existing secret during edits.
-	existing.Config.WechatAppID = ch.Config.WechatAppID
-	existing.Config.EnablePublishing = ch.Config.EnablePublishing
-	existing.Config.RequirePublishApproval = ch.Config.RequirePublishApproval
+	// Credentials are partial-update fields: a mode-only update, including a
+	// transition to disabled, must not erase an existing account configuration.
+	if ch.Config.WechatAppID != "" {
+		existing.Config.WechatAppID = ch.Config.WechatAppID
+	}
+	if ch.Config.WechatPublishMode != "" {
+		existing.Config.WechatPublishMode = ch.Config.WechatPublishMode
+	}
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
+	}
+	if err := validateProjectWechatCredentials(existing); err != nil {
+		return nil, err
 	}
 	return existing, nil
 }

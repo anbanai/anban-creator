@@ -8,16 +8,9 @@ import (
 
 // ProjectConfig holds platform-specific configuration stored as JSON.
 type ProjectConfig struct {
-	WechatAppID      string `json:"wechat_app_id,omitempty"`
-	WechatSecret     string `json:"wechat_secret,omitempty"`
-	EnablePublishing bool   `json:"enable_publishing"`
-	// RequirePublishApproval gates auto-publishing behind a human review step.
-	// Only meaningful when EnablePublishing=true: when set, a completed article
-	// task freezes its draft data into Task.PendingDraftArticles and enters the
-	// "pending" approval state instead of immediately landing in the WeChat draft
-	// box. Orthogonal to EnablePublishing — old projects default to false, so
-	// auto-publish behavior is unchanged unless explicitly opted in.
-	RequirePublishApproval bool `json:"require_publish_approval"`
+	WechatAppID       string `json:"wechat_app_id,omitempty"`
+	WechatSecret      string `json:"wechat_secret,omitempty"`
+	WechatPublishMode string `json:"wechat_publish_mode,omitempty"`
 }
 
 // EcommerceProjectDefaults holds the reusable e-commerce defaults for a project
@@ -70,7 +63,7 @@ type Project struct {
 	Writer string `gorm:"type:varchar(100);default:''" json:"writer"`
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
-	// Author is the 作者（署名）— the published author name, passed to publish_draft.
+	// Author is the 作者（署名）— the published author name, passed to create_draft.
 	Author                string        `gorm:"column:author;type:varchar(50)" json:"author"`
 	ReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView    `gorm:"-" json:"reference_image,omitempty"`
@@ -104,14 +97,11 @@ func (p *Project) GetWechatSecret() string {
 	return p.Config.WechatSecret
 }
 
-// GetEnablePublishing returns whether auto-publishing is enabled for this project.
-func (p *Project) GetEnablePublishing() bool {
-	return p.Config.EnablePublishing
-}
-
-// GetRequirePublishApproval returns whether auto-published drafts must pass a
-// human approval gate before touching the WeChat account. No-op unless
-// GetEnablePublishing() is also true.
-func (p *Project) GetRequirePublishApproval() bool {
-	return p.Config.RequirePublishApproval
+// GetWechatPublishMode returns the selected lifecycle behavior. An omitted
+// value is manual so newly created and zero-value projects never auto-publish.
+func (p *Project) GetWechatPublishMode() string {
+	if p == nil || p.Config.WechatPublishMode == "" {
+		return WechatPublishModeManual
+	}
+	return p.Config.WechatPublishMode
 }

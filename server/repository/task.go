@@ -735,74 +735,23 @@ func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID 
 		Where("deleting_at IS NULL").
 		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
 		Updates(map[string]interface{}{
-			"status":                 model.TaskStatusPending,
-			"started_at":             nil,
-			"completed_at":           nil,
-			"last_heartbeat_at":      nil,
-			"error_message":          "",
-			"result":                 nil,
-			"terminal_model_usage":   datatypes.NewJSONType([]model.ModelTokenUsage{}),
-			"cost_status":            "",
-			"progress":               0,
-			"progress_sequence":      0,
-			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
-			"workflow_status":        nil,
-			"publish_approval_state": "",
-			"pending_draft_articles": nil,
-			"published":              false,
-			"published_at":           nil,
-			"input_attachments":      datatypes.NewJSONType(attachments),
-			"execution_target":       model.ExecutionTargetCloud,
-			"local_claim_deadline":   nil,
-			"executor_info":          datatypes.NewJSONType(model.ExecutorMeta{}),
+			"status":               model.TaskStatusPending,
+			"started_at":           nil,
+			"completed_at":         nil,
+			"last_heartbeat_at":    nil,
+			"error_message":        "",
+			"result":               nil,
+			"terminal_model_usage": datatypes.NewJSONType([]model.ModelTokenUsage{}),
+			"cost_status":          "",
+			"progress":             0,
+			"progress_sequence":    0,
+			"latest_progress":      datatypes.NewJSONType(model.ProgressPayload{}),
+			"workflow_status":      nil,
+			"input_attachments":    datatypes.NewJSONType(attachments),
+			"execution_target":     model.ExecutionTargetCloud,
+			"local_claim_deadline": nil,
+			"executor_info":        datatypes.NewJSONType(model.ExecutorMeta{}),
 		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return result.RowsAffected > 0, nil
-}
-
-// SetPublished toggles the published flag and updates published_at timestamp.
-func (r *taskRepository) SetPublished(ctx context.Context, id string, published bool) error {
-	updates := map[string]interface{}{"published": published}
-	if published {
-		now := time.Now()
-		updates["published_at"] = &now
-	} else {
-		updates["published_at"] = nil
-	}
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
-}
-
-// UpdatePublishApproval writes the publish-approval state column and the frozen
-// pending-draft-articles blob for a task. Used by holdPublishForApproval to enter
-// the pending state (state=pending, blob=marshaled articles).
-func (r *taskRepository) UpdatePublishApproval(ctx context.Context, id, state string, pendingArticles []byte) error {
-	updates := map[string]interface{}{"publish_approval_state": state}
-	if pendingArticles != nil {
-		updates["pending_draft_articles"] = pendingArticles
-	}
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
-}
-
-// CompareAndSwapPublishApproval atomically transitions publish_approval_state
-// from expected to newState, clearing the frozen pending-draft-articles blob in
-// the same update when clearArticles is true (spec: approve/reject clear the
-// blob). Returns true only if the task was in the expected state and is now
-// newState — exactly one concurrent caller wins. Mirrors CompareAndSwapStatus:
-// the atomic UPDATE ... WHERE id=? AND publish_approval_state=? guarantees the
-// winner is unique, so ApprovePublish can safely gate its publish goroutine on
-// the returned bool (no double-publish).
-func (r *taskRepository) CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error) {
-	updates := map[string]interface{}{"publish_approval_state": newState}
-	if clearArticles {
-		// datatypes.JSON zero value serializes to SQL NULL → column cleared.
-		updates["pending_draft_articles"] = nil
-	}
-	result := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ? AND publish_approval_state = ?", id, expected).
-		Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
 	}

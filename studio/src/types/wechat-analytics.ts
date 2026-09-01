@@ -2,17 +2,32 @@ export type WechatTrackingStatus = 'waiting_data' | 'tracking' | 'stopped' | 'fa
 
 export interface WechatTrackingInfo {
   status: WechatTrackingStatus | string
-  article_url: string
+  source?: string
+  article_url?: string
   article_title?: string
-  published_date: string
+  published_date?: string
+  published_at?: string
+  expires_at?: string
   last_run_at?: string | null
   next_run_at?: string | null
+  last_fetch_at?: string | null
+  next_fetch_at?: string | null
   run_count: number
+  failure_count?: number
   stop_reason?: string
   last_error?: string
 }
 
 export interface WechatMetricInfo {
+  read_users?: number
+  share_users?: number
+  collection_users?: number
+  like_users?: number
+  zaikan_users?: number
+  comment_count?: number
+  read_finish_rate?: number
+  average_read_active_time?: number
+  read_to_subscribe_users?: number
   target_user: number
   int_page_read_user: number
   int_page_read_count: number
@@ -42,11 +57,16 @@ export interface WechatMetricSeriesItem {
   ori_page_read_count: number
   share_count: number
   add_to_fav_count: number
+  read_users?: number
+  share_users?: number
+  collection_users?: number
 }
 
 export interface WechatAnalytics {
   tracking?: WechatTrackingInfo
+  metrics?: WechatMetricInfo
   latest?: WechatMetricInfo
   deltas?: WechatMetricDelta
-  series: WechatMetricSeriesItem[]
+  trend?: WechatMetricSeriesItem[]
+  series?: WechatMetricSeriesItem[]
 }

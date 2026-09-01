@@ -329,6 +329,7 @@ func main() {
 	var projectSvc *service.ProjectService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
+	var wechatPublicationSvc *service.WechatPublicationService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var wechatTrackingSvc *service.WechatTrackingService
 	var channelsTrackingSvc *service.ChannelsTrackingService
@@ -342,6 +343,7 @@ func main() {
 		projectSvc = service.NewProjectService(repo, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
+		wechatPublicationSvc = service.NewWechatPublicationService(repo, nil, log)
 		templateSvc = service.NewTemplateService(repo, log)
 		posterSvc = service.NewPosterService(repo, log)
 
@@ -355,6 +357,7 @@ func main() {
 			)
 			log.Info().Msg("Asynq client initialized")
 		}
+		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
@@ -478,6 +481,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
+	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
@@ -514,6 +518,7 @@ func main() {
 		}
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
+		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
@@ -641,6 +646,7 @@ func main() {
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
 			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
+			WechatPublicationSvc:   wechatPublicationSvc,
 			LiveSliceSvc:           liveSliceSvc,
 			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
 			FileUploadSvc:          service.NewFileUploadService(store),
@@ -687,7 +693,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -700,6 +706,11 @@ func main() {
 		analyticsRecoveryCtx, analyticsRecoveryCancel := context.WithCancel(context.Background())
 		defer analyticsRecoveryCancel()
 		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, log)
+		if wechatPublicationSvc != nil {
+			publicationRecoveryCtx, publicationRecoveryCancel := context.WithCancel(context.Background())
+			defer publicationRecoveryCancel()
+			go startWechatPublicationRecovery(publicationRecoveryCtx, wechatPublicationSvc, log)
+		}
 	}
 	var runtimeReconcilerDone <-chan struct{}
 	if runtimeReconciler != nil {
@@ -759,6 +770,7 @@ func main() {
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		WechatAnalyticsHandler:   wechatAnalyticsHandler,
+		WechatPublicationHandler: wechatPublicationHandler,
 		ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		AgentProfileHandler:      agentProfileHandler,
@@ -1069,7 +1081,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1089,6 +1101,15 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		}
 	}
 
+	publicationHandlers := scheduler.WechatPublicationHandlers{}
+	if wechatPublicationSvc != nil {
+		publicationHandlers.Poll = func(ctx context.Context, publicationID string) error {
+			return wechatPublicationSvc.ProcessPoll(ctx, publicationID)
+		}
+		publicationHandlers.Reconcile = func(ctx context.Context, projectID string) error {
+			return wechatPublicationSvc.ReconcileProject(ctx, projectID)
+		}
+	}
 	srv := scheduler.NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error {
 			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
@@ -1104,6 +1125,7 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		cfg.Redis.DB,
 		cfg.Asynq.Concurrency,
 		log,
+		publicationHandlers,
 	)
 
 	go func() {
@@ -1133,6 +1155,25 @@ func startAnalyticsRecovery(ctx context.Context, seednote, wechat, channels anal
 	}
 	run()
 	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func startWechatPublicationRecovery(ctx context.Context, publications analyticsRecoveryService, log *zerolog.Logger) {
+	run := func() {
+		if err := publications.RecoverDue(ctx, 100); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("WeChat publication recovery failed")
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {

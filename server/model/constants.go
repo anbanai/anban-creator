@@ -25,15 +25,17 @@ func IsTerminalTaskStatus(s string) bool {
 	return slices.Contains(TerminalTaskStatuses, s)
 }
 
-// Publish-approval state constants (Batch 4A). PublishApprovalStateEmpty means
-// the task never entered the gate (the common case: project does not require
-// approval, or the task is not an auto-publishable article).
+// WeChat project modes are the complete publication policy contract.
 const (
-	PublishApprovalStateEmpty    = ""
-	PublishApprovalStatePending  = "pending"
-	PublishApprovalStateApproved = "approved"
-	PublishApprovalStateRejected = "rejected"
+	WechatPublishModeDisabled     = "disabled"
+	WechatPublishModeManual       = "manual"
+	WechatPublishModeAPIConfirmed = "api_confirmed"
 )
+
+// IsWechatPublishMode reports whether value is a supported project mode.
+func IsWechatPublishMode(value string) bool {
+	return slices.Contains([]string{WechatPublishModeDisabled, WechatPublishModeManual, WechatPublishModeAPIConfirmed}, value)
+}
 
 // Plan status constants.
 const (

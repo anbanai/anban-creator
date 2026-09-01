@@ -34,34 +34,34 @@ type TaskExecution struct {
 	ProfileEnvs        map[string]string `gorm:"type:json;serializer:json;not null" json:"profile_envs"`
 	ProfileFingerprint string            `gorm:"type:char(64);not null;index" json:"profile_fingerprint"`
 
-	Target             string         `gorm:"type:varchar(20);not null" json:"target"`
-	Status             string         `gorm:"type:varchar(20);index;not null" json:"status"`
-	DispatchClaimToken string         `gorm:"type:char(36);index" json:"-"`
-	DispatchClaimedAt  *time.Time     `gorm:"index" json:"-"`
-	RuntimeScope       string         `gorm:"column:runtime_scope;type:varchar(63)" json:"runtime_scope,omitempty"`
-	RuntimeWorkload    string         `gorm:"column:runtime_workload;type:varchar(63);index" json:"runtime_workload,omitempty"`
-	RuntimeInstanceID  string         `gorm:"column:runtime_instance_id;type:varchar(64)" json:"runtime_instance_id,omitempty"`
-	Started            bool           `gorm:"default:false;not null" json:"started"`
-	ManifestStatus     string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','collected','discarded','rejected')" json:"manifest_status,omitempty"`
-	ManifestSealed     bool           `gorm:"default:false;not null" json:"-"`
-	FinalizationStatus string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
-	FinalizationToken  string         `gorm:"type:char(36);default:'';index" json:"-"`
-	FinalizationAt     *time.Time     `json:"-"`
-	CleanupStatus      string         `gorm:"type:varchar(20);default:'';index" json:"cleanup_status,omitempty"`
-	CleanupToken       string         `gorm:"type:char(36);default:'';index" json:"-"`
-	CleanupAt          *time.Time     `json:"-"`
-	CleanupAttempts    int            `gorm:"default:0" json:"-"`
-	CleanupNextAt      *time.Time     `gorm:"index" json:"-"`
-	PublishingStatus   string         `gorm:"type:varchar(20);default:'';index" json:"publishing_status,omitempty"`
-	PublishingResult   datatypes.JSON `gorm:"type:json" json:"-"`
-	Result             datatypes.JSON `gorm:"type:json" json:"-"`
-	TerminalReason     string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
-	Diagnostics        datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
-	LastHeartbeatAt    *time.Time     `json:"last_heartbeat_at,omitempty"`
-	StartedAt          *time.Time     `json:"started_at,omitempty"`
-	CompletedAt        *time.Time     `json:"completed_at,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
+	Target              string         `gorm:"type:varchar(20);not null" json:"target"`
+	Status              string         `gorm:"type:varchar(20);index;not null" json:"status"`
+	DispatchClaimToken  string         `gorm:"type:char(36);index" json:"-"`
+	DispatchClaimedAt   *time.Time     `gorm:"index" json:"-"`
+	RuntimeScope        string         `gorm:"column:runtime_scope;type:varchar(63)" json:"runtime_scope,omitempty"`
+	RuntimeWorkload     string         `gorm:"column:runtime_workload;type:varchar(63);index" json:"runtime_workload,omitempty"`
+	RuntimeInstanceID   string         `gorm:"column:runtime_instance_id;type:varchar(64)" json:"runtime_instance_id,omitempty"`
+	Started             bool           `gorm:"default:false;not null" json:"started"`
+	ManifestStatus      string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','collected','discarded','rejected')" json:"manifest_status,omitempty"`
+	ManifestSealed      bool           `gorm:"default:false;not null" json:"-"`
+	FinalizationStatus  string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
+	FinalizationToken   string         `gorm:"type:char(36);default:'';index" json:"-"`
+	FinalizationAt      *time.Time     `json:"-"`
+	CleanupStatus       string         `gorm:"type:varchar(20);default:'';index" json:"cleanup_status,omitempty"`
+	CleanupToken        string         `gorm:"type:char(36);default:'';index" json:"-"`
+	CleanupAt           *time.Time     `json:"-"`
+	CleanupAttempts     int            `gorm:"default:0" json:"-"`
+	CleanupNextAt       *time.Time     `gorm:"index" json:"-"`
+	DraftDeliveryStatus string         `gorm:"type:varchar(20);default:'';index" json:"draft_delivery_status,omitempty"`
+	DraftDeliveryResult datatypes.JSON `gorm:"type:json" json:"-"`
+	Result              datatypes.JSON `gorm:"type:json" json:"-"`
+	TerminalReason      string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
+	Diagnostics         datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
+	LastHeartbeatAt     *time.Time     `json:"last_heartbeat_at,omitempty"`
+	StartedAt           *time.Time     `json:"started_at,omitempty"`
+	CompletedAt         *time.Time     `json:"completed_at,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 // NewTaskExecutionAgentProfile copies a frozen task profile into a durable
@@ -87,17 +87,17 @@ const (
 )
 
 const (
-	TaskExecutionFinalizationTerminal     = "terminal"
-	TaskExecutionFinalizationArtifacts    = "artifacts"
-	TaskExecutionFinalizationResult       = "result"
-	TaskExecutionFinalizationWorkflow     = "workflow"
-	TaskExecutionFinalizationPublishing   = "publishing"
-	TaskExecutionFinalizationTask         = "task"
-	TaskExecutionFinalizationSettlement   = "settlement"
-	TaskExecutionFinalizationSlot         = "slot"
-	TaskExecutionFinalizationDispatch     = "dispatch"
-	TaskExecutionFinalizationNotification = "notification"
-	TaskExecutionFinalizationDone         = "done"
+	TaskExecutionFinalizationTerminal      = "terminal"
+	TaskExecutionFinalizationArtifacts     = "artifacts"
+	TaskExecutionFinalizationResult        = "result"
+	TaskExecutionFinalizationWorkflow      = "workflow"
+	TaskExecutionFinalizationDraftDelivery = "draft_delivery"
+	TaskExecutionFinalizationTask          = "task"
+	TaskExecutionFinalizationSettlement    = "settlement"
+	TaskExecutionFinalizationSlot          = "slot"
+	TaskExecutionFinalizationDispatch      = "dispatch"
+	TaskExecutionFinalizationNotification  = "notification"
+	TaskExecutionFinalizationDone          = "done"
 )
 
 const (
@@ -106,10 +106,10 @@ const (
 )
 
 const (
-	TaskExecutionPublishingInFlight  = "in_flight"
-	TaskExecutionPublishingSucceeded = "succeeded"
-	TaskExecutionPublishingSkipped   = "skipped"
-	TaskExecutionPublishingAmbiguous = "ambiguous"
+	TaskExecutionDraftDeliveryInFlight  = "in_flight"
+	TaskExecutionDraftDeliverySucceeded = "succeeded"
+	TaskExecutionDraftDeliverySkipped   = "skipped"
+	TaskExecutionDraftDeliveryAmbiguous = "ambiguous"
 )
 
 const (

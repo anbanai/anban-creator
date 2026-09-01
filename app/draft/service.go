@@ -54,8 +54,7 @@ type Article struct {
 
 // DraftResult 草稿结果
 type DraftResult struct {
-	MediaID  string `json:"media_id"`
-	DraftURL string `json:"draft_url,omitempty"`
+	MediaID string `json:"media_id"`
 }
 
 // CreateDraftFromFile 从 JSON 文件创建草稿
@@ -135,8 +134,7 @@ func (s *Service) CreateDraft(articles []Article) (*DraftResult, error) {
 	}
 
 	return &DraftResult{
-		MediaID:  result.MediaID,
-		DraftURL: result.DraftURL,
+		MediaID: result.MediaID,
 	}, nil
 }
 

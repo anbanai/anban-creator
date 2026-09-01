@@ -1150,82 +1150,6 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 	return Success(c, taskAPIResponse(task, h.store))
 }
 
-// PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held
-// publish-approval gate (Batch 4A) and publishes the frozen draft to the WeChat
-// draft box. The actual publish runs asynchronously; this returns once the task
-// is marked approved.
-func (h *TaskHandler) PublishApprove(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
-	}
-
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-
-	// Verify ownership before resuming the publish.
-	task, err := h.service.GetByID(c.Context(), id)
-	if err != nil {
-		return Error(c, fiber.StatusNotFound, "task not found")
-	}
-	if task.UserID != userID {
-		return Forbidden(c, "you do not have access to this task")
-	}
-	if err := h.service.ApprovePublish(c.Context(), id); err != nil {
-		h.logger.Error().Err(err).Str("task_id", id).Msg("approve publish failed")
-		switch {
-		case errors.Is(err, service.ErrPublishApprovalNotPending):
-			return Error(c, fiber.StatusConflict, "该任务不在待审核发布状态")
-		case errors.Is(err, service.ErrPublishApprovalUnavailable):
-			return Error(c, fiber.StatusConflict, "无法发布：项目未启用发布或草稿数据缺失")
-		}
-		return Error(c, fiber.StatusInternalServerError, "放行发布失败")
-	}
-
-	return Success(c, fiber.Map{"approved": true})
-}
-
-// PublishReject handles POST /api/v1/tasks/:id/publish-reject: closes the
-// publish-approval gate without publishing. Accepts an optional {"reason": "..."}
-// body; the reason is surfaced to the user via the progress event.
-func (h *TaskHandler) PublishReject(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
-	}
-
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-
-	task, err := h.service.GetByID(c.Context(), id)
-	if err != nil {
-		return Error(c, fiber.StatusNotFound, "task not found")
-	}
-	if task.UserID != userID {
-		return Forbidden(c, "you do not have access to this task")
-	}
-
-	var req struct {
-		Reason string `json:"reason"`
-	}
-	// Body is optional — a POST with no body simply rejects with no note.
-	_ = c.Bind().Body(&req)
-
-	if err := h.service.RejectPublish(c.Context(), id, req.Reason); err != nil {
-		h.logger.Error().Err(err).Str("task_id", id).Msg("reject publish failed")
-		if errors.Is(err, service.ErrPublishApprovalNotPending) {
-			return Error(c, fiber.StatusConflict, "该任务不在待审核发布状态")
-		}
-		return Error(c, fiber.StatusInternalServerError, "驳回发布失败")
-	}
-
-	return Success(c, fiber.Map{"rejected": true})
-}
-
 // Delete handles DELETE /api/v1/tasks/:id.
 func (h *TaskHandler) Delete(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")
@@ -1443,40 +1367,6 @@ func (h *TaskHandler) BulkDelete(c fiber.Ctx) error {
 		succeeded++
 	}
 	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})
-}
-
-// MarkPublished handles PATCH /api/v1/tasks/:id/published.
-func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
-	}
-
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-
-	var body struct {
-		Published bool `json:"published"`
-	}
-	if err := c.Bind().Body(&body); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	task, err := h.service.GetByID(c.Context(), id)
-	if err != nil {
-		return Error(c, fiber.StatusNotFound, "task not found")
-	}
-	if task.UserID != userID {
-		return Forbidden(c, "you do not have access to this task")
-	}
-	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
-		h.logger.Error().Err(err).Msg("mark published failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
-	}
-
-	return Success(c, fiber.Map{"published": body.Published})
 }
 
 // GetFiles handles GET /api/v1/tasks/:id/files.

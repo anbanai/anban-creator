@@ -338,13 +338,13 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			return s.RebuildWorkflowStatus(ctx, task.ID)
 		}, nil
 	case model.TaskExecutionFinalizationWorkflow:
-		return model.TaskExecutionFinalizationPublishing, func(ctx context.Context) error {
+		return model.TaskExecutionFinalizationDraftDelivery, func(ctx context.Context) error {
 			if execution.Status != model.TaskExecutionSucceeded {
-				return s.markCloudPublishingSkipped(ctx, execution)
+				return s.markCloudDraftDeliverySkipped(ctx, execution)
 			}
-			return s.finalizeCloudPublishing(ctx, task, execution, result)
+			return s.finalizeCloudDraftDelivery(ctx, task, execution, result)
 		}, nil
-	case model.TaskExecutionFinalizationPublishing:
+	case model.TaskExecutionFinalizationDraftDelivery:
 		return model.TaskExecutionFinalizationTask, func(ctx context.Context) error {
 			return s.finalizeExecutionTaskStatus(ctx, task, execution, result)
 		}, nil
@@ -393,165 +393,53 @@ func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task
 	return nil
 }
 
-func (s *TaskService) markCloudPublishingSkipped(ctx context.Context, execution *model.TaskExecution) error {
+func (s *TaskService) markCloudDraftDeliverySkipped(ctx context.Context, execution *model.TaskExecution) error {
 	latest, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if err != nil {
 		return err
 	}
-	switch latest.PublishingStatus {
-	case model.TaskExecutionPublishingSkipped, model.TaskExecutionPublishingSucceeded:
+	switch latest.DraftDeliveryStatus {
+	case model.TaskExecutionDraftDeliverySkipped, model.TaskExecutionDraftDeliverySucceeded:
 		return nil
-	case model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous:
+	case model.TaskExecutionDraftDeliveryInFlight, model.TaskExecutionDraftDeliveryAmbiguous:
 		return ErrCloudPublishingAmbiguous
 	}
-	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSkipped, []byte(`{"reason":"not_applicable"}`))
+	won, err := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID, "", model.TaskExecutionDraftDeliverySkipped, []byte(`{"reason":"not_applicable"}`))
 	if err != nil {
 		return err
 	}
 	if !won {
-		return fmt.Errorf("mark cloud publishing skipped: state changed concurrently")
+		return fmt.Errorf("mark cloud draft delivery skipped: state changed concurrently")
 	}
-	execution.PublishingStatus = model.TaskExecutionPublishingSkipped
+	execution.DraftDeliveryStatus = model.TaskExecutionDraftDeliverySkipped
 	return nil
 }
 
-func (s *TaskService) finalizeCloudPublishing(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
+func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	latestExecution, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if err != nil {
 		return err
 	}
-	latestTask, err := s.repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		return err
-	}
-	switch latestExecution.PublishingStatus {
-	case model.TaskExecutionPublishingSucceeded:
-		if !latestTask.Published {
-			return s.repo.Tasks().SetPublished(ctx, latestTask.ID, true)
-		}
+	switch latestExecution.DraftDeliveryStatus {
+	case model.TaskExecutionDraftDeliverySucceeded, model.TaskExecutionDraftDeliverySkipped:
 		return nil
-	case model.TaskExecutionPublishingSkipped:
-		return nil
-	case model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous:
+	case model.TaskExecutionDraftDeliveryInFlight, model.TaskExecutionDraftDeliveryAmbiguous:
 		return ErrCloudPublishingAmbiguous
 	}
-	if s.cloudPublisher == nil || latestTask.ProjectID == "" || result == nil {
-		return s.markCloudPublishingSkipped(ctx, latestExecution)
+	// create_draft owns the durable publication record. Completion only records
+	// whether that atomic capability ran; it never infers formal publication.
+	if result == nil || !strings.Contains(result.LogText, "create_draft") {
+		return s.markCloudDraftDeliverySkipped(ctx, latestExecution)
 	}
-	project, err := s.repo.Projects().FindByID(ctx, latestTask.ProjectID)
-	if err != nil {
-		return fmt.Errorf("load project for cloud publishing: %w", err)
-	}
-	if !project.GetEnablePublishing() {
-		return s.markCloudPublishingSkipped(ctx, latestExecution)
-	}
-	if wasPublishedByAgent(result.LogText) || latestTask.Published {
-		if err := s.repo.Tasks().SetPublished(ctx, latestTask.ID, true); err != nil {
-			return err
-		}
-		won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSucceeded, []byte(`{"source":"agent"}`))
-		if err != nil {
-			return err
-		}
-		if !won {
-			return fmt.Errorf("record agent publication: state changed concurrently")
-		}
-		return nil
-	}
-	if latestTask.Type != model.ScopeArticle {
-		return s.markCloudPublishingSkipped(ctx, latestExecution)
-	}
-	articles, err := s.extractArticleDraftFromTaskFiles(ctx, latestTask.ID)
-	if err != nil {
-		return fmt.Errorf("extract cloud article draft: %w", err)
-	}
-	if len(articles) == 0 {
-		return s.markCloudPublishingSkipped(ctx, latestExecution)
-	}
-	if project.GetRequirePublishApproval() {
-		encoded, err := json.Marshal(articles)
-		if err != nil {
-			return err
-		}
-		if err := s.repo.Tasks().UpdatePublishApproval(ctx, task.ID, model.PublishApprovalStatePending, encoded); err != nil {
-			return fmt.Errorf("persist cloud publish approval: %w", err)
-		}
-		won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingSkipped, []byte(`{"reason":"approval_pending"}`))
-		if err != nil {
-			return err
-		}
-		if !won {
-			return fmt.Errorf("record publish approval hold: state changed concurrently")
-		}
-		return nil
-	}
-	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, "", model.TaskExecutionPublishingInFlight, nil)
+	won, err := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID, "", model.TaskExecutionDraftDeliverySucceeded, []byte(`{"source":"agent"}`))
 	if err != nil {
 		return err
 	}
 	if !won {
-		return fmt.Errorf("claim cloud publication: state changed concurrently")
+		return fmt.Errorf("record agent draft delivery: state changed concurrently")
 	}
-	publishCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	published, publishErr := s.cloudPublisher.PublishDraft(publishCtx, latestTask.UserID, project.ID, articles)
-	cancel()
-	if publishErr != nil {
-		detail, _ := json.Marshal(map[string]string{"error": publishErr.Error()})
-		_, _ = s.repo.TaskExecutions().TransitionPublishing(context.WithoutCancel(ctx), execution.ID, model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingAmbiguous, detail)
-		return fmt.Errorf("publish cloud draft (outcome may be ambiguous): %w", publishErr)
-	}
-	if s.finalizationAfterEffect != nil {
-		if err := s.finalizationAfterEffect(model.TaskExecutionFinalizationPublishing); err != nil {
-			return err
-		}
-	}
-	publishResult, err := json.Marshal(published)
-	if err != nil {
-		return err
-	}
-	won, err = s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, model.TaskExecutionPublishingInFlight, model.TaskExecutionPublishingSucceeded, publishResult)
-	if err != nil {
-		return err
-	}
-	if !won {
-		return ErrCloudPublishingAmbiguous
-	}
-	return s.repo.Tasks().SetPublished(ctx, latestTask.ID, true)
-}
-
-// ResolveCloudPublishing closes the only ambiguity the WeChat draft API cannot
-// resolve itself: the provider accepted a draft but the server died before it
-// persisted the response. An operator/reconciliation adapter must confirm the
-// downstream outcome; true continues without another provider call, while
-// false resets the durable operation and retries it under the finalization lease.
-func (s *TaskService) ResolveCloudPublishing(ctx context.Context, executionID string, published bool) error {
-	execution, task, err := s.currentExecution(ctx, executionID)
-	if err != nil {
-		return err
-	}
-	if execution.PublishingStatus != model.TaskExecutionPublishingInFlight && execution.PublishingStatus != model.TaskExecutionPublishingAmbiguous {
-		return fmt.Errorf("cloud publishing is not awaiting resolution: %s", execution.PublishingStatus)
-	}
-	target := ""
-	var detail []byte
-	if published {
-		target = model.TaskExecutionPublishingSucceeded
-		detail = []byte(`{"source":"reconciled"}`)
-	}
-	won, err := s.repo.TaskExecutions().TransitionPublishing(ctx, execution.ID, execution.PublishingStatus, target, detail)
-	if err != nil {
-		return err
-	}
-	if !won {
-		return fmt.Errorf("resolve cloud publishing: state changed concurrently")
-	}
-	execution.PublishingStatus = target
-	if published {
-		if err := s.repo.Tasks().SetPublished(ctx, task.ID, true); err != nil {
-			return err
-		}
-	}
-	return s.finalizeTaskFromExecution(ctx, task, execution)
+	execution.DraftDeliveryStatus = model.TaskExecutionDraftDeliverySucceeded
+	return nil
 }
 
 func (s *TaskService) cloudFinalizationLease() time.Duration {

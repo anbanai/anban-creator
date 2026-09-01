@@ -25,6 +25,7 @@ type Repository interface {
 	SeednoteTrackings() SeednoteTrackingRepository
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	WechatTrackings() WechatTrackingRepository
+	WechatPublications() WechatPublicationRepository
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
 	ChannelsTrackings() ChannelsTrackingRepository
 	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
@@ -160,19 +161,6 @@ type TaskRepository interface {
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
-	SetPublished(ctx context.Context, id string, published bool) error
-	// UpdatePublishApproval writes the publish-approval state and the frozen
-	// pending-draft-articles blob for a task (Batch 4A). Used by holdPublishForApproval
-	// to enter the pending state. pendingArticles may be nil only if state is non-pending.
-	UpdatePublishApproval(ctx context.Context, id, state string, pendingArticles []byte) error
-	// CompareAndSwapPublishApproval atomically transitions publish_approval_state
-	// from expected to newState, clearing the frozen pending-draft-articles blob
-	// in the same update when clearArticles is true (spec: approve/reject clear
-	// the blob). Returns true only if the task was in the expected state and is
-	// now newState — the single atomic winner among concurrent approve/reject
-	// calls. Used by ApprovePublish/RejectPublish to prevent a double-publish
-	// race: only the goroutine whose CAS wins actually publishes.
-	CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
@@ -242,7 +230,7 @@ type TaskExecutionRepository interface {
 	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
 	RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error)
 	ReleaseFinalization(ctx context.Context, id, token string) error
-	TransitionPublishing(ctx context.Context, id, from, to string, result []byte) (bool, error)
+	TransitionDraftDelivery(ctx context.Context, id, from, to string, result []byte) (bool, error)
 	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	CompleteCleanup(ctx context.Context, id, token string) (bool, error)
 	FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error)
@@ -304,7 +292,34 @@ type WechatTrackingRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatArticleTracking, error)
 	FindByID(ctx context.Context, id string) (*model.WechatArticleTracking, error)
 	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatArticleTracking, error)
+	TryClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, claimedAt, leaseUntil time.Time, token string) (bool, error)
+	ReleaseDueDispatch(ctx context.Context, id, token string, retryAt time.Time) (bool, error)
+	TryClaimDailyFetch(ctx context.Context, id string, claimedAt, dayStart, nextFetchAt time.Time) (bool, error)
 	Update(ctx context.Context, tracking *model.WechatArticleTracking) error
+}
+
+// WechatPublicationRepository persists the one-per-task WeChat lifecycle.
+type WechatPublicationRepository interface {
+	Create(ctx context.Context, publication *model.WechatPublication) error
+	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
+	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
+	FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error)
+	FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatPublication, error)
+	ClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, now, leaseUntil time.Time) (bool, error)
+	ReleaseDueDispatch(ctx context.Context, id string, leaseUntil, retryAt time.Time) (bool, error)
+	ClaimProjectReconcile(ctx context.Context, projectID string, lease time.Duration) (bool, error)
+	ClaimArticleBinding(ctx context.Context, projectID, articleID, publicationID string) (bool, error)
+	TransitionToNeedsSelection(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, source string, candidates []byte, nextCheckAt *time.Time) (bool, error)
+	TransitionToPublishSubmitting(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time, lastError string, nextCheckAt *time.Time) (bool, error)
+	TransitionDraftRecovered(ctx context.Context, id string, expectedUpdatedAt time.Time, draftMediaID string, nextCheckAt, lastCheckedAt *time.Time) (bool, error)
+	UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
+	TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
+	BindMsgID(ctx context.Context, id, msgID string) (bool, error)
+	Update(ctx context.Context, publication *model.WechatPublication) error
+	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
+	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
+	DeleteLifecycleByTaskID(ctx context.Context, taskID string) error
 }
 
 type WechatMetricSnapshotRepository interface {
@@ -370,6 +385,7 @@ type repository struct {
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	wechatTrackings         WechatTrackingRepository
+	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
@@ -399,6 +415,7 @@ func New(db *gorm.DB) Repository {
 	seednoteTrackings := newSeednoteTrackingRepository(db)
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
 	wechatTrackings := newWechatTrackingRepository(db)
+	wechatPublications := newWechatPublicationRepository(db)
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
 	channelsTrackings := newChannelsTrackingRepository(db)
 	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
@@ -427,6 +444,7 @@ func New(db *gorm.DB) Repository {
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
 		wechatTrackings:         wechatTrackings,
+		wechatPublications:      wechatPublications,
 		wechatMetricSnapshots:   wechatMetricSnapshots,
 		channelsTrackings:       channelsTrackings,
 		channelsMetricSnapshots: channelsMetricSnapshots,
@@ -456,7 +474,8 @@ func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.s
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *repository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
+func (r *repository) WechatTrackings() WechatTrackingRepository       { return r.wechatTrackings }
+func (r *repository) WechatPublications() WechatPublicationRepository { return r.wechatPublications }
 func (r *repository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
 }
@@ -517,6 +536,7 @@ type txRepository struct {
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	wechatTrackings         WechatTrackingRepository
+	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
@@ -547,6 +567,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
 		wechatTrackings:         newWechatTrackingRepository(tx),
+		wechatPublications:      newWechatPublicationRepository(tx),
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
 		channelsTrackings:       newChannelsTrackingRepository(tx),
 		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
@@ -576,7 +597,8 @@ func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *txRepository) WechatTrackings() WechatTrackingRepository { return r.wechatTrackings }
+func (r *txRepository) WechatTrackings() WechatTrackingRepository       { return r.wechatTrackings }
+func (r *txRepository) WechatPublications() WechatPublicationRepository { return r.wechatPublications }
 func (r *txRepository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
 }

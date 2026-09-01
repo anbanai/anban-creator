@@ -19,7 +19,6 @@ import (
 	wechatcache "github.com/silenceper/wechat/v2/cache"
 	"github.com/silenceper/wechat/v2/officialaccount"
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
-	"github.com/silenceper/wechat/v2/officialaccount/datacube"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/freepublish"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
@@ -54,6 +53,14 @@ func NewService(cfg *config.Config, log *zerolog.Logger) *Service {
 // getOfficialAccount 获取公众号实例（缓存在 Service 中，避免每次调用重新创建）
 func (s *Service) getOfficialAccount() *officialaccount.OfficialAccount {
 	return s.oa
+}
+
+// OfficialAPI returns the typed publication-lifecycle transport using this
+// service's managed Official Account access-token cache.
+func (s *Service) OfficialAPI() *OfficialAPI {
+	return NewOfficialAPI(nil, "", func(context.Context) (string, error) {
+		return s.getOfficialAccount().GetAccessToken()
+	})
 }
 
 // UploadMaterialResult 上传素材结果
@@ -91,8 +98,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 
 // CreateDraftResult 创建草稿结果
 type CreateDraftResult struct {
-	MediaID  string `json:"media_id"`
-	DraftURL string `json:"draft_url,omitempty"`
+	MediaID string `json:"media_id"`
 }
 
 // CreateDraft 创建草稿
@@ -111,12 +117,8 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 	duration := time.Since(startTime)
 	s.log.Info().Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("article draft created")
 
-	// 构造草稿 URL
-	draftURL := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&createType=0&token=")
-
 	return &CreateDraftResult{
-		MediaID:  mediaID,
-		DraftURL: draftURL,
+		MediaID: mediaID,
 	}, nil
 }
 
@@ -149,15 +151,6 @@ type ListPublishedResult struct {
 	TotalCount int64           `json:"total_count"`
 	ItemCount  int64           `json:"item_count"`
 	Items      []PublishedItem `json:"items"`
-}
-
-// ArticleTotalItem is the official cumulative metric series for one published
-// article returned by WeChat DataCube.
-type ArticleTotalItem struct {
-	RefDate string                         `json:"ref_date"`
-	MsgID   string                         `json:"msgid"`
-	Title   string                         `json:"title"`
-	Details []datacube.ArticleTotalDetails `json:"details"`
 }
 
 // ListDrafts 获取草稿列表
@@ -242,30 +235,6 @@ func mapPublishedItems(items []freepublish.ArticleListItem) []PublishedItem {
 		}
 	}
 	return result
-}
-
-// GetArticleTotal returns cumulative official-account article metrics for the
-// requested publication date. WeChat requires beginDate and endDate in
-// YYYY-MM-DD format and limits the available historical window.
-func (s *Service) GetArticleTotal(beginDate, endDate string) ([]ArticleTotalItem, error) {
-	cube := s.getOfficialAccount().GetDataCube()
-	result, err := cube.GetArticleTotal(beginDate, endDate)
-	if err != nil {
-		if wErr := ParseWechatError(err); wErr != nil {
-			return nil, wErr
-		}
-		return nil, fmt.Errorf("get article total: %w", err)
-	}
-	items := make([]ArticleTotalItem, 0, len(result.List))
-	for _, item := range result.List {
-		items = append(items, ArticleTotalItem{
-			RefDate: item.RefDate,
-			MsgID:   item.MsgID,
-			Title:   item.Title,
-			Details: item.Details,
-		})
-	}
-	return items, nil
 }
 
 // UploadMaterialFromBytes 从字节数据上传素材

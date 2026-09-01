@@ -69,6 +69,8 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.BillingSettlementOutbox{},
 		&model.TopicPool{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
+		&model.WechatPublication{}, &model.WechatPublicationBinding{},
+		&model.WechatArticleTracking{}, &model.WechatMetricSnapshot{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -2948,65 +2950,6 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	}
 	if len(reader.File) != 1 || reader.File[0].Name != "content.md" {
 		t.Fatalf("zip files = %#v, want only content.md", reader.File)
-	}
-}
-
-func TestTaskService_SetPublishedUpdatesFlagWithoutBindingAnalytics(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusCompleted,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
-		t.Fatalf("SetPublished: %v", err)
-	}
-	updated, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !updated.Published {
-		t.Fatal("task should be marked published")
-	}
-}
-
-func TestTaskService_SetPublishedCanClearFlag(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
-		Published: true,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	if err := svc.SetPublished(ctx, userID, task.ID, false); err != nil {
-		t.Fatalf("SetPublished false: %v", err)
-	}
-	updated, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Published {
-		t.Fatal("task should be marked unpublished")
 	}
 }
 
