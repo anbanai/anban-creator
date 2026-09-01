@@ -1152,6 +1152,26 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
   })
 
+  it('waits for project configuration before querying WeChat publication', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      result: null,
+    }))
+    let resolveProject!: (value: typeof mockProjectDetail) => void
+    vi.mocked(api.projects.get).mockImplementation(() => new Promise((resolve) => {
+      resolveProject = resolve
+    }))
+
+    render(<TaskDetailPage />)
+
+    await screen.findByRole('heading', { name: '测试任务' })
+    expect(api.tasks.getWechatPublication).not.toHaveBeenCalled()
+
+    resolveProject(mockProjectDetail)
+    await waitFor(() => expect(api.tasks.getWechatPublication).toHaveBeenCalledWith('task-1'))
+  })
+
   it('shows Channels link binding for a completed montage task', async () => {
     mockTask(taskWith({
       type: 'montage',

@@ -397,9 +397,14 @@ func (s *WechatPublicationService) recoverDraftFromItems(ctx context.Context, pu
 	if !ok {
 		return false, nil
 	}
-	publication.DraftMediaID, publication.Status, publication.LastError = matched.MediaID, model.WechatPublicationStatusDrafted, ""
-	publication.ClaimToken, publication.ClaimedAt = "", nil
-	return true, s.repo.WechatPublications().Update(ctx, publication)
+	lastCheckedAt := s.now()
+	won, err := s.repo.WechatPublications().TransitionDraftRecovered(
+		ctx, publication.ID, publication.UpdatedAt, matched.MediaID, nil, &lastCheckedAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	return won, nil
 }
 
 func exactWechatDraftMatch(publication *model.WechatPublication, items []appwechat.DraftBatchItem) (appwechat.DraftBatchItem, bool) {
@@ -893,6 +898,9 @@ func publishedArticles(response *appwechat.FreePublishBatchGetResponse) []publis
 	}
 	var result []publishedWechatArticle
 	for _, item := range response.Items {
+		if item.UpdateTime <= 0 {
+			continue
+		}
 		publishedAt := time.Unix(item.UpdateTime, 0)
 		if len(item.Content.NewsItems) == 0 {
 			continue

@@ -344,9 +344,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.AgentConfigSet {
 		existing.AgentConfig = ch.AgentConfig
 	}
-	// A completely omitted config preserves credentials for partial updates.
-	// Selecting a mode makes AppID explicit, including clearing it while disabled.
-	if ch.Config.WechatAppID != "" || ch.Config.WechatSecret != "" || ch.Config.WechatPublishMode != "" {
+	// Credentials are partial-update fields: a mode-only update, including a
+	// transition to disabled, must not erase an existing account configuration.
+	if ch.Config.WechatAppID != "" {
 		existing.Config.WechatAppID = ch.Config.WechatAppID
 	}
 	if ch.Config.WechatPublishMode != "" {

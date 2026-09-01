@@ -303,3 +303,27 @@ func TestProjectServiceUpdatePreservesWechatPublishModeWhenOmitted(t *testing.T)
 		t.Fatalf("WechatPublishMode = %q, want %q", got, model.WechatPublishModeAPIConfirmed)
 	}
 }
+
+func TestProjectServiceDisablingWechatPreservesExistingCredentials(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Config: model.ProjectConfig{
+			WechatAppID: "wx-existing", WechatSecret: "secret-existing", WechatPublishMode: model.WechatPublishModeManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
+		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+	})
+	if err != nil {
+		t.Fatalf("Update disabled: %v", err)
+	}
+	if updated.Config.WechatAppID != "wx-existing" || updated.Config.WechatSecret != "secret-existing" {
+		t.Fatalf("credentials after disabling = %#v, want existing credentials preserved", updated.Config)
+	}
+}

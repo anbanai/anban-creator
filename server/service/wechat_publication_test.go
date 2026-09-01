@@ -513,6 +513,50 @@ func TestCreateDraftRecoveryRejectsProviderTimestampInPriorSecond(t *testing.T) 
 	}
 }
 
+func TestRecoverDraftFromItemsDoesNotOverwriteConcurrentLifecycleUpdate(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	created := f.now.Add(-time.Hour)
+	request := f.draftInput()
+	article := request.Articles[0]
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: f.taskID, UserID: f.userID, ProjectID: f.projectID,
+		DraftTitle: "Durable lifecycle", DraftAuthor: "Author", DraftDigest: "Digest", DraftThumbMediaID: "thumb-1",
+		DraftContentFingerprint: WechatContentFingerprint(article.Content),
+		DraftRequestFingerprint: wechatDraftRequestFingerprint(normalizeDraftArticle(article)),
+		Source:                  model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+		DraftCreatedAt: &created, ClaimToken: "draft-claim",
+	}
+	if err := f.repo.WechatPublications().Create(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newClaimedAt := f.now
+	if err := f.db.Model(&model.WechatPublication{}).Where("id = ?", publication.ID).Updates(map[string]any{
+		"status": model.WechatPublicationStatusPublishSubmitting, "claim_token": "newer-claim", "claimed_at": &newClaimedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	matchedItem := appwechat.DraftBatchItem{MediaID: "recovered-media", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}}}
+	recovered, err := f.svc.recoverDraftFromItems(context.Background(), stale, []appwechat.DraftBatchItem{matchedItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered {
+		t.Fatal("recoverDraftFromItems reported recovery after losing its version")
+	}
+	stored, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.WechatPublicationStatusPublishSubmitting || stored.DraftMediaID != "" || stored.ClaimToken != "newer-claim" {
+		t.Fatalf("concurrent lifecycle state overwritten: %#v", stored)
+	}
+}
+
 func TestWechatContentFingerprintPreservesMeaningfulInlineSpaces(t *testing.T) {
 	formatted := `<section>
   <p>Hello <strong>world</strong></p>
@@ -1426,6 +1470,19 @@ func TestPollSuccessRequiresAuthoritativeBatchTimestamp(t *testing.T) {
 			t.Fatalf("premature bind = %#v", got)
 		}
 	})
+}
+
+func TestPublishedArticlesRejectsMissingUpdateTime(t *testing.T) {
+	response := &appwechat.FreePublishBatchGetResponse{Items: []appwechat.FreePublishBatchItem{
+		{ArticleID: "missing-time", UpdateTime: 0, Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/missing"}}}},
+		{ArticleID: "negative-time", UpdateTime: -1, Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/negative"}}}},
+		{ArticleID: "valid", UpdateTime: 1_700_000_000, Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{URL: "https://mp.weixin.qq.com/s/valid"}}}},
+	}}
+
+	articles := publishedArticles(response)
+	if len(articles) != 1 || articles[0].ArticleID != "valid" || !articles[0].PublishedAt.Equal(time.Unix(1_700_000_000, 0)) {
+		t.Fatalf("publishedArticles = %#v, want only valid timestamp", articles)
+	}
 }
 
 func TestPublishUnsupportedAndMissingDraftNeverBlindSubmit(t *testing.T) {

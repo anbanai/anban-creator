@@ -879,7 +879,7 @@ export default function TaskDetailPage() {
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      {task.type === 'article' && task.status === 'completed' && (
+      {task.type === 'article' && task.status === 'completed' && project && (
         <WechatAnalyticsPanel taskId={task.id} projectConfig={project?.config} />
       )}
 
