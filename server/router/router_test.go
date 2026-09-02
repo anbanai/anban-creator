@@ -173,6 +173,7 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 		{"POST", "/api/v1/tasks"},
 		{"GET", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/seednote-analytics"},
 		{"GET", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/channels-analytics"},
+		{"POST", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/wechat-publication/retry-publish"},
 		{"GET", "/api/v1/timeline?from=2025-01-01&to=2025-12-31"},
 		{"GET", "/api/v1/credits/balance"},
 		{"GET", "/api/v1/credits/sign-in/status"},
@@ -220,10 +221,11 @@ func TestWechatPublicationRoutesReplaceLegacyTaskPublicationRoutes(t *testing.T)
 		WechatPublicationHandler: handler.NewWechatPublicationHandler(nil, &logger),
 	})
 	want := map[string]bool{
-		"GET /api/v1/tasks/:id/wechat-publication":            false,
-		"POST /api/v1/tasks/:id/wechat-publication/publish":   false,
-		"POST /api/v1/tasks/:id/wechat-publication/reconcile": false,
-		"POST /api/v1/tasks/:id/wechat-publication/select":    false,
+		"GET /api/v1/tasks/:id/wechat-publication":                false,
+		"POST /api/v1/tasks/:id/wechat-publication/publish":       false,
+		"POST /api/v1/tasks/:id/wechat-publication/retry-publish": false,
+		"POST /api/v1/tasks/:id/wechat-publication/reconcile":     false,
+		"POST /api/v1/tasks/:id/wechat-publication/select":        false,
 	}
 	for _, route := range app.GetRoutes() {
 		key := route.Method + " " + route.Path

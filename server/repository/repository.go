@@ -317,6 +317,13 @@ type WechatPublicationRepository interface {
 	TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
 	BindMsgID(ctx context.Context, id, msgID string) (bool, error)
 	Update(ctx context.Context, publication *model.WechatPublication) error
+	RetryUnsupportedDraft(ctx context.Context, id string, expectedUpdatedAt, claimedAt time.Time, claimToken string) (bool, error)
+	ReclaimUnattemptedDraft(ctx context.Context, id string, expectedUpdatedAt, staleBefore, claimedAt time.Time, claimToken string) (bool, error)
+	RetryUnsupportedPublish(ctx context.Context, id string, expectedUpdatedAt time.Time, targetStatus string, nextCheckAt *time.Time) (bool, error)
+	DeleteDraftClaimed(ctx context.Context, id, claimToken string) (bool, error)
+	RestoreUnsupportedDraftClaimed(ctx context.Context, id, claimToken string, wechatStatusCode int, lastError string) (bool, error)
+	MarkDraftAddAttempted(ctx context.Context, id, claimToken string, attemptedAt, nextCheckAt time.Time) (bool, error)
+	UpdateDraftClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
 	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
 	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
 	DeleteLifecycleByTaskID(ctx context.Context, taskID string) error

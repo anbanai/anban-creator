@@ -73,11 +73,12 @@ type WechatPublication struct {
 	LastError      string         `gorm:"type:text;not null" json:"last_error,omitempty"`
 	Candidates     datatypes.JSON `gorm:"type:json" json:"candidates,omitempty"`
 
-	ClaimToken        string     `gorm:"type:char(36);not null;default:'';index" json:"-"`
-	ClaimedAt         *time.Time `gorm:"index" json:"-"`
-	SubmitAttemptedAt *time.Time `json:"submit_attempted_at,omitempty"`
-	CreatedAt         time.Time  `gorm:"not null" json:"created_at"`
-	UpdatedAt         time.Time  `gorm:"not null" json:"updated_at"`
+	ClaimToken          string     `gorm:"type:char(36);not null;default:'';index" json:"-"`
+	ClaimedAt           *time.Time `gorm:"index" json:"-"`
+	DraftAddAttemptedAt *time.Time `json:"-"`
+	SubmitAttemptedAt   *time.Time `json:"submit_attempted_at,omitempty"`
+	CreatedAt           time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt           time.Time  `gorm:"not null" json:"updated_at"`
 }
 
 func (WechatPublication) TableName() string { return "wechat_publications" }

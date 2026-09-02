@@ -14,6 +14,7 @@ import (
 type WechatPublicationActions interface {
 	Get(context.Context, string, string) (*model.WechatPublication, error)
 	Publish(context.Context, string, string) (*model.WechatPublication, error)
+	RetryPublish(context.Context, string, string) (*model.WechatPublication, error)
 	Reconcile(context.Context, string, string) error
 	Select(context.Context, string, string, string) (*model.WechatPublication, error)
 }
@@ -60,6 +61,18 @@ func (h *WechatPublicationHandler) Publish(c fiber.Ctx) error {
 		return err
 	}
 	publication, err := h.service.Publish(c.Context(), userID, taskID)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, publication)
+}
+
+func (h *WechatPublicationHandler) RetryPublish(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	publication, err := h.service.RetryPublish(c.Context(), userID, taskID)
 	if err != nil {
 		return h.handleError(c, taskID, err)
 	}

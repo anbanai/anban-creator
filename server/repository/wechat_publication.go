@@ -280,6 +280,125 @@ func (r *wechatPublicationRepository) Update(ctx context.Context, publication *m
 	})
 }
 
+func (r *wechatPublicationRepository) RetryUnsupportedDraft(ctx context.Context, id string, expectedUpdatedAt, claimedAt time.Time, claimToken string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND wechat_status_code <> 0 AND updated_at = ? AND draft_media_id = ''", id, model.WechatPublicationStatusUnsupported, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status":              model.WechatPublicationStatusDrafting,
+				"wechat_status_code":  0,
+				"last_error":          "",
+				"next_check_at":       nil,
+				"last_checked_at":     nil,
+				"check_attempts":      0,
+				"claim_token":         claimToken,
+				"claimed_at":          &claimedAt,
+				"submit_attempted_at": nil,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) ReclaimUnattemptedDraft(ctx context.Context, id string, expectedUpdatedAt, staleBefore, claimedAt time.Time, claimToken string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ? AND draft_media_id = '' AND draft_add_attempted_at IS NULL", id, model.WechatPublicationStatusDrafting, expectedUpdatedAt).
+			Where("claimed_at IS NULL OR claimed_at <= ?", staleBefore).
+			Updates(map[string]any{
+				"claim_token": claimToken,
+				"claimed_at":  &claimedAt,
+				"last_error":  "",
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) RetryUnsupportedPublish(ctx context.Context, id string, expectedUpdatedAt time.Time, targetStatus string, nextCheckAt *time.Time) (bool, error) {
+	query := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("id = ? AND status = ? AND wechat_status_code <> 0 AND updated_at = ? AND draft_media_id <> ''", id, model.WechatPublicationStatusUnsupported, expectedUpdatedAt)
+	switch targetStatus {
+	case model.WechatPublicationStatusDrafted:
+		query = query.Where("submit_attempted_at IS NULL AND publish_id = '' AND msg_data_id = '' AND msg_id = ''")
+	case model.WechatPublicationStatusPublishing:
+		query = query.Where("publish_id <> ''")
+	case model.WechatPublicationStatusPublishSubmitting:
+		query = query.Where("publish_id = '' AND (submit_attempted_at IS NOT NULL OR msg_data_id <> '' OR msg_id <> '')")
+	default:
+		return false, fmt.Errorf("unsupported WeChat publication retry target %q", targetStatus)
+	}
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return query.Updates(map[string]any{
+			"status":             targetStatus,
+			"wechat_status_code": 0,
+			"last_error":         "",
+			"next_check_at":      nextCheckAt,
+			"last_checked_at":    nil,
+			"check_attempts":     0,
+			"claim_token":        "",
+			"claimed_at":         nil,
+		})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) DeleteDraftClaimed(ctx context.Context, id, claimToken string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).
+			Where("id = ? AND status = ? AND claim_token = ? AND draft_media_id = ''", id, model.WechatPublicationStatusDrafting, claimToken).
+			Delete(&model.WechatPublication{})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) RestoreUnsupportedDraftClaimed(ctx context.Context, id, claimToken string, wechatStatusCode int, lastError string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND claim_token = ? AND draft_media_id = ''", id, model.WechatPublicationStatusDrafting, claimToken).
+			Updates(map[string]any{
+				"status":              model.WechatPublicationStatusUnsupported,
+				"wechat_status_code":  wechatStatusCode,
+				"last_error":          lastError,
+				"next_check_at":       nil,
+				"claim_token":         "",
+				"claimed_at":          nil,
+				"submit_attempted_at": nil,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) MarkDraftAddAttempted(ctx context.Context, id, claimToken string, attemptedAt, nextCheckAt time.Time) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND claim_token = ? AND draft_media_id = '' AND draft_add_attempted_at IS NULL", id, model.WechatPublicationStatusDrafting, claimToken).
+			Updates(map[string]any{
+				"draft_add_attempted_at": &attemptedAt,
+				"draft_created_at":       &attemptedAt,
+				"next_check_at":          &nextCheckAt,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) UpdateDraftClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error) {
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND claim_token = ?", publication.ID, model.WechatPublicationStatusDrafting, token).
+			Updates(map[string]any{
+				"draft_media_id":         publication.DraftMediaID,
+				"status":                 publication.Status,
+				"wechat_status_code":     publication.WechatStatusCode,
+				"draft_created_at":       publication.DraftCreatedAt,
+				"next_check_at":          publication.NextCheckAt,
+				"last_error":             publication.LastError,
+				"draft_add_attempted_at": publication.DraftAddAttemptedAt,
+				"claim_token":            "",
+				"claimed_at":             nil,
+			})
+	})
+	return rows == 1, err
+}
+
 func (r *wechatPublicationRepository) BindMsgID(ctx context.Context, id, msgID string) (bool, error) {
 	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
@@ -306,6 +425,9 @@ func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, toke
 			"claimed_at":          &now,
 			"submit_attempted_at": &now,
 			"next_check_at":       nextCheckAt,
+			"last_checked_at":     nil,
+			"check_attempts":      0,
+			"wechat_status_code":  0,
 			"last_error":          "",
 		})
 	return result.RowsAffected == 1, result.Error
@@ -316,6 +438,7 @@ func (r *wechatPublicationRepository) UpdateClaimed(ctx context.Context, publica
 		"status": publication.Status, "publish_id": publication.PublishID, "msg_data_id": publication.MsgDataID,
 		"wechat_status_code": publication.WechatStatusCode, "next_check_at": publication.NextCheckAt,
 		"last_error": publication.LastError, "claim_token": "", "claimed_at": nil,
+		"submit_attempted_at": publication.SubmitAttemptedAt,
 	}
 	result := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 		Where("id = ? AND claim_token = ? AND status = ?", publication.ID, token, model.WechatPublicationStatusPublishSubmitting).

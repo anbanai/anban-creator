@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   Bookmark,
@@ -53,7 +54,7 @@ const statusCopy: Record<string, string> = {
   published: "已识别正式发布",
   needs_selection: "需要选择文章",
   publish_failed: "发布失败",
-  unsupported: "账号不支持官方接口",
+  unsupported: "公众号接口调用失败",
 };
 
 const terminalPublicationStatuses = new Set([
@@ -61,6 +62,13 @@ const terminalPublicationStatuses = new Set([
   "publish_failed",
   "unsupported",
 ]);
+
+const notifyFormalPublishResult = (publication: WechatPublication) => {
+  if (publication.status !== "unsupported" || publication.wechat_status_code !== 48001) return;
+  toast.error("正式发布失败：公众号没有接口权限", {
+    description: "微信错误码 48001。草稿已保留，请前往公众号后台手动发布；权限开通后可在这里重新尝试。",
+  });
+};
 
 export default function WechatAnalyticsPanel({
   taskId,
@@ -92,8 +100,18 @@ export default function WechatAnalyticsPanel({
   });
   const publish = useMutation({
     mutationFn: () => api.tasks.publishWechat(taskId),
-    onSuccess: () => {
+    onSuccess: (result) => {
       setConfirmOpen(false);
+      notifyFormalPublishResult(result);
+      void queryClient.invalidateQueries({
+        queryKey: ["wechat-publication", taskId],
+      });
+    },
+  });
+  const retryPublish = useMutation({
+    mutationFn: () => api.tasks.retryWechatPublish(taskId),
+    onSuccess: (result) => {
+      notifyFormalPublishResult(result);
       void queryClient.invalidateQueries({
         queryKey: ["wechat-publication", taskId],
       });
@@ -144,7 +162,7 @@ export default function WechatAnalyticsPanel({
         </CardContent>
       </Card>
     );
-  const mutationFailed = reconcile.isError || publish.isError || select.isError;
+  const mutationFailed = reconcile.isError || publish.isError || retryPublish.isError || select.isError;
   return (
     <div className="space-y-4">
       <PublicationCard
@@ -152,7 +170,8 @@ export default function WechatAnalyticsPanel({
         mode={mode}
         onReconcile={() => reconcile.mutate()}
         onPublish={() => setConfirmOpen(true)}
-        pending={reconcile.isPending || publish.isPending}
+        onRetryPublish={() => retryPublish.mutate()}
+        pending={reconcile.isPending || publish.isPending || retryPublish.isPending}
       />
       {mutationFailed && (
         <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
@@ -173,9 +192,9 @@ export default function WechatAnalyticsPanel({
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认由 Anban 正式发布</DialogTitle>
+            <DialogTitle>确认正式发布</DialogTitle>
             <DialogDescription>
-              将使用当前公众号账号提交草稿。提交后仍会通过微信官方状态接口确认结果。
+              将使用当前公众号账号把已生成的草稿提交为正式文章，提交后会继续确认微信发布结果。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -203,16 +222,28 @@ function PublicationCard({
   mode,
   onReconcile,
   onPublish,
+  onRetryPublish,
   pending,
 }: {
   publication: WechatPublication;
   mode: WechatPublishMode;
   onReconcile: () => void;
   onPublish: () => void;
+  onRetryPublish: () => void;
   pending: boolean;
 }) {
   const status = publication.status;
-  const canPublish = mode === "api_confirmed" && status === "drafted";
+  const hasSubmissionEvidence = Boolean(
+    publication.submit_attempted_at ||
+      publication.publish_id ||
+      publication.msg_data_id ||
+      publication.msg_id,
+  );
+  const canPublish = mode === "manual" && status === "drafted" && !hasSubmissionEvidence;
+  const canRetryPublish =
+    status === "unsupported" &&
+    Boolean(publication.wechat_status_code) &&
+    Boolean(publication.draft_media_id);
   const canReconcile =
     status !== "publishing" && !terminalPublicationStatuses.has(status);
   return (
@@ -244,7 +275,7 @@ function PublicationCard({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {status === "drafted" && (
+          {(status === "drafted" || canRetryPublish) && (
             <Button
               size="sm"
               variant="outline"
@@ -287,7 +318,13 @@ function PublicationCard({
           )}
           {canPublish && (
             <Button size="sm" onClick={onPublish} disabled={pending}>
-              <Send className="h-4 w-4" />由 Anban 正式发布
+              <Send className="h-4 w-4" />正式发布
+            </Button>
+          )}
+          {canRetryPublish && (
+            <Button size="sm" onClick={onRetryPublish} disabled={pending}>
+              <RefreshCw className={pending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              {hasSubmissionEvidence ? "重新检测发布结果" : "重新尝试正式发布"}
             </Button>
           )}
         </div>
@@ -301,7 +338,21 @@ function PublicationCard({
           )}
           {publication.msg_id && <span>消息 ID：{publication.msg_id}</span>}
         </div>
-        {publication.last_error && (
+        {status === "unsupported" && publication.wechat_status_code === 48001 ? (
+          <div className="space-y-1 text-sm text-destructive" role="alert">
+            <p className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              {publication.draft_media_id
+                ? "微信返回 48001：当前公众号没有“发布草稿”接口权限，无法通过 API 正式发布。"
+                : "微信返回 48001：当前公众号没有草稿接口权限。"}
+            </p>
+            <p className="pl-6 text-xs text-muted-foreground">
+              {publication.draft_media_id
+                ? "草稿已保留，请前往公众号后台手动发布。这是账号接口权限限制，不是 AppSecret 或 IP 白名单错误；可在微信开发者平台“接口管理 / 接口权限与额度 / 发布能力”中确认，权限开通后再重新尝试。"
+                : "请在微信开发者平台“接口管理 / 接口权限与额度 / 草稿管理”中确认；权限开通后再重新尝试。"}
+            </p>
+          </div>
+        ) : publication.last_error && (
           <p className="flex items-start gap-2 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             {publication.last_error}
@@ -309,7 +360,9 @@ function PublicationCard({
         )}
         {status === "drafted" && (
           <p className="text-xs text-muted-foreground">
-            请在公众号后台完成正式发布，系统会自动识别并开始 30 天数据追踪。
+            {mode === "manual"
+              ? "你可以在这里正式发布，也可以去公众号后台发布；系统会自动识别并开始 30 天数据追踪。"
+              : "草稿已就绪，系统正在自动提交正式发布。"}
           </p>
         )}
       </CardContent>

@@ -756,15 +756,15 @@ export default function ProjectsPage() {
 
                   <FormField control={form.control} name="wechat_publish_mode" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>公众号发布模式</FormLabel>
+                      <FormLabel>公众号投递</FormLabel>
                       <FormControl>
                         <ToggleGroup value={[field.value ?? 'manual']} onValueChange={(value) => { const selected = value[0]; if (selected) field.onChange(selected) }} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <ToggleGroupItem value="disabled" className="h-auto justify-start px-3 py-2 text-left">不投递草稿</ToggleGroupItem>
-                          <ToggleGroupItem value="manual" className="h-auto justify-start px-3 py-2 text-left">进入草稿箱</ToggleGroupItem>
-                          <ToggleGroupItem value="api_confirmed" className="h-auto justify-start px-3 py-2 text-left">确认后正式发布</ToggleGroupItem>
+                          <ToggleGroupItem value="disabled" className="h-auto justify-start px-3 py-2 text-left">不投递公众号</ToggleGroupItem>
+                          <ToggleGroupItem value="manual" className="h-auto justify-start px-3 py-2 text-left">草稿后手动发布</ToggleGroupItem>
+                          <ToggleGroupItem value="api_confirmed" className="h-auto justify-start px-3 py-2 text-left">草稿后自动发布</ToggleGroupItem>
                         </ToggleGroup>
                       </FormControl>
-                      <FormDescription>默认进入草稿箱；正式发布前必须在公众号后台完成，或由你在任务详情确认。</FormDescription>
+                      <FormDescription>后两种方式都会自动进入草稿箱；手动模式由你在任务详情确认正式发布，自动模式会在草稿成功后直接提交。</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />

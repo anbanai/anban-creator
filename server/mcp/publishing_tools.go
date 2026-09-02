@@ -142,7 +142,11 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 	case errors.Is(err, service.ErrWechatPublicationModeConflict):
 		return createDraftFailure{Code: "create_draft_disabled", Message: "draft creation is disabled for this project", Hint: "Enable the project's WeChat draft mode before retrying", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationDraftUnsupported):
-		return createDraftFailure{Code: "create_draft_unsupported", Message: "the configured WeChat account does not support draft creation", Hint: "Use an Official Account with the WeChat draft API capability", Retryable: false}
+		return createDraftFailure{Code: "create_draft_unsupported", Message: "the configured WeChat account does not support draft creation", Hint: "Enable the WeChat draft API capability, then rerun the current task", Retryable: false}
+	case errors.Is(err, service.ErrWechatPublicationDraftRejected):
+		return classifyDefinitiveDraftRejection(err)
+	case errors.Is(err, service.ErrWechatPublicationDraftFailed):
+		return createDraftFailure{Code: "create_draft_reconciliation_failed", Message: "the previous WeChat draft outcome could not be confirmed", Hint: "Automatic reconciliation has stopped; create a new task or finish the draft manually in WeChat", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationConflict):
 		return createDraftFailure{Code: "create_draft_conflict", Message: "a different draft request already exists for this task", Hint: "Replay the original request or use a new task", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationPending):
@@ -153,6 +157,19 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 		}
 		return createDraftFailure{Code: "create_draft_provider_failure", Message: "WeChat draft creation failed", Hint: "Check the WeChat account configuration and retry when the provider is available", Retryable: true}
 	}
+}
+
+func classifyDefinitiveDraftRejection(err error) createDraftFailure {
+	var apiErr *appwechat.WechatAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrCode {
+		case 40001, 40125:
+			return createDraftFailure{Code: "create_draft_rejected", Message: "WeChat rejected draft creation because the account credentials are invalid", Hint: "Correct the AppID and AppSecret, then rerun the current task", Retryable: false}
+		case 40164:
+			return createDraftFailure{Code: "create_draft_rejected", Message: "WeChat rejected draft creation because the server IP is not allowed", Hint: "Add the server egress IP to the WeChat API allowlist, then rerun the current task", Retryable: false}
+		}
+	}
+	return createDraftFailure{Code: "create_draft_rejected", Message: "WeChat definitively rejected draft creation", Hint: "Correct the WeChat account configuration indicated by the error, then rerun the current task", Retryable: false}
 }
 
 func listDraftsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -32,6 +32,10 @@ func (f *fakeWechatPublicationService) Publish(_ context.Context, userID, taskID
 	f.method, f.userID, f.taskID = "publish", userID, taskID
 	return f.publication, f.err
 }
+func (f *fakeWechatPublicationService) RetryPublish(_ context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	f.method, f.userID, f.taskID = "retry-publish", userID, taskID
+	return f.publication, f.err
+}
 func (f *fakeWechatPublicationService) Reconcile(_ context.Context, userID, taskID string) error {
 	f.method, f.userID, f.taskID = "reconcile", userID, taskID
 	return f.err
@@ -48,6 +52,7 @@ func publicationHandlerApp(fake WechatPublicationActions) *fiber.App {
 	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", c.Get("X-User-ID")); return c.Next() })
 	app.Get("/tasks/:id/wechat-publication", h.Get)
 	app.Post("/tasks/:id/wechat-publication/publish", h.Publish)
+	app.Post("/tasks/:id/wechat-publication/retry-publish", h.RetryPublish)
 	app.Post("/tasks/:id/wechat-publication/reconcile", h.Reconcile)
 	app.Post("/tasks/:id/wechat-publication/select", h.Select)
 	return app
@@ -58,6 +63,7 @@ func TestWechatPublicationHandlerActionsAreThinAndArticleIDOnly(t *testing.T) {
 	for _, tc := range []struct{ name, method, path, body, called, articleID string }{
 		{"get", http.MethodGet, "/tasks/" + taskID + "/wechat-publication", "", "get", ""},
 		{"publish", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/publish", "", "publish", ""},
+		{"retry publish", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/retry-publish", "", "retry-publish", ""},
 		{"reconcile", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/reconcile", "", "reconcile", ""},
 		{"select", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/select", `{"article_id":"article-1"}`, "select", "article-1"},
 	} {

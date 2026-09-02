@@ -340,6 +340,7 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.WechatPublicationHandler != nil {
 		apiV1.Get("/tasks/:id/wechat-publication", svc.WechatPublicationHandler.Get)
 		apiV1.Post("/tasks/:id/wechat-publication/publish", svc.WechatPublicationHandler.Publish)
+		apiV1.Post("/tasks/:id/wechat-publication/retry-publish", svc.WechatPublicationHandler.RetryPublish)
 		apiV1.Post("/tasks/:id/wechat-publication/reconcile", svc.WechatPublicationHandler.Reconcile)
 		apiV1.Post("/tasks/:id/wechat-publication/select", svc.WechatPublicationHandler.Select)
 	}

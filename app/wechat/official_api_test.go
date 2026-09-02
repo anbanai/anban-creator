@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
 
 func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *testing.T) {
 	tests := []struct {
@@ -151,6 +158,90 @@ func TestOfficialAPIReturnsTypedWechatError(t *testing.T) {
 	_, err := api.SubmitFreePublish(context.Background(), FreePublishSubmitRequest{MediaID: "draft"})
 	if err == nil || !strings.Contains(err.Error(), "48001") {
 		t.Fatalf("error = %v, want WeChat 48001", err)
+	}
+}
+
+func TestOfficialAPISanitizesAccessTokenSourceErrors(t *testing.T) {
+	t.Run("known WeChat code", func(t *testing.T) {
+		sourceErr := errors.New("http get error: uri=https://api.weixin.qq.com/cgi-bin/token?appid=public-app-id&secret=super-secret errcode=40125")
+		api := NewOfficialAPI(http.DefaultClient, "https://api.weixin.qq.com", func(context.Context) (string, error) {
+			return "", sourceErr
+		})
+
+		_, err := api.BatchGetDrafts(context.Background(), DraftBatchGetRequest{Count: 1})
+		var apiErr *WechatAPIError
+		if !errors.As(err, &apiErr) || apiErr.ErrCode != 40125 {
+			t.Fatalf("error = %#v, want sanitized typed 40125", err)
+		}
+		for _, secret := range []string{"public-app-id", "super-secret", "https://", "appid", "secret="} {
+			if strings.Contains(strings.ToLower(err.Error()), strings.ToLower(secret)) {
+				t.Fatalf("access-token error exposed %q: %q", secret, err)
+			}
+		}
+	})
+
+	t.Run("unknown source error", func(t *testing.T) {
+		sourceErr := errors.New("http get error: uri=https://api.weixin.qq.com/cgi-bin/token?appid=public-app-id&secret=super-secret")
+		api := NewOfficialAPI(http.DefaultClient, "https://api.weixin.qq.com", func(context.Context) (string, error) {
+			return "", sourceErr
+		})
+
+		_, err := api.BatchGetDrafts(context.Background(), DraftBatchGetRequest{Count: 1})
+		if err == nil || !strings.Contains(err.Error(), "access token") {
+			t.Fatalf("error = %#v, want bounded access-token failure", err)
+		}
+		for _, secret := range []string{"public-app-id", "super-secret", "https://", "appid", "secret="} {
+			if strings.Contains(strings.ToLower(err.Error()), strings.ToLower(secret)) {
+				t.Fatalf("access-token error exposed %q: %q", secret, err)
+			}
+		}
+	})
+}
+
+func TestOfficialAPIClassifiesTransientWechatErrorAsRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"errcode":-1,"errmsg":"system busy"}`)
+	}))
+	defer server.Close()
+	api := NewOfficialAPI(server.Client(), server.URL, func(context.Context) (string, error) { return "token", nil })
+	_, err := api.BatchGetFreePublishes(context.Background(), FreePublishBatchGetRequest{Count: 1})
+	if err == nil || !IsRetryable(err) {
+		t.Fatalf("error = %#v, want retryable WeChat system-busy error", err)
+	}
+}
+
+func TestOfficialAPITransportErrorDoesNotExposeAccessToken(t *testing.T) {
+	transportErr := errors.New("connection reset")
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})}
+	api := NewOfficialAPI(client, "https://api.weixin.qq.com", func(context.Context) (string, error) { return "secret-token", nil })
+
+	_, err := api.BatchGetFreePublishes(context.Background(), FreePublishBatchGetRequest{Count: 1})
+	if err == nil || !errors.Is(err, transportErr) {
+		t.Fatalf("error = %#v, want wrapped transport error", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") || strings.Contains(err.Error(), "access_token") {
+		t.Fatalf("transport error exposed credentials: %q", err)
+	}
+}
+
+func TestOfficialAPINonSuccessResponseDoesNotExposeResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `proxy failure for `+r.URL.String()+` access_token=echoed-secret`)
+	}))
+	defer server.Close()
+	api := NewOfficialAPI(server.Client(), server.URL, func(context.Context) (string, error) { return "secret-token", nil })
+
+	_, err := api.BatchGetFreePublishes(context.Background(), FreePublishBatchGetRequest{Count: 1})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("error = %v, want bounded HTTP status diagnostic", err)
+	}
+	for _, secret := range []string{"secret-token", "echoed-secret", "access_token"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("non-success response exposed %q: %q", secret, err)
+		}
 	}
 }
 

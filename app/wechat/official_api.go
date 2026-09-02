@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -212,7 +213,7 @@ func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any
 	}
 	token, err := p.accessToken(ctx)
 	if err != nil {
-		return fmt.Errorf("get wechat access token: %w", err)
+		return sanitizeAccessTokenSourceError(err)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -232,15 +233,19 @@ func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any
 	req.Header.Set("Content-Type", "application/json")
 	response, err := p.client.Do(req)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) && urlErr.Err != nil {
+			return fmt.Errorf("call WeChat %s: %w", path, urlErr.Err)
+		}
 		return fmt.Errorf("call WeChat %s: %w", path, err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("WeChat %s returned HTTP %d", path, response.StatusCode)
+	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return fmt.Errorf("read WeChat %s response: %w", path, err)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("WeChat %s returned HTTP %d: %s", path, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var apiError struct {
 		ErrCode int    `json:"errcode"`
@@ -250,7 +255,8 @@ func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any
 		return fmt.Errorf("decode WeChat %s response: %w", path, err)
 	}
 	if apiError.ErrCode != 0 {
-		return &WechatAPIError{ErrCode: apiError.ErrCode, UserMsg: apiError.ErrMsg, Original: fmt.Errorf("errcode=%d errmsg=%s", apiError.ErrCode, apiError.ErrMsg)}
+		raw := fmt.Errorf("errcode=%d errmsg=%s", apiError.ErrCode, apiError.ErrMsg)
+		return ParseWechatError(raw)
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("decode WeChat %s response: %w", path, err)
@@ -259,4 +265,25 @@ func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any
 		receiver.setRawResponse(body)
 	}
 	return nil
+}
+
+func sanitizeAccessTokenSourceError(err error) error {
+	var apiErr *WechatAPIError
+	if errors.As(err, &apiErr) {
+		return sanitizedWechatAPIError(apiErr.ErrCode)
+	}
+	if parsed := ParseWechatError(err); parsed != nil {
+		return sanitizedWechatAPIError(parsed.ErrCode)
+	}
+	return errors.New("get WeChat access token failed")
+}
+
+func sanitizedWechatAPIError(code int) *WechatAPIError {
+	parsed := ParseWechatError(fmt.Errorf("errcode=%d", code))
+	return &WechatAPIError{
+		ErrCode:   parsed.ErrCode,
+		UserMsg:   parsed.UserMsg,
+		HintMsg:   parsed.HintMsg,
+		Retryable: parsed.Retryable,
+	}
 }

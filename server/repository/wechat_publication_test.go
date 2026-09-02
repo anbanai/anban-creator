@@ -293,6 +293,59 @@ func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T)
 		}
 	})
 
+	t.Run("unsupported draft retry is version guarded and has one winner", func(t *testing.T) {
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusUnsupported,
+			WechatStatusCode: 48001, LastError: "missing draft permission",
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		stale, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimedAt := time.Now()
+		won, err := repo.WechatPublications().RetryUnsupportedDraft(ctx, stale.ID, stale.UpdatedAt, claimedAt, "retry-claim")
+		if err != nil || !won {
+			t.Fatalf("RetryUnsupportedDraft won=%v err=%v", won, err)
+		}
+		won, err = repo.WechatPublications().RetryUnsupportedDraft(ctx, stale.ID, stale.UpdatedAt, claimedAt.Add(time.Second), "stale-claim")
+		if err != nil || won {
+			t.Fatalf("stale RetryUnsupportedDraft won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.Status != model.WechatPublicationStatusDrafting || stored.WechatStatusCode != 0 || stored.LastError != "" ||
+			stored.ClaimToken != "retry-claim" || stored.ClaimedAt == nil || !stored.ClaimedAt.Equal(claimedAt) {
+			t.Fatalf("stored=%#v err=%v", stored, err)
+		}
+	})
+
+	t.Run("draft add write-ahead marker includes its recovery boundary", func(t *testing.T) {
+		claimedAt := time.Now().Add(-time.Minute)
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+			ClaimToken: "draft-add-claim", ClaimedAt: &claimedAt,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		attemptedAt := time.Now()
+		nextCheckAt := attemptedAt.Add(10 * time.Minute)
+		won, err := repo.WechatPublications().MarkDraftAddAttempted(ctx, publication.ID, "draft-add-claim", attemptedAt, nextCheckAt)
+		if err != nil || !won {
+			t.Fatalf("MarkDraftAddAttempted won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil || stored.DraftAddAttemptedAt == nil || !stored.DraftAddAttemptedAt.Equal(attemptedAt) ||
+			stored.NextCheckAt == nil || !stored.NextCheckAt.Equal(nextCheckAt) ||
+			stored.DraftCreatedAt == nil || !stored.DraftCreatedAt.Equal(attemptedAt) {
+			t.Fatalf("write-ahead state = %#v err=%v", stored, err)
+		}
+	})
+
 	t.Run("reconciliation CAS loss preserves newer publish claim", func(t *testing.T) {
 		publication := &model.WechatPublication{
 			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",

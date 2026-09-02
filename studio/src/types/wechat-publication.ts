@@ -39,6 +39,7 @@ export interface WechatPublication {
   published_at?: string
   next_check_at?: string
   last_checked_at?: string
+  submit_attempted_at?: string
   check_attempts?: number
   last_error?: string
   candidates?: WechatPublicationCandidate[]

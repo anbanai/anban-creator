@@ -299,6 +299,34 @@ func TestCreateDraftHandlerRejectsDuplicateContentImagesBeforeWechat(t *testing.
 	}
 }
 
+func TestClassifyCreateDraftFailureMarksExpiredReconciliationTerminal(t *testing.T) {
+	failure := classifyCreateDraftFailure(service.ErrWechatPublicationDraftFailed)
+
+	if failure.Code != "create_draft_reconciliation_failed" || failure.Retryable {
+		t.Fatalf("failure = %#v, want terminal reconciliation failure", failure)
+	}
+	hint := strings.ToLower(failure.Hint)
+	if !strings.Contains(hint, "stopped") || !strings.Contains(hint, "new task") || !strings.Contains(hint, "wechat") {
+		t.Fatalf("hint = %q, want stopped reconciliation and recovery action", failure.Hint)
+	}
+}
+
+func TestClassifyCreateDraftFailureExplainsDefinitiveIPRejection(t *testing.T) {
+	err := errors.Join(
+		service.ErrWechatPublicationDraftRejected,
+		&appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"},
+	)
+	failure := classifyCreateDraftFailure(err)
+
+	if failure.Code != "create_draft_rejected" || failure.Retryable {
+		t.Fatalf("failure = %#v, want nonretryable definitive rejection", failure)
+	}
+	message, hint := strings.ToLower(failure.Message), strings.ToLower(failure.Hint)
+	if !strings.Contains(message, "ip") || !strings.Contains(hint, "allowlist") || !strings.Contains(hint, "rerun") {
+		t.Fatalf("failure = %#v, want actionable IP allowlist guidance", failure)
+	}
+}
+
 func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		f := newPublishingToolFixture(t)
@@ -387,7 +415,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 	})
 }
 
-func TestCreateDraftHandlerReturnsPersistedUnsupportedCapabilityFailure(t *testing.T) {
+func TestCreateDraftHandlerRetriesUnsupportedCapabilityAfterRepair(t *testing.T) {
 	f := newPublishingToolFixture(t)
 	ctx := withMCPUserID(context.Background(), f.userID)
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
@@ -397,7 +425,7 @@ func TestCreateDraftHandlerReturnsPersistedUnsupportedCapabilityFailure(t *testi
 		t.Fatal(err)
 	}
 	failure := decodeCreateDraftToolFailure(t, result)
-	if failure.Code != "create_draft_unsupported" || failure.Retryable || !strings.Contains(strings.ToLower(failure.Hint), "capability") {
+	if failure.Code != "create_draft_unsupported" || failure.Retryable || !strings.Contains(strings.ToLower(failure.Hint), "rerun") {
 		t.Fatalf("failure = %#v, want nonretryable account capability hint", failure)
 	}
 	firstAddCalls, firstListCalls := f.api.addCalls, f.api.draftListCalls
@@ -407,12 +435,15 @@ func TestCreateDraftHandlerReturnsPersistedUnsupportedCapabilityFailure(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	failure = decodeCreateDraftToolFailure(t, result)
-	if failure.Code != "create_draft_unsupported" || failure.Retryable {
-		t.Fatalf("persisted failure = %#v", failure)
+	if result.IsError {
+		t.Fatalf("retry failed: %#v", result)
 	}
-	if f.api.addCalls != firstAddCalls || f.api.draftListCalls != firstListCalls {
-		t.Fatalf("persisted unsupported row reached provider again: add=%d/%d list=%d/%d", f.api.addCalls, firstAddCalls, f.api.draftListCalls, firstListCalls)
+	data := decodeMCPMap(t, result)
+	if data["draft_media_id"] != "draft-media-1" || data["status"] != model.WechatPublicationStatusDrafted {
+		t.Fatalf("retry response = %#v", data)
+	}
+	if f.api.addCalls != firstAddCalls+1 || f.api.draftListCalls != firstListCalls+1 {
+		t.Fatalf("retry provider calls: add=%d/%d list=%d/%d", f.api.addCalls, firstAddCalls+1, f.api.draftListCalls, firstListCalls+1)
 	}
 }
 
