@@ -7,6 +7,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type planRepository struct {
@@ -24,6 +25,18 @@ func (r *planRepository) Create(ctx context.Context, plan *model.Plan) error {
 func (r *planRepository) FindByID(ctx context.Context, id string) (*model.Plan, error) {
 	var plan model.Plan
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&plan).Error; err != nil {
+		return nil, err
+	}
+	return &plan, nil
+}
+
+func (r *planRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.Plan, error) {
+	var plan model.Plan
+	query := r.db.WithContext(ctx)
+	if r.db.Dialector.Name() != "sqlite" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Where("id = ?", id).First(&plan).Error; err != nil {
 		return nil, err
 	}
 	return &plan, nil

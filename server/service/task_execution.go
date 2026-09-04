@@ -82,8 +82,8 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, _ 
 	if err != nil {
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
-	if isPreDispatchTerminalFailure(task) {
-		return s.finalizeFailedExecutionPostCommit(ctx, task, task.ErrorMessage)
+	if model.IsTerminalTaskStatus(task.Status) {
+		return nil
 	}
 	_, preparation, err := s.preparePendingExecution(ctx, task)
 	if err != nil || preparation != pendingExecutionReady {
@@ -94,6 +94,9 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, _ 
 
 func (s *TaskService) dispatchPendingTask(ctx context.Context, task *model.Task) error {
 	if err := s.dispatchRuntime(ctx, task); err != nil {
+		if errors.Is(err, ErrTaskPlanPaused) {
+			return nil
+		}
 		return s.finalizePendingDispatchFailure(task, err)
 	}
 	return nil
@@ -195,10 +198,6 @@ func (s *TaskService) verifyPendingFailureCommitted(ctx context.Context, task *m
 		}
 	}
 	return true, nil
-}
-
-func isPreDispatchTerminalFailure(task *model.Task) bool {
-	return task != nil && task.Status == model.TaskStatusFailed && task.CurrentExecutionID == nil && task.BillingTerminalReason == model.TaskBillingTerminalPlatformError
 }
 
 func (s *TaskService) finalizeFailedExecutionPostCommit(ctx context.Context, task *model.Task, errorMsg string) error {

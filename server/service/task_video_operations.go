@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -186,8 +187,9 @@ func recordUnderstandingCost(ctx context.Context, costs UnderstandingCostRecorde
 		_, err = costs.RecordProviderTokenUsage(ctx, RecordProviderTokenCostRequest{
 			TaskID: req.TaskID, Provider: req.Provider, Model: req.Model,
 			ProviderRequestID: req.ProviderRequestID, CatalogID: costs.CatalogID(), IdempotencyKey: req.ProviderRequestID,
-			Usage:  TokenUsage{Input: req.Usage.InputTokens, CacheRead: cacheRead, CacheCreation: req.Usage.CacheCreationInputTokens, Output: req.Usage.OutputTokens},
-			Source: string(model.BillingProviderCostSourceProviderResponse),
+			Usage:   TokenUsage{Input: req.Usage.InputTokens, CacheRead: cacheRead, CacheCreation: req.Usage.CacheCreationInputTokens, Output: req.Usage.OutputTokens},
+			UsageAt: time.Now().UTC(),
+			Source:  string(model.BillingProviderCostSourceProviderResponse),
 		})
 	}
 	if err != nil && logger != nil {

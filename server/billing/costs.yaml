@@ -49,12 +49,25 @@ models:
     pricing_type: "token"
     currency: "USD"
     unit: 1000000
-    input: "0.435"
-    cache_read_input: "0.003625"
-    cache_creation_input: "0.435"
-    output: "0.87"
+    input: "0.66"
+    cache_read_input: "0.022"
+    cache_creation_input: "0.66"
+    output: "1.98"
     operator_evidence: "https://api-docs.deepseek.com/quick_start/pricing/"
-    effective_at: "2026-07-29T00:00:00+08:00"
+    effective_at: "2026-08-16T16:00:00Z"
+    peak:
+      effective_at: "2026-08-16T16:00:00Z"
+      input: "1.32"
+      cache_read_input: "0.044"
+      cache_creation_input: "1.32"
+      output: "3.96"
+    pricing_timezone: "UTC"
+    peak_weekdays_only: true
+    peak_windows:
+      - start: "01:00"
+        end: "04:00"
+      - start: "06:00"
+        end: "10:00"
 
   moonshot/kimi-k3:
     pricing_type: "token"

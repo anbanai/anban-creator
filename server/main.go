@@ -368,6 +368,7 @@ func main() {
 		taskSvc.SetProviderCostService(fixedBilling.Cost)
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
+		planSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		taskSvc.SetExecutorMaxTurns(cfg.Claude.MaxTurns)

@@ -192,6 +192,7 @@ const (
 	TaskBillingTerminalProviderError           = "provider_error"
 	TaskBillingTerminalExecutionTimeout        = "execution_timeout"
 	TaskBillingTerminalInfrastructureCancelled = "infrastructure_cancelled"
+	TaskBillingTerminalPlanPaused              = "plan_paused"
 )
 
 // ExecutionTarget values selecting where a task runs.

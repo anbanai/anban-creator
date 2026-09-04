@@ -1127,6 +1127,85 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	}
 }
 
+func TestPlanServicePauseCancelsPendingBacklogAndReversesAdmission(t *testing.T) {
+	ctx := context.Background()
+	billingTaskSvc, fixture, _ := newFixedTaskBillingFixture(t, 2_000, 0)
+	repo := fixture.repo
+	svc := newTestPlanService(t, repo)
+	projectID := createTestProject(t, repo, billingWalletUserID, model.PlatformArticle)
+	nextRun := time.Now().Add(time.Hour)
+	plan := &model.Plan{ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Status: model.PlanStatusActive, CronExpr: "0 6 * * *", NextRunAt: &nextRun, ExecutionProfile: "effective"}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetBillingWalletService(fixture.wallet)
+	created, err := billingTaskSvc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID, Prompt: "pause backlog", Quantity: 2})
+	if err != nil || len(created) != 2 {
+		t.Fatalf("CreateManual = %d, %v", len(created), err)
+	}
+	for _, task := range created {
+		task.PlanID = &plan.ID
+		if err := repo.Tasks().Update(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.Tasks().UpdateStatus(ctx, created[1].ID, model.TaskStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Pause(ctx, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := repo.Tasks().FindByID(ctx, created[0].ID)
+	running, _ := repo.Tasks().FindByID(ctx, created[1].ID)
+	if pending.Status != model.TaskStatusCancelled || pending.BillingTerminalReason != model.TaskBillingTerminalPlanPaused || running.Status != model.TaskStatusRunning {
+		t.Fatalf("paused task states: pending=%s running=%s", pending.Status, running.Status)
+	}
+	settlements, err := repo.Billing().ListSettlementsByTask(ctx, created[0].ID)
+	if err != nil || len(settlements) != 1 || settlements[0].Reason != model.TaskBillingTerminalPlanPaused {
+		t.Fatalf("pause settlements=%#v err=%v", settlements, err)
+	}
+	if err := svc.Pause(ctx, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	settlements, _ = repo.Billing().ListSettlementsByTask(ctx, created[0].ID)
+	if len(settlements) != 1 {
+		t.Fatalf("repeated pause settlements=%d, want 1", len(settlements))
+	}
+}
+
+func TestFindPendingByProjectExcludesPausedPlanTasks(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestProject(t, repo, "user-dispatch", model.PlatformArticle)
+	activeID, pausedID := uuid.NewString(), uuid.NewString()
+	for _, plan := range []*model.Plan{
+		{ID: activeID, UserID: "user-dispatch", ProjectID: projectID, Status: model.PlanStatusActive, CronExpr: "0 6 * * *"},
+		{ID: pausedID, UserID: "user-dispatch", ProjectID: projectID, Status: model.PlanStatusPaused, CronExpr: "0 6 * * *"},
+	} {
+		if err := repo.Plans().Create(ctx, plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, planID := range []*string{nil, &activeID, &pausedID} {
+		task := &model.Task{ID: uuid.NewString(), UserID: "user-dispatch", ProjectID: projectID, PlanID: planID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := repo.Tasks().FindPendingByProject(ctx, projectID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending tasks=%d, want standalone and active-plan tasks", len(pending))
+	}
+	for _, task := range pending {
+		if task.PlanID != nil && *task.PlanID == pausedID {
+			t.Fatal("paused-plan task was returned for dispatch")
+		}
+	}
+}
+
 func TestPlanService_Delete(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

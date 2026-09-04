@@ -2,24 +2,19 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/anbanai/anban-creator/server/agent"
-	config "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
 
 var (
-	errPreStartReplacementContended = fmt.Errorf("pre-start replacement lost concurrent transition")
-	ErrRuntimePreparationInFlight   = errors.New("runtime preparation may still be in flight")
-	ErrExecutionCleanupLeaseLost    = errors.New("runtime execution cleanup lease lost")
+	ErrRuntimePreparationInFlight = errors.New("runtime preparation may still be in flight")
+	ErrExecutionCleanupLeaseLost  = errors.New("runtime execution cleanup lease lost")
 )
 
 func (s *TaskService) FindReconcilableExecutions(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error) {
@@ -161,110 +156,13 @@ func (s *TaskService) ReleaseExecutionCleanup(ctx context.Context, executionID, 
 	return s.repo.TaskExecutions().ReleaseCleanup(ctx, executionID, token)
 }
 
-// ReconcileExecutionFailure either atomically replaces a pre-start attempt or
-// sends the current attempt through the normal terminal finalizer. retryLimit
-// counts replacements: limit=1 permits attempt 1 to create attempt 2.
-func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID, status, reason string, diagnostics []byte, retryLimit int) error {
-	execution, task, err := s.currentExecution(ctx, executionID)
+// ReconcileExecutionFailure always sends the current attempt through the
+// terminal finalizer. retryLimit is retained in the interface for wire and
+// deployment compatibility, but failed provider work is never retried.
+func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID, status, reason string, diagnostics []byte, _ int) error {
+	_, _, err := s.currentExecution(ctx, executionID)
 	if err != nil {
 		return err
 	}
-	if !execution.Started && execution.Attempt <= retryLimit {
-		replacement, replaced, err := s.replacePreStartExecution(ctx, task, execution, reason, diagnostics)
-		if err != nil {
-			return err
-		}
-		if replaced {
-			freshTask, err := s.repo.Tasks().FindByID(ctx, task.ID)
-			if err != nil {
-				return err
-			}
-			return s.dispatchCurrentExecution(ctx, freshTask, replacement)
-		}
-		latest, reloadErr := s.repo.Tasks().FindByID(ctx, task.ID)
-		if reloadErr == nil && latest.CurrentExecutionID != nil && *latest.CurrentExecutionID != execution.ID {
-			return nil
-		}
-	}
 	return s.TerminalizeCurrentExecution(ctx, executionID, status, reason, diagnostics)
-}
-
-func (s *TaskService) replacePreStartExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, reason string, diagnostics []byte) (*model.TaskExecution, bool, error) {
-	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
-		return nil, false, err
-	}
-	target, err := s.runtimeDispatcherScope()
-	if err != nil {
-		return nil, false, err
-	}
-	var replacement *model.TaskExecution
-	replaced := false
-	err = s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		currentTask, err := txRepo.Tasks().FindByID(ctx, task.ID)
-		if err != nil {
-			return err
-		}
-		current, err := txRepo.TaskExecutions().FindByID(ctx, execution.ID)
-		if err != nil {
-			return err
-		}
-		if currentTask.Status != model.TaskStatusRunning || currentTask.CurrentExecutionID == nil || *currentTask.CurrentExecutionID != current.ID || current.Started || isTerminalExecution(current.Status) {
-			return nil
-		}
-		if err := txRepo.TaskFiles().DiscardCurrentExecution(ctx, task.ID, current.ID); err != nil {
-			return fmt.Errorf("discard failed pre-start artifacts: %w", err)
-		}
-		encoded, _ := json.Marshal(&agent.ExecutionResult{Success: false, Error: reason, RemoteArtifacts: true})
-		won, err := txRepo.TaskExecutions().Transition(ctx, current.ID,
-			[]string{model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting}, model.TaskExecutionFailed,
-			model.ExecutionTransition{TerminalReason: reason, Diagnostics: diagnostics, Result: encoded, FinalizationStatus: model.TaskExecutionFinalizationDone})
-		if err != nil {
-			return err
-		}
-		if !won {
-			return errPreStartReplacementContended
-		}
-		profiledExecution := model.NewTaskExecutionAgentProfile(currentTask.AgentProfileSnapshot, currentTask.AgentProfileFingerprint)
-		replacement = &profiledExecution
-		runtime := config.RuntimeImageSelection{
-			Profile: strings.TrimSpace(current.RuntimeProfile),
-			Image:   strings.TrimSpace(current.RuntimeImage),
-		}
-		if !inheritAgentPackIdentity(replacement, current) {
-			if err := applyAgentPackIdentity(replacement, currentTask.Type); err != nil {
-				return err
-			}
-			runtime = s.runtimeDispatcher.ResolveRuntime(currentTask.Type)
-			runtime.Profile = strings.TrimSpace(runtime.Profile)
-			runtime.Image = strings.TrimSpace(runtime.Image)
-		}
-		if runtime.Profile == "" || runtime.Image == "" {
-			return fmt.Errorf("resolve replacement runtime for task type %q returned incomplete identity", currentTask.Type)
-		}
-		replacement.ID = uuid.NewString()
-		replacement.TaskID = task.ID
-		replacement.Attempt = current.Attempt + 1
-		if replacement.RuntimeProfile != runtime.Profile {
-			return fmt.Errorf("replacement runtime profile %q does not match selected profile %q", replacement.RuntimeProfile, runtime.Profile)
-		}
-		replacement.RuntimeImage = runtime.Image
-		replacement.Target = target
-		replacement.Status = model.TaskExecutionCreated
-		if err := txRepo.TaskExecutions().Create(ctx, replacement); err != nil {
-			return err
-		}
-		won, err = txRepo.Tasks().SetCurrentExecution(ctx, task.ID, replacement.ID)
-		if err != nil {
-			return err
-		}
-		if !won {
-			return errPreStartReplacementContended
-		}
-		replaced = true
-		return nil
-	})
-	if err == errPreStartReplacementContended {
-		return nil, false, nil
-	}
-	return replacement, replaced, err
 }

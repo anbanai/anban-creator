@@ -143,7 +143,7 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 {
 		t.Fatal("job ttl")
 	}
-	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 {
+	if cfg.Claude.Kubernetes.PreStartRetryLimit != 0 {
 		t.Fatal("pre-start retry limit")
 	}
 }
@@ -390,11 +390,11 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 			wantErr: "claude.kubernetes.completion_grace_seconds must not be negative",
 		},
 		{
-			name: "negative pre-start retry limit",
+			name: "nonzero pre-start retry limit",
 			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.PreStartRetryLimit = -1
+				cfg.Claude.Kubernetes.PreStartRetryLimit = 1
 			},
-			wantErr: "claude.kubernetes.pre_start_retry_limit must not be negative",
+			wantErr: "claude.kubernetes.pre_start_retry_limit must be 0",
 		},
 	}
 

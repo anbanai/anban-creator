@@ -68,6 +68,7 @@ type SessionRepository interface {
 type PlanRepository interface {
 	Create(ctx context.Context, plan *model.Plan) error
 	FindByID(ctx context.Context, id string) (*model.Plan, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.Plan, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Plan, error)
 	Update(ctx context.Context, plan *model.Plan) error
 	UpdateEditable(ctx context.Context, plan *model.Plan, scheduleChanged bool) error
@@ -126,6 +127,8 @@ type TaskRepository interface {
 	CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string) (int64, error)
 	CountRunningByProject(ctx context.Context, projectID string) (int64, error)
 	FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error)
+	FindPendingByPlanID(ctx context.Context, planID string) ([]*model.Task, error)
+	CancelPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
 	// ClaimNextLocalTask atomically claims the oldest pending local-target task
 	// owned by userID: CAS status pending→running, set execution_target=
 	// local_claimed + executor_info + started_at, all inside one transaction so

@@ -19,6 +19,7 @@ import (
 var (
 	ErrDispatchInProgress              = errors.New("runtime dispatch is already in progress")
 	ErrRuntimeDispatcherTargetMismatch = errors.New("runtime dispatcher target mismatch")
+	ErrTaskPlanPaused                  = errors.New("task plan is paused")
 )
 
 const defaultRuntimeDispatchLease = time.Minute
@@ -343,6 +344,15 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 	var execution *model.TaskExecution
 	created := false
 	err = s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if task.PlanID != nil && strings.TrimSpace(*task.PlanID) != "" {
+			plan, err := txRepo.Plans().FindByIDForUpdate(ctx, strings.TrimSpace(*task.PlanID))
+			if err != nil {
+				return fmt.Errorf("check task plan before dispatch: %w", err)
+			}
+			if plan.Status != model.PlanStatusActive {
+				return ErrTaskPlanPaused
+			}
+		}
 		swapped, err := txRepo.Tasks().CompareAndSwapStatusAndStartedAt(
 			ctx, task.ID, model.TaskStatusPending, model.TaskStatusRunning,
 		)

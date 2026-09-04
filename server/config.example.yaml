@@ -351,8 +351,8 @@ claude:
     completion_grace_seconds: 30
     # 已完成 Job 的自动清理时间，单位秒。
     ttl_seconds_after_finished: 600
-    # Job 启动前失败时允许创建新执行尝试的次数。
-    pre_start_retry_limit: 1
+    # 任务失败后不自动创建新的执行尝试；手动重试会创建新任务并重新计费。
+    pre_start_retry_limit: 0
     resources:
       # 未配置专属档位的任务使用此默认资源。
       requests:

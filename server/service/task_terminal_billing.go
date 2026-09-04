@@ -20,7 +20,8 @@ func ShouldReverseTaskCharge(reason string, durableDelivery bool) bool {
 	case model.TaskBillingTerminalPlatformError,
 		model.TaskBillingTerminalProviderError,
 		model.TaskBillingTerminalExecutionTimeout,
-		model.TaskBillingTerminalInfrastructureCancelled:
+		model.TaskBillingTerminalInfrastructureCancelled,
+		model.TaskBillingTerminalPlanPaused:
 		return true
 	default:
 		return false
@@ -58,7 +59,8 @@ func approvedTaskBillingTerminalReason(reason string) bool {
 	case model.TaskBillingTerminalPlatformError,
 		model.TaskBillingTerminalProviderError,
 		model.TaskBillingTerminalExecutionTimeout,
-		model.TaskBillingTerminalInfrastructureCancelled:
+		model.TaskBillingTerminalInfrastructureCancelled,
+		model.TaskBillingTerminalPlanPaused:
 		return true
 	default:
 		return false

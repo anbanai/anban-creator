@@ -138,21 +138,33 @@ type rawCostCatalog struct {
 }
 
 type rawModelConfig struct {
-	PricingType        string        `yaml:"pricing_type"`
-	Currency           string        `yaml:"currency"`
-	Unit               int64         `yaml:"unit"`
+	PricingType        string               `yaml:"pricing_type"`
+	Currency           string               `yaml:"currency"`
+	Unit               int64                `yaml:"unit"`
+	Input              decimalString        `yaml:"input"`
+	CacheReadInput     decimalString        `yaml:"cache_read_input"`
+	CacheCreationInput decimalString        `yaml:"cache_creation_input"`
+	Output             decimalString        `yaml:"output"`
+	TextInput          decimalString        `yaml:"text_input"`
+	TextCachedInput    decimalString        `yaml:"text_cached_input"`
+	ImageInput         decimalString        `yaml:"image_input"`
+	ImageCachedInput   decimalString        `yaml:"image_cached_input"`
+	ImageOutput        decimalString        `yaml:"image_output"`
+	Tiers              []rawCostTier        `yaml:"tiers"`
+	OperatorEvidence   string               `yaml:"operator_evidence"`
+	EffectiveAt        string               `yaml:"effective_at"`
+	Peak               *rawTokenPricePeriod `yaml:"peak"`
+	PricingTimezone    string               `yaml:"pricing_timezone"`
+	PeakWeekdaysOnly   bool                 `yaml:"peak_weekdays_only"`
+	PeakWindows        []TimeWindow         `yaml:"peak_windows"`
+}
+
+type rawTokenPricePeriod struct {
+	EffectiveAt        string        `yaml:"effective_at"`
 	Input              decimalString `yaml:"input"`
 	CacheReadInput     decimalString `yaml:"cache_read_input"`
 	CacheCreationInput decimalString `yaml:"cache_creation_input"`
 	Output             decimalString `yaml:"output"`
-	TextInput          decimalString `yaml:"text_input"`
-	TextCachedInput    decimalString `yaml:"text_cached_input"`
-	ImageInput         decimalString `yaml:"image_input"`
-	ImageCachedInput   decimalString `yaml:"image_cached_input"`
-	ImageOutput        decimalString `yaml:"image_output"`
-	Tiers              []rawCostTier `yaml:"tiers"`
-	OperatorEvidence   string        `yaml:"operator_evidence"`
-	EffectiveAt        string        `yaml:"effective_at"`
 }
 
 type rawCostTier struct {
@@ -182,6 +194,20 @@ type ModelCostConfig struct {
 	Tiers              []CostTier
 	OperatorEvidence   string
 	EffectiveAt        time.Time
+	Peak               *TokenPricePeriod
+	PeakEffectiveAt    time.Time
+	PricingTimezone    string
+	PeakWeekdaysOnly   bool
+	PeakWindows        []TimeWindow
+}
+
+// TokenPricePeriod is an optional alternate token price schedule for models
+// whose provider pricing changes by time of day.
+type TokenPricePeriod struct {
+	Input              MicroCNY
+	CacheReadInput     MicroCNY
+	CacheCreationInput MicroCNY
+	Output             MicroCNY
 }
 
 type CostTier struct {
@@ -280,7 +306,7 @@ func fixedPolicySnapshot() PolicySnapshot {
 		Promotions:    PromotionsPolicy{MayRepayDebt: false},
 		TaskFailureReversal: TaskFailureReversalPolicy{
 			Enabled: true,
-			Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled"},
+			Reasons: []string{"platform_error", "provider_error", "execution_timeout", "infrastructure_cancelled", "plan_paused"},
 		},
 	}
 }
@@ -620,6 +646,62 @@ func validateCosts(raw rawCostCatalog) (CostCatalog, error) {
 			PricingType: pricingType, Currency: canonicalCurrency, Unit: rawModel.Unit,
 			OperatorEvidence: strings.TrimSpace(rawModel.OperatorEvidence), EffectiveAt: effectiveAt.UTC(),
 		}
+		if rawModel.Peak != nil {
+			if pricingType != "token" {
+				return costs, configError("costs.yaml", field+".peak", errors.New("peak schedule is only valid for token pricing"))
+			}
+			period := &TokenPricePeriod{}
+			periodFields := []struct {
+				name string
+				raw  decimalString
+				out  *MicroCNY
+			}{
+				{name: "input", raw: rawModel.Peak.Input, out: &period.Input},
+				{name: "cache_read_input", raw: rawModel.Peak.CacheReadInput, out: &period.CacheReadInput},
+				{name: "cache_creation_input", raw: rawModel.Peak.CacheCreationInput, out: &period.CacheCreationInput},
+				{name: "output", raw: rawModel.Peak.Output, out: &period.Output},
+			}
+			for _, item := range periodFields {
+				parsed, parseErr := ParseMicroCNY(strings.TrimSpace(string(item.raw)))
+				if parseErr != nil || parsed <= 0 {
+					if parseErr == nil {
+						parseErr = errors.New("price must be positive")
+					}
+					return costs, configError("costs.yaml", field+".peak."+item.name, parseErr)
+				}
+				*item.out = parsed
+			}
+			peakEffectiveAt, peakEffectiveErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(rawModel.Peak.EffectiveAt))
+			if peakEffectiveErr != nil {
+				return costs, configError("costs.yaml", field+".peak.effective_at", errors.New("effective_at must be RFC3339"))
+			}
+			model.Peak = period
+			model.PeakEffectiveAt = peakEffectiveAt.UTC()
+			model.PricingTimezone = strings.TrimSpace(rawModel.PricingTimezone)
+			if model.PricingTimezone == "" {
+				return costs, configError("costs.yaml", field+".pricing_timezone", errors.New("is required when peak schedule is configured"))
+			}
+			if _, loadErr := time.LoadLocation(model.PricingTimezone); loadErr != nil {
+				return costs, configError("costs.yaml", field+".pricing_timezone", errors.New("must be a valid IANA timezone"))
+			}
+			if len(rawModel.PeakWindows) == 0 {
+				return costs, configError("costs.yaml", field+".peak_windows", errors.New("must not be empty when peak schedule is configured"))
+			}
+			model.PeakWeekdaysOnly = rawModel.PeakWeekdaysOnly
+			model.PeakWindows = append([]TimeWindow(nil), rawModel.PeakWindows...)
+			previousEnd := -1
+			for index, window := range model.PeakWindows {
+				start, startErr := parseClockMinute(window.Start, false)
+				end, endErr := parseClockMinute(window.End, true)
+				if startErr != nil || endErr != nil || start >= end {
+					return costs, configError("costs.yaml", fmt.Sprintf("%s.peak_windows[%d]", field, index), errors.New("invalid non-overlapping time window"))
+				}
+				if previousEnd >= 0 && start < previousEnd {
+					return costs, configError("costs.yaml", fmt.Sprintf("%s.peak_windows[%d]", field, index), errors.New("invalid non-overlapping time window"))
+				}
+				previousEnd = end
+			}
+		}
 		prices := []struct {
 			name  string
 			raw   decimalString
@@ -788,6 +870,11 @@ type costModelSnapshot struct {
 	Tiers              []costTierSnapshot `json:"tiers"`
 	OperatorEvidence   string             `json:"operator_evidence"`
 	EffectiveAt        string             `json:"effective_at"`
+	Peak               *TokenPricePeriod  `json:"peak,omitempty"`
+	PeakEffectiveAt    string             `json:"peak_effective_at,omitempty"`
+	PricingTimezone    string             `json:"pricing_timezone,omitempty"`
+	PeakWeekdaysOnly   bool               `json:"peak_weekdays_only,omitempty"`
+	PeakWindows        []TimeWindow       `json:"peak_windows,omitempty"`
 }
 
 func costCatalogID(costs CostCatalog) (string, error) {
@@ -803,6 +890,8 @@ func costCatalogID(costs CostCatalog) (string, error) {
 			TextInput: model.TextInput, TextCachedInput: model.TextCachedInput, ImageInput: model.ImageInput,
 			ImageCachedInput: model.ImageCachedInput, ImageOutput: model.ImageOutput, Tiers: tiers,
 			OperatorEvidence: model.OperatorEvidence, EffectiveAt: model.EffectiveAt.UTC().Format(time.RFC3339Nano),
+			Peak: model.Peak, PeakEffectiveAt: model.PeakEffectiveAt.UTC().Format(time.RFC3339Nano),
+			PricingTimezone: model.PricingTimezone, PeakWeekdaysOnly: model.PeakWeekdaysOnly, PeakWindows: model.PeakWindows,
 		}
 	}
 	snapshot := struct {

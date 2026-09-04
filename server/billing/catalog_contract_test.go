@@ -27,7 +27,7 @@ func TestProductionBillingBundleMatchesPolicy(t *testing.T) {
 		t.Fatalf("finance policy = topup %#v promotions %#v reversal %#v", policy.TopUp, policy.Promotions, policy.TaskFailureReversal)
 	}
 	wantReasons := map[string]bool{
-		"platform_error": true, "provider_error": true, "execution_timeout": true, "infrastructure_cancelled": true,
+		"platform_error": true, "provider_error": true, "execution_timeout": true, "infrastructure_cancelled": true, "plan_paused": true,
 	}
 	if len(policy.TaskFailureReversal.Reasons) != len(wantReasons) {
 		t.Fatalf("reversal reasons = %#v", policy.TaskFailureReversal.Reasons)
@@ -98,7 +98,7 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"volcengine_ark/doubao-seed-2-1-pro-260628":     {"token", "CNY", 6_000_000, 1_200_000, 6_000_000, 30_000_000},
 		"volcengine_ark/doubao-seed-2-1-turbo-260628":   {"token", "CNY", 3_000_000, 600_000, 3_000_000, 15_000_000},
 		"deepseek/deepseek-v4-flash":                    {"token", "USD", 140_000, 2_800, 140_000, 280_000},
-		"deepseek/deepseek-v4-pro":                      {"token", "USD", 435_000, 3_625, 435_000, 870_000},
+		"deepseek/deepseek-v4-pro":                      {"token", "USD", 660_000, 22_000, 660_000, 1_980_000},
 		"moonshot/kimi-k3":                              {"token", "CNY", 20_000_000, 2_000_000, 20_000_000, 100_000_000},
 		"moonshot/kimi-k2.7-code":                       {"token", "CNY", 6_500_000, 1_300_000, 6_500_000, 27_000_000},
 		"moonshot/kimi-k2.7-code-highspeed":             {"token", "CNY", 13_000_000, 2_600_000, 13_000_000, 54_000_000},
@@ -373,6 +373,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 	}
 	newEffectiveAt := time.Date(2026, time.July, 29, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	deepSeekV4ProEffectiveAt := time.Date(2026, time.August, 16, 16, 0, 0, 0, time.UTC)
 	legacyEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	if len(bundle.Costs.Models) != len(wantEvidence) {
 		return fmt.Errorf("cost model count = %d, want %d evidenced models", len(bundle.Costs.Models), len(wantEvidence))
@@ -388,6 +389,9 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		wantEffectiveAt := legacyEffectiveAt
 		if strings.HasPrefix(modelID, "deepseek/") || strings.HasPrefix(modelID, "moonshot/") || strings.HasPrefix(modelID, "zhipu/") {
 			wantEffectiveAt = newEffectiveAt
+		}
+		if modelID == "deepseek/deepseek-v4-pro" {
+			wantEffectiveAt = deepSeekV4ProEffectiveAt
 		}
 		if !model.EffectiveAt.Equal(wantEffectiveAt) {
 			return fmt.Errorf("models.%s.effective_at = %q, want %q", modelID, model.EffectiveAt.Format(time.RFC3339), wantEffectiveAt.Format(time.RFC3339))

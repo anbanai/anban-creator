@@ -37,14 +37,14 @@ func managedRuntimeReconcilerConfig(executor string, docker config.DockerConfig,
 			ActiveDeadline:     activeDeadline,
 			HeartbeatTimeout:   heartbeatTimeout,
 			CompletionGrace:    30 * time.Second,
-			PreStartRetryLimit: 1,
+			PreStartRetryLimit: 0,
 		}
 	case "kubernetes":
 		return serveragent.RuntimeReconcilerConfig{
 			ActiveDeadline:     time.Duration(kubernetes.ActiveDeadlineSeconds) * time.Second,
 			HeartbeatTimeout:   time.Duration(kubernetes.HeartbeatTimeoutSeconds) * time.Second,
 			CompletionGrace:    time.Duration(kubernetes.CompletionGraceSeconds) * time.Second,
-			PreStartRetryLimit: kubernetes.PreStartRetryLimit,
+			PreStartRetryLimit: 0,
 		}
 	default:
 		return serveragent.RuntimeReconcilerConfig{}

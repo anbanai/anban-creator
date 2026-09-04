@@ -52,6 +52,10 @@ type MarginTotals struct {
 	ProviderCostMicroCNY        int64 `json:"provider_cost_micro_cny"`
 	FailureCostMicroCNY         int64 `json:"failure_cost_micro_cny"`
 	ContributionMarginMicroCNY  int64 `json:"contribution_margin_micro_cny"`
+	InputTokens                 int64 `json:"input_tokens"`
+	CacheReadInputTokens        int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens    int64 `json:"cache_creation_input_tokens"`
+	OutputTokens                int64 `json:"output_tokens"`
 }
 
 type MarginDisplay struct {
@@ -252,7 +256,7 @@ func (s *MarginService) Report(ctx context.Context, from, to time.Time, groupBy 
 		}
 	}
 	switch groupBy {
-	case "day", "task", "sku", "provider", "model":
+	case "day", "task", "sku", "provider", "model", "account":
 	default:
 		return nil, fmt.Errorf("%w: unsupported margin report grouping %q", ErrBillingInvalid, groupBy)
 	}
@@ -396,11 +400,30 @@ func (s *MarginService) factFromProviderCost(event *model.BillingProviderCostEve
 	if event == nil {
 		return nil, errors.New("provider cost event is required for margin projection")
 	}
+	userID := ""
+	if event.TaskID != "" && s.appRepo != nil {
+		if task, err := s.appRepo.Tasks().FindByID(context.Background(), event.TaskID); err == nil {
+			userID = task.UserID
+		}
+	}
+	occurredAt := event.CreatedAt.UTC()
+	if event.UsageAt != nil {
+		occurredAt = event.UsageAt.UTC()
+	}
+	var ev struct {
+		Kind          string `json:"kind"`
+		Input         int64  `json:"input_tokens"`
+		CacheRead     int64  `json:"cache_read_input_tokens"`
+		CacheCreation int64  `json:"cache_creation_input_tokens"`
+		Output        int64  `json:"output_tokens"`
+	}
+	_ = json.Unmarshal(event.UsageEvidence, &ev)
 	return s.finalizeFact(&model.BillingMarginFact{
 		ID: uuid.NewString(), Kind: model.BillingMarginFactProviderCost, SourceKind: "provider_cost_event", SourceID: event.ID,
-		TaskID: event.TaskID, ExecutionID: event.ExecutionID, CatalogID: event.CatalogID,
+		UserID: userID, TaskID: event.TaskID, ExecutionID: event.ExecutionID, CatalogID: event.CatalogID,
 		Provider: event.Provider, Model: event.Model, ProviderCostMicroCNY: event.CostMicroCNY,
-		ContributionMarginMicroCNY: -event.CostMicroCNY, OccurredAt: event.CreatedAt.UTC(), CreatedAt: s.now().UTC(),
+		InputTokens: ev.Input, CacheReadInputTokens: ev.CacheRead, CacheCreationInputTokens: ev.CacheCreation, OutputTokens: ev.Output,
+		ProviderCostStatus: event.Status, ContributionMarginMicroCNY: -event.CostMicroCNY, OccurredAt: occurredAt, CreatedAt: s.now().UTC(),
 	})
 }
 
@@ -461,6 +484,10 @@ func (s *MarginService) failureCost(ctx context.Context, fact model.BillingMargi
 
 func marginGroupKey(fact model.BillingMarginFact, groupBy string) string {
 	switch groupBy {
+	case "account":
+		if fact.UserID != "" {
+			return fact.UserID
+		}
 	case "task":
 		if fact.TaskID != "" {
 			return fact.TaskID
@@ -494,6 +521,7 @@ func rowDelta(fact model.BillingMarginFact, failureCost int64) MarginTotals {
 		RecognizedRevenueMicroCNY: fact.RecognizedRevenueMicroCNY, PromotionMicroCNY: fact.PromotionMicroCNY,
 		ReceivableCreatedMicroCNY: fact.ReceivableCreatedMicroCNY, ReceivableCollectedMicroCNY: fact.ReceivableCollectedMicroCNY,
 		ProviderCostMicroCNY: fact.ProviderCostMicroCNY, FailureCostMicroCNY: failureCost,
+		InputTokens: fact.InputTokens, CacheReadInputTokens: fact.CacheReadInputTokens, CacheCreationInputTokens: fact.CacheCreationInputTokens, OutputTokens: fact.OutputTokens,
 		ContributionMarginMicroCNY: fact.ContributionMarginMicroCNY,
 	}
 }
@@ -505,6 +533,8 @@ func addMarginTotals(target *MarginTotals, delta MarginTotals) error {
 		{&target.ReceivableCreatedMicroCNY, &delta.ReceivableCreatedMicroCNY}, {&target.ReceivableCollectedMicroCNY, &delta.ReceivableCollectedMicroCNY},
 		{&target.ProviderCostMicroCNY, &delta.ProviderCostMicroCNY}, {&target.FailureCostMicroCNY, &delta.FailureCostMicroCNY},
 		{&target.ContributionMarginMicroCNY, &delta.ContributionMarginMicroCNY},
+		{&target.InputTokens, &delta.InputTokens}, {&target.CacheReadInputTokens, &delta.CacheReadInputTokens},
+		{&target.CacheCreationInputTokens, &delta.CacheCreationInputTokens}, {&target.OutputTokens, &delta.OutputTokens},
 	}
 	for _, field := range fields {
 		value, ok := checkedInt64Add(*field[0], *field[1])

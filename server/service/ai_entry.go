@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -373,8 +374,9 @@ func (s *AIEntryService) recordIntentCost(ctx context.Context, usage srvconfig.T
 		_, err = s.costs.RecordProviderTokenUsage(ctx, RecordProviderTokenCostRequest{
 			Provider: s.config.ProviderKey, Model: s.config.Model, ProviderRequestID: providerRequestID,
 			CatalogID: s.costs.CatalogID(), IdempotencyKey: providerRequestID,
-			Usage:  TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
-			Source: string(model.BillingProviderCostSourceProviderResponse),
+			Usage:   TokenUsage{Input: usage.InputTokens, CacheRead: cacheRead, CacheCreation: usage.CacheCreationInputTokens, Output: usage.OutputTokens},
+			UsageAt: time.Now().UTC(),
+			Source:  string(model.BillingProviderCostSourceProviderResponse),
 		})
 	}
 	if err != nil && s.logger != nil {

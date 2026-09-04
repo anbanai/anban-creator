@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -22,10 +23,11 @@ var (
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
-	repo            repository.Repository
-	logger          *zerolog.Logger
-	referenceAssets *ReferenceAssetService
-	agentProfiles   *AgentProfileRegistry
+	repo             repository.Repository
+	logger           *zerolog.Logger
+	referenceAssets  *ReferenceAssetService
+	agentProfiles    *AgentProfileRegistry
+	billingWalletSvc *BillingWalletService
 }
 
 // NewPlanService creates a new PlanService.
@@ -42,6 +44,12 @@ func (s *PlanService) SetReferenceAssetService(referenceAssets *ReferenceAssetSe
 func (s *PlanService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
 	if s != nil {
 		s.agentProfiles = registry
+	}
+}
+
+func (s *PlanService) SetBillingWalletService(wallet *BillingWalletService) {
+	if s != nil {
+		s.billingWalletSvc = wallet
 	}
 }
 
@@ -431,18 +439,69 @@ func (s *PlanService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Pause sets a plan's status to "paused".
+// Pause sets a plan's status to "paused" and atomically cancels its pending
+// backlog. Any task admission charges for cancelled tasks are reversed via the
+// billing settlement outbox; running tasks are deliberately left untouched.
 func (s *PlanService) Pause(ctx context.Context, id string) error {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("find plan: %w", err)
 	}
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		if err := txRepo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusPaused, nil); err != nil {
+			return fmt.Errorf("pause plan: %w", err)
+		}
+		pending, err := txRepo.Tasks().FindPendingByPlanID(ctx, plan.ID)
+		if err != nil {
+			return fmt.Errorf("find pending plan tasks: %w", err)
+		}
+		for _, task := range pending {
+			if task == nil {
+				continue
+			}
+			cancelled, err := txRepo.Tasks().CancelPendingTask(ctx, task.ID, "plan paused before task execution")
+			if err != nil {
+				return fmt.Errorf("cancel pending task %s: %w", task.ID, err)
+			}
+			if !cancelled {
+				continue
+			}
+			if err := s.enqueuePlanPauseReversal(ctx, txRepo, task); err != nil {
+				return fmt.Errorf("reverse admission for cancelled task %s: %w", task.ID, err)
+			}
+		}
+		return nil
+	})
+}
 
-	if err := s.repo.Plans().UpdateStatusAndNextRunAt(ctx, plan.ID, model.PlanStatusPaused, nil); err != nil {
-		return fmt.Errorf("pause plan: %w", err)
+func (s *PlanService) enqueuePlanPauseReversal(ctx context.Context, txRepo repository.Repository, task *model.Task) error {
+	if task == nil || task.BillingChargeID == nil || strings.TrimSpace(*task.BillingChargeID) == "" {
+		return nil
 	}
-
-	return nil
+	if s.billingWalletSvc == nil {
+		return errors.New("fixed task billing wallet is not configured")
+	}
+	chargeID := strings.TrimSpace(*task.BillingChargeID)
+	if _, err := txRepo.Billing().FindReversal(ctx, chargeID); err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if _, err := txRepo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", chargeID); err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	_, err := s.billingWalletSvc.EnqueueSettlementInTx(ctx, txRepo, SettlementIntent{
+		Action: model.BillingSettlementActionReverseTask,
+		UserID: task.UserID, ResourceType: "task", ResourceID: task.ID,
+		TaskID: task.ID, ChargeID: chargeID,
+		CatalogID: task.BillingCatalogID, SKUID: task.BillingSKUID,
+		Reason:             model.TaskBillingTerminalPlanPaused,
+		RequestFingerprint: billingFingerprint("task-terminal-reversal", task.ID, chargeID, model.TaskBillingTerminalPlanPaused),
+		IdempotencyScope:   "task-terminal-reversal", IdempotencyKey: chargeID,
+	})
+	return err
 }
 
 // Resume sets a plan's status to "active" and recomputes next_run_at.

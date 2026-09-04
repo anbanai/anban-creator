@@ -1172,8 +1172,10 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
 		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
 	}
-	if c.Claude.Kubernetes.PreStartRetryLimit == 0 && !c.Claude.Kubernetes.preStartRetryLimitSet {
-		c.Claude.Kubernetes.PreStartRetryLimit = 1
+	// Failed tasks are terminal. This setting remains decoded for config
+	// compatibility but automatic provider-work retries are disabled.
+	if !c.Claude.Kubernetes.preStartRetryLimitSet {
+		c.Claude.Kubernetes.PreStartRetryLimit = 0
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
@@ -1731,8 +1733,8 @@ func (c *Config) Validate() error {
 		if c.Claude.Kubernetes.CompletionGraceSeconds < 0 {
 			errs = append(errs, "claude.kubernetes.completion_grace_seconds must not be negative")
 		}
-		if c.Claude.Kubernetes.PreStartRetryLimit < 0 {
-			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must not be negative")
+		if c.Claude.Kubernetes.PreStartRetryLimit != 0 {
+			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must be 0 because failed tasks are never retried")
 		}
 		errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resources", c.Claude.Kubernetes.Resources)...)
 		for taskType := range c.Claude.Kubernetes.ResourceProfiles {

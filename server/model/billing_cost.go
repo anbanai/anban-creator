@@ -49,10 +49,12 @@ const (
 )
 
 const (
-	BillingExecutionCostReasonMissingTerminalModelUsage BillingExecutionCostReasonCode = "missing_terminal_model_usage"
-	BillingExecutionCostReasonInvalidTerminalModelUsage BillingExecutionCostReasonCode = "invalid_terminal_model_usage"
-	BillingExecutionCostReasonMissingProviderUsage      BillingExecutionCostReasonCode = "missing_provider_usage"
-	BillingExecutionCostReasonMissingOutputMetadata     BillingExecutionCostReasonCode = "missing_output_metadata"
+	BillingExecutionCostReasonMissingTerminalModelUsage  BillingExecutionCostReasonCode = "missing_terminal_model_usage"
+	BillingExecutionCostReasonInvalidTerminalModelUsage  BillingExecutionCostReasonCode = "invalid_terminal_model_usage"
+	BillingExecutionCostReasonMissingProviderUsage       BillingExecutionCostReasonCode = "missing_provider_usage"
+	BillingExecutionCostReasonMissingOutputMetadata      BillingExecutionCostReasonCode = "missing_output_metadata"
+	BillingExecutionCostReasonPricingPeriodUnknown       BillingExecutionCostReasonCode = "pricing_period_unknown"
+	BillingExecutionCostReasonPricingCatalogNotEffective BillingExecutionCostReasonCode = "pricing_catalog_not_effective"
 )
 
 const (
@@ -85,6 +87,7 @@ type BillingProviderCostEvent struct {
 	Source              BillingProviderCostSource       `gorm:"type:varchar(40);index;not null" json:"source"`
 	Status              BillingProviderCostStatus       `gorm:"type:varchar(24);index;not null" json:"status"`
 	CostMicroCNY        int64                           `gorm:"not null;check:chk_billing_provider_cost_base_nonnegative,event_kind <> 'base' OR cost_micro_cny >= 0;check:chk_billing_provider_cost_adjustment_nonzero,event_kind <> 'adjustment' OR cost_micro_cny <> 0" json:"cost_micro_cny"`
+	UsageAt             *time.Time                      `gorm:"index" json:"usage_at,omitempty"`
 	UsageEvidence       datatypes.JSON                  `gorm:"type:json;not null" json:"usage_evidence"`
 	CalculationSnapshot datatypes.JSON                  `gorm:"type:json;not null" json:"calculation_snapshot"`
 	CreatedAt           time.Time                       `gorm:"index;not null" json:"created_at"`
@@ -205,6 +208,8 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 			CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
 			CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 			OutputTokens             *int64 `json:"output_tokens"`
+			UsageAt                  string `json:"usage_at,omitempty"`
+			Aggregated               bool   `json:"aggregated,omitempty"`
 		}
 		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
 			return fmt.Errorf("invalid token provider cost evidence: %w", err)
@@ -217,6 +222,17 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 			if count == nil || *count < 0 {
 				return fmt.Errorf("token provider cost evidence requires all nonnegative token counts")
 			}
+		}
+		if evidence.UsageAt != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, evidence.UsageAt)
+			if err != nil {
+				return fmt.Errorf("token provider cost evidence usage_at must be RFC3339")
+			}
+			if event.UsageAt == nil || !event.UsageAt.UTC().Equal(parsed.UTC()) {
+				return fmt.Errorf("token provider cost evidence usage_at does not match column")
+			}
+		} else if event.UsageAt != nil {
+			return fmt.Errorf("token provider cost evidence usage_at is missing")
 		}
 	case "output_pixels":
 		if event.EventKind != BillingProviderCostEventKindBase {
@@ -306,14 +322,33 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 			return fmt.Errorf("unreconciled token evidence requires an unreconciled provider-response base event")
 		}
 		var evidence struct {
-			Kind       string                         `json:"kind"`
-			ReasonCode BillingExecutionCostReasonCode `json:"reason_code"`
+			Kind                     string                         `json:"kind"`
+			ReasonCode               BillingExecutionCostReasonCode `json:"reason_code"`
+			InputTokens              int64                          `json:"input_tokens,omitempty"`
+			CacheReadInputTokens     int64                          `json:"cache_read_input_tokens,omitempty"`
+			CacheCreationInputTokens int64                          `json:"cache_creation_input_tokens,omitempty"`
+			OutputTokens             int64                          `json:"output_tokens,omitempty"`
+			UsageAt                  string                         `json:"usage_at,omitempty"`
 		}
 		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
 			return fmt.Errorf("invalid unreconciled token provider cost evidence: %w", err)
 		}
 		if !evidence.ReasonCode.Valid() {
 			return fmt.Errorf("unreconciled token evidence requires a supported reason")
+		}
+		if evidence.InputTokens < 0 || evidence.CacheReadInputTokens < 0 || evidence.CacheCreationInputTokens < 0 || evidence.OutputTokens < 0 {
+			return fmt.Errorf("unreconciled token evidence requires nonnegative token counts")
+		}
+		if evidence.UsageAt != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, evidence.UsageAt)
+			if err != nil {
+				return fmt.Errorf("unreconciled token evidence usage_at must be RFC3339")
+			}
+			if event.UsageAt == nil || !event.UsageAt.UTC().Equal(parsed.UTC()) {
+				return fmt.Errorf("unreconciled token evidence usage_at does not match column")
+			}
+		} else if event.UsageAt != nil {
+			return fmt.Errorf("unreconciled token evidence usage_at is missing")
 		}
 	case "invoice_adjustment":
 		if event.EventKind != BillingProviderCostEventKindAdjustment {
@@ -369,7 +404,9 @@ func (c BillingExecutionCostReasonCode) Valid() bool {
 	case BillingExecutionCostReasonMissingTerminalModelUsage,
 		BillingExecutionCostReasonInvalidTerminalModelUsage,
 		BillingExecutionCostReasonMissingProviderUsage,
-		BillingExecutionCostReasonMissingOutputMetadata:
+		BillingExecutionCostReasonMissingOutputMetadata,
+		BillingExecutionCostReasonPricingPeriodUnknown,
+		BillingExecutionCostReasonPricingCatalogNotEffective:
 		return true
 	default:
 		return false
@@ -438,28 +475,33 @@ const (
 // BillingMarginFact is an immutable accounting projection. SourceKind and
 // SourceID bind each fact to one durable wallet or provider-cost event.
 type BillingMarginFact struct {
-	ID                          string                `gorm:"type:char(36);primaryKey" json:"id"`
-	Kind                        BillingMarginFactKind `gorm:"type:varchar(24);index;not null" json:"kind"`
-	SourceKind                  string                `gorm:"type:varchar(32);uniqueIndex:idx_billing_margin_source,priority:1;not null" json:"source_kind"`
-	SourceID                    string                `gorm:"type:varchar(128);uniqueIndex:idx_billing_margin_source,priority:2;not null" json:"source_id"`
-	SourceFingerprint           string                `gorm:"type:char(64);not null" json:"source_fingerprint"`
-	UserID                      string                `gorm:"type:char(36);index" json:"user_id,omitempty"`
-	TaskID                      string                `gorm:"type:char(36);index" json:"task_id,omitempty"`
-	ExecutionID                 string                `gorm:"type:varchar(128);index" json:"execution_id,omitempty"`
-	CatalogID                   string                `gorm:"type:varchar(128);index" json:"catalog_id,omitempty"`
-	SKUID                       string                `gorm:"column:sku_id;type:varchar(128);index" json:"sku_id,omitempty"`
-	Provider                    string                `gorm:"type:varchar(80);index" json:"provider,omitempty"`
-	Model                       string                `gorm:"type:varchar(160);index" json:"model,omitempty"`
-	CashMicroCNY                int64                 `gorm:"not null" json:"cash_micro_cny"`
-	DeferredPaidMicroCNY        int64                 `gorm:"not null" json:"deferred_paid_micro_cny"`
-	RecognizedRevenueMicroCNY   int64                 `gorm:"not null" json:"recognized_revenue_micro_cny"`
-	PromotionMicroCNY           int64                 `gorm:"not null" json:"promotion_micro_cny"`
-	ReceivableCreatedMicroCNY   int64                 `gorm:"not null" json:"receivable_created_micro_cny"`
-	ReceivableCollectedMicroCNY int64                 `gorm:"not null" json:"receivable_collected_micro_cny"`
-	ProviderCostMicroCNY        int64                 `gorm:"not null" json:"provider_cost_micro_cny"`
-	ContributionMarginMicroCNY  int64                 `gorm:"not null" json:"contribution_margin_micro_cny"`
-	OccurredAt                  time.Time             `gorm:"index;not null" json:"occurred_at"`
-	CreatedAt                   time.Time             `gorm:"not null" json:"created_at"`
+	ID                          string                    `gorm:"type:char(36);primaryKey" json:"id"`
+	Kind                        BillingMarginFactKind     `gorm:"type:varchar(24);index;not null" json:"kind"`
+	SourceKind                  string                    `gorm:"type:varchar(32);uniqueIndex:idx_billing_margin_source,priority:1;not null" json:"source_kind"`
+	SourceID                    string                    `gorm:"type:varchar(128);uniqueIndex:idx_billing_margin_source,priority:2;not null" json:"source_id"`
+	SourceFingerprint           string                    `gorm:"type:char(64);not null" json:"source_fingerprint"`
+	UserID                      string                    `gorm:"type:char(36);index" json:"user_id,omitempty"`
+	TaskID                      string                    `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	ExecutionID                 string                    `gorm:"type:varchar(128);index" json:"execution_id,omitempty"`
+	CatalogID                   string                    `gorm:"type:varchar(128);index" json:"catalog_id,omitempty"`
+	SKUID                       string                    `gorm:"column:sku_id;type:varchar(128);index" json:"sku_id,omitempty"`
+	Provider                    string                    `gorm:"type:varchar(80);index" json:"provider,omitempty"`
+	Model                       string                    `gorm:"type:varchar(160);index" json:"model,omitempty"`
+	InputTokens                 int64                     `gorm:"not null;default:0" json:"input_tokens"`
+	CacheReadInputTokens        int64                     `gorm:"not null;default:0" json:"cache_read_input_tokens"`
+	CacheCreationInputTokens    int64                     `gorm:"not null;default:0" json:"cache_creation_input_tokens"`
+	OutputTokens                int64                     `gorm:"not null;default:0" json:"output_tokens"`
+	ProviderCostStatus          BillingProviderCostStatus `gorm:"type:varchar(24);index" json:"provider_cost_status,omitempty"`
+	CashMicroCNY                int64                     `gorm:"not null" json:"cash_micro_cny"`
+	DeferredPaidMicroCNY        int64                     `gorm:"not null" json:"deferred_paid_micro_cny"`
+	RecognizedRevenueMicroCNY   int64                     `gorm:"not null" json:"recognized_revenue_micro_cny"`
+	PromotionMicroCNY           int64                     `gorm:"not null" json:"promotion_micro_cny"`
+	ReceivableCreatedMicroCNY   int64                     `gorm:"not null" json:"receivable_created_micro_cny"`
+	ReceivableCollectedMicroCNY int64                     `gorm:"not null" json:"receivable_collected_micro_cny"`
+	ProviderCostMicroCNY        int64                     `gorm:"not null" json:"provider_cost_micro_cny"`
+	ContributionMarginMicroCNY  int64                     `gorm:"not null" json:"contribution_margin_micro_cny"`
+	OccurredAt                  time.Time                 `gorm:"index;not null" json:"occurred_at"`
+	CreatedAt                   time.Time                 `gorm:"not null" json:"created_at"`
 }
 
 func (BillingMarginFact) TableName() string { return "billing_margin_facts" }
@@ -485,6 +527,9 @@ func (f BillingMarginFact) Validate() error {
 	}
 	if f.OccurredAt.IsZero() || f.CreatedAt.IsZero() {
 		return fmt.Errorf("margin fact timestamps are required")
+	}
+	if f.InputTokens < 0 || f.CacheReadInputTokens < 0 || f.CacheCreationInputTokens < 0 || f.OutputTokens < 0 {
+		return fmt.Errorf("margin fact token counts cannot be negative")
 	}
 	return nil
 }

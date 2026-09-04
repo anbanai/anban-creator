@@ -73,6 +73,8 @@ type TokenCostCalculation struct {
 	Rounding                 string                      `json:"rounding"`
 	OperatorEvidence         string                      `json:"operator_evidence"`
 	EffectiveAt              time.Time                   `json:"effective_at"`
+	Period                   string                      `json:"period,omitempty"`
+	UsageAt                  *time.Time                  `json:"usage_at,omitempty"`
 }
 
 type OutputPixelTierSnapshot struct {
@@ -142,6 +144,11 @@ func NewProviderCostCalculator(catalog billing.CostCatalog) *ProviderCostCalcula
 	}
 	for modelID, price := range catalog.Models {
 		price.Tiers = append([]billing.CostTier(nil), price.Tiers...)
+		price.PeakWindows = append([]billing.TimeWindow(nil), price.PeakWindows...)
+		if price.Peak != nil {
+			peak := *price.Peak
+			price.Peak = &peak
+		}
 		snapshot.Models[modelID] = price
 	}
 	return &ProviderCostCalculator{catalog: snapshot}
@@ -187,6 +194,14 @@ func (c *ProviderCostCalculator) OpenAIImageCost(modelID string, usage OpenAIIma
 }
 
 func (c *ProviderCostCalculator) TokenCost(modelID string, usage TokenUsage) (TokenCostCalculation, error) {
+	return c.tokenCostAt(modelID, usage, time.Time{})
+}
+
+func (c *ProviderCostCalculator) TokenCostAt(modelID string, usage TokenUsage, usageAt time.Time) (TokenCostCalculation, error) {
+	return c.tokenCostAt(modelID, usage, usageAt)
+}
+
+func (c *ProviderCostCalculator) tokenCostAt(modelID string, usage TokenUsage, usageAt time.Time) (TokenCostCalculation, error) {
 	if c == nil {
 		return TokenCostCalculation{}, errors.New("provider cost calculator is required")
 	}
@@ -196,6 +211,9 @@ func (c *ProviderCostCalculator) TokenCost(modelID string, usage TokenUsage) (To
 	}
 	if price.PricingType != "token" || price.Unit <= 0 {
 		return TokenCostCalculation{}, fmt.Errorf("provider cost model %q is not token-priced", modelID)
+	}
+	if !usageAt.IsZero() && !price.EffectiveAt.IsZero() && usageAt.Before(price.EffectiveAt) {
+		return TokenCostCalculation{}, fmt.Errorf("provider cost model %q pricing catalog is not effective at usage time", modelID)
 	}
 	counts := []int64{usage.Input, usage.CacheRead, usage.CacheCreation, usage.Output}
 	for _, count := range counts {
@@ -208,6 +226,19 @@ func (c *ProviderCostCalculator) TokenCost(modelID string, usage TokenUsage) (To
 		return TokenCostCalculation{}, fmt.Errorf("provider cost currency %q has no positive CNY rate", price.Currency)
 	}
 	prices := []billing.MicroCNY{price.Input, price.CacheReadInput, price.CacheCreationInput, price.Output}
+	period := "off_peak"
+	if !usageAt.IsZero() && isPeakTokenPeriod(price, usageAt) {
+		if price.Peak == nil {
+			return TokenCostCalculation{}, fmt.Errorf("provider cost model %q has no peak price schedule", modelID)
+		}
+		prices = []billing.MicroCNY{price.Peak.Input, price.Peak.CacheReadInput, price.Peak.CacheCreationInput, price.Peak.Output}
+		period = "peak"
+	}
+	for index, priceValue := range prices {
+		if priceValue <= 0 {
+			return TokenCostCalculation{}, fmt.Errorf("provider cost model %q has non-positive price category %d", modelID, index)
+		}
+	}
 	numerators := make([]*big.Int, len(counts))
 	total := new(big.Int)
 	for index := range counts {
@@ -220,18 +251,70 @@ func (c *ProviderCostCalculator) TokenCost(modelID string, usage TokenUsage) (To
 	if !cost.IsInt64() || cost.Sign() < 0 {
 		return TokenCostCalculation{}, errors.New("provider token cost overflows signed micro-CNY")
 	}
+	effectiveAt := price.EffectiveAt
+	if period == "peak" && !price.PeakEffectiveAt.IsZero() {
+		effectiveAt = price.PeakEffectiveAt
+	}
 	return TokenCostCalculation{
 		Version: 1, CatalogID: c.catalog.CatalogID, ModelID: modelID, PricingType: price.PricingType,
 		Currency: price.Currency, CurrencyRateMicroCNY: int64(rate), Unit: price.Unit,
-		Prices: TokenCostPrices{Input: int64(price.Input), CacheRead: int64(price.CacheReadInput), CacheCreation: int64(price.CacheCreationInput), Output: int64(price.Output)},
+		Prices: TokenCostPrices{Input: int64(prices[0]), CacheRead: int64(prices[1]), CacheCreation: int64(prices[2]), Output: int64(prices[3])},
 		CategoryNumerators: TokenCostCategoryNumerators{
 			Input: numerators[0].String(), CacheRead: numerators[1].String(),
 			CacheCreation: numerators[2].String(), Output: numerators[3].String(),
 		},
 		TotalCategoryNumerator: total.String(), CNYConversionNumerator: conversionNumerator.String(),
 		CNYConversionDenominator: conversionDenominator.String(), MicroCNY: cost.Int64(),
-		Rounding: "ceil_once_per_provider_event", OperatorEvidence: price.OperatorEvidence, EffectiveAt: price.EffectiveAt,
+		Rounding: "ceil_once_per_provider_event", OperatorEvidence: price.OperatorEvidence, EffectiveAt: effectiveAt,
+		Period: period, UsageAt: usageAtPtr(usageAt),
 	}, nil
+}
+
+func isPeakTokenPeriod(price billing.ModelCostConfig, at time.Time) bool {
+	if price.Peak == nil || len(price.PeakWindows) == 0 {
+		return false
+	}
+	if !price.PeakEffectiveAt.IsZero() && at.Before(price.PeakEffectiveAt) {
+		return false
+	}
+	location := time.UTC
+	if timezone := strings.TrimSpace(price.PricingTimezone); timezone != "" {
+		if loaded, err := time.LoadLocation(timezone); err == nil {
+			location = loaded
+		}
+	}
+	local := at.In(location)
+	if price.PeakWeekdaysOnly && (local.Weekday() == time.Saturday || local.Weekday() == time.Sunday) {
+		return false
+	}
+	minute := local.Hour()*60 + local.Minute()
+	for _, window := range price.PeakWindows {
+		start, end, ok := providerCostClockWindow(window.Start, window.End)
+		if ok && minute >= start && minute < end {
+			return true
+		}
+	}
+	return false
+}
+
+func providerCostClockWindow(startValue, endValue string) (int, int, bool) {
+	parse := func(value string, allowDayEnd bool) (int, bool) {
+		if len(value) != 5 || value[2] != ':' {
+			return 0, false
+		}
+		if value[0] < '0' || value[0] > '9' || value[1] < '0' || value[1] > '9' || value[3] < '0' || value[3] > '9' || value[4] < '0' || value[4] > '9' {
+			return 0, false
+		}
+		hour := int(value[0]-'0')*10 + int(value[1]-'0')
+		minute := int(value[3]-'0')*10 + int(value[4]-'0')
+		if minute > 59 || hour > 24 || (hour == 24 && minute != 0) || (!allowDayEnd && hour == 24) {
+			return 0, false
+		}
+		return hour*60 + minute, true
+	}
+	start, okStart := parse(startValue, false)
+	end, okEnd := parse(endValue, true)
+	return start, end, okStart && okEnd && start < end
 }
 
 func (c *ProviderCostCalculator) OutputPixelCost(modelID string, usage OutputPixelUsage) (OutputPixelCostCalculation, error) {
@@ -305,12 +388,14 @@ type RecordTokenCostRequest struct {
 	CatalogID      string
 	IdempotencyKey string
 	Usage          TokenUsage
+	UsageAt        time.Time
 	Source         string
 }
 
 type RecordProviderTokenCostRequest struct {
 	TaskID, Provider, Model, ProviderRequestID, CatalogID, IdempotencyKey, Source string
 	Usage                                                                         TokenUsage
+	UsageAt                                                                       time.Time
 }
 
 type ExecutionTokenCostEntry struct {
@@ -318,6 +403,7 @@ type ExecutionTokenCostEntry struct {
 	Model          string
 	IdempotencyKey string
 	Usage          TokenUsage
+	UsageAt        time.Time
 	Source         string
 }
 
@@ -363,6 +449,8 @@ type RecordMediaUnreconciledRequest struct {
 type RecordProviderTokenUnreconciledRequest struct {
 	TaskID, Provider, Model, ProviderRequestID string
 	ReasonCode                                 model.BillingExecutionCostReasonCode
+	Usage                                      TokenUsage
+	UsageAt                                    time.Time
 }
 
 type AdjustmentRequest struct {
@@ -378,6 +466,8 @@ type tokenUsageEvidence struct {
 	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
 	OutputTokens             int64  `json:"output_tokens"`
+	UsageAt                  string `json:"usage_at,omitempty"`
+	Aggregated               bool   `json:"aggregated,omitempty"`
 }
 
 type outputPixelEvidence struct {
@@ -407,8 +497,13 @@ type mediaUnreconciledEvidence struct {
 }
 
 type tokenUnreconciledEvidence struct {
-	Kind       string                               `json:"kind"`
-	ReasonCode model.BillingExecutionCostReasonCode `json:"reason_code"`
+	Kind                     string                               `json:"kind"`
+	ReasonCode               model.BillingExecutionCostReasonCode `json:"reason_code"`
+	InputTokens              int64                                `json:"input_tokens,omitempty"`
+	CacheReadInputTokens     int64                                `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int64                                `json:"cache_creation_input_tokens,omitempty"`
+	OutputTokens             int64                                `json:"output_tokens,omitempty"`
+	UsageAt                  string                               `json:"usage_at,omitempty"`
 }
 
 type unreconciledCalculation struct {
@@ -454,7 +549,7 @@ func (s *ProviderCostService) RecordTokenUsage(ctx context.Context, req RecordTo
 		ExecutionID: req.ExecutionID, TaskID: req.TaskID, CatalogID: req.CatalogID,
 		Entries: []ExecutionTokenCostEntry{{
 			Provider: req.Provider, Model: req.Model, IdempotencyKey: req.IdempotencyKey,
-			Usage: req.Usage, Source: req.Source,
+			Usage: req.Usage, UsageAt: req.UsageAt, Source: req.Source,
 		}},
 	})
 	if err != nil {
@@ -478,15 +573,33 @@ func (s *ProviderCostService) RecordProviderTokenUsage(ctx context.Context, req 
 	if model.BillingProviderCostSource(strings.TrimSpace(req.Source)) != model.BillingProviderCostSourceProviderResponse {
 		return nil, fmt.Errorf("unsupported provider token usage cost source %q", req.Source)
 	}
-	calculation, err := s.calculator.TokenCost(req.Provider+"/"+req.Model, req.Usage)
-	if err != nil {
-		return nil, err
+	if req.UsageAt.IsZero() {
+		if price, ok := s.calculator.catalog.Models[req.Provider+"/"+req.Model]; ok && price.Peak != nil {
+			return s.RecordProviderTokenUnreconciled(ctx, RecordProviderTokenUnreconciledRequest{
+				TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
+				ReasonCode: model.BillingExecutionCostReasonPricingPeriodUnknown, Usage: req.Usage,
+			})
+		}
 	}
-	evidence := tokenUsageEvidence{Kind: "token", InputTokens: req.Usage.Input, CacheReadInputTokens: req.Usage.CacheRead, CacheCreationInputTokens: req.Usage.CacheCreation, OutputTokens: req.Usage.Output}
+	if price, ok := s.calculator.catalog.Models[req.Provider+"/"+req.Model]; ok && !price.EffectiveAt.IsZero() && !req.UsageAt.IsZero() && req.UsageAt.Before(price.EffectiveAt) {
+		return s.RecordProviderTokenUnreconciled(ctx, RecordProviderTokenUnreconciledRequest{
+			TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
+			ReasonCode: model.BillingExecutionCostReasonPricingCatalogNotEffective, Usage: req.Usage, UsageAt: req.UsageAt,
+		})
+	}
+	calculation, err := s.calculator.TokenCostAt(req.Provider+"/"+req.Model, req.Usage, req.UsageAt)
+	if err != nil {
+		reason := model.BillingExecutionCostReasonMissingProviderUsage
+		if price, ok := s.calculator.catalog.Models[req.Provider+"/"+req.Model]; ok && !price.EffectiveAt.IsZero() && !req.UsageAt.IsZero() && req.UsageAt.Before(price.EffectiveAt) {
+			reason = model.BillingExecutionCostReasonPricingCatalogNotEffective
+		}
+		return s.RecordProviderTokenUnreconciled(ctx, RecordProviderTokenUnreconciledRequest{TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID, ReasonCode: reason, Usage: req.Usage, UsageAt: req.UsageAt})
+	}
+	evidence := tokenUsageEvidence{Kind: "token", InputTokens: req.Usage.Input, CacheReadInputTokens: req.Usage.CacheRead, CacheCreationInputTokens: req.Usage.CacheCreation, OutputTokens: req.Usage.Output, UsageAt: formatProviderUsageAt(req.UsageAt)}
 	return s.appendProviderRequestEvent(ctx, providerRequestEvent{
 		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
 		CatalogID: req.CatalogID, IdempotencyKey: req.IdempotencyKey, Source: model.BillingProviderCostSourceProviderResponse,
-		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY, Evidence: evidence, Calculation: calculation,
+		Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY, UsageAt: req.UsageAt, Evidence: evidence, Calculation: calculation,
 	})
 }
 
@@ -499,11 +612,16 @@ func (s *ProviderCostService) RecordProviderTokenUnreconciled(ctx context.Contex
 	if req.Provider == "" || req.Model == "" || req.ProviderRequestID == "" || !req.ReasonCode.Valid() {
 		return nil, errors.New("unreconciled provider token cost requires provider, model, request, and supported reason")
 	}
+	if req.Usage.Input < 0 || req.Usage.CacheRead < 0 || req.Usage.CacheCreation < 0 || req.Usage.Output < 0 {
+		return nil, errors.New("unreconciled provider token usage cannot be negative")
+	}
+	evidence := tokenUnreconciledEvidence{Kind: "token_unreconciled", ReasonCode: req.ReasonCode, InputTokens: req.Usage.Input, CacheReadInputTokens: req.Usage.CacheRead, CacheCreationInputTokens: req.Usage.CacheCreation, OutputTokens: req.Usage.Output, UsageAt: formatProviderUsageAt(req.UsageAt)}
 	return s.appendProviderRequestEvent(ctx, providerRequestEvent{
 		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, ProviderRequestID: req.ProviderRequestID,
 		CatalogID: s.catalogID, IdempotencyKey: req.ProviderRequestID, Source: model.BillingProviderCostSourceProviderResponse,
 		Status:      model.BillingProviderCostStatusUnreconciled,
-		Evidence:    tokenUnreconciledEvidence{Kind: "token_unreconciled", ReasonCode: req.ReasonCode},
+		UsageAt:     req.UsageAt,
+		Evidence:    evidence,
 		Calculation: unreconciledCalculation{Version: 1, ReasonCode: req.ReasonCode},
 	})
 }
@@ -532,7 +650,7 @@ func (s *ProviderCostService) FinalizeExecutionTokenCosts(ctx context.Context, r
 		seenModels[identity] = struct{}{}
 		event, err := s.buildTokenCostEvent(RecordTokenCostRequest{
 			ExecutionID: req.ExecutionID, TaskID: req.TaskID, Provider: entry.Provider, Model: entry.Model,
-			CatalogID: req.CatalogID, IdempotencyKey: entry.IdempotencyKey, Usage: entry.Usage, Source: entry.Source,
+			CatalogID: req.CatalogID, IdempotencyKey: entry.IdempotencyKey, Usage: entry.Usage, UsageAt: entry.UsageAt, Source: entry.Source,
 		})
 		if err != nil {
 			return nil, err
@@ -549,8 +667,15 @@ func (s *ProviderCostService) FinalizeExecutionTokenCosts(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	executionCostStatus := model.BillingProviderCostStatusReconciled
+	for _, event := range events {
+		if event.Status == model.BillingProviderCostStatusUnreconciled {
+			executionCostStatus = model.BillingProviderCostStatusUnreconciled
+			break
+		}
+	}
 	status := &model.BillingExecutionCostStatus{
-		ExecutionID: req.ExecutionID, TaskID: req.TaskID, Status: model.BillingProviderCostStatusReconciled,
+		ExecutionID: req.ExecutionID, TaskID: req.TaskID, Status: executionCostStatus,
 		FinalizationFingerprint: finalizationFingerprint,
 	}
 	return s.repo.AppendEventsAndUpsertExecutionCostStatus(ctx, events, status)
@@ -569,13 +694,31 @@ func (s *ProviderCostService) buildTokenCostEvent(req RecordTokenCostRequest) (*
 		return nil, fmt.Errorf("unsupported token cost source %q", req.Source)
 	}
 	modelID := req.Provider + "/" + req.Model
-	calculation, err := s.calculator.TokenCost(modelID, req.Usage)
-	if err != nil {
-		return nil, err
+	priceUnknown := req.UsageAt.IsZero() && func() bool { price, ok := s.calculator.catalog.Models[modelID]; return ok && price.Peak != nil }()
+	var calculation any
+	status := model.BillingProviderCostStatusReconciled
+	costMicroCNY := int64(0)
+	if priceUnknown {
+		calculation = unreconciledCalculation{Version: 1, ReasonCode: model.BillingExecutionCostReasonPricingPeriodUnknown}
+		status = model.BillingProviderCostStatusUnreconciled
+	} else {
+		calculated, calcErr := s.calculator.TokenCostAt(modelID, req.Usage, req.UsageAt)
+		if calcErr != nil {
+			reason := model.BillingExecutionCostReasonMissingProviderUsage
+			if price, ok := s.calculator.catalog.Models[modelID]; ok && !price.EffectiveAt.IsZero() && !req.UsageAt.IsZero() && req.UsageAt.Before(price.EffectiveAt) {
+				reason = model.BillingExecutionCostReasonPricingCatalogNotEffective
+			}
+			calculation = unreconciledCalculation{Version: 1, ReasonCode: reason}
+			status = model.BillingProviderCostStatusUnreconciled
+		} else {
+			calculation = calculated
+			costMicroCNY = calculated.MicroCNY
+		}
 	}
 	evidence := tokenUsageEvidence{
 		Kind: "token", InputTokens: req.Usage.Input, CacheReadInputTokens: req.Usage.CacheRead,
 		CacheCreationInputTokens: req.Usage.CacheCreation, OutputTokens: req.Usage.Output,
+		UsageAt: formatProviderUsageAt(req.UsageAt), Aggregated: source == model.BillingProviderCostSourceClaudeResult,
 	}
 	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
@@ -592,7 +735,8 @@ func (s *ProviderCostService) buildTokenCostEvent(req RecordTokenCostRequest) (*
 	fingerprint, err := providerCostFingerprint(struct {
 		ExecutionID, TaskID, Provider, Model, CatalogID, Source string
 		Usage                                                   TokenUsage
-	}{req.ExecutionID, req.TaskID, req.Provider, req.Model, req.CatalogID, string(source), req.Usage})
+		UsageAt                                                 time.Time
+	}{req.ExecutionID, req.TaskID, req.Provider, req.Model, req.CatalogID, string(source), req.Usage, req.UsageAt.UTC()})
 	if err != nil {
 		return nil, err
 	}
@@ -602,8 +746,8 @@ func (s *ProviderCostService) buildTokenCostEvent(req RecordTokenCostRequest) (*
 		ExecutionID:  req.ExecutionID, TaskID: req.TaskID, Provider: req.Provider, Model: req.Model,
 		CatalogID: req.CatalogID, IdempotencyScope: "provider_cost_base/" + req.Provider,
 		IdempotencyKey: req.IdempotencyKey, BaseIdentityKey: &baseIdentity, RequestFingerprint: fingerprint,
-		Source: source, Status: model.BillingProviderCostStatusReconciled, CostMicroCNY: calculation.MicroCNY,
-		UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
+		Source: source, Status: status, CostMicroCNY: costMicroCNY,
+		UsageAt: usageAtPtr(req.UsageAt), UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
 	}
 	return event, nil
 }
@@ -774,11 +918,30 @@ type providerRequestEvent struct {
 	Source                                                                model.BillingProviderCostSource
 	Status                                                                model.BillingProviderCostStatus
 	CostMicroCNY                                                          int64
+	UsageAt                                                               time.Time
 	Evidence                                                              any
 	Calculation                                                           any
 }
 
+func usageAtPtr(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	value = value.UTC()
+	return &value
+}
+
+func formatProviderUsageAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func (s *ProviderCostService) appendProviderRequestEvent(ctx context.Context, req providerRequestEvent) (*model.BillingProviderCostEvent, error) {
+	if !req.UsageAt.IsZero() {
+		req.UsageAt = req.UsageAt.UTC()
+	}
 	evidenceJSON, err := json.Marshal(req.Evidence)
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider request evidence: %w", err)
@@ -805,7 +968,7 @@ func (s *ProviderCostService) appendProviderRequestEvent(ctx context.Context, re
 		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, CatalogID: req.CatalogID,
 		IdempotencyScope: "provider_cost_base/" + req.Provider, IdempotencyKey: req.IdempotencyKey,
 		BaseIdentityKey: &baseIdentity, RequestFingerprint: fingerprint, Source: req.Source, Status: req.Status,
-		CostMicroCNY: req.CostMicroCNY, UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
+		CostMicroCNY: req.CostMicroCNY, UsageAt: usageAtPtr(req.UsageAt), UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
 	})
 }
 

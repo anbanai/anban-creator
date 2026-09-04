@@ -34,6 +34,43 @@ func TestProviderCostCalculatorUsesExactCategories(t *testing.T) {
 	}
 }
 
+func TestProviderCostCalculatorUsesDeepSeekPeakWindows(t *testing.T) {
+	bundle := providerCostBundle()
+	bundle.Costs.Models["deepseek/deepseek-v4-pro"] = billing.ModelCostConfig{
+		PricingType: "token", Currency: "USD", Unit: 1_000_000,
+		Input: 660_000, CacheReadInput: 22_000, CacheCreationInput: 660_000, Output: 1_980_000,
+		OperatorEvidence: "deepseek-pricing", EffectiveAt: time.Date(2026, 8, 16, 16, 0, 0, 0, time.UTC),
+		Peak:            &billing.TokenPricePeriod{Input: 1_320_000, CacheReadInput: 44_000, CacheCreationInput: 1_320_000, Output: 3_960_000},
+		PricingTimezone: "UTC", PeakWeekdaysOnly: true,
+		PeakWindows: []billing.TimeWindow{{Start: "01:00", End: "04:00"}, {Start: "06:00", End: "10:00"}},
+	}
+	calculator := NewProviderCostCalculator(bundle.Costs)
+	usage := TokenUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}
+	peak, err := calculator.TokenCostAt("deepseek/deepseek-v4-pro", usage, time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("peak TokenCostAt: %v", err)
+	}
+	offPeak, err := calculator.TokenCostAt("deepseek/deepseek-v4-pro", usage, time.Date(2026, 8, 16, 18, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("off-peak TokenCostAt: %v", err)
+	}
+	if peak.Period != "peak" || offPeak.Period != "off_peak" || peak.MicroCNY <= offPeak.MicroCNY {
+		t.Fatalf("peak=%#v off_peak=%#v", peak, offPeak)
+	}
+}
+
+func TestProviderCostCalculatorRejectsUsageBeforeCatalogEffectiveAt(t *testing.T) {
+	bundle := providerCostBundle()
+	bundle.Costs.Models["deepseek/deepseek-v4-pro"] = billing.ModelCostConfig{
+		PricingType: "token", Currency: "USD", Unit: 1_000_000,
+		Input: 660_000, CacheReadInput: 22_000, CacheCreationInput: 660_000, Output: 1_980_000,
+		OperatorEvidence: "deepseek-pricing", EffectiveAt: time.Date(2026, 8, 16, 16, 0, 0, 0, time.UTC),
+	}
+	if _, err := NewProviderCostCalculator(bundle.Costs).TokenCostAt("deepseek/deepseek-v4-pro", TokenUsage{Input: 1}, time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)); err == nil {
+		t.Fatal("usage before catalog effective_at was accepted")
+	}
+}
+
 func TestProviderCostCalculatorConvertsForeignCurrencyBeforeSingleCeiling(t *testing.T) {
 	bundle := providerCostBundle()
 	bundle.Costs.Models["moonshot/model"] = billing.ModelCostConfig{
@@ -95,6 +132,40 @@ func TestProviderTokenUnreconciledAllowsEmptyTaskWithoutZeroCostReconciliation(t
 	}
 	if repeated.ID != event.ID {
 		t.Fatalf("repeat event ID = %q, want %q", repeated.ID, event.ID)
+	}
+}
+
+func TestProviderTokenUnreconciledRejectsNegativeUsage(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	_, err := fixture.service.RecordProviderTokenUnreconciled(context.Background(), RecordProviderTokenUnreconciledRequest{
+		Provider: "moonshot", Model: "kimi-k2.7-code", ProviderRequestID: "negative-usage",
+		ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage, Usage: TokenUsage{Output: -1},
+	})
+	if err == nil {
+		t.Fatal("negative unreconciled token usage was accepted")
+	}
+}
+
+func TestProviderTokenUsagePersistsUsageAtAndTokenEvidence(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	usageAt := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
+	event, err := fixture.service.RecordProviderTokenUsage(context.Background(), RecordProviderTokenCostRequest{
+		TaskID: "task-usage-at", Provider: "volcengine_ark", Model: "doubao-seed-evolving", ProviderRequestID: "provider-request-usage-at",
+		CatalogID: fixture.service.catalogID, IdempotencyKey: "usage-at", Source: string(model.BillingProviderCostSourceProviderResponse), UsageAt: usageAt,
+		Usage: TokenUsage{Input: 10, CacheRead: 20, CacheCreation: 30, Output: 40},
+	})
+	if err != nil {
+		t.Fatalf("RecordProviderTokenUsage: %v", err)
+	}
+	if event.UsageAt == nil || !event.UsageAt.Equal(usageAt) {
+		t.Fatalf("usage_at=%v, want %v", event.UsageAt, usageAt)
+	}
+	var evidence tokenUsageEvidence
+	if err := json.Unmarshal(event.UsageEvidence, &evidence); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	if evidence.InputTokens != 10 || evidence.CacheReadInputTokens != 20 || evidence.CacheCreationInputTokens != 30 || evidence.OutputTokens != 40 || evidence.UsageAt == "" {
+		t.Fatalf("token evidence=%#v", evidence)
 	}
 }
 

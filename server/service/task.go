@@ -731,7 +731,7 @@ func (s *TaskService) persistTaskWithFixedAdmission(ctx context.Context, task *m
 	return s.persistTasksWithFixedAdmission(ctx, []*model.Task{task})
 }
 
-func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task, hasContentImageOverride ...*bool) error {
+func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks []*model.Task, options ...interface{}) error {
 	if len(tasks) == 0 {
 		return fmt.Errorf("at least one task is required")
 	}
@@ -740,7 +740,17 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return fmt.Errorf("task is required")
 		}
 	}
-	explicitlyDisableContentImage := len(hasContentImageOverride) > 0 && hasContentImageOverride[0] != nil && !*hasContentImageOverride[0]
+	var hasContentImageOverride *bool
+	allowMissingPlanID := ""
+	for _, option := range options {
+		switch value := option.(type) {
+		case *bool:
+			hasContentImageOverride = value
+		case string:
+			allowMissingPlanID = value
+		}
+	}
+	explicitlyDisableContentImage := hasContentImageOverride != nil && !*hasContentImageOverride
 	lockProjectAdmission := func(repo repository.Repository) error {
 		project, err := repo.Projects().FindByIDForUpdate(ctx, tasks[0].ProjectID)
 		if err != nil {
@@ -752,6 +762,31 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		for _, task := range tasks {
 			if task.ProjectID != project.ID || task.UserID != project.UserID {
 				return fmt.Errorf("task admission project identity mismatch")
+			}
+		}
+		for _, task := range tasks {
+			if task.PlanID == nil || strings.TrimSpace(*task.PlanID) == "" {
+				continue
+			}
+			planID := strings.TrimSpace(*task.PlanID)
+			lockedPlan, err := repo.Plans().FindByIDForUpdate(ctx, planID)
+			if err != nil {
+				// Some local callers construct an in-memory plan before persistence.
+				// A persisted plan is always locked; only a missing row may use the
+				// caller snapshot, and it must still be active.
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					if planID == allowMissingPlanID {
+						continue
+					}
+					return fmt.Errorf("task plan %s does not exist", planID)
+				}
+				return fmt.Errorf("lock task plan for admission: %w", err)
+			}
+			if lockedPlan.Status != model.PlanStatusActive {
+				return ErrTaskPlanPaused
+			}
+			if lockedPlan.ProjectID != "" && lockedPlan.ProjectID != project.ID {
+				return fmt.Errorf("task admission plan project mismatch")
 			}
 		}
 		return nil
@@ -966,7 +1001,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		task.SetMontageInput(*planMontageInput)
 	}
 
-	if err := s.persistTaskWithFixedAdmission(ctx, task); err != nil {
+	if err := s.persistTasksWithFixedAdmission(ctx, []*model.Task{task}, plan.ID); err != nil {
 		if errors.Is(err, ErrBillingDebtOutstanding) || errors.Is(err, ErrBillingInsufficientForTask) {
 			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task at fixed-SKU admission")
 			return nil, nil
@@ -1326,6 +1361,15 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, pr
 	if authoritative.DeletingAt != nil {
 		return ErrTaskDeleting
 	}
+	if model.IsTerminalTaskStatus(authoritative.Status) {
+		if authoritative.CurrentExecutionID == nil {
+			return nil
+		}
+		execution, findErr := s.repo.TaskExecutions().FindByID(ctx, strings.TrimSpace(*authoritative.CurrentExecutionID))
+		if findErr != nil || (execution.Status != model.TaskExecutionStarting && execution.Status != model.TaskExecutionRunning && execution.FinalizationStatus == model.TaskExecutionFinalizationDone) {
+			return nil
+		}
+	}
 	task = authoritative
 	// Load project if not provided, for concurrency check.
 	if project == nil && task.ProjectID != "" {
@@ -1560,6 +1604,9 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string
 	var dispatchErr error
 	for _, t := range pending {
 		if err := s.EnqueueExecution(ctx, t, project); err != nil {
+			if errors.Is(err, ErrTaskPlanPaused) {
+				continue
+			}
 			s.logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to dispatch pending task")
 			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("dispatch pending task %s: %w", t.ID, err))
 		}

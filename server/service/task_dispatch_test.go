@@ -1008,45 +1008,6 @@ func TestCreateCurrentExecutionValidatesRuntimeAndCopiesFrozenTaskAgentProfile(t
 	}
 }
 
-func TestReplacePreStartExecutionCopiesFrozenTaskProfileAfterRuntimeValidation(t *testing.T) {
-	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	ctx := context.Background()
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
-	task.Status = model.TaskStatusRunning
-	profile := testAgentProfiles()[1]
-	snapshot, fingerprint, err := profile.Freeze()
-	if err != nil {
-		t.Fatal(err)
-	}
-	task.ExecutionProfile, task.AgentProfileSnapshot, task.AgentProfileFingerprint = profile.ID, snapshot, fingerprint
-	if err := repo.Tasks().Update(ctx, task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
-	current := &model.TaskExecution{
-		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, RuntimeProfile: "article",
-		RuntimeImage: "registry/content@sha256:old", Target: "docker", Status: model.TaskExecutionCreated,
-	}
-	if err := repo.TaskExecutions().Create(ctx, current); err != nil {
-		t.Fatalf("create current execution: %v", err)
-	}
-	if won, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, current.ID); err != nil || !won {
-		t.Fatalf("set current execution: won=%v err=%v", won, err)
-	}
-	task.CurrentExecutionID = &current.ID
-
-	replacement, replaced, err := svc.replacePreStartExecution(ctx, task, current, "stale", nil)
-	if err != nil || !replaced {
-		t.Fatalf("replacePreStartExecution = %#v, replaced=%v, err=%v", replacement, replaced, err)
-	}
-	profiled := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
-	if replacement.Provider != task.AgentProfileSnapshot.Provider || !reflect.DeepEqual(replacement.ProfileEnvs, profiled.ProfileEnvs) || replacement.ProfileFingerprint != task.AgentProfileFingerprint {
-		t.Fatalf("replacement profile = %#v, want frozen runtime identity %#v", replacement, task.AgentProfileSnapshot)
-	}
-	if replacement.RuntimeImage != "registry/content@sha256:current" || replacement.AgentPackID != "article" {
-		t.Fatalf("replacement runtime = %#v, want current image and frozen Agent Pack identity", replacement)
-	}
-}
-
 func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.T) {
 	svc, repo, _, _, task := setupDispatchTest(t)
 	ctx := context.Background()
@@ -1380,8 +1341,8 @@ func TestDispatchCloudTaskFailureTerminalizesAttemptAndTask(t *testing.T) {
 	if failedTask.Status != model.TaskStatusFailed || failedTask.CompletedAt == nil || failedTask.ErrorMessage == "" {
 		t.Fatalf("failed task = %+v", failedTask)
 	}
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
-		t.Fatal("terminal current attempt was silently acknowledged")
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("replayed terminal task = %v, want acknowledgement", err)
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("replayed dispatch calls = %d, want 1", dispatcher.callCount())
@@ -1446,8 +1407,8 @@ func TestDispatchCloudTaskDoesNotAcknowledgeStartingAttemptOnTerminalTask(t *tes
 	if err := repo.Tasks().UpdateStatus(context.Background(), task.ID, model.TaskStatusFailed); err != nil {
 		t.Fatalf("make task inconsistent: %v", err)
 	}
-	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err == nil {
-		t.Fatal("terminal task with starting execution was silently acknowledged")
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("replayed terminal task = %v, want acknowledgement", err)
 	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
@@ -1745,7 +1706,7 @@ func TestPendingFailureAmbiguousCommitVerifiesTerminalBillingBeforePostCommit(t 
 	}
 }
 
-func TestPreDispatchFailureRetryAdvancesOnlyCurrentProjectPendingQueue(t *testing.T) {
+func TestPreDispatchFailureDoesNotReprocessFailedTask(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -1777,8 +1738,8 @@ func TestPreDispatchFailureRetryAdvancesOnlyCurrentProjectPendingQueue(t *testin
 	if err := svc.HandleExecutionFromPayload(ctx, failedTask.ID, userID); err != nil {
 		t.Fatalf("retry HandleExecutionFromPayload: %v", err)
 	}
-	if len(enqueuer.enqueued) != 1 || enqueuer.enqueued[0] != pendingTask.ID {
-		t.Fatalf("enqueued pending tasks = %#v, want [%s]", enqueuer.enqueued, pendingTask.ID)
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("enqueued pending tasks = %#v, want no re-dispatch from failed task", enqueuer.enqueued)
 	}
 }
 

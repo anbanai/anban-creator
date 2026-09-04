@@ -849,7 +849,7 @@ func TestCancelCloudRejectsCleanupDispatcherTargetMismatch(t *testing.T) {
 }
 
 func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
-	t.Run("one configured replacement", func(t *testing.T) {
+	t.Run("configured replacement limit is ignored", func(t *testing.T) {
 		svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 		dispatcher := &dispatchTestDispatcher{}
 		svc.SetRuntimeDispatcher(dispatcher)
@@ -862,22 +862,11 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 		}
 		old, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 		foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
-		if current.Attempt != 2 || current.Status != model.TaskExecutionStarting || old.Status != model.TaskExecutionFailed || foundTask.Status != model.TaskStatusRunning {
+		if current.ID != execution.ID || current.Attempt != 1 || current.Status != model.TaskExecutionFailed || old.Status != model.TaskExecutionFailed || foundTask.Status != model.TaskStatusFailed {
 			t.Fatalf("current=%+v old=%s task=%s", current, old.Status, foundTask.Status)
 		}
-		if old.CleanupStatus != model.TaskExecutionCleanupPending {
-			t.Fatalf("old cleanup status=%s", old.CleanupStatus)
-		}
-		reconcilable, err := repo.TaskExecutions().FindReconcilable(context.Background(), time.Now().Add(time.Second), 10)
-		if err != nil {
-			t.Fatal(err)
-		}
-		foundOld := false
-		for _, candidate := range reconcilable {
-			foundOld = foundOld || candidate.ID == old.ID
-		}
-		if !foundOld {
-			t.Fatal("replaced terminal execution was excluded before cleanup")
+		if dispatcher.callCount() != 0 {
+			t.Fatalf("provider dispatches=%d, want 0", dispatcher.callCount())
 		}
 	})
 
@@ -896,26 +885,30 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 	})
 }
 
-func TestReplacePreStartExecutionPreservesRuntimeImage(t *testing.T) {
+func TestReconcilePreStartFailureKeepsOriginalExecution(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
+	current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replacement.RuntimeProfile != execution.RuntimeProfile || replacement.RuntimeImage != execution.RuntimeImage {
-		t.Fatalf("replacement runtime = %q %q, want %q %q", replacement.RuntimeProfile, replacement.RuntimeImage, execution.RuntimeProfile, execution.RuntimeImage)
+	if current.ID != execution.ID || current.Attempt != execution.Attempt || current.Status != model.TaskExecutionFailed {
+		t.Fatalf("current execution = %#v, want original terminal execution", current)
 	}
-	if replacement.Target != "docker" {
-		t.Fatalf("replacement target = %q, want selected dispatcher scope", replacement.Target)
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil || foundTask.Status != model.TaskStatusFailed {
+		t.Fatalf("task = %#v, err=%v", foundTask, err)
+	}
+	if dispatcher.callCount() != 0 {
+		t.Fatalf("provider dispatches=%d, want 0", dispatcher.callCount())
 	}
 }
 
-func TestReplacePreStartExecutionResetsProviderIdentityAcrossDispatcherScopes(t *testing.T) {
+func TestReconcilePreStartFailureDoesNotResetProviderIdentity(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	ctx := context.Background()
 	oldIdentity := model.RuntimeIdentity{
@@ -930,64 +923,40 @@ func TestReplacePreStartExecutionResetsProviderIdentityAcrossDispatcherScopes(t 
 	svc.SetRuntimeDispatcher(dispatcher)
 
 	if err := svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
-		t.Fatalf("cross-scope replacement dispatch: %v", err)
+		t.Fatalf("reconcile failure: %v", err)
 	}
-	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID)
+	current, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replacement.RuntimeProfile != execution.RuntimeProfile || replacement.RuntimeImage != execution.RuntimeImage {
-		t.Fatalf("replacement runtime = %q %q, want inherited %q %q", replacement.RuntimeProfile, replacement.RuntimeImage, execution.RuntimeProfile, execution.RuntimeImage)
+	if current.ID != execution.ID || current.Attempt != execution.Attempt || current.Target != execution.Target || current.RuntimeScope != oldIdentity.Scope || current.RuntimeWorkload != oldIdentity.Workload {
+		t.Fatalf("current target/identity = %#v, want original execution", current)
 	}
-	if replacement.Target != "docker" || replacement.RuntimeScope != "daemon-a" || replacement.RuntimeWorkload != "container-"+replacement.ID {
-		t.Fatalf("replacement target/identity = %q %q/%q, want docker daemon/container", replacement.Target, replacement.RuntimeScope, replacement.RuntimeWorkload)
-	}
-	if replacement.RuntimeInstanceID != "" {
-		t.Fatalf("replacement instance = %q, want old provider instance cleared", replacement.RuntimeInstanceID)
+	if current.RuntimeInstanceID != oldIdentity.InstanceID {
+		t.Fatalf("current instance = %q, want %q", current.RuntimeInstanceID, oldIdentity.InstanceID)
 	}
 }
 
-func TestReplacementDispatchResumesSameAttemptAfterTransientFailure(t *testing.T) {
-	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true, false)
+func TestReconcilePreStartFailureDoesNotResumeAfterTransientFailure(t *testing.T) {
+	svc, repo, _, task, execution := setupCloudCompletionTestWithDB(t, true, false)
 	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}
 	svc.SetRuntimeDispatcher(dispatcher)
-	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err == nil {
-		t.Fatal("expected first replacement dispatch to fail")
-	}
-	replacement, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replacement.Attempt != 2 || replacement.Status != model.TaskExecutionDispatching || replacement.DispatchClaimToken == "" || replacement.DispatchClaimedAt == nil {
-		t.Fatalf("replacement=%+v", replacement)
-	}
-	dispatcher.mu.Lock()
-	dispatcher.err = nil
-	dispatcher.mu.Unlock()
-	if err := svc.ResumeExecutionDispatch(context.Background(), replacement.ID); err != nil {
-		t.Fatalf("idempotent replacement resume during active lease: %v", err)
-	}
-	leased, err := repo.TaskExecutions().FindByID(context.Background(), replacement.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dispatcher.callCount() != 1 || leased.Status != model.TaskExecutionDispatching || leased.DispatchClaimToken == "" || leased.DispatchClaimedAt == nil {
-		t.Fatalf("active replacement lease dispatched again: calls=%d execution=%+v", dispatcher.callCount(), leased)
-	}
-	ageDispatchClaim(t, db, replacement.ID, 2*time.Minute)
-	if err := svc.ResumeExecutionDispatch(context.Background(), replacement.ID); err != nil {
-		t.Fatalf("retry replacement after database lease expiry: %v", err)
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+		t.Fatalf("reconcile failure: %v", err)
 	}
 	current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.ID != replacement.ID || current.Attempt != 2 || current.Status != model.TaskExecutionStarting || dispatcher.callCount() != 2 || dispatcher.createCount() != 1 {
-		t.Fatalf("current=%+v calls=%d creates=%d", current, dispatcher.callCount(), dispatcher.createCount())
+	if current.ID != execution.ID || current.Attempt != 1 || current.Status != model.TaskExecutionFailed {
+		t.Fatalf("current=%+v", current)
+	}
+	if dispatcher.callCount() != 0 || dispatcher.createCount() != 0 {
+		t.Fatalf("provider dispatches=%d creates=%d, want 0", dispatcher.callCount(), dispatcher.createCount())
 	}
 }
 
-func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
+func TestConcurrentPreStartReconcileDoesNotCreateReplacement(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
@@ -1015,8 +984,8 @@ func TestConcurrentPreStartReconcileCreatesOneReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Attempt != 2 || next != 3 || dispatcher.createCount() != 1 {
-		t.Fatalf("current attempt=%d next=%d jobs=%d", current.Attempt, next, dispatcher.createCount())
+	if current.ID != execution.ID || current.Attempt != 1 || current.Status != model.TaskExecutionFailed || next != 2 || dispatcher.createCount() != 0 {
+		t.Fatalf("current id=%s attempt=%d next=%d jobs=%d", current.ID, current.Attempt, next, dispatcher.createCount())
 	}
 }
 

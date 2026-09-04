@@ -469,6 +469,7 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
 		Where("project_id = ? AND status = ? AND deleting_at IS NULL", projectID, model.TaskStatusPending).
+		Where("(plan_id IS NULL OR EXISTS (SELECT 1 FROM plans WHERE plans.id = tasks.plan_id AND plans.status = ?))", model.PlanStatusActive).
 		// Exclude tasks awaiting a desktop local-executor claim — those must not
 		// be scooped up by cloud DispatchPendingTasks. execution_target defaults
 		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
@@ -477,6 +478,15 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 		Where("NOT (retry_count > 0 AND updated_at > ?)", time.Now().Add(-2*time.Minute)).
 		Order("created_at ASC").
 		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (r *taskRepository) FindPendingByPlanID(ctx context.Context, planID string) ([]*model.Task, error) {
+	var tasks []*model.Task
+	err := r.db.WithContext(ctx).
+		Where("plan_id = ? AND status = ? AND current_execution_id IS NULL AND deleting_at IS NULL", planID, model.TaskStatusPending).
+		Order("created_at ASC").
 		Find(&tasks).Error
 	return tasks, err
 }
@@ -719,6 +729,25 @@ func (r *taskRepository) FailPendingTask(ctx context.Context, taskID, errorMsg s
 			"status":        model.TaskStatusFailed,
 			"error_message": errorMsg,
 			"completed_at":  time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// CancelPendingTask atomically cancels an admitted task only while it remains
+// pending and has not acquired an execution. Callers use this for plan pause
+// backlog cancellation and must settle any admission charge in the same tx.
+func (r *taskRepository) CancelPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ? AND current_execution_id IS NULL AND deleting_at IS NULL", taskID, model.TaskStatusPending).
+		Updates(map[string]interface{}{
+			"status":                  model.TaskStatusCancelled,
+			"error_message":           errorMsg,
+			"completed_at":            time.Now(),
+			"billing_terminal_reason": model.TaskBillingTerminalPlanPaused,
 		})
 	if result.Error != nil {
 		return false, result.Error
