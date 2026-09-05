@@ -156,10 +156,9 @@ func (s *TaskService) ReleaseExecutionCleanup(ctx context.Context, executionID, 
 	return s.repo.TaskExecutions().ReleaseCleanup(ctx, executionID, token)
 }
 
-// ReconcileExecutionFailure always sends the current attempt through the
-// terminal finalizer. retryLimit is retained in the interface for wire and
-// deployment compatibility, but failed provider work is never retried.
-func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID, status, reason string, diagnostics []byte, _ int) error {
+// ReconcileExecutionFailure makes the current attempt terminal. Runtime
+// failures never create another execution or invoke the provider again.
+func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID, status, reason string, diagnostics []byte) error {
 	_, _, err := s.currentExecution(ctx, executionID)
 	if err != nil {
 		return err

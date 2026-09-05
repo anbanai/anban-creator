@@ -166,7 +166,6 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.ActiveDeadlineSeconds != 3600 { t.Fatal("active deadline") }
 	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 30 { t.Fatal("completion grace") }
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 { t.Fatal("job ttl") }
-	if cfg.Claude.Kubernetes.PreStartRetryLimit != 1 { t.Fatal("pre-start retry limit") }
 }
 ```
 
@@ -188,17 +187,11 @@ Add these cases to `TestValidateKubernetesJobRuntimeRequirements`:
 	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.CompletionGraceSeconds = -1 },
 	wantErr: "claude.kubernetes.completion_grace_seconds must not be negative",
 },
-{
-	name: "negative pre-start retry limit",
-	mutate: func(cfg *Config) { cfg.Claude.Kubernetes.PreStartRetryLimit = -1 },
-	wantErr: "claude.kubernetes.pre_start_retry_limit must not be negative",
-},
 ```
 
 Keep the existing invalid-quantity case and add an explicit valid case with
-both completion grace and pre-start retries set to zero. Add a real `NewConfig`
-test with both YAML keys explicitly set to `0` and assert they remain zero after
-loading and defaults. Keep
+completion grace set to zero. Add a real `NewConfig` test with the YAML key
+explicitly set to `0` and assert it remains zero after loading and defaults. Keep
 `memory_storage_class` explicit in YAML and valid fixtures, and prove omission
 survives defaults:
 
@@ -239,26 +232,24 @@ type KubernetesConfig struct {
 	CompletionGraceSeconds    int                      `yaml:"completion_grace_seconds"`
 	completionGraceSet        bool                     `yaml:"-"`
 	TTLSecondsAfterFinished   int32                    `yaml:"ttl_seconds_after_finished"`
-	PreStartRetryLimit        int                      `yaml:"pre_start_retry_limit"`
-	preStartRetryLimitSet     bool                     `yaml:"-"`
 	Resources                 KubernetesResourceConfig `yaml:"resources"`
 }
 ```
 
 Implement `KubernetesConfig.UnmarshalYAML` using a non-recursive alias and scan
-the mapping node for `completion_grace_seconds` and `pre_start_retry_limit`.
+the mapping node for `completion_grace_seconds`.
 Decode into a fresh alias before assigning it back so repeated unmarshalling
 resets presence state. In `applyDefaults`, default zero values only when the
 corresponding presence flag is false. Keep the exported values as integers.
 
 Defaults: namespace `default`, memory size `1Gi`, active deadline `3600`,
-completion grace `30`, Job TTL `600`, pre-start retries `1`. Completion grace
-and pre-start retry defaults apply only when their YAML keys are omitted;
-explicit YAML zero remains zero. Validation requires OSS, STS role, Agent
-Server URL, image, service account, storage class, a valid positive quantity for
-memory size, positive deadline/TTL values, non-negative completion grace, and a
-non-negative pre-start retry limit. Storage class has no Go default and must be
-explicit.
+completion grace `30`, Job TTL `600`. The completion-grace default applies only
+when its YAML key is omitted; explicit YAML zero remains zero. Runtime failure
+retry is a fixed policy rather than configuration: failed tasks are terminal,
+and the removed retry key is rejected as an unknown field. Validation requires
+OSS, STS role, Agent Server URL, image, service account, storage class, a valid
+positive quantity for memory size, positive deadline/TTL values, and
+non-negative completion grace. Storage class has no Go default and must be explicit.
 
 Retain the legacy reusable-Pod fields, defaults, validation, and YAML keys in
 this task solely because `server/agent/kubernetes_executor.go` and the current
@@ -762,7 +753,9 @@ Cancellation CASes the execution to cancelled and the task to cancelled before
 calling dispatcher delete. The reconciler polls reconcilable attempts, calls
 `Inspect`, updates Pod UID/started state, and terminalizes image pull, scheduling,
 PVC mount, OOM, Job failure, deadline, heartbeat, and missing-completion cases.
-Only pre-start failures below `PreStartRetryLimit` create a replacement attempt.
+Every runtime failure terminalizes the current attempt. Technical retries may
+repeat persistence, lease, outbox, inspection, and cleanup work, but must never
+create a replacement execution or invoke a provider again.
 
 - [ ] **Step 5: Route cloud completion and run tests**
 

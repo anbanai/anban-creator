@@ -848,12 +848,12 @@ func TestCancelCloudRejectsCleanupDispatcherTargetMismatch(t *testing.T) {
 	}
 }
 
-func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
-	t.Run("configured replacement limit is ignored", func(t *testing.T) {
+func TestReconcileExecutionFailureAlwaysTerminalizesCurrentExecution(t *testing.T) {
+	t.Run("pre-start failure does not create a replacement", func(t *testing.T) {
 		svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 		dispatcher := &dispatchTestDispatcher{}
 		svc.SetRuntimeDispatcher(dispatcher)
-		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
 			t.Fatal(err)
 		}
 		current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
@@ -874,7 +874,7 @@ func TestReconcileExecutionFailureRetriesOnlyPreStart(t *testing.T) {
 		svc, repo, task, execution := setupCloudCompletionTest(t, true, true)
 		dispatcher := &dispatchTestDispatcher{}
 		svc.SetRuntimeDispatcher(dispatcher)
-		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {
+		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil); err != nil {
 			t.Fatal(err)
 		}
 		current, _ := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
@@ -889,7 +889,7 @@ func TestReconcilePreStartFailureKeepsOriginalExecution(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
-	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
 		t.Fatal(err)
 	}
 	current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
@@ -922,7 +922,7 @@ func TestReconcilePreStartFailureDoesNotResetProviderIdentity(t *testing.T) {
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
 
-	if err := svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+	if err := svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
 		t.Fatalf("reconcile failure: %v", err)
 	}
 	current, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, task.ID)
@@ -941,7 +941,7 @@ func TestReconcilePreStartFailureDoesNotResumeAfterTransientFailure(t *testing.T
 	svc, repo, _, task, execution := setupCloudCompletionTestWithDB(t, true, false)
 	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}
 	svc.SetRuntimeDispatcher(dispatcher)
-	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil, 1); err != nil {
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
 		t.Fatalf("reconcile failure: %v", err)
 	}
 	current, err := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)
@@ -966,7 +966,7 @@ func TestConcurrentPreStartReconcileDoesNotCreateReplacement(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "scheduling_failed", nil, 1)
+			errs <- svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "scheduling_failed", nil)
 		}()
 	}
 	wg.Wait()
@@ -998,7 +998,7 @@ func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
 		model.ExecutionTransition{Started: true, RuntimeInstanceID: "pod-1"}); err != nil || !won {
 		t.Fatalf("mark bootstrap started: won=%v err=%v", won, err)
 	}
-	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil, 1); err != nil {
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "job_failed", nil); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := repo.TaskExecutions().FindCurrentByTaskID(context.Background(), task.ID)

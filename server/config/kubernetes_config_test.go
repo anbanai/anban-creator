@@ -143,9 +143,6 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.TTLSecondsAfterFinished != 600 {
 		t.Fatal("job ttl")
 	}
-	if cfg.Claude.Kubernetes.PreStartRetryLimit != 0 {
-		t.Fatal("pre-start retry limit")
-	}
 }
 
 func TestKubernetesResourcesForTaskOverlaysDefaults(t *testing.T) {
@@ -202,7 +199,7 @@ func TestValidateKubernetesHeartbeatTimeout(t *testing.T) {
 	}
 }
 
-func TestNewConfigPreservesExplicitZeroKubernetesJobControls(t *testing.T) {
+func TestNewConfigRejectsRemovedPreStartRetryLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := []byte(`
 database:
@@ -239,16 +236,9 @@ claude:
 		t.Fatalf("write config: %v", err)
 	}
 
-	cfg, err := NewConfig(path)
-	if err != nil {
-		t.Fatalf("NewConfig() error = %v", err)
-	}
-	if cfg.Claude.Kubernetes.CompletionGraceSeconds != 0 || cfg.Claude.Kubernetes.PreStartRetryLimit != 0 {
-		t.Fatalf(
-			"job controls = %d/%d, want explicit zero values preserved",
-			cfg.Claude.Kubernetes.CompletionGraceSeconds,
-			cfg.Claude.Kubernetes.PreStartRetryLimit,
-		)
+	_, err := NewConfig(path)
+	if err == nil || !strings.Contains(err.Error(), `unknown claude.kubernetes config field "pre_start_retry_limit"`) {
+		t.Fatalf("NewConfig() error = %v, want removed field rejection", err)
 	}
 }
 
@@ -389,13 +379,6 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 			},
 			wantErr: "claude.kubernetes.completion_grace_seconds must not be negative",
 		},
-		{
-			name: "nonzero pre-start retry limit",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.PreStartRetryLimit = 1
-			},
-			wantErr: "claude.kubernetes.pre_start_retry_limit must be 0",
-		},
 	}
 
 	for _, tt := range tests {
@@ -410,13 +393,12 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 	}
 }
 
-func TestValidateKubernetesAllowsZeroJobControls(t *testing.T) {
+func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.Kubernetes.CompletionGraceSeconds = 0
-	cfg.Claude.Kubernetes.PreStartRetryLimit = 0
 
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v, want zero completion grace and retries accepted", err)
+		t.Fatalf("Validate() error = %v, want zero completion grace accepted", err)
 	}
 }
 

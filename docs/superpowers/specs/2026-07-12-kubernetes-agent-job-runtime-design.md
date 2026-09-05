@@ -318,7 +318,6 @@ claude:
     active_deadline_seconds: 3600
     completion_grace_seconds: 30
     ttl_seconds_after_finished: 600
-    pre_start_retry_limit: 1
     resources:
       requests:
         cpu: "500m"
@@ -327,6 +326,10 @@ claude:
         cpu: "4"
         memory: "8Gi"
 ```
+
+Runtime failures are terminal. The reconciler may retry persistence, lease,
+outbox, inspection, and cleanup operations, but it never creates a replacement
+execution or invokes a provider again for a failed task.
 
 Delete configuration for project Pod revision, reusable Pod TTL, exec timeout,
 workspace PVC name, and workspace mount path. There is no compatibility parser

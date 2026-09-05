@@ -47,17 +47,17 @@ func TestRuntimeReconcilerLifecycleJoinsBeforeProviderClose(t *testing.T) {
 
 func TestManagedRuntimeReconcilerConfigCoversDockerAndKubernetes(t *testing.T) {
 	docker := managedRuntimeReconcilerConfig("docker", config.DockerConfig{TimeoutSec: 600}, config.KubernetesConfig{})
-	if docker.ActiveDeadline != 10*time.Minute || docker.HeartbeatTimeout <= 0 || docker.HeartbeatTimeout >= docker.ActiveDeadline || docker.CompletionGrace != 30*time.Second || docker.PreStartRetryLimit != 0 {
+	if docker.ActiveDeadline != 10*time.Minute || docker.HeartbeatTimeout <= 0 || docker.HeartbeatTimeout >= docker.ActiveDeadline || docker.CompletionGrace != 30*time.Second {
 		t.Fatalf("Docker reconciler config = %+v", docker)
 	}
 
 	kubernetes := managedRuntimeReconcilerConfig("kubernetes", config.DockerConfig{}, config.KubernetesConfig{
-		ActiveDeadlineSeconds: 900, HeartbeatTimeoutSeconds: 120, CompletionGraceSeconds: 45, PreStartRetryLimit: 2,
+		ActiveDeadlineSeconds: 900, HeartbeatTimeoutSeconds: 120, CompletionGraceSeconds: 45,
 	})
 	want := serveragent.RuntimeReconcilerConfig{
-		ActiveDeadline: 15 * time.Minute, HeartbeatTimeout: 2 * time.Minute, CompletionGrace: 45 * time.Second, PreStartRetryLimit: 0,
+		ActiveDeadline: 15 * time.Minute, HeartbeatTimeout: 2 * time.Minute, CompletionGrace: 45 * time.Second,
 	}
-	if kubernetes.ActiveDeadline != want.ActiveDeadline || kubernetes.HeartbeatTimeout != want.HeartbeatTimeout || kubernetes.CompletionGrace != want.CompletionGrace || kubernetes.PreStartRetryLimit != want.PreStartRetryLimit {
+	if kubernetes.ActiveDeadline != want.ActiveDeadline || kubernetes.HeartbeatTimeout != want.HeartbeatTimeout || kubernetes.CompletionGrace != want.CompletionGrace {
 		t.Fatalf("Kubernetes reconciler config = %+v, want %+v", kubernetes, want)
 	}
 }

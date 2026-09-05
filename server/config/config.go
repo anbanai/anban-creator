@@ -698,8 +698,6 @@ type KubernetesConfig struct {
 	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
 	completionGraceSet      bool                                `yaml:"-"`
 	TTLSecondsAfterFinished int32                               `yaml:"ttl_seconds_after_finished"`
-	PreStartRetryLimit      int                                 `yaml:"pre_start_retry_limit"`
-	preStartRetryLimitSet   bool                                `yaml:"-"`
 	Resources               KubernetesResourceConfig            `yaml:"resources"`
 	ResourceProfiles        map[string]KubernetesResourceConfig `yaml:"resource_profiles"`
 }
@@ -762,7 +760,7 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 		"project_memory_size": true, "task_workspace_size": true,
 		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
 		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
-		"pre_start_retry_limit": true, "resources": true, "resource_profiles": true,
+		"resources": true, "resource_profiles": true,
 	}
 	if value.Kind != yaml.MappingNode {
 		return fmt.Errorf("claude.kubernetes config must be a mapping")
@@ -783,8 +781,6 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 		switch value.Content[i].Value {
 		case "completion_grace_seconds":
 			c.completionGraceSet = true
-		case "pre_start_retry_limit":
-			c.preStartRetryLimitSet = true
 		}
 	}
 	return nil
@@ -1171,11 +1167,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
 		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
-	}
-	// Failed tasks are terminal. This setting remains decoded for config
-	// compatibility but automatic provider-work retries are disabled.
-	if !c.Claude.Kubernetes.preStartRetryLimitSet {
-		c.Claude.Kubernetes.PreStartRetryLimit = 0
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
@@ -1732,9 +1723,6 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Kubernetes.CompletionGraceSeconds < 0 {
 			errs = append(errs, "claude.kubernetes.completion_grace_seconds must not be negative")
-		}
-		if c.Claude.Kubernetes.PreStartRetryLimit != 0 {
-			errs = append(errs, "claude.kubernetes.pre_start_retry_limit must be 0 because failed tasks are never retried")
 		}
 		errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resources", c.Claude.Kubernetes.Resources)...)
 		for taskType := range c.Claude.Kubernetes.ResourceProfiles {

@@ -330,6 +330,7 @@ claude:
     pids_limit: 512
     timeout_sec: 3600
   kubernetes:
+    # 任务失败即进入终态，不自动创建新的执行尝试；手动重试会创建新任务并重新计费。
     # Agent Job 所在命名空间。
     namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
     # Agent Job 使用的 Kubernetes ServiceAccount。
@@ -351,8 +352,6 @@ claude:
     completion_grace_seconds: 30
     # 已完成 Job 的自动清理时间，单位秒。
     ttl_seconds_after_finished: 600
-    # 任务失败后不自动创建新的执行尝试；手动重试会创建新任务并重新计费。
-    pre_start_retry_limit: 0
     resources:
       # 未配置专属档位的任务使用此默认资源。
       requests:

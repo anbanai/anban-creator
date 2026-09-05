@@ -20,7 +20,7 @@ type RuntimeReconcileService interface {
 	RecordExecutionInstance(context.Context, string, string) error
 	ResumeExecutionDispatch(context.Context, string) error
 	ResumeExecutionFinalization(context.Context, string) error
-	ReconcileExecutionFailure(context.Context, string, string, string, []byte, int) error
+	ReconcileExecutionFailure(context.Context, string, string, string, []byte) error
 	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	ResolveExecutionCleanupRuntime(context.Context, string, string) (*model.TaskExecution, bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
@@ -36,7 +36,6 @@ type RuntimeReconcilerConfig struct {
 	MissingResourceGrace time.Duration
 	HeartbeatTimeout     time.Duration
 	ActiveDeadline       time.Duration
-	PreStartRetryLimit   int
 	CleanupLease         time.Duration
 	CleanupRetryBackoff  time.Duration
 }
@@ -129,7 +128,7 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 		return errors.Join(finalizeErr, cleanupErr)
 	}
 	if r.config.ActiveDeadline > 0 && !execution.CreatedAt.IsZero() && now.Sub(execution.CreatedAt) >= r.config.ActiveDeadline {
-		return r.failWithRetryLimit(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", "", "Runtime execution active deadline exceeded", nil, 0)
+		return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", "", "Runtime execution active deadline exceeded", nil)
 	}
 	if execution.Status == model.TaskExecutionCreated || execution.Status == model.TaskExecutionDispatching {
 		return r.service.ResumeExecutionDispatch(ctx, execution.ID)
@@ -156,7 +155,7 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 	if execution.Status == model.TaskExecutionStarting && state.Phase == RuntimePhasePending {
 		if err := r.dispatcher.Activate(ctx, execution); err != nil {
 			if IsPermanentDispatchError(err) {
-				return r.failWithRetryLimit(ctx, execution, model.TaskExecutionFailed, "activation_failed", state.Reason, err.Error(), state.ExitCode, 0)
+				return r.fail(ctx, execution, model.TaskExecutionFailed, "activation_failed", state.Reason, err.Error(), state.ExitCode)
 			}
 			return err
 		}
@@ -190,17 +189,13 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 }
 
 func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32) error {
-	return r.failWithRetryLimit(ctx, execution, status, reason, runtimeReason, message, exitCode, r.config.PreStartRetryLimit)
-}
-
-func (r *RuntimeReconciler) failWithRetryLimit(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32, retryLimit int) error {
 	diagnostics, _ := json.Marshal(map[string]any{
 		"reason":         reason,
 		"runtime_reason": sanitizeRuntimeDiagnostic(runtimeReason),
 		"message":        sanitizeRuntimeDiagnostic(message),
 		"exit_code":      exitCodeValue(exitCode),
 	})
-	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics, retryLimit); err != nil {
+	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics); err != nil {
 		return err
 	}
 	return r.cleanupExecution(ctx, execution)

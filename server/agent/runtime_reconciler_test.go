@@ -160,7 +160,7 @@ func (s *reconcileTestService) ResumeExecutionFinalization(_ context.Context, id
 	s.resumed = append(s.resumed, id)
 	return nil
 }
-func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, status, reason string, diagnostics []byte, _ int) error {
+func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, status, reason string, diagnostics []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id == s.failID {
