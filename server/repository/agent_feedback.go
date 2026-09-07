@@ -21,7 +21,7 @@ func (r *agentFeedbackRepository) Create(ctx context.Context, feedback *model.Ag
 	if err := db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "task_id"}, {Name: "agent_name"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"scores", "errors", "optimizations", "summary", "updated_at",
+			"scores", "errors", "optimizations", "summary", "execution_id", "source", "updated_at",
 		}),
 	}).Create(feedback).Error; err != nil {
 		return err

@@ -116,6 +116,14 @@ export class Reporter {
     await postJSONWithRetry(() => this.post("/api/v1/agent/complete", this.identity({ result }), signal), undefined, signal);
   }
 
+  async submitCompletionMetadata(metadata: unknown, signal?: AbortSignal): Promise<void> {
+    await postJSONWithRetry(() => this.callMCP("submit_completion_metadata", {
+      task_id: this.taskID,
+      execution_id: this.config.executionID,
+      metadata: JSON.stringify(metadata),
+    }, signal), undefined, signal);
+  }
+
   async prepareArtifactUpload(request: ArtifactPrepareRequest, signal?: AbortSignal): Promise<ArtifactPrepareResponse> {
     return this.postJSON("/api/v1/agent/artifacts/prepare", this.identity(request), signal);
   }
@@ -170,6 +178,26 @@ export class Reporter {
     });
     if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
     return this.decodeEnvelope(await response.text(), path);
+  }
+
+  private async callMCP(tool: string, arguments_: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
+    const endpoint = `${this.config.serverURL}/mcp`;
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+    const initialize = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "anban-runtime", version: "1.0" } } }), signal });
+    if (!initialize.ok) throw new Error(`/mcp initialize returned HTTP ${initialize.status}`);
+    await initialize.arrayBuffer();
+    const session = initialize.headers.get("mcp-session-id");
+    if (session) headers["Mcp-Session-Id"] = session;
+    const initialized = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }), signal });
+    if (!initialized.ok) throw new Error(`/mcp initialized returned HTTP ${initialized.status}`);
+    await initialized.arrayBuffer();
+    const response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool, arguments: arguments_ } }), signal });
+    if (!response.ok) throw new Error(`/mcp tools/call returned HTTP ${response.status}`);
+    const raw = await response.text();
+    if (!raw.trim()) return;
+    const envelope = JSON.parse(raw) as { error?: { message?: string }; result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+    if (envelope.error) throw new Error(`/mcp tools/call failed: ${envelope.error.message ?? "unknown error"}`);
+    if (envelope.result?.isError) throw new Error(envelope.result.content?.map((item) => item.text ?? "").join(" ") || "/mcp tool failed");
   }
 
   private decodeEnvelope<T>(raw: string, path: string): T {

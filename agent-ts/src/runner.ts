@@ -173,10 +173,10 @@ export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "res
   return appendResumeContextToPrompt(data.prompt, data.resume_context_path);
 }
 
-export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
+export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal, executionID = process.env.ANBAN_EXECUTION_ID ?? ""): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
+  const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller, executionID);
   const cwd = options.cwd!;
   let logText = "";
   let initValidated = false;
@@ -224,6 +224,7 @@ export function buildQueryOptions(
   token = "test-token",
   reporter: RunnerReporter = { progress: async () => {}, stageProgress: async () => {} },
   controller = new AbortController(),
+  executionID = process.env.ANBAN_EXECUTION_ID ?? "",
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
@@ -242,10 +243,19 @@ export function buildQueryOptions(
       diagnostic,
     );
   }
+  const completionHook = createCompletionMetadataHook(cwd, data, executionID, serverURL, token, pluginRoot);
+  const composedStopHook: HookCallback = async (input, toolUseID, hookOptions) => {
+    const result = await stopHook(input, toolUseID, hookOptions);
+    const specific = "hookSpecificOutput" in result ? result.hookSpecificOutput as { permissionDecision?: string } : undefined;
+    if (("decision" in result && result.decision === "block") || specific?.permissionDecision === "deny") return result;
+    await completionHook(input, toolUseID, hookOptions);
+    return result;
+  };
   const hooks: NonNullable<Options["hooks"]> = {
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
     PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, cwd, diagnostic)] }],
-    Stop: [{ hooks: [stopHook] }],
+    Stop: [{ hooks: [composedStopHook] }],
+    SubagentStop: [{ hooks: [completionHook] }],
   };
   return {
     abortController: controller,
@@ -268,6 +278,32 @@ export function buildQueryOptions(
     hooks,
   };
 }
+
+export function createCompletionMetadataHook(
+  workspace: string,
+  data: Pick<ResolvedBootstrapResponse, "task_id" | "task_type" | "execution_profile">,
+  executionID: string,
+  _serverURL: string,
+  _token: string,
+  pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai",
+): HookCallback {
+  return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "Stop" && input.hook_event_name !== "SubagentStop") return {};
+    if (input.hook_event_name === "Stop" && input.stop_hook_active) return {};
+    const script = `${pluginRoot}/hooks/completion-metadata.sh`;
+    return await new Promise<HookJSONOutput>((resolve) => {
+      const child = spawn(script, [], {
+        cwd: workspace,
+        signal: hookOptions.signal as AbortSignal,
+        env: { ...process.env, CLAUDE_PROJECT_DIR: workspace, ANBAN_TASK_ID: data.task_id, ANBAN_EXECUTION_ID: executionID, ANBAN_TASK_TYPE: data.task_type },
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      child.on("error", () => resolve({}));
+      child.on("exit", () => resolve({}));
+    });
+  };
+}
+
 
 export function createTaskProgressHook(
   emitter: ProgressEmitter,

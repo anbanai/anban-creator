@@ -786,8 +786,9 @@ func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
 		t.Fatal("hooks.json must not register TaskCompleted hooks")
 	}
 
-	expected := map[string]string{
-		"^anban:seednote$": "${CLAUDE_PLUGIN_ROOT}/hooks/seednote-quality-gate.sh",
+	expected := map[string][]string{
+		"^anban:[a-z][a-z0-9-]*$": {"${CLAUDE_PLUGIN_ROOT}/hooks/completion-metadata.sh"},
+		"^anban:seednote$":        {"${CLAUDE_PLUGIN_ROOT}/hooks/seednote-quality-gate.sh"},
 	}
 	groups := cfg.Hooks["SubagentStop"]
 	if len(groups) != len(expected) {
@@ -795,7 +796,7 @@ func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
 	}
 	seen := make(map[string]bool, len(groups))
 	for _, group := range groups {
-		command, ok := expected[group.Matcher]
+		commands, ok := expected[group.Matcher]
 		if !ok {
 			t.Fatalf("SubagentStop has unsupported matcher %q", group.Matcher)
 		}
@@ -803,15 +804,16 @@ func TestClaudeCodeCompletionHooksUseSupportedRoles(t *testing.T) {
 			t.Fatalf("SubagentStop matcher %q is registered more than once", group.Matcher)
 		}
 		seen[group.Matcher] = true
-		if len(group.Hooks) != 1 {
-			t.Fatalf("SubagentStop matcher %q has %d hooks, want exactly one command hook", group.Matcher, len(group.Hooks))
+		if len(group.Hooks) != len(commands) {
+			t.Fatalf("SubagentStop matcher %q has %d hooks, want %d command hooks", group.Matcher, len(group.Hooks), len(commands))
 		}
-		hook := group.Hooks[0]
-		if hook.Type != "command" {
-			t.Fatalf("SubagentStop matcher %q hook type = %q, want command", group.Matcher, hook.Type)
-		}
-		if hook.Command != command {
-			t.Fatalf("SubagentStop matcher %q command = %q, want %q", group.Matcher, hook.Command, command)
+		for i, hook := range group.Hooks {
+			if hook.Type != "command" {
+				t.Fatalf("SubagentStop matcher %q hook type = %q, want command", group.Matcher, hook.Type)
+			}
+			if hook.Command != commands[i] {
+				t.Fatalf("SubagentStop matcher %q command = %q, want %q", group.Matcher, hook.Command, commands[i])
+			}
 		}
 	}
 	for matcher := range expected {

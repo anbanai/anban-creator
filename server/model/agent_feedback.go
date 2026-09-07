@@ -7,6 +7,8 @@ type AgentFeedback struct {
 	ID            string    `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID        string    `gorm:"type:varchar(128);not null;uniqueIndex:idx_agent_feedback_task_agent,priority:1" json:"task_id"`
 	AgentName     string    `gorm:"type:varchar(30);not null;uniqueIndex:idx_agent_feedback_task_agent,priority:2" json:"agent_name"`
+	ExecutionID   string    `gorm:"type:varchar(128);index" json:"execution_id,omitempty"`
+	Source        string    `gorm:"type:varchar(20);not null;default:agent" json:"source,omitempty"`
 	Scores        string    `gorm:"type:json" json:"scores,omitempty"`
 	Errors        string    `gorm:"type:text" json:"errors,omitempty"`
 	Optimizations string    `gorm:"type:text" json:"optimizations,omitempty"`

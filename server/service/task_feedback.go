@@ -9,7 +9,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 )
 
 var (

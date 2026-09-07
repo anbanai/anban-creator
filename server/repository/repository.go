@@ -39,6 +39,7 @@ type Repository interface {
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
 	AgentFeedbacks() AgentFeedbackRepository
+	ContentMetadata() ContentMetadataRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
 	Billing() BillingRepository
@@ -418,6 +419,14 @@ type AgentFeedbackRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
 }
 
+type ContentMetadataRepository interface {
+	CreateOrUpdate(ctx context.Context, report *model.ContentMetadataReport) error
+	FindByTaskExecution(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error)
+	ReplaceTags(ctx context.Context, reportID string, tags []*model.ContentTagAssignment) error
+	ListVocabulary(ctx context.Context, dimension, taxonomyVersion string) ([]*model.ContentTagVocabulary, error)
+	UpsertVocabulary(ctx context.Context, vocabulary *model.ContentTagVocabulary) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -452,6 +461,7 @@ type repository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	agentFeedbacks          AgentFeedbackRepository
+	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
 	billing                 BillingRepository
@@ -487,6 +497,7 @@ func New(db *gorm.DB) Repository {
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
+	contentMetadata := newContentMetadataRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
 	billing := newBillingRepository(db)
@@ -521,6 +532,7 @@ func New(db *gorm.DB) Repository {
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
 		agentFeedbacks:          agentFeedbacks,
+		contentMetadata:         contentMetadata,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
 		billing:                 billing,
@@ -558,10 +570,11 @@ func (r *repository) ChannelsTrackings() ChannelsTrackingRepository { return r.c
 func (r *repository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }
-func (r *repository) Templates() TemplateRepository           { return r.templates }
-func (r *repository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
-func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
-func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
+func (r *repository) Templates() TemplateRepository              { return r.templates }
+func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
+func (r *repository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
+func (r *repository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
+func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *repository) IlinkBindings() IlinkBindingRepository {
@@ -625,6 +638,7 @@ type txRepository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	agentFeedbacks          AgentFeedbackRepository
+	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
 	billing                 BillingRepository
@@ -661,6 +675,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
+		contentMetadata:         newContentMetadataRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
 		billing:                 newTxBillingRepository(tx),
@@ -700,10 +715,11 @@ func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository { return r
 func (r *txRepository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }
-func (r *txRepository) Templates() TemplateRepository           { return r.templates }
-func (r *txRepository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
-func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
-func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
+func (r *txRepository) Templates() TemplateRepository              { return r.templates }
+func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
+func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
+func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
+func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {

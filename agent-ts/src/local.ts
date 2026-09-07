@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { uploadWorkspaceArtifacts } from "./artifacts.js";
 import { readAgentPackCatalog, resolveAgentPackForTaskType, type AgentPack, type AgentPackCatalog, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { CompletionReportError } from "./errors.js";
+import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
 import { runClaude } from "./runner.js";
@@ -131,7 +133,7 @@ export async function runLocal(
   process.once("SIGTERM", onShutdown);
   const stopHeartbeat = startHeartbeat(reporter, stderr, shutdown.signal);
   try {
-    let result = await runClaude(config.workspace, data, config.serverURL, config.apiKey, reporter, shutdown.signal);
+    let result = await runClaude(config.workspace, data, config.serverURL, config.apiKey, reporter, shutdown.signal, config.executionID);
     if (config.artifactUploadMode !== "off") {
       try {
         await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
@@ -143,6 +145,13 @@ export async function runLocal(
     }
     let completionError: Error | undefined;
     try {
+      try {
+        await evaluateCompletionMetadata(config.workspace, data.execution_profile, shutdown.signal);
+        const metadata = JSON.parse(await readFile(join(config.workspace, "output", "completion-metadata.json"), "utf8"));
+        await reporter.submitCompletionMetadata(metadata, shutdown.signal);
+      } catch (metadataError) {
+        stderr.write(`completion metadata upload skipped: ${(metadataError as Error).message}\n`);
+      }
       await reporter.complete(result);
     } catch (error) {
       completionError = error instanceof Error ? error : new Error("completion report failed");

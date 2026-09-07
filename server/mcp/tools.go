@@ -65,6 +65,7 @@ type Services struct {
 	MediaPipelineSvc       *service.MediaPipelineService
 	TopicPoolSvc           *service.TopicPoolService
 	AgentFeedbackSvc       *service.AgentFeedbackService
+	ContentMetadataSvc     *service.ContentMetadataService
 	AgentProjectProfileSvc *service.AgentProjectProfileService
 	ArticleScoreSvc        *service.ArticleScoreService
 	SeednoteExportSvc      *service.SeednoteExportService
@@ -92,6 +93,7 @@ func RegisterTools(server *mcp.Server) {
 	registerTopicPoolTools(server)
 	registerProgressTools(server)
 	registerAgentFeedbackTools(server)
+	registerContentMetadataTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

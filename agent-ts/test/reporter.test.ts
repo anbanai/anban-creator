@@ -3,6 +3,25 @@ import { describe, expect, test } from "bun:test";
 import { Reporter, postJSONWithRetry } from "../src/reporter.js";
 
 describe("postJSONWithRetry", () => {
+  test("submits completion metadata through a session-capable MCP request", async () => {
+    const requests: Array<{ body: unknown; headers: Headers }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      requests.push({ body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers) });
+      if (requests.length === 1) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), { status: 200, headers: { "Content-Type": "application/json", "Mcp-Session-Id": "session-1" } });
+      if (requests.length === 2) return new Response("", { status: 202 });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "ok" }] } }), { status: 200 });
+    };
+    try {
+      const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
+      await reporter.submitCompletionMetadata({ tags: [] });
+      expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/event-stream");
+      expect(requests[2]?.headers.get("Mcp-Session-Id")).toBe("session-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("retries a transient terminal failure three times", async () => {
     let attempts = 0;
     await postJSONWithRetry(

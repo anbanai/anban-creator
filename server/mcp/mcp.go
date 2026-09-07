@@ -164,6 +164,7 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 		},
 		&mcp.StreamableHTTPOptions{
 			SessionTimeout: 16 * time.Minute,
+			JSONResponse:   true,
 		},
 	)
 

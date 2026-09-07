@@ -656,6 +656,7 @@ func main() {
 			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
 			TopicPoolSvc:           topicPoolSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
+			ContentMetadataSvc:     service.NewContentMetadataService(repo, log),
 			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver),
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),

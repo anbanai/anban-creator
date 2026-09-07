@@ -1,9 +1,11 @@
 import { pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
 
 import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
 import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { CompletionReportError, exitCodeForError } from "./errors.js";
+import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { runClaude, type RunnerReporter } from "./runner.js";
@@ -16,7 +18,7 @@ const MAX_ARTIFACT_TIMEOUT_MS = 300_000;
 const MAX_COMPLETION_TIMEOUT_MS = 60_000;
 
 type HeartbeatReporter = Pick<Reporter, "heartbeat">;
-type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete">;
+type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete" | "submitCompletionMetadata">;
 
 export interface FinalizationTimeouts {
   artifact: number;
@@ -61,7 +63,7 @@ const defaultRunJobDependencies: RunJobDependencies = {
   createReporter: (config, data) => new Reporter(config, data.execution_token, data.task_id),
   startHeartbeat,
   runClaude: (config, data, reporter, signal) =>
-    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal),
+    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal, config.executionID),
   uploadWorkspaceArtifacts,
   subscribeShutdown: (onSignal) => {
     process.once("SIGINT", onSignal);
@@ -136,6 +138,13 @@ export async function runJob(
     let completionError: Error | undefined;
     try {
       stderr.write(`completion report started: timeout_ms=${timeouts.completion}\n`);
+      try {
+        await evaluateCompletionMetadata(config.workspace, data.execution_profile, completionAbort.signal);
+        const metadata = JSON.parse(await readFile(`${config.workspace}/output/completion-metadata.json`, "utf8"));
+        await reporter.submitCompletionMetadata(metadata, completionAbort.signal);
+      } catch (metadataError) {
+        stderr.write(`completion metadata upload skipped: ${(metadataError as Error).message}\n`);
+      }
       await reporter.complete(result, completionAbort.signal);
       stderr.write(`completion report acknowledged: duration_ms=${Date.now() - completionStartedAt}\n`);
     } catch (error) {
