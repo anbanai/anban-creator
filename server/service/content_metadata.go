@@ -24,11 +24,12 @@ func NewContentMetadataService(repo repository.Repository, logger *zerolog.Logge
 }
 
 type ContentMetadataInput struct {
-	TaskID          string
-	ExecutionID     string
-	TaxonomyVersion string
-	SourceDigest    string
-	RawMetadata     []byte
+	AuthenticatedUserID string
+	TaskID              string
+	ExecutionID         string
+	TaxonomyVersion     string
+	SourceDigest        string
+	RawMetadata         []byte
 }
 
 type contentMetadataPayload struct {
@@ -113,6 +114,9 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		}
 		if execution, err := s.repo.TaskExecutions().FindByID(ctx, input.ExecutionID); err != nil || execution.TaskID != input.TaskID {
 			return nil, fmt.Errorf("execution does not belong to task")
+		}
+		if userID := strings.TrimSpace(input.AuthenticatedUserID); userID != "" && task.UserID != userID {
+			return nil, fmt.Errorf("task does not belong to authenticated user")
 		}
 	}
 	report := &model.ContentMetadataReport{ID: uuid.NewString(), TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataPending, TaggingStatus: model.ContentMetadataPending, FeedbackStatus: model.ContentMetadataPending, TaxonomyVersion: version, SourceDigest: strings.TrimSpace(input.SourceDigest), RawMetadata: datatypes.JSON(input.RawMetadata), Attempts: 1}
@@ -258,24 +262,48 @@ func normalizeTagValue(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 
-func (s *ContentMetadataService) RecomputeTags(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error) {
+func (s *ContentMetadataService) RecomputeTags(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.ContentMetadataReport, error) {
 	report, err := s.Find(ctx, taskID, executionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.submit(ctx, ContentMetadataInput{TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, true, false)
+	return s.submit(ctx, ContentMetadataInput{AuthenticatedUserID: authenticatedUserID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, true, false)
 }
 
-func (s *ContentMetadataService) RecomputeFeedback(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error) {
+func (s *ContentMetadataService) RecomputeFeedback(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.ContentMetadataReport, error) {
 	report, err := s.Find(ctx, taskID, executionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.submit(ctx, ContentMetadataInput{TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, false, true)
+	return s.submit(ctx, ContentMetadataInput{AuthenticatedUserID: authenticatedUserID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, false, true)
 }
 
 func (s *ContentMetadataService) Find(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error) {
 	return s.repo.ContentMetadata().FindByTaskExecution(ctx, strings.TrimSpace(taskID), strings.TrimSpace(executionID))
+}
+
+// Authorize verifies that a non-admin caller owns the task and that the
+// execution belongs to it before allowing metadata reads or recomputation.
+func (s *ContentMetadataService) Authorize(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.Task, error) {
+	task, err := s.repo.Tasks().FindByID(ctx, strings.TrimSpace(taskID))
+	if err != nil || task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+	if userID := strings.TrimSpace(authenticatedUserID); userID != "" && task.UserID != userID {
+		return nil, fmt.Errorf("task does not belong to authenticated user")
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, strings.TrimSpace(executionID))
+	if err != nil || execution == nil || execution.TaskID != task.ID {
+		return nil, fmt.Errorf("execution does not belong to task")
+	}
+	return task, nil
+}
+
+func (s *ContentMetadataService) FindAuthorized(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.ContentMetadataReport, error) {
+	if _, err := s.Authorize(ctx, authenticatedUserID, taskID, executionID); err != nil {
+		return nil, err
+	}
+	return s.Find(ctx, taskID, executionID)
 }
 
 func (s *ContentMetadataService) Recompute(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error) {

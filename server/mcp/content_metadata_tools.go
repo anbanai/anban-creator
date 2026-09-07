@@ -38,7 +38,7 @@ func contentMetadataSubmitHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if svcs.ContentMetadataSvc == nil {
 		return errorResult("content metadata service not available"), nil
 	}
-	report, err := svcs.ContentMetadataSvc.Submit(ctx, service.ContentMetadataInput{TaskID: taskID, ExecutionID: executionID, TaxonomyVersion: stringArg(args, "taxonomy_version"), SourceDigest: stringArg(args, "source_digest"), RawMetadata: []byte(metadata)})
+	report, err := svcs.ContentMetadataSvc.Submit(ctx, service.ContentMetadataInput{AuthenticatedUserID: getUserID(ctx), TaskID: taskID, ExecutionID: executionID, TaxonomyVersion: stringArg(args, "taxonomy_version"), SourceDigest: stringArg(args, "source_digest"), RawMetadata: []byte(metadata)})
 	if err != nil {
 		return errorResult(fmt.Sprintf("submit completion metadata: %v", err)), nil
 	}
@@ -63,7 +63,7 @@ func contentMetadataRecomputeTagsHandler(ctx context.Context, req *mcp.CallToolR
 	if validation != nil {
 		return validation, nil
 	}
-	report, err := svcs.ContentMetadataSvc.RecomputeTags(ctx, taskID, executionID)
+	report, err := svcs.ContentMetadataSvc.RecomputeTags(ctx, getUserID(ctx), taskID, executionID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("recompute content tags: %v", err)), nil
 	}
@@ -78,7 +78,7 @@ func contentMetadataRecomputeFeedbackHandler(ctx context.Context, req *mcp.CallT
 	if validation != nil {
 		return validation, nil
 	}
-	report, err := svcs.ContentMetadataSvc.RecomputeFeedback(ctx, taskID, executionID)
+	report, err := svcs.ContentMetadataSvc.RecomputeFeedback(ctx, getUserID(ctx), taskID, executionID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("recompute agent feedback: %v", err)), nil
 	}
@@ -95,7 +95,7 @@ func contentMetadataStatusHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if svcs.ContentMetadataSvc == nil {
 		return errorResult("content metadata service not available"), nil
 	}
-	report, err := svcs.ContentMetadataSvc.Find(ctx, taskID, executionID)
+	report, err := svcs.ContentMetadataSvc.FindAuthorized(ctx, getUserID(ctx), taskID, executionID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get completion metadata status: %v", err)), nil
 	}

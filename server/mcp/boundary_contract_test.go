@@ -35,7 +35,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"compressImageHandler":                    "svcs.TaskImageOperationsSvc.Compress",
 	"contentMetadataRecomputeFeedbackHandler": "svcs.ContentMetadataSvc.RecomputeFeedback",
 	"contentMetadataRecomputeTagsHandler":     "svcs.ContentMetadataSvc.RecomputeTags",
-	"contentMetadataStatusHandler":            "svcs.ContentMetadataSvc.Find",
+	"contentMetadataStatusHandler":            "svcs.ContentMetadataSvc.FindAuthorized",
 	"contentMetadataSubmitHandler":            "svcs.ContentMetadataSvc.Submit",
 	"cropImageHandler":                        "svcs.TaskImageOperationsSvc.Crop",
 	"convertMarkdownHandler":                  "svcs.ContentRenderSvc.ConvertMarkdown",

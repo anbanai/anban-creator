@@ -1,5 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
@@ -36,8 +36,14 @@ const evaluatorResultSchema = z.object({
 
 type CompletionMetadata = Record<string, unknown> & { artifacts?: Array<{ file?: string }>; tags?: unknown; feedback?: unknown };
 
+const MAX_METADATA_BYTES = 512 * 1024;
+const MAX_ARTIFACTS = 100;
+const MAX_SOURCE_BYTES = 120_000;
+
 export async function evaluateCompletionMetadata(workspace: string, profile: ExecutionProfile, signal?: AbortSignal): Promise<void> {
   const metadataPath = join(workspace, "output", "completion-metadata.json");
+  const metadataStat = await stat(metadataPath);
+  if (metadataStat.size > MAX_METADATA_BYTES) throw new Error("completion metadata exceeds size limit");
   const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as CompletionMetadata;
   try {
     const env = profile.envs;
@@ -46,11 +52,13 @@ export async function evaluateCompletionMetadata(workspace: string, profile: Exe
     if (!apiKey || !model) throw new Error("runtime evaluator model configuration is unavailable");
 
     const sources: Array<{ file: string; content: string }> = [];
-    let remaining = 120_000;
-    for (const artifact of metadata.artifacts ?? []) {
+    let remaining = MAX_SOURCE_BYTES;
+    const artifacts = metadata.artifacts ?? [];
+    if (artifacts.length > MAX_ARTIFACTS) throw new Error("completion metadata contains too many artifacts");
+    for (const artifact of artifacts) {
       const file = typeof artifact.file === "string" ? artifact.file : "";
       if (!file || !/\.(md|txt|json)$/i.test(file) || remaining <= 0) continue;
-      const content = (await readFile(join(workspace, file), "utf8")).slice(0, remaining);
+      const content = await readSafeArtifact(workspace, file, remaining);
       sources.push({ file, content });
       remaining -= content.length;
     }
@@ -74,6 +82,22 @@ export async function evaluateCompletionMetadata(workspace: string, profile: Exe
     metadata.evaluation_error = error instanceof Error ? error.message.slice(0, 500) : "runtime evaluator failed";
   }
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+}
+
+async function readSafeArtifact(workspace: string, artifactFile: string, maxBytes: number): Promise<string> {
+  if (isAbsolute(artifactFile) || artifactFile.includes("\\") || artifactFile.split("/").includes("..")) throw new Error(`invalid completion artifact path: ${artifactFile}`);
+  const workspaceRoot = resolve(workspace);
+  const candidate = resolve(workspaceRoot, artifactFile);
+  const rel = relative(workspaceRoot, candidate);
+  if (!rel || rel.startsWith(`..${sep}`) || isAbsolute(rel) || !(rel === "output" || rel.startsWith(`output${sep}`))) throw new Error(`completion artifact is outside output: ${artifactFile}`);
+  const realRoot = await realpath(workspaceRoot);
+  const realCandidate = await realpath(candidate);
+  const realRel = relative(realRoot, realCandidate);
+  if (!realRel || realRel.startsWith(`..${sep}`) || isAbsolute(realRel) || !(realRel === "output" || realRel.startsWith(`output${sep}`))) throw new Error(`completion artifact resolves outside workspace: ${artifactFile}`);
+  const entry = await lstat(candidate);
+  if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(`completion artifact is not a regular file: ${artifactFile}`);
+  const bounded = Math.min(entry.size, maxBytes);
+  return (await readFile(candidate, { encoding: "utf8" })).slice(0, bounded);
 }
 
 function stripJSONFence(raw: string): string {
