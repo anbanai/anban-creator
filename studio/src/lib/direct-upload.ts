@@ -7,6 +7,7 @@ export type DirectUploadPurpose =
   | 'ecommerce_product_photo'
   | 'ai_entry_attachment'
   | 'montage_asset'
+  | 'seednote_analytics_import'
 
 export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose

@@ -25,6 +25,13 @@ export const queryKeys = {
     seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
     channelsAnalytics: (id: string) => ['task', id, 'channels-analytics'] as const,
   },
+  seednoteImport: {
+    batches: (projectId: string) => ['seednote-import-batches', projectId] as const,
+    batch: (projectId: string, batchId: string) => ['seednote-import-batch', projectId, batchId] as const,
+    overview: (projectId: string, params?: { from?: string; to?: string }) => ['seednote-import-overview', projectId, params] as const,
+    posts: (projectId: string) => ['seednote-import-posts', projectId] as const,
+    post: (projectId: string, postId: string, params?: { from?: string; to?: string }) => ['seednote-import-post', projectId, postId, params] as const,
+  },
   timeline: {
     range: (from: string, to: string, filters?: Record<string, string>) =>
       ['timeline', from, to, filters] as const,

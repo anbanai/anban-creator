@@ -24,6 +24,10 @@ type Repository interface {
 	Feedbacks() FeedbackRepository
 	SeednoteTrackings() SeednoteTrackingRepository
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
+	SeednoteImports() SeednoteImportRepository
+	SeednotePosts() SeednotePostRepository
+	SeednotePostAliases() SeednotePostAliasRepository
+	SeednoteMetricVersions() SeednoteMetricVersionRepository
 	WechatTrackings() WechatTrackingRepository
 	WechatPublications() WechatPublicationRepository
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
@@ -290,6 +294,38 @@ type SeednoteMetricSnapshotRepository interface {
 	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error)
 }
 
+type SeednoteImportRepository interface {
+	CreateBatch(ctx context.Context, batch *model.SeednoteImportBatch) error
+	FindBatchByID(ctx context.Context, projectID, id string) (*model.SeednoteImportBatch, error)
+	ListBatches(ctx context.Context, projectID string, offset, limit int) ([]*model.SeednoteImportBatch, int64, error)
+	UpdateBatch(ctx context.Context, batch *model.SeednoteImportBatch) error
+	CreateRows(ctx context.Context, rows []*model.SeednoteImportRow) error
+	FindRowsByBatchID(ctx context.Context, projectID, batchID string) ([]*model.SeednoteImportRow, error)
+	FindRowByID(ctx context.Context, projectID, batchID, rowID string) (*model.SeednoteImportRow, error)
+	UpdateRow(ctx context.Context, row *model.SeednoteImportRow) error
+}
+
+type SeednotePostRepository interface {
+	Create(ctx context.Context, post *model.SeednotePost) error
+	FindByID(ctx context.Context, projectID, id string) (*model.SeednotePost, error)
+	ListByProject(ctx context.Context, projectID, search string, offset, limit int) ([]*model.SeednotePost, int64, error)
+	FindBySignature(ctx context.Context, projectID, normalizedTitle string, publishedAt *time.Time) ([]*model.SeednotePost, error)
+	Update(ctx context.Context, post *model.SeednotePost) error
+}
+
+type SeednotePostAliasRepository interface {
+	Create(ctx context.Context, alias *model.SeednotePostAlias) error
+	FindBySignature(ctx context.Context, normalizedTitle string, publishedAt *time.Time) ([]*model.SeednotePostAlias, error)
+}
+
+type SeednoteMetricVersionRepository interface {
+	Create(ctx context.Context, version *model.SeednoteMetricVersion) error
+	UpdatePostID(ctx context.Context, id, postID string) error
+	FindByPostID(ctx context.Context, postID string, from, to *time.Time) ([]*model.SeednoteMetricVersion, error)
+	FindByProject(ctx context.Context, projectID string, from, to *time.Time) ([]*model.SeednoteMetricVersion, error)
+	FindByImportRowID(ctx context.Context, rowID string) (*model.SeednoteMetricVersion, error)
+}
+
 type WechatTrackingRepository interface {
 	Create(ctx context.Context, tracking *model.WechatArticleTracking) error
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatArticleTracking, error)
@@ -394,6 +430,10 @@ type repository struct {
 	feedbacks               FeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
+	seednoteImports         SeednoteImportRepository
+	seednotePosts           SeednotePostRepository
+	seednotePostAliases     SeednotePostAliasRepository
+	seednoteMetricVersions  SeednoteMetricVersionRepository
 	wechatTrackings         WechatTrackingRepository
 	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
@@ -424,6 +464,10 @@ func New(db *gorm.DB) Repository {
 	feedbacks := newFeedbackRepository(db)
 	seednoteTrackings := newSeednoteTrackingRepository(db)
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
+	seednoteImports := newSeednoteImportRepository(db)
+	seednotePosts := newSeednotePostRepository(db)
+	seednotePostAliases := newSeednotePostAliasRepository(db)
+	seednoteMetricVersions := newSeednoteMetricVersionRepository(db)
 	wechatTrackings := newWechatTrackingRepository(db)
 	wechatPublications := newWechatPublicationRepository(db)
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
@@ -453,6 +497,10 @@ func New(db *gorm.DB) Repository {
 		feedbacks:               feedbacks,
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
+		seednoteImports:         seednoteImports,
+		seednotePosts:           seednotePosts,
+		seednotePostAliases:     seednotePostAliases,
+		seednoteMetricVersions:  seednoteMetricVersions,
 		wechatTrackings:         wechatTrackings,
 		wechatPublications:      wechatPublications,
 		wechatMetricSnapshots:   wechatMetricSnapshots,
@@ -483,6 +531,12 @@ func (r *repository) Feedbacks() FeedbackRepository                 { return r.f
 func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
+}
+func (r *repository) SeednoteImports() SeednoteImportRepository        { return r.seednoteImports }
+func (r *repository) SeednotePosts() SeednotePostRepository            { return r.seednotePosts }
+func (r *repository) SeednotePostAliases() SeednotePostAliasRepository { return r.seednotePostAliases }
+func (r *repository) SeednoteMetricVersions() SeednoteMetricVersionRepository {
+	return r.seednoteMetricVersions
 }
 func (r *repository) WechatTrackings() WechatTrackingRepository       { return r.wechatTrackings }
 func (r *repository) WechatPublications() WechatPublicationRepository { return r.wechatPublications }
@@ -545,6 +599,10 @@ type txRepository struct {
 	feedbacks               FeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
+	seednoteImports         SeednoteImportRepository
+	seednotePosts           SeednotePostRepository
+	seednotePostAliases     SeednotePostAliasRepository
+	seednoteMetricVersions  SeednoteMetricVersionRepository
 	wechatTrackings         WechatTrackingRepository
 	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
@@ -576,6 +634,10 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		feedbacks:               newFeedbackRepository(tx),
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
+		seednoteImports:         newSeednoteImportRepository(tx),
+		seednotePosts:           newSeednotePostRepository(tx),
+		seednotePostAliases:     newSeednotePostAliasRepository(tx),
+		seednoteMetricVersions:  newSeednoteMetricVersionRepository(tx),
 		wechatTrackings:         newWechatTrackingRepository(tx),
 		wechatPublications:      newWechatPublicationRepository(tx),
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
@@ -606,6 +668,14 @@ func (r *txRepository) Feedbacks() FeedbackRepository                 { return r
 func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
+}
+func (r *txRepository) SeednoteImports() SeednoteImportRepository { return r.seednoteImports }
+func (r *txRepository) SeednotePosts() SeednotePostRepository     { return r.seednotePosts }
+func (r *txRepository) SeednotePostAliases() SeednotePostAliasRepository {
+	return r.seednotePostAliases
+}
+func (r *txRepository) SeednoteMetricVersions() SeednoteMetricVersionRepository {
+	return r.seednoteMetricVersions
 }
 func (r *txRepository) WechatTrackings() WechatTrackingRepository       { return r.wechatTrackings }
 func (r *txRepository) WechatPublications() WechatPublicationRepository { return r.wechatPublications }

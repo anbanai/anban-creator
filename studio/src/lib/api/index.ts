@@ -22,6 +22,7 @@ import { uploadsApi } from './uploads'
 import { agentProfilesApi } from './agent-profiles'
 import { agentPacksApi } from './agent-packs'
 import { seednoteAdminApi } from './seednote-admin'
+import { seednoteImportApi } from './seednote-import'
 
 export const api = {
   auth: authApi,
@@ -48,4 +49,5 @@ export const api = {
   agentProfiles: agentProfilesApi,
   agentPacks: agentPacksApi,
   seednoteAdmin: seednoteAdminApi,
+  seednoteImport: seednoteImportApi,
 }

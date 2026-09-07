@@ -70,6 +70,7 @@ export type {
   SeednoteTrackingInfo,
   SeednoteTrackingStatus,
 } from './seednote-analytics'
+export type { SeednoteImportBatch, SeednoteImportRow, SeednoteImportSummary, SeednoteImportOverview, SeednoteOverviewPoint, SeednoteMetricVersion } from './seednote-import'
 
 export type {
   WechatAnalytics,

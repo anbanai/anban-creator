@@ -481,6 +481,7 @@ func main() {
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
+	var seednoteImportHandler *handler.SeednoteImportHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
 	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
@@ -518,6 +519,7 @@ func main() {
 			taskHandler.SetStore(store)
 		}
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
+		seednoteImportHandler = handler.NewSeednoteImportHandler(service.NewSeednoteImportService(repo, store), log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
@@ -770,6 +772,7 @@ func main() {
 		PlanHandler:              planHandler,
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
+		SeednoteImportHandler:    seednoteImportHandler,
 		WechatAnalyticsHandler:   wechatAnalyticsHandler,
 		WechatPublicationHandler: wechatPublicationHandler,
 		ChannelsAnalyticsHandler: channelsAnalyticsHandler,

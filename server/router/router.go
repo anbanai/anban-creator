@@ -41,6 +41,7 @@ type Services struct {
 	PlanHandler              *handler.PlanHandler
 	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
+	SeednoteImportHandler    *handler.SeednoteImportHandler
 	WechatAnalyticsHandler   *handler.WechatAnalyticsHandler
 	WechatPublicationHandler *handler.WechatPublicationHandler
 	ChannelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
@@ -336,6 +337,16 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
 		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
 		apiV1.Get("/usage/stats", svc.TaskHandler.UsageStats)
+	}
+	if svc.SeednoteImportHandler != nil {
+		apiV1.Post("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.Import)
+		apiV1.Get("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.List)
+		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId", svc.SeednoteImportHandler.Detail)
+		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId/file", svc.SeednoteImportHandler.File)
+		apiV1.Post("/projects/:id/seednote-analytics/imports/:batchId/resolve", svc.SeednoteImportHandler.Resolve)
+		apiV1.Get("/projects/:id/seednote-analytics/overview", svc.SeednoteImportHandler.Overview)
+		apiV1.Get("/projects/:id/seednote-analytics/posts", svc.SeednoteImportHandler.Posts)
+		apiV1.Get("/projects/:id/seednote-analytics/posts/:postId", svc.SeednoteImportHandler.Post)
 	}
 	if svc.WechatPublicationHandler != nil {
 		apiV1.Get("/tasks/:id/wechat-publication", svc.WechatPublicationHandler.Get)

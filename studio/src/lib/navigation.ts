@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   PlugZap,
   KeyRound,
+  BarChart3,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -27,6 +28,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/billing', label: '钱包', icon: Coins },
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
+  { to: '/seednote-data', label: '小红书数据', icon: BarChart3 },
 ]
 
 export const adminNavItems: NavItem[] = [

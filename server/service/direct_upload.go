@@ -29,6 +29,7 @@ const (
 	DirectUploadPurposeMontageAsset      = "montage_asset"
 	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
 	DirectUploadPurposeTaskArtifact      = "task_artifact"
+	DirectUploadPurposeSeednoteImport    = "seednote_analytics_import"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
 	uploadSessionCleanupLease     = 5 * time.Minute
@@ -155,6 +156,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeEcommercePhoto:    {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeMontageAsset:      {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment: {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
+	DirectUploadPurposeSeednoteImport:    {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},
 }
 
 const maxUploadImageBytes = 10 * 1024 * 1024
@@ -1057,6 +1059,11 @@ func isDirectUploadMontageAsset(contentType, ext string) bool {
 	default:
 		return false
 	}
+}
+
+func isDirectUploadSeednoteImport(contentType, ext string) bool {
+	return strings.EqualFold(ext, ".xlsx") &&
+		(strings.EqualFold(contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") || strings.EqualFold(contentType, "application/octet-stream"))
 }
 
 func aiEntryAttachmentMaxSize(contentType, ext string) int64 {
