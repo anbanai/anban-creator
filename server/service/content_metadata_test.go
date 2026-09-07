@@ -87,3 +87,25 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 		t.Fatalf("normalized tag = %#v", tag)
 	}
 }
+
+func TestContentMetadataServiceRejectsForeignAuthenticatedUser(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:content-metadata-service-auth?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-owned", UserID: "owner-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-owned", TaskID: "task-owned", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewContentMetadataService(repo, nil)
+	_, err = svc.Submit(context.Background(), ContentMetadataInput{AuthenticatedUserID: "owner-2", TaskID: "task-owned", ExecutionID: "exec-owned", RawMetadata: []byte(`{"tags":[]}`)})
+	if err == nil {
+		t.Fatal("expected foreign user rejection")
+	}
+}
