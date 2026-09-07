@@ -1,4 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
+import type { TaskFeedback } from '@/types'
 
 export interface CreateFeedbackRequest {
   type: 'bug' | 'suggestion'
@@ -17,5 +18,11 @@ export interface Feedback {
 export const feedbackApi = {
   create: async (data: CreateFeedbackRequest): Promise<Feedback> => {
     return unwrap<Feedback>(http.post('/feedback', data))
+  },
+  getTask: async (taskId: string): Promise<TaskFeedback | null> => {
+    return unwrap<TaskFeedback | null>(http.get(`/tasks/${taskId}/feedback`))
+  },
+  saveTask: async (taskId: string, data: { rating: number; content?: string }): Promise<TaskFeedback> => {
+    return unwrap<TaskFeedback>(http.put(`/tasks/${taskId}/feedback`, data))
   },
 }

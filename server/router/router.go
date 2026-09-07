@@ -338,6 +338,10 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
 		apiV1.Get("/usage/stats", svc.TaskHandler.UsageStats)
 	}
+	if svc.FeedbackHandler != nil {
+		apiV1.Get("/tasks/:id/feedback", svc.FeedbackHandler.GetTaskFeedback)
+		apiV1.Put("/tasks/:id/feedback", svc.FeedbackHandler.UpsertTaskFeedback)
+	}
 	if svc.SeednoteImportHandler != nil {
 		apiV1.Post("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.Import)
 		apiV1.Get("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.List)

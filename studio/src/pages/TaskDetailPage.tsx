@@ -38,6 +38,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { taskFailureMessage } from '@/lib/studio-ux'
+import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -748,7 +749,10 @@ export default function TaskDetailPage() {
       )}
 
       {task.status === 'completed' && (
-        <WorkflowReviewSummary workflow={task.workflow_status} />
+        <>
+          <WorkflowReviewSummary workflow={task.workflow_status} />
+          <TaskFeedbackCard taskId={task.id} />
+        </>
       )}
 
       <TaskDetailsSheet

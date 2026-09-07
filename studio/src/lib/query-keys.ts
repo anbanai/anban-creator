@@ -22,6 +22,7 @@ export const queryKeys = {
     list: (filters?: { status?: string; project_id?: string }) => ['tasks', filters] as const,
     detail: (id: string) => ['task', id] as const,
     files: (id: string) => ['task-files', id] as const,
+    feedback: (id: string) => ['task-feedback', id] as const,
     seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
     channelsAnalytics: (id: string) => ['task', id, 'channels-analytics'] as const,
   },

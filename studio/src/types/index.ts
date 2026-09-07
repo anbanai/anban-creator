@@ -1,5 +1,6 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
+export type { TaskFeedback } from './feedback'
 export type {
   AgentPack,
   AgentPackCatalog,

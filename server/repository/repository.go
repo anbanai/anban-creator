@@ -22,6 +22,7 @@ type Repository interface {
 	Projects() ProjectRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
+	TaskFeedbacks() TaskFeedbackRepository
 	SeednoteTrackings() SeednoteTrackingRepository
 	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	SeednoteImports() SeednoteImportRepository
@@ -275,6 +276,12 @@ type FeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.Feedback) error
 }
 
+// TaskFeedbackRepository provides access to task result evaluations.
+type TaskFeedbackRepository interface {
+	FindByTaskAndUser(ctx context.Context, taskID, userID string) (*model.TaskFeedback, error)
+	Upsert(ctx context.Context, feedback *model.TaskFeedback) error
+}
+
 // SeednoteTrackingRepository provides access to Seednote post tracking records.
 type SeednoteTrackingRepository interface {
 	Create(ctx context.Context, tracking *model.SeednotePostTracking) error
@@ -428,6 +435,7 @@ type repository struct {
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
+	taskFeedbacks           TaskFeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	seednoteImports         SeednoteImportRepository
@@ -462,6 +470,7 @@ func New(db *gorm.DB) Repository {
 	projects := newProjectRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
+	taskFeedbacks := newTaskFeedbackRepository(db)
 	seednoteTrackings := newSeednoteTrackingRepository(db)
 	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
 	seednoteImports := newSeednoteImportRepository(db)
@@ -495,6 +504,7 @@ func New(db *gorm.DB) Repository {
 		projects:                projects,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
+		taskFeedbacks:           taskFeedbacks,
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
 		seednoteImports:         seednoteImports,
@@ -528,6 +538,7 @@ func (r *repository) Assets() AssetRepository                       { return r.a
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
+func (r *repository) TaskFeedbacks() TaskFeedbackRepository         { return r.taskFeedbacks }
 func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
@@ -597,6 +608,7 @@ type txRepository struct {
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
+	taskFeedbacks           TaskFeedbackRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	seednoteImports         SeednoteImportRepository
@@ -632,6 +644,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		projects:                newProjectRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
+		taskFeedbacks:           newTaskFeedbackRepository(tx),
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
 		seednoteImports:         newSeednoteImportRepository(tx),
@@ -665,6 +678,7 @@ func (r *txRepository) Assets() AssetRepository                       { return r
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
+func (r *txRepository) TaskFeedbacks() TaskFeedbackRepository         { return r.taskFeedbacks }
 func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots

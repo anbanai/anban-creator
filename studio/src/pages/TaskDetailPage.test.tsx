@@ -130,6 +130,11 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.channelsAnalytics,
         getByTask: vi.fn(),
       },
+      feedback: {
+        ...actual.api.feedback,
+        getTask: vi.fn(),
+        saveTask: vi.fn(),
+      },
     },
   }
 })
@@ -239,6 +244,10 @@ describe('TaskDetailPage', () => {
       draft_title: '测试文章',
     })
     vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
+    vi.mocked(api.feedback.getTask).mockResolvedValue(null)
+    vi.mocked(api.feedback.saveTask).mockResolvedValue({
+      id: 'feedback-1', task_id: 'task-1', user_id: 'user-1', rating: 4, content: '', created_at: '', updated_at: '',
+    })
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.projects.list).mockResolvedValue(mockProjects)
     vi.mocked(api.billing.wallet).mockResolvedValue(mockBillingWallet)

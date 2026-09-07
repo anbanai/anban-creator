@@ -20,6 +20,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Asset{},
 		&APIKey{},
 		&Feedback{},
+		&TaskFeedback{},
 		&SeednotePostTracking{},
 		&SeednoteMetricSnapshot{},
 		&SeednoteImportBatch{},
