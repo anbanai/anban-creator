@@ -749,10 +749,7 @@ export default function TaskDetailPage() {
       )}
 
       {task.status === 'completed' && (
-        <>
-          <WorkflowReviewSummary workflow={task.workflow_status} />
-          <TaskFeedbackCard taskId={task.id} />
-        </>
+        <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
       <TaskDetailsSheet
@@ -889,6 +886,10 @@ export default function TaskDetailPage() {
 
       {task.type === 'montage' && task.status === 'completed' && (
         <ChannelsAnalyticsPanel taskId={task.id} />
+      )}
+
+      {task.status === 'completed' && (
+        <TaskFeedbackCard taskId={task.id} />
       )}
 
       <TaskContextSummary
