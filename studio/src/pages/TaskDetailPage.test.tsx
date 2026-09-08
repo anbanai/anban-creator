@@ -1303,6 +1303,31 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
   })
 
+  it('keeps task feedback behind a completed-task icon and lazy-loads it on open', async () => {
+    mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
+
+    render(<TaskDetailPage />)
+
+    const feedbackButton = await screen.findByRole('button', { name: '人工评价' })
+    expect(screen.queryByText('评价只对当前任务生效')).not.toBeInTheDocument()
+    expect(api.feedback.getTask).not.toHaveBeenCalled()
+
+    fireEvent.click(feedbackButton)
+
+    expect(await screen.findByRole('dialog', { name: '人工评价' })).toBeInTheDocument()
+    await waitFor(() => expect(api.feedback.getTask).toHaveBeenCalledWith('task-1'))
+  })
+
+  it('hides the task feedback icon for non-completed tasks', async () => {
+    mockTask(taskWith({ id: 'task-1', status: 'running', result: null }))
+
+    render(<TaskDetailPage />)
+
+    await screen.findByText(/%/)
+    expect(screen.queryByRole('button', { name: '人工评价' })).not.toBeInTheDocument()
+    expect(api.feedback.getTask).not.toHaveBeenCalled()
+  })
+
   it('uploads resume files to OSS, keeps failed input for retry, then reopens blank', async () => {
     mockTask(taskWith({
       id: 'task-1',

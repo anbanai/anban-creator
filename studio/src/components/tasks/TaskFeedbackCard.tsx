@@ -12,16 +12,18 @@ import { queryKeys } from '@/lib/query-keys'
 
 interface TaskFeedbackCardProps {
   taskId: string
+  enabled?: boolean
+  showHeader?: boolean
 }
 
-export function TaskFeedbackCard({ taskId }: TaskFeedbackCardProps) {
+export function TaskFeedbackCard({ taskId, enabled = true, showHeader = true }: TaskFeedbackCardProps) {
   const queryClient = useQueryClient()
   const [rating, setRating] = useState(0)
   const [content, setContent] = useState('')
   const feedbackQuery = useQuery({
     queryKey: queryKeys.tasks.feedback(taskId),
     queryFn: () => api.feedback.getTask(taskId),
-    enabled: Boolean(taskId),
+    enabled: Boolean(taskId) && enabled,
   })
 
   useEffect(() => {
@@ -42,10 +44,12 @@ export function TaskFeedbackCard({ taskId }: TaskFeedbackCardProps) {
 
   return (
     <Card className="border-border">
-      <div className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">人工评价</h2>
-        <p className="mt-1 text-xs text-muted-foreground">请为本次任务产出评分，帮助我们持续改进。</p>
-      </div>
+      {showHeader && (
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">人工评价</h2>
+          <p className="mt-1 text-xs text-muted-foreground">请为本次任务产出评分，帮助我们持续改进。</p>
+        </div>
+      )}
       <div className="space-y-4 p-4">
         {feedbackQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">正在加载评价...</p>

@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Send, Ban } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Send, Ban, MessageSquare } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -35,6 +35,7 @@ import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { taskFailureMessage } from '@/lib/studio-ux'
@@ -220,6 +221,7 @@ export default function TaskDetailPage() {
   const [showCloneDialog, setShowCloneDialog] = useState(false)
   const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
@@ -230,6 +232,10 @@ export default function TaskDetailPage() {
   const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
+
+  useEffect(() => {
+    setShowFeedback(false)
+  }, [id])
 
   const { data: task, isLoading, isError, refetch } = useQuery({
     queryKey: ['task', id],
@@ -666,6 +672,25 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          {task.status === 'completed' && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="人工评价"
+                    aria-pressed={showFeedback}
+                    onClick={() => setShowFeedback(true)}
+                  />
+                }
+              >
+                <MessageSquare className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>人工评价</TooltipContent>
+            </Tooltip>
+          )}
           {canCancel && (
             <Button
               variant="destructive"
@@ -888,10 +913,6 @@ export default function TaskDetailPage() {
         <ChannelsAnalyticsPanel taskId={task.id} />
       )}
 
-      {task.status === 'completed' && (
-        <TaskFeedbackCard taskId={task.id} />
-      )}
-
       <TaskContextSummary
         task={task}
         project={project}
@@ -923,6 +944,18 @@ export default function TaskDetailPage() {
           shouldHandleResult={shouldHandleCloneResult}
         />
       ) : null}
+
+      {task.status === 'completed' && (
+        <Dialog open={showFeedback} onOpenChange={setShowFeedback}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>人工评价</DialogTitle>
+              <DialogDescription>请为本次任务产出评分，帮助我们持续改进。</DialogDescription>
+            </DialogHeader>
+            <TaskFeedbackCard taskId={task.id} enabled={showFeedback} showHeader={false} />
+          </DialogContent>
+        </Dialog>
+      )}
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>
