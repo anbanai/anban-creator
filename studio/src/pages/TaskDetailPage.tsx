@@ -247,6 +247,11 @@ export default function TaskDetailPage() {
     },
     enabled: !!id,
   })
+
+  useEffect(() => {
+    if (task?.status !== 'completed') setShowFeedback(false)
+  }, [task?.status])
+
   const activeTaskIdentityRef = useRef<{ routeId: string | undefined; taskId: string | undefined }>({
     routeId: id,
     taskId: task?.id,

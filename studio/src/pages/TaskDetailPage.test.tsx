@@ -1328,6 +1328,21 @@ describe('TaskDetailPage', () => {
     expect(api.feedback.getTask).not.toHaveBeenCalled()
   })
 
+  it('closes feedback when a completed task leaves the completed state', async () => {
+    const task = taskWith({ id: 'task-1', status: 'completed', result: null })
+    const { queryClient } = renderWithCachedTasks(task)
+
+    fireEvent.click(await screen.findByRole('button', { name: '人工评价' }))
+    expect(await screen.findByRole('dialog', { name: '人工评价' })).toBeInTheDocument()
+
+    queryClient.setQueryData(['task', 'task-1'], { ...task, status: 'running' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '人工评价' })).not.toBeInTheDocument())
+
+    queryClient.setQueryData(['task', 'task-1'], { ...task, status: 'completed' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '人工评价' })).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: '人工评价' })).not.toBeInTheDocument()
+  })
+
   it('uploads resume files to OSS, keeps failed input for retry, then reopens blank', async () => {
     mockTask(taskWith({
       id: 'task-1',
