@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const pinnedHumanizerRevision = "1b48564898e999219882660237fde01bf4843a0f"
+const pinnedHumanizerRevision = "9862685f575c65a8247f90369951df1b3416e3d6"
 
 func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	root := repoRoot(t)
@@ -29,15 +29,18 @@ func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	if got := frontmatterStringValue(frontmatter["name"]); got != "humanizer" {
 		t.Fatalf("upstream Humanizer name = %q, want humanizer", got)
 	}
-	if got := frontmatterStringValue(frontmatter["version"]); got != "2.8.2" {
-		t.Fatalf("upstream Humanizer version = %q, want pinned 2.8.2", got)
+	metadata, ok := frontmatter["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("upstream Humanizer metadata = %#v, want a mapping", frontmatter["metadata"])
+	}
+	if got := frontmatterStringValue(metadata["version"]); got != "3.0.0" {
+		t.Fatalf("upstream Humanizer version = %q, want pinned 3.0.0", got)
 	}
 	for _, want := range []string{
 		"name: humanizer",
-		"version: 2.8.2",
+		"metadata:",
+		`version: "3.0.0"`,
 		"license: MIT",
-		"compatibility: any-agent",
-		"  - AskUserQuestion",
 	} {
 		if !strings.Contains(upstream, want) {
 			t.Fatalf("upstream Humanizer source missing %q", want)
@@ -130,6 +133,7 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		"plugins/agents/article.md",
 		"plugins/agents/ecommerce.md",
 		"plugins/agents/moments.md",
+		"plugins/agents/seednote.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
@@ -138,29 +142,28 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 		}
 	}
 
-	for _, relPath := range []string{"plugins/agents/seednote.md", "plugins/agents/seednote.toml"} {
-		body := strings.ToLower(readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath))))
-		for _, banned := range []string{
-			"anban:humanizer",
-			"skills/humanizer/skill.md",
-			"using the humanizer skill",
-			"using the `humanizer` skill",
-			"重跑 humanizer",
-		} {
-			if strings.Contains(body, banned) {
-				t.Fatalf("%s must use seednote-writing's compact built-in de-AI pass, found %q", relPath, banned)
-			}
-		}
-	}
-
 	for _, relPath := range []string{
 		"plugins/agents/article.toml",
 		"plugins/agents/ecommerce.toml",
 		"plugins/agents/moments.toml",
+		"plugins/agents/seednote.toml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		if !strings.Contains(body, `path = "__PLUGIN_ROOT__/skills/humanizer/SKILL.md"`) {
 			t.Fatalf("%s must inject the bundled humanizer skill", relPath)
+		}
+	}
+
+	for _, relPath := range []string{
+		"plugins/agents/seednote.md",
+		"plugins/agents/seednote.toml",
+		"plugins/skills/seednote-writing/SKILL.md",
+	} {
+		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
+		for _, banned := range []string{"内置去 AI", "不要再调用 `humanizer` Skill", "额外加载通用 33 类规则会浪费上下文"} {
+			if strings.Contains(body, banned) {
+				t.Fatalf("%s still contains duplicate Seednote de-AI contract %q", relPath, banned)
+			}
 		}
 	}
 	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {

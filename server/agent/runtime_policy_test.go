@@ -356,6 +356,7 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 				"anban:seednote-viral-analysis",
 				"anban:seednote-writing",
 				"anban:seednote-visual-design",
+				"anban:humanizer",
 			},
 			missing: "anban:seednote-research",
 		},
@@ -364,8 +365,6 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 			skills: []any{
 				"anban:seednote-research",
 				"anban:seednote-viral-analysis",
-				"anban:seednote-writing",
-				"anban:seednote-visual-design",
 			},
 			missing: "anban:seednote-research",
 		},

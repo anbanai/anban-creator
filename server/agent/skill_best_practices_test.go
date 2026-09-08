@@ -167,7 +167,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"live-slicer": {"live-slice", "capcut-draft"},
 		"moments":     {"moments", "humanizer"},
 		"montage":     {"montage"},
-		"seednote":    {"seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"seednote":    {"humanizer", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
 		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
 	}
 

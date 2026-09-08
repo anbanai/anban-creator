@@ -95,7 +95,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "fd64131d23a64485e278ad2be76d3fe4bbf4f232eeb387a32895a8324d2b19f2"
+      "digest": "285f0c86e5a08d4d56d073f0f2cc89f389844e33cefbdfeb43dd308dcfd9fc0c"
     },
     {
       "id": "ecommerce",
@@ -187,7 +187,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "1fb864d426f00365d7183b08c1142be673cd9e3b41166e64a9b58372e68bc58a"
+      "digest": "202c79302ce17d2c2585bbe0c861b8794025ad15b225fe373d33fe1113ef3c4d"
     },
     {
       "id": "live-slicer",
@@ -405,7 +405,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "cab400cbf05138d91b1f21089ba18cd4bad6a063f01395a9db5686e9fb78c80a"
+      "digest": "978b45a25bf490b0c8292eb51df6f21fc47e41d78f3d3cc79db2e22ba952d25a"
     },
     {
       "id": "montage",
@@ -505,6 +505,7 @@
       "agent": {
         "name": "seednote",
         "skills": [
+          "humanizer",
           "seednote-research",
           "seednote-viral-analysis",
           "seednote-writing",
@@ -608,7 +609,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "dfec9e17f5d365df73dfe4df11a9d5e79df66ef8e7920f293106fcace7e08e03"
+      "digest": "84c58f8e77326bfc818bcd7e36cacab18b52f7e5d8d61e775516bfdabb817933"
     }
   ]
 }

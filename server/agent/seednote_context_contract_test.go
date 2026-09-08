@@ -33,6 +33,7 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 	body := readRepoFile(t, path)
 	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{
+		"  - humanizer",
 		"  - seednote-research",
 		"  - seednote-viral-analysis",
 		"  - seednote-writing",
@@ -57,7 +58,7 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 			t.Fatalf("%s missing file-backed phase contract %q", path, want)
 		}
 	}
-	for _, banned := range []string{"context: fork", "$ARGUMENTS", "只接收短回执", "anban:humanizer", "using the `humanizer` skill"} {
+	for _, banned := range []string{"context: fork", "$ARGUMENTS", "只接收短回执", "内置去 AI", "不要再调用 `humanizer` Skill"} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("%s contains obsolete Seednote invocation contract %q", path, banned)
 		}

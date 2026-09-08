@@ -138,7 +138,7 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "article")).toThrow("anban:humanizer");
   });
 
-  test("requires Seednote core tools and phase skills while research tools remain optional", () => {
+  test("requires Seednote core tools and all publishing skills while research tools remain optional", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
@@ -161,6 +161,7 @@ describe("validateManagedInit", () => {
         "anban:seednote-viral-analysis",
         "anban:seednote-writing",
         "anban:seednote-visual-design",
+        "anban:humanizer",
       ],
     };
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
@@ -171,9 +172,16 @@ describe("validateManagedInit", () => {
     message.tools = [...message.tools, "mcp__anban__generate_image"];
     message.skills = message.skills.slice(1);
     expect(() => validateManagedInit(message, "seednote")).toThrow("anban:seednote-research");
+    message.skills = [
+      "anban:seednote-research",
+      "anban:seednote-viral-analysis",
+      "anban:seednote-writing",
+      "anban:seednote-visual-design",
+    ];
+    expect(() => validateManagedInit(message, "seednote")).toThrow("anban:humanizer");
   });
 
-  test("applies Seednote readiness to viral analysis without requiring external research tools", () => {
+  test("requires only research skills for viral analysis", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
@@ -187,8 +195,6 @@ describe("validateManagedInit", () => {
       skills: [
         "anban:seednote-research",
         "anban:seednote-viral-analysis",
-        "anban:seednote-writing",
-        "anban:seednote-visual-design",
       ],
     };
     expect(() => validateManagedInit(message, "viral_analysis")).not.toThrow();

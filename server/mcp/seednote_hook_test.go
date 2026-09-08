@@ -536,11 +536,11 @@ func validateSeednoteFinalizationContract(body string) error {
 	duplicateAt := strings.Index(titleStage, "返回 `duplicate title` 错误时")
 	contentAt := indexAfter(titleStage, "`output/content.md`", duplicateAt)
 	firstLineAt := indexAfter(titleStage, "第一行为新标题", contentAt)
-	humanizeAt := indexAfter(titleStage, "轻量去 AI", firstLineAt)
+	humanizeAt := indexAfter(titleStage, "humanizer", firstLineAt)
 	complianceAt := indexAfter(titleStage, "标题合规", humanizeAt)
 	retryAt := indexAfter(titleStage, "重试", complianceAt)
 	if duplicateAt < 0 || contentAt <= duplicateAt || firstLineAt <= contentAt || humanizeAt <= firstLineAt || complianceAt <= humanizeAt || retryAt <= complianceAt {
-		return fmt.Errorf("seednote duplicate handling must update content.md, rerun built-in de-AI/title compliance, then retry before image generation")
+		return fmt.Errorf("seednote duplicate handling must update content.md, rerun humanizer/title compliance, then retry before image generation")
 	}
 	for _, code := range []string{`error_code="finalize_title_failed"`, `error_code="duplicate_title_exhausted"`} {
 		if !strings.Contains(titleStage, code) {
