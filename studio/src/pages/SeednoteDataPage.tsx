@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, Download, RefreshCw, Upload } from 'lucide-react'
+import { AlertCircle, BarChart3, Check, CheckCircle2, Download, FileSpreadsheet, RefreshCw, Search, Upload } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import PageHeader from '@/components/layout/PageHeader'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api } from '@/lib/api'
-import { queryKeys } from '@/lib/query-keys'
 import { uploadToOSS } from '@/lib/direct-upload'
+import { queryKeys } from '@/lib/query-keys'
 import type { Project } from '@/types'
 import type { SeednoteImportRow, SeednoteMetricVersion } from '@/types/seednote-import'
 
@@ -19,24 +23,18 @@ const metrics = [
   ['follower_gain_count', '涨粉', 'count'], ['share_count', '分享', 'count'], ['avg_watch_duration', '人均观看时长', 'duration'],
   ['barrage_count', '弹幕', 'count'],
 ] as const
+
 type MetricKey = typeof metrics[number][0]
+type WorkspaceTab = 'import' | 'analytics'
 
 function localDate(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 10) }
 function nextDate(value: string) { const date = new Date(`${value}T00:00:00`); date.setDate(date.getDate() + 1); return localDate(date) }
 function normalizeTitle(value: string) { return value.normalize('NFKC').trim().replace(/\s+/g, ' ') }
 function samePublishTime(a?: string | null, b?: string | null) { return Boolean(a && b && new Date(a).getTime() === new Date(b).getTime()) }
 function metricLabel(key: MetricKey) { return metrics.find(([value]) => value === key)?.[1] ?? key }
-function metricNote(key: MetricKey) {
-  const kind = metrics.find(([value]) => value === key)?.[2]
-  return kind === 'rate' || kind === 'duration' ? '按当日有值帖子平均' : '按当日已确认帖子求和'
-}
-function formatMetric(value: number | null | undefined, key: MetricKey) {
-  if (value == null) return '-'
-  const kind = metrics.find(([valueKey]) => valueKey === key)?.[2]
-  if (kind === 'rate') return `${(value * 100).toFixed(2)}%`
-  if (kind === 'duration') return `${value.toFixed(1)} 秒`
-  return value.toLocaleString('zh-CN')
-}
+function metricNote(key: MetricKey) { const kind = metrics.find(([value]) => value === key)?.[2]; return kind === 'rate' || kind === 'duration' ? '按当日有值帖子平均' : '按当日已确认帖子求和' }
+function formatMetric(value: number | null | undefined, key: MetricKey) { if (value == null) return '-'; const kind = metrics.find(([valueKey]) => valueKey === key)?.[2]; if (kind === 'rate') return `${(value * 100).toFixed(2)}%`; if (kind === 'duration') return `${value.toFixed(1)} 秒`; return value.toLocaleString('zh-CN') }
+function formatFileSize(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB` }
 function statusLabel(status: string) { return ({ processing: '解析中', needs_review: '待确认', completed: '已完成', failed: '失败' } as Record<string, string>)[status] ?? status }
 function latestDailyVersions(versions: SeednoteMetricVersion[]) {
   const latest = new Map<string, SeednoteMetricVersion>()
@@ -47,15 +45,23 @@ function latestDailyVersions(versions: SeednoteMetricVersion[]) {
 export default function SeednoteDataPage() {
   const queryClient = useQueryClient()
   const [projectId, setProjectId] = useState('')
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('import')
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null)
   const [selectedPost, setSelectedPost] = useState<string | null>(null)
+  const [preferredPostIds, setPreferredPostIds] = useState<string[]>([])
+  const [postSearch, setPostSearch] = useState('')
+  const [stagedFile, setStagedFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [metric, setMetric] = useState<MetricKey>('exposure_count')
   const [asOf, setAsOf] = useState(() => `${localDate(new Date())}T23:59`)
   const [from, setFrom] = useState(() => localDate(new Date(Date.now() - 29 * 86400000)))
   const [to, setTo] = useState(() => localDate(new Date()))
+
   const projectsQuery = useQuery({ queryKey: queryKeys.projects.list({ platform: 'seednote' }), queryFn: () => api.projects.list({ platform: 'seednote' }) })
   const projects = (projectsQuery.data ?? []) as Project[]
-  const activeProjectId = projectId || projects[0]?.id || ''
+  const activeProjectId = projectId
+  const activeProject = projects.find((project) => project.id === activeProjectId)
   const overviewParams = { from: from || undefined, to: to ? nextDate(to) : undefined }
   const batchesQuery = useQuery({ queryKey: queryKeys.seednoteImport.batches(activeProjectId), queryFn: () => api.seednoteImport.listBatches(activeProjectId), enabled: Boolean(activeProjectId) })
   const overviewQuery = useQuery({ queryKey: queryKeys.seednoteImport.overview(activeProjectId, overviewParams), queryFn: () => api.seednoteImport.overview(activeProjectId, overviewParams), enabled: Boolean(activeProjectId) })
@@ -63,24 +69,89 @@ export default function SeednoteDataPage() {
   const postsQuery = useQuery({ queryKey: queryKeys.seednoteImport.posts(activeProjectId), queryFn: () => api.seednoteImport.posts(activeProjectId), enabled: Boolean(activeProjectId) })
   const postQuery = useQuery({ queryKey: queryKeys.seednoteImport.post(activeProjectId, selectedPost || '', overviewParams), queryFn: () => api.seednoteImport.post(activeProjectId, selectedPost!, overviewParams), enabled: Boolean(activeProjectId && selectedPost) })
   const importMutation = useMutation({
-    mutationFn: async (file: File) => { if (!file.name.toLowerCase().endsWith('.xlsx')) throw new Error('请选择 .xlsx 文件'); const uploaded = await uploadToOSS({ purpose: 'seednote_analytics_import', file }); return api.seednoteImport.import(activeProjectId, { upload_id: uploaded.uploadSessionId, data_as_of_at: new Date(asOf).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: new Date(file.lastModified).toISOString() }) },
-    onSuccess: (result) => { setSelectedBatch(result.batch.id); queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.batches(activeProjectId) }); queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.overview(activeProjectId) }) },
+    mutationFn: async (file: File) => {
+      if (!activeProjectId) throw new Error('请先选择小红书账号')
+      const uploaded = await uploadToOSS({ purpose: 'seednote_analytics_import', file })
+      return api.seednoteImport.import(activeProjectId, { upload_id: uploaded.uploadSessionId, data_as_of_at: new Date(asOf).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: new Date(file.lastModified).toISOString() })
+    },
+    onSuccess: (result) => {
+      setConfirmOpen(false); setStagedFile(null); setSelectedBatch(result.batch.id); setWorkspaceTab('import')
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.batches(activeProjectId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.overview(activeProjectId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.posts(activeProjectId) })
+    },
   })
-  const resolveMutation = useMutation({ mutationFn: (actions: Array<{ row_id: string; action: string; post_id?: string }>) => api.seednoteImport.resolve(activeProjectId, selectedBatch!, actions), onSuccess: () => { queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.batch(activeProjectId, selectedBatch || '') }); queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.overview(activeProjectId) }); queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.posts(activeProjectId) }) } })
+  const resolveMutation = useMutation({
+    mutationFn: (actions: Array<{ row_id: string; action: string; post_id?: string }>) => api.seednoteImport.resolve(activeProjectId, selectedBatch!, actions),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.batch(activeProjectId, selectedBatch || '') })
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.overview(activeProjectId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.seednoteImport.posts(activeProjectId) })
+    },
+  })
+
   const series = overviewQuery.data?.series ?? []
   const posts = postsQuery.data?.items ?? []
+  const visiblePosts = posts.filter((post) => normalizeTitle(post.title).includes(normalizeTitle(postSearch)))
+  const orderedPosts = [...posts].sort((a, b) => Number(preferredPostIds.includes(b.id)) - Number(preferredPostIds.includes(a.id)) || a.title.localeCompare(b.title, 'zh-CN'))
+  const preferredPosts = posts.filter((post) => preferredPostIds.includes(post.id))
   const pendingRows = (batchQuery.data?.rows ?? []).filter((row) => row.match_status === 'needs_review')
   const chartData = useMemo(() => series.map((item) => ({ ...item, label: item.date.slice(5) })), [series])
   const postVersions = useMemo(() => latestDailyVersions(postQuery.data?.versions ?? []), [postQuery.data?.versions])
+
+  function changeProject(nextProjectId: string) {
+    setProjectId(nextProjectId); setSelectedBatch(null); setSelectedPost(null); setPreferredPostIds([]); setPostSearch(''); setStagedFile(null); setFileError(''); setConfirmOpen(false); setWorkspaceTab('import')
+  }
+  function stageFile(file?: File) {
+    setFileError('')
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.xlsx')) { setStagedFile(null); setFileError('仅支持小红书官方导出的 .xlsx 文件'); return }
+    if (file.size > 20 * 1024 * 1024) { setStagedFile(null); setFileError('文件不能超过 20 MB'); return }
+    setStagedFile(file)
+  }
+  function togglePreferredPost(postId: string, checked: boolean) { setPreferredPostIds((current) => checked ? [...current, postId] : current.filter((id) => id !== postId)) }
   async function downloadBatch(batchId: string) { const result = await api.seednoteImport.file(activeProjectId, batchId); window.open(result.url, '_blank', 'noopener,noreferrer') }
-  function candidatesFor(row: SeednoteImportRow) { return posts.filter((post) => normalizeTitle(post.title) === normalizeTitle(row.title) && samePublishTime(post.first_published_at, row.first_published_at)) }
+  function exactCandidatesFor(row: SeednoteImportRow) { return orderedPosts.filter((post) => normalizeTitle(post.title) === normalizeTitle(row.title) && samePublishTime(post.first_published_at, row.first_published_at)) }
 
   return <div className="space-y-6">
-    <PageHeader title="小红书数据" description="导入官方 XLSX，确认帖子后按天查看账号和单帖表现。" />
-    <Card><CardContent className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-end lg:justify-between"><label className="grid gap-2 text-sm"><span className="text-muted-foreground">项目</span><select className="h-9 min-w-64 rounded-md border border-input bg-background px-3" value={activeProjectId} onChange={(e) => { setProjectId(e.target.value); setSelectedBatch(null); setSelectedPost(null) }}><option value="">请选择小红书项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label className="grid gap-2 text-sm"><span className="text-muted-foreground">数据截至时间</span><Input type="datetime-local" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></label><label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-input px-3 py-2 text-sm hover:bg-accent"><Upload className="h-4 w-4" />{importMutation.isPending ? '导入中…' : '导入 XLSX'}<input className="sr-only" type="file" accept=".xlsx" disabled={!activeProjectId || importMutation.isPending} onChange={(e) => { const file = e.target.files?.[0]; if (file) importMutation.mutate(file); e.currentTarget.value = '' }} /></label></CardContent><CardContent className="flex flex-wrap items-center gap-3 border-t pt-4 text-sm"><span className="text-muted-foreground">趋势范围</span><Input className="w-36" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /><span>至</span><Input className="w-36" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /><select className="h-9 rounded-md border border-input bg-background px-3" value={metric} onChange={(e) => setMetric(e.target.value as MetricKey)}>{metrics.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></CardContent>{importMutation.error && <CardContent className="pt-0 text-sm text-destructive"><AlertCircle className="mr-1 inline h-4 w-4" />{(importMutation.error as Error).message}</CardContent>}</Card>
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]"><Card><CardHeader><CardTitle>账号日趋势 · {metricLabel(metric)}</CardTitle><p className="text-xs text-muted-foreground">{metricNote(metric)}</p></CardHeader><CardContent><div className="h-72">{chartData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={chartData}><CartesianGrid strokeDasharray="3 3" className="stroke-border" /><XAxis dataKey="label" /><YAxis allowDecimals={metric !== 'exposure_count' && metric !== 'view_count'} /><Tooltip formatter={(value) => formatMetric(Number(value), metric)} /><Line type="monotone" dataKey={metric} stroke="#0f766e" strokeWidth={2} dot={false} connectNulls /></LineChart></ResponsiveContainer> : <p className="py-20 text-center text-sm text-muted-foreground">暂无已确认数据，请先导入并完成匹配。</p>}</div></CardContent></Card><Card><CardHeader><CardTitle>导入批次</CardTitle></CardHeader><CardContent className="space-y-2">{(batchesQuery.data?.items ?? []).map((batch) => <div key={batch.id} className={`rounded-md border p-3 text-sm ${selectedBatch === batch.id ? 'border-primary bg-primary/5' : 'border-border'}`}><button type="button" className="w-full text-left" onClick={() => setSelectedBatch(batch.id)}><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{batch.file_name}</span><span className="text-xs text-muted-foreground">{statusLabel(batch.status)}</span></div><div className="mt-1 text-xs text-muted-foreground">数据截至 {new Date(batch.data_as_of_at).toLocaleString('zh-CN')} · {batch.resolved_rows}/{batch.total_rows} 行已确认</div></button><div className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>接收于 {new Date(batch.received_at).toLocaleString('zh-CN')}</span><Button variant="ghost" size="sm" className="h-7 px-2" title="下载原始文件" onClick={() => void downloadBatch(batch.id)}><Download className="mr-1 h-3.5 w-3.5" />下载</Button></div></div>)}{!batchesQuery.data?.items?.length && <p className="text-sm text-muted-foreground">还没有导入批次</p>}</CardContent></Card></div>
-    {selectedBatch && batchQuery.data && <Card><CardHeader><CardTitle>待确认帖子 <span className="text-sm font-normal text-muted-foreground">{pendingRows.length} 条</span></CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>源行</TableHead><TableHead>标题</TableHead><TableHead>首次发布时间</TableHead><TableHead>候选/处理</TableHead></TableRow></TableHeader><TableBody>{pendingRows.map((row) => { const candidates = candidatesFor(row); return <TableRow key={row.id}><TableCell>{row.source_row}</TableCell><TableCell className="max-w-[300px] truncate" title={row.title}>{row.title}</TableCell><TableCell>{row.first_published_at ? new Date(row.first_published_at).toLocaleString('zh-CN') : '未提供'}</TableCell><TableCell><div className="flex flex-wrap gap-2"><select className="h-8 max-w-[240px] rounded-md border border-input bg-background px-2 text-xs" defaultValue="" disabled={resolveMutation.isPending} aria-label={`为 ${row.title} 选择已有帖子`} onChange={(e) => { if (e.target.value) resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', post_id: e.target.value }]) }}><option value="">选择已有帖子…</option>{posts.map((post) => <option key={post.id} value={post.id}>{post.title}</option>)}</select>{candidates.map((post) => <Button key={post.id} size="sm" variant="outline" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', post_id: post.id }])}><Check className="h-4 w-4" />精确关联</Button>)}<Button size="sm" variant="outline" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'create_new' }])}>新建帖子</Button><Button size="sm" variant="ghost" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'skip' }])}>跳过</Button></div>{row.parse_error && <p className="mt-1 text-xs text-destructive">{row.parse_error}</p>}{!candidates.length && <p className="mt-1 text-xs text-muted-foreground">未找到精确候选，请确认后再新建</p>}</TableCell></TableRow> })}</TableBody></Table>{!pendingRows.length && <p className="py-4 text-sm text-muted-foreground">当前批次没有待处理行。</p>}</CardContent></Card>}
-    <Card><CardHeader><CardTitle>帖子排行</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{(overviewQuery.data?.posts ?? posts).map((post, index) => <button key={post.id} type="button" className={`rounded-md border p-3 text-left text-sm ${selectedPost === post.id ? 'border-primary bg-primary/5' : 'border-border'}`} onClick={() => setSelectedPost(post.id)}><span className="mr-2 text-muted-foreground">#{index + 1}</span>{post.title}</button>)}</div>{selectedPost && postQuery.data && <div className="border-t pt-4"><p className="mb-3 text-sm font-medium">{postQuery.data.post.title} · {metricLabel(metric)}</p><div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={postVersions.map((version) => ({ ...version, label: version.data_as_of_at.slice(0, 10) }))}><CartesianGrid strokeDasharray="3 3" className="stroke-border" /><XAxis dataKey="label" /><YAxis allowDecimals={metric !== 'exposure_count' && metric !== 'view_count'} /><Tooltip formatter={(value) => formatMetric(Number(value), metric)} /><Line type="monotone" dataKey={metric} stroke="#0f766e" strokeWidth={2} dot={false} connectNulls /></LineChart></ResponsiveContainer></div><Table className="mt-4"><TableHeader><TableRow><TableHead>数据日期</TableHead><TableHead>{metricLabel(metric)}</TableHead><TableHead>导入时间</TableHead></TableRow></TableHeader><TableBody>{postVersions.map((version) => <TableRow key={version.id}><TableCell>{version.data_as_of_at.slice(0, 10)}</TableCell><TableCell>{formatMetric(version[metric], metric)}</TableCell><TableCell>{new Date(version.imported_at).toLocaleString('zh-CN')}</TableCell></TableRow>)}</TableBody></Table></div>}{!posts.length && <p className="text-sm text-muted-foreground">确认匹配后，帖子会显示在这里。</p>}</CardContent></Card>
-    {overviewQuery.isFetching && <div className="text-xs text-muted-foreground"><RefreshCw className="mr-1 inline h-3 w-3 animate-spin" />数据刷新中</div>}
+    <PageHeader title="小红书数据" description="导入官方数据，确认帖子归属，再按天查看账号与单帖表现。" />
+    <Card className="overflow-hidden"><CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(280px,420px)_1fr] lg:items-center">
+      <label className="grid gap-2 text-sm" htmlFor="seednote-account"><span className="font-medium">小红书账号 <span className="text-destructive">*</span></span>{projectsQuery.isFetched ? <select id="seednote-account" aria-label="小红书账号" className="h-10 rounded-md border border-input bg-background px-3" value={projectId} disabled={importMutation.isPending} onChange={(event) => changeProject(event.target.value)}><option value="">请选择要导入数据的账号</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select> : <span className="flex h-10 items-center rounded-md border border-input px-3 text-muted-foreground">正在读取账号…</span>}</label>
+      <div className="rounded-lg bg-muted/60 px-4 py-3 text-sm">{activeProject ? <div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 text-primary" /><div><p className="font-medium">当前导入账号：{activeProject.name}</p><p className="mt-1 text-muted-foreground">文件、帖子匹配和图表都会归入这个账号。</p></div></div> : <div><p className="font-medium">请先选择小红书账号</p><p className="mt-1 text-muted-foreground">选择后才能查看帖子、历史批次和上传数据。</p></div>}</div>
+    </CardContent></Card>
+
+    {activeProjectId && <Tabs value={workspaceTab} onValueChange={(value) => setWorkspaceTab(value as WorkspaceTab)}>
+      <TabsList className="grid w-full max-w-sm grid-cols-2"><TabsTrigger value="import"><Upload />导入与匹配</TabsTrigger><TabsTrigger value="analytics"><BarChart3 />数据看板</TabsTrigger></TabsList>
+      <TabsContent value="import" className="space-y-6 pt-2">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <Card><CardHeader className="border-b"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">1</span><div><CardTitle>{postsQuery.isFetched ? '优先匹配帖子' : '正在读取帖子…'}</CardTitle><p className="mt-1 text-sm text-muted-foreground">可选。勾选后，这些帖子会在待确认列表中优先展示；不勾选则匹配账号内全部帖子。</p></div></div></CardHeader><CardContent className="space-y-4 pt-5">
+            <div className="relative max-w-md"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="搜索帖子" className="pl-9" placeholder="搜索帖子标题" value={postSearch} onChange={(event) => setPostSearch(event.target.value)} /></div>
+            {visiblePosts.length ? <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">{visiblePosts.map((post) => { const labelId = `seednote-post-label-${post.id}`; return <div key={post.id} className="flex items-start gap-3 rounded-lg border p-3 hover:bg-muted/50"><Checkbox id={`seednote-post-${post.id}`} aria-labelledby={labelId} checked={preferredPostIds.includes(post.id)} onCheckedChange={(checked) => togglePreferredPost(post.id, checked === true)} /><label htmlFor={`seednote-post-${post.id}`} className="min-w-0 cursor-pointer"><span id={labelId} className="block truncate text-sm font-medium">{post.title}</span><span className="mt-1 block text-xs text-muted-foreground">{post.first_published_at ? new Date(post.first_published_at).toLocaleString('zh-CN') : '暂无首次发布时间'}</span></label></div> })}</div> : <p className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">{postsQuery.isLoading ? '正在读取帖子…' : postSearch ? '没有找到相关帖子' : '这个账号还没有已确认帖子，可在导入后创建。'}</p>}
+            <p className="text-xs text-muted-foreground">已选 {preferredPostIds.length} 篇{preferredPostIds.length ? '，待匹配时会优先推荐' : '，将从全部帖子中匹配'}</p>
+          </CardContent></Card>
+          <Card><CardHeader className="border-b"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">2</span><div><CardTitle>选择官方数据文件</CardTitle><p className="mt-1 text-sm text-muted-foreground">选择文件后先核对信息，不会立即上传。</p></div></div></CardHeader><CardContent className="space-y-4 pt-5">
+            <label htmlFor="seednote-import-file" className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 px-5 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"><FileSpreadsheet className="mb-3 h-8 w-8 text-primary" /><span className="sr-only">导入数据文件</span><span className="text-sm font-medium">选择小红书官方 XLSX</span><span className="mt-1 text-xs text-muted-foreground">仅支持 .xlsx，最大 20 MB</span><input id="seednote-import-file" className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="导入数据文件" disabled={importMutation.isPending} onChange={(event) => { stageFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label>
+            {stagedFile && <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3"><div className="flex min-w-0 items-center gap-3"><FileSpreadsheet className="h-5 w-5 shrink-0 text-primary" /><div className="min-w-0"><p className="truncate text-sm font-medium">{stagedFile.name}</p><p className="text-xs text-muted-foreground">{formatFileSize(stagedFile.size)} · 尚未上传</p></div></div><Button variant="ghost" size="sm" onClick={() => setStagedFile(null)}>移除</Button></div>}
+            {fileError && <p className="text-sm text-destructive"><AlertCircle className="mr-1 inline h-4 w-4" />{fileError}</p>}
+            <label className="grid gap-2 text-sm" htmlFor="seednote-as-of"><span className="font-medium">数据截至时间</span><Input id="seednote-as-of" type="datetime-local" value={asOf} onChange={(event) => setAsOf(event.target.value)} /><span className="text-xs text-muted-foreground">决定这批数据落在哪一天，可在确认前修改。</span></label>
+            <Button className="w-full" disabled={!stagedFile || importMutation.isPending} onClick={() => setConfirmOpen(true)}>确认导入</Button>
+          </CardContent></Card>
+        </div>
+        {importMutation.error && <Alert variant="destructive"><AlertCircle /><AlertTitle>导入失败</AlertTitle><AlertDescription>{(importMutation.error as Error).message}</AlertDescription></Alert>}
+        {selectedBatch && batchQuery.data && <Card><CardHeader className="border-b"><CardTitle>匹配确认 <span className="text-sm font-normal text-muted-foreground">{pendingRows.length} 条待处理</span></CardTitle><p className="text-sm text-muted-foreground">只处理系统无法唯一确认的帖子，已精确匹配的数据无需重复操作。</p></CardHeader><CardContent className="pt-5">
+          {pendingRows.length ? <Table><TableHeader><TableRow><TableHead>源行</TableHead><TableHead>标题</TableHead><TableHead>首次发布时间</TableHead><TableHead>关联处理</TableHead></TableRow></TableHeader><TableBody>{pendingRows.map((row) => { const candidates = exactCandidatesFor(row); return <TableRow key={row.id}><TableCell>{row.source_row}</TableCell><TableCell className="max-w-[300px] truncate" title={row.title}>{row.title}</TableCell><TableCell>{row.first_published_at ? new Date(row.first_published_at).toLocaleString('zh-CN') : '未提供'}</TableCell><TableCell><div className="flex flex-wrap gap-2"><select className="h-8 max-w-[240px] rounded-md border border-input bg-background px-2 text-xs" defaultValue="" disabled={resolveMutation.isPending} aria-label={`为 ${row.title} 选择已有帖子`} onChange={(event) => { if (event.target.value) resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', post_id: event.target.value }]) }}><option value="">选择已有帖子…</option>{orderedPosts.map((post) => <option key={post.id} value={post.id}>{preferredPostIds.includes(post.id) ? '★ ' : ''}{post.title}</option>)}</select>{candidates.map((post) => <Button key={post.id} size="sm" variant="outline" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', post_id: post.id }])}><Check />精确关联</Button>)}<Button size="sm" variant="outline" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'create_new' }])}>新建帖子</Button><Button size="sm" variant="ghost" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'skip' }])}>跳过</Button></div>{row.parse_error && <p className="mt-1 text-xs text-destructive">{row.parse_error}</p>}{!candidates.length && <p className="mt-1 text-xs text-muted-foreground">未找到唯一精确候选，请确认后再新建。</p>}</TableCell></TableRow> })}</TableBody></Table> : <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-4"><CheckCircle2 className="mt-0.5 h-5 w-5 text-primary" /><div><p className="font-medium">这批数据已完成匹配</p><p className="mt-1 text-sm text-muted-foreground">可以前往数据看板查看趋势和帖子表现。</p><Button className="mt-3" size="sm" variant="outline" onClick={() => setWorkspaceTab('analytics')}>查看数据看板</Button></div></div>}
+        </CardContent></Card>}
+        <Card><CardHeader><CardTitle>历史导入</CardTitle></CardHeader><CardContent className="space-y-2">{(batchesQuery.data?.items ?? []).map((batch) => <div key={batch.id} className={`rounded-lg border p-3 text-sm ${selectedBatch === batch.id ? 'border-primary bg-primary/5' : 'border-border'}`}><button type="button" className="w-full text-left" onClick={() => setSelectedBatch(batch.id)}><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{batch.file_name}</span><span className="text-xs text-muted-foreground">{statusLabel(batch.status)}</span></div><div className="mt-1 text-xs text-muted-foreground">数据截至 {new Date(batch.data_as_of_at).toLocaleString('zh-CN')} · {batch.resolved_rows}/{batch.total_rows} 行已确认</div></button><div className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>接收于 {new Date(batch.received_at).toLocaleString('zh-CN')}</span><Button variant="ghost" size="sm" className="h-7 px-2" title="下载原始文件" onClick={() => void downloadBatch(batch.id)}><Download className="mr-1 h-3.5 w-3.5" />下载</Button></div></div>)}{!batchesQuery.data?.items?.length && <p className="text-sm text-muted-foreground">还没有导入批次</p>}</CardContent></Card>
+      </TabsContent>
+
+      <TabsContent value="analytics" className="space-y-6 pt-2">
+        <Card><CardContent className="flex flex-wrap items-end gap-3 pt-5"><label className="grid gap-2 text-sm"><span className="text-muted-foreground">开始日期</span><Input className="w-40" type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} /></label><label className="grid gap-2 text-sm"><span className="text-muted-foreground">结束日期</span><Input className="w-40" type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} /></label><label className="grid gap-2 text-sm"><span className="text-muted-foreground">指标</span><select className="h-9 rounded-md border border-input bg-background px-3" value={metric} onChange={(event) => setMetric(event.target.value as MetricKey)}>{metrics.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></CardContent></Card>
+        <Card><CardHeader><CardTitle>账号日趋势 · {metricLabel(metric)}</CardTitle><p className="text-xs text-muted-foreground">{metricNote(metric)}</p></CardHeader><CardContent><div className="h-72">{chartData.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={chartData}><CartesianGrid strokeDasharray="3 3" className="stroke-border" /><XAxis dataKey="label" /><YAxis allowDecimals={metric !== 'exposure_count' && metric !== 'view_count'} /><Tooltip formatter={(value) => formatMetric(Number(value), metric)} /><Line type="monotone" dataKey={metric} stroke="#0f766e" strokeWidth={2} dot={false} connectNulls /></LineChart></ResponsiveContainer> : <p className="py-20 text-center text-sm text-muted-foreground">暂无已确认数据，请先导入并完成匹配。</p>}</div></CardContent></Card>
+        <Card><CardHeader><CardTitle>帖子表现</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{(overviewQuery.data?.posts ?? posts).map((post, index) => <button key={post.id} type="button" className={`rounded-lg border p-3 text-left text-sm ${selectedPost === post.id ? 'border-primary bg-primary/5' : 'border-border'}`} onClick={() => setSelectedPost(post.id)}><span className="mr-2 text-muted-foreground">#{index + 1}</span>{post.title}</button>)}</div>{selectedPost && postQuery.data && <div className="border-t pt-4"><p className="mb-3 text-sm font-medium">{postQuery.data.post.title} · {metricLabel(metric)}</p><div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={postVersions.map((version) => ({ ...version, label: version.data_as_of_at.slice(0, 10) }))}><CartesianGrid strokeDasharray="3 3" className="stroke-border" /><XAxis dataKey="label" /><YAxis allowDecimals={metric !== 'exposure_count' && metric !== 'view_count'} /><Tooltip formatter={(value) => formatMetric(Number(value), metric)} /><Line type="monotone" dataKey={metric} stroke="#0f766e" strokeWidth={2} dot={false} connectNulls /></LineChart></ResponsiveContainer></div><Table className="mt-4"><TableHeader><TableRow><TableHead>数据日期</TableHead><TableHead>{metricLabel(metric)}</TableHead><TableHead>导入时间</TableHead></TableRow></TableHeader><TableBody>{postVersions.map((version) => <TableRow key={version.id}><TableCell>{version.data_as_of_at.slice(0, 10)}</TableCell><TableCell>{formatMetric(version[metric], metric)}</TableCell><TableCell>{new Date(version.imported_at).toLocaleString('zh-CN')}</TableCell></TableRow>)}</TableBody></Table></div>}{!posts.length && <p className="text-sm text-muted-foreground">确认匹配后，帖子会显示在这里。</p>}</CardContent></Card>
+        {overviewQuery.isFetching && <div className="text-xs text-muted-foreground"><RefreshCw className="mr-1 inline h-3 w-3 animate-spin" />数据刷新中</div>}
+      </TabsContent>
+    </Tabs>}
+
+    <Dialog open={confirmOpen} onOpenChange={(open) => !importMutation.isPending && setConfirmOpen(open)}><DialogContent className="sm:max-w-lg" closeButtonDisabled={importMutation.isPending}><DialogHeader><DialogTitle>确认这次导入</DialogTitle><DialogDescription>开始解析后，原始文件和解析结果会归入以下小红书账号。</DialogDescription></DialogHeader><div className="grid gap-3 rounded-lg border bg-muted/30 p-4"><div className="grid grid-cols-[96px_1fr] gap-3 text-sm"><span className="text-muted-foreground">导入账号</span><span className="font-medium">{activeProject?.name ?? '-'}</span><span className="text-muted-foreground">数据文件</span><span className="min-w-0 break-all font-medium">{stagedFile?.name ?? '-'}</span><span className="text-muted-foreground">文件大小</span><span>{stagedFile ? formatFileSize(stagedFile.size) : '-'}</span><span className="text-muted-foreground">数据截至</span><span>{asOf ? new Date(asOf).toLocaleString('zh-CN') : '-'}</span><span className="text-muted-foreground">优先帖子</span><span>{preferredPosts.length ? preferredPosts.map((post) => post.title).join('、') : '未指定，从账号全部帖子中匹配'}</span></div></div><Alert><AlertCircle /><AlertTitle>请再次确认账号</AlertTitle><AlertDescription>账号选错会导致数据归属错误。解析前仍可取消并重新选择。</AlertDescription></Alert><DialogFooter><Button variant="outline" disabled={importMutation.isPending} onClick={() => setConfirmOpen(false)}>返回修改</Button><Button disabled={!stagedFile || importMutation.isPending} onClick={() => stagedFile && importMutation.mutate(stagedFile)}>{importMutation.isPending ? <><RefreshCw className="animate-spin" />解析中…</> : '开始解析'}</Button></DialogFooter></DialogContent></Dialog>
   </div>
 }
