@@ -14,7 +14,7 @@ const executionProfileSchema = z
   .or(z.literal(''))
   .refine((value): boolean => value !== '', '请选择执行配置')
 
-export const imageRatioSchema = z.enum(['auto', '3:4', '1:1', '4:3', '16:9'])
+export const imageRatioSchema = z.enum(['auto', '9:16', '3:4', '1:1', '4:3', '16:9'])
 export type ImageRatio = z.infer<typeof imageRatioSchema>
 
 export function normalizeImageRatio(value: unknown): ImageRatio {
@@ -81,7 +81,6 @@ const montageAssetSchema = z.object({
 })
 
 const montagePreferencesSchema = z.object({
-  aspect_ratio: z.string().optional(),
   duration_seconds: z.number().int().min(1).max(600).optional(),
   style: z.string().max(1000).optional(),
   music_prompt: z.string().max(1000).optional(),

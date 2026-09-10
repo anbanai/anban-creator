@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -480,10 +481,6 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		return nil, Error(c, fiber.StatusBadRequest, "type must match project platform")
 	}
 	projectSnapshot := model.SnapshotProject(project)
-	if model.IsMontagePlatform(project.Platform) {
-		req.ImageRatio = ""
-		req.ImageCapabilityKey = ""
-	}
 
 	var referenceAssetID string
 	var referenceView *model.AssetView
@@ -1590,6 +1587,51 @@ func (h *TaskHandler) verifyTaskOwnership(c fiber.Ctx, taskID string) (*model.Ta
 	return task, nil
 }
 
+func taskFileContentDisposition(disposition, filename string) string {
+	value := mime.FormatMediaType(disposition, map[string]string{"filename": filename})
+	if value == "" {
+		return disposition
+	}
+	return value
+}
+
+func setTaskFilePreviewHeaders(c fiber.Ctx, contentType, filename string) {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	}
+	mediaType = strings.ToLower(mediaType)
+	disposition := "inline"
+	if !taskFilePreviewMIMEAllowed(mediaType) {
+		contentType = "application/octet-stream"
+		disposition = "attachment"
+	}
+	c.Set("Content-Type", contentType)
+	c.Set("Content-Disposition", taskFileContentDisposition(disposition, filename))
+	c.Set("X-Content-Type-Options", "nosniff")
+
+	switch mediaType {
+	case "text/html", "application/xhtml+xml", "image/svg+xml":
+		// Agent-produced preview content is untrusted. Keep it renderable while
+		// preventing scripts, same-origin access, navigation, and form actions.
+		c.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'")
+		c.Set("Referrer-Policy", "no-referrer")
+	}
+}
+
+func taskFilePreviewMIMEAllowed(mediaType string) bool {
+	switch mediaType {
+	case "text/plain", "text/markdown", "application/json",
+		"text/html", "application/xhtml+xml", "image/svg+xml",
+		"image/png", "image/jpeg", "image/gif", "image/webp",
+		"audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/aac",
+		"video/mp4", "video/quicktime", "video/webm":
+		return true
+	default:
+		return false
+	}
+}
+
 // DownloadFile handles GET /api/v1/tasks/:id/files/:fileId/download.
 // It streams the file content as an attachment download.
 func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
@@ -1610,13 +1652,23 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
 		return Error(c, fiber.StatusNotFound, "file not found")
 	}
+	fileForDownload, err := h.service.Repository().TaskFiles().FindByID(c.Context(), fileID)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "file not found")
+	}
+	if err := h.service.RequireDownloadableTaskFile(c.Context(), taskID, fileForDownload); err != nil {
+		if errors.Is(err, service.ErrTaskFileDownloadNotAllowed) {
+			return Error(c, fiber.StatusForbidden, "过程文件不支持下载")
+		}
+		h.logger.Error().Err(err).Str("file_id", fileID).Msg("check task file delivery failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to check file delivery")
+	}
 
 	stream, file, err := h.service.GetFileStream(c.Context(), fileID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("file_id", fileID).Msg("get file stream failed")
 		return Error(c, fiber.StatusNotFound, "file not found")
 	}
-	defer stream.Close()
 
 	contentType := file.MimeType
 	if contentType == "" {
@@ -1624,14 +1676,40 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 	}
 
 	c.Set("Content-Type", contentType)
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, file.FileName))
-	c.Set("Content-Length", strconv.FormatInt(file.FileSize, 10))
-
-	if _, err := io.Copy(c.Response().BodyWriter(), stream); err != nil {
-		h.logger.Error().Err(err).Str("file_id", fileID).Msg("stream file failed")
+	c.Set("Content-Disposition", taskFileContentDisposition("attachment", file.FileName))
+	if file.FileSize > 0 && file.FileSize <= int64(^uint(0)>>1) {
+		return c.SendStream(stream, int(file.FileSize))
 	}
+	return c.SendStream(stream)
+}
 
-	return nil
+// PreviewFile handles authenticated inline preview for both delivery and
+// process files. Unlike DownloadFile, preview does not require delivery status.
+func (h *TaskHandler) PreviewFile(c fiber.Ctx) error {
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	fileID, err := validateUUIDParam(c, "fileId")
+	if err != nil {
+		return err
+	}
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
+		return nil
+	}
+	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
+		return Error(c, fiber.StatusNotFound, "file not found")
+	}
+	stream, file, err := h.service.GetFileStream(c.Context(), fileID)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "file not found")
+	}
+	contentType := file.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	setTaskFilePreviewHeaders(c, contentType, file.FileName)
+	return c.SendStream(stream)
 }
 
 // PreviewHTML handles GET /api/v1/tasks/:id/preview.
@@ -1689,14 +1767,7 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 		htmlContent = service.RewriteHTMLImageURLs(htmlContent, fileMap)
 	}
 
-	c.Set("Content-Type", "text/html; charset=utf-8")
-	c.Set("X-Content-Type-Options", "nosniff")
-	// Allow loading images from external storage (OSS) in the sandboxed preview.
-	cspValue := "sandbox allow-scripts"
-	if h.service.StorageProviderName() == "oss" {
-		cspValue += "; img-src https: data:"
-	}
-	c.Set("Content-Security-Policy", cspValue)
+	setTaskFilePreviewHeaders(c, "text/html; charset=utf-8", htmlFile.FileName)
 	c.Set("Content-Length", strconv.Itoa(len(htmlContent)))
 
 	return c.Send(htmlContent)
@@ -1714,17 +1785,19 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 	if err != nil {
 		return nil // error response already written
 	}
-	buf, zipName, err := h.service.DownloadZip(c.Context(), taskID)
+	stream, zipName, err := h.service.DownloadZip(c.Context(), taskID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", taskID).Msg("download zip failed")
+		if errors.Is(err, service.ErrNoDownloadableDeliveryFiles) {
+			return Error(c, fiber.StatusNotFound, "没有可下载的交付文件")
+		}
 		return Error(c, fiber.StatusNotFound, "failed to create ZIP archive")
 	}
 
 	c.Set("Content-Type", "application/zip")
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipName))
-	c.Set("Content-Length", strconv.Itoa(buf.Len()))
+	c.Set("Content-Disposition", taskFileContentDisposition("attachment", zipName))
 
-	return c.Send(buf.Bytes())
+	return c.SendStream(stream)
 }
 
 // DownloadTasksZip handles POST /api/v1/tasks/files/zip.
@@ -1762,6 +1835,9 @@ func (h *TaskHandler) DownloadTasksZip(c fiber.Ctx) error {
 	buf, zipName, err := h.service.DownloadTasksZip(c.Context(), userID, req.TaskIDs)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("bulk download zip failed")
+		if errors.Is(err, service.ErrNoDownloadableDeliveryFiles) {
+			return Error(c, fiber.StatusNotFound, "没有可下载的交付文件")
+		}
 		return Error(c, fiber.StatusNotFound, "failed to create ZIP archive")
 	}
 

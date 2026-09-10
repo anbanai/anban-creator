@@ -371,7 +371,7 @@ func TestGenerateImageUsesResolvedDescriptor(t *testing.T) {
 	}
 
 	_, err := svc.GenerateImage(
-		context.Background(), project.UserID, project.ID, "test prompt", "content", "", "", nil, "", resolved, nil,
+		context.Background(), project.UserID, project.ID, "test prompt", "content", "", "", nil, "", "3:4", resolved, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "resolved image model does not match image type configuration") {
 		t.Fatalf("GenerateImage() error = %v, want descriptor mismatch before provider request", err)

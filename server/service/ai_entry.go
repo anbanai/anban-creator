@@ -127,7 +127,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
-	usesImageSettings := !model.IsMontagePlatform(project.Platform)
+	usesImageSettings := len(model.SupportedImageRatios(project.Platform)) > 0
 	quantity := req.Quantity
 	if quantity == 0 {
 		quantity = 1
@@ -153,10 +153,6 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		}
 		imageCapabilityKey = resolved.Key
 	}
-	if !usesImageSettings {
-		imageRatio = ""
-		imageCapabilityKey = ""
-	}
 	if s.llm == nil {
 		return aiEntryNeedsConfiguration("AI 入口意图解析模型暂不可用，请联系管理员。", ""), nil
 	}
@@ -172,7 +168,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
-	if usesImageSettings && imageRatio == "" {
+	if usesImageSettings && imageRatio == "" && !model.IsMontagePlatform(project.Platform) {
 		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
 	}
 
@@ -276,9 +272,6 @@ func aiEntryMontageInput(project *model.Project, brief string) *model.MontageInp
 		defaults = project.MontageDefaults.Data()
 	}
 	preferences := defaults.Preferences
-	if strings.TrimSpace(preferences.AspectRatio) == "" {
-		preferences.AspectRatio = "9:16"
-	}
 	if preferences.DurationSeconds == 0 {
 		preferences.DurationSeconds = 30
 	}

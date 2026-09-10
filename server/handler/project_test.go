@@ -129,7 +129,6 @@ func TestProjectRequestMapsMontageDefaults(t *testing.T) {
 		MontageDefaults: &model.MontageDefaults{
 			DefaultPipeline: "social-short",
 			Preferences: model.MontagePreferences{
-				AspectRatio:     "9:16",
 				DurationSeconds: 45,
 				Style:           "documentary",
 				MusicPrompt:     "minimal electronic",
@@ -418,16 +417,16 @@ func TestProjectHandler_CreateAndUpdateMontageDefaults(t *testing.T) {
 	if defaults.DefaultPipeline != "social-short" || defaults.Preferences.DurationSeconds != 45 || defaults.Preferences.VoiceoverMode != "narrated" {
 		t.Fatalf("created MontageDefaults = %#v", defaults)
 	}
-	if stored.ImageRatio != "" {
-		t.Fatalf("created Montage image ratio = %q, want empty", stored.ImageRatio)
+	if stored.ImageRatio != "9:16" {
+		t.Fatalf("created Montage image ratio = %q, want 9:16", stored.ImageRatio)
 	}
 
 	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID, userID, map[string]any{
-		"platform": model.PlatformMontage,
+		"platform":    model.PlatformMontage,
+		"image_ratio": "16:9",
 		"montage_defaults": map[string]any{
 			"default_pipeline": "product-demo",
 			"preferences": map[string]any{
-				"aspect_ratio":     "16:9",
 				"duration_seconds": 30,
 			},
 			"delivery_targets": []string{"final_video"},
@@ -441,23 +440,23 @@ func TestProjectHandler_CreateAndUpdateMontageDefaults(t *testing.T) {
 		t.Fatalf("FindByID after update: %v", err)
 	}
 	defaults = stored.MontageDefaults.Data()
-	if defaults.DefaultPipeline != "product-demo" || defaults.Preferences.AspectRatio != "16:9" || defaults.Preferences.DurationSeconds != 30 {
+	if defaults.DefaultPipeline != "product-demo" || defaults.Preferences.DurationSeconds != 30 {
 		t.Fatalf("updated MontageDefaults = %#v", defaults)
 	}
-	if stored.ImageRatio != "" {
-		t.Fatalf("updated Montage image ratio = %q, want empty", stored.ImageRatio)
+	if stored.ImageRatio != "16:9" {
+		t.Fatalf("updated Montage image ratio = %q, want 16:9", stored.ImageRatio)
 	}
 }
 
-func TestProjectHandler_RejectsImageRatioForMontage(t *testing.T) {
+func TestProjectHandler_AcceptsImageRatioForMontage(t *testing.T) {
 	app, _ := setupProjectDeleteHandlerTest(t)
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), map[string]any{
 		"platform":    model.PlatformMontage,
 		"name":        "Launch montage",
 		"image_ratio": "9:16",
 	})
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%#v", resp.StatusCode, decodeBody(t, resp))
 	}
 }
 

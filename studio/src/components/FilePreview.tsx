@@ -43,6 +43,20 @@ function fileRequestErrorMessage(error: unknown, fallback: string): string {
   return status === 429 ? '请求过于频繁，请稍后再试' : fallback
 }
 
+function firstAbsoluteHTTPURL(...candidates: Array<string | undefined>): string {
+  return candidates.find((candidate) => /^https?:\/\//i.test(candidate || '')) || ''
+}
+
+function startBrowserDownload(url: string, filename: string) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = 'noopener noreferrer'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
 function filePreviewTone(file: TaskFile) {
   const name = file.file_name.toLowerCase()
   const mime = file.mime_type?.toLowerCase() || ''
@@ -73,7 +87,7 @@ const montageRoleLabel: Record<string, string> = {
 
 function taskFileRoleLabel(file: TaskFile, taskType?: string) {
   if (taskType === 'montage') {
-    return montageRoleLabel[file.role] ?? ''
+    return montageRoleLabel[file.delivery_role || file.role] ?? ''
   }
   return ''
 }
@@ -105,6 +119,8 @@ function FilePreviewModalContent({
   const isHTML = file.mime_type === 'text/html'
   const isText = isTextPreviewFile(file)
   const isMD = isText && isMarkdownFile(file.file_name)
+  const canDownload = file.is_deliverable === true
+  const previewUrl = file.preview_url || file.url || ''
 
   useEffect(() => {
     let cancelled = false
@@ -121,7 +137,7 @@ function FilePreviewModalContent({
       }
 
       if (isImage || isVideo) {
-        const url = file.url || ''
+        const url = previewUrl
         if (!url) {
           setImgSrc('')
           if (blobUrlRef.current) {
@@ -130,10 +146,12 @@ function FilePreviewModalContent({
           }
           return
         }
-        if (url.startsWith('/api/v1/files/')) {
+        if (!firstAbsoluteHTTPURL(url) && (file.preview_url || url.startsWith('/api/v1/files/'))) {
           setLoading(true)
           try {
-            const blob = await api.tasks.downloadFileBlob(taskId, file.id)
+            const blob = file.preview_url
+              ? await api.tasks.previewFileBlob(taskId, file.id)
+              : await api.tasks.downloadFileBlob(taskId, file.id)
             if (cancelled) return
             const newUrl = URL.createObjectURL(blob)
             const oldUrl = blobUrlRef.current
@@ -164,11 +182,15 @@ function FilePreviewModalContent({
       setLoading(true)
       try {
         if (isHTML) {
-          const html = await api.tasks.fetchPreviewHTML(taskId)
+          const html = file.preview_url
+            ? await (await api.tasks.previewFileBlob(taskId, file.id)).text()
+            : await api.tasks.fetchPreviewHTML(taskId)
           if (cancelled) return
           setHtmlContent(html)
         } else if (isText) {
-          const blob = await api.tasks.downloadFileBlob(taskId, file.id)
+          const blob = file.preview_url
+            ? await api.tasks.previewFileBlob(taskId, file.id)
+            : await api.tasks.downloadFileBlob(taskId, file.id)
           if (cancelled) return
           setTextContent(await blob.text())
         }
@@ -184,7 +206,7 @@ function FilePreviewModalContent({
     }
     void load()
     return () => { cancelled = true }
-  }, [file.id, file.url, taskId, isImage, isVideo, isHTML, isText, loadAttempt])
+  }, [file.id, file.url, file.preview_url, taskId, isImage, isVideo, isHTML, isText, loadAttempt])
 
   useEffect(() => {
     return () => {
@@ -196,11 +218,17 @@ function FilePreviewModalContent({
   }, [])
 
   const handleDownload = async () => {
-    if (downloading) return
+    if (downloading || !canDownload) return
     setDownloading(true)
     try {
-      if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
-        return
+      const directDownloadURL = firstAbsoluteHTTPURL(file.download_url)
+      if (directDownloadURL) {
+        if (isDesktop()) {
+          if (await saveUrlToFile(directDownloadURL, file.file_name)) return
+        } else {
+          startBrowserDownload(directDownloadURL, file.file_name)
+          return
+        }
       }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
       // Native save dialog on desktop (WKWebView ignores <a download>); anchor
@@ -279,7 +307,7 @@ function FilePreviewModalContent({
       {!loading && isHTML && htmlContent && (
         <iframe
           srcDoc={htmlContent}
-          sandbox="allow-scripts"
+          sandbox=""
           className="h-[70vh] w-full rounded-lg border border-border bg-background"
           style={{ height: '70vh' }}
           title="文章预览"
@@ -371,7 +399,7 @@ function FilePreviewModalContent({
             复制 HTML
           </Button>
         )}
-        <Button variant="secondary" size="sm" disabled={downloading} onClick={handleDownload}>
+        <Button variant="secondary" size="sm" disabled={downloading || !canDownload} title={!canDownload ? '过程文件仅支持预览' : undefined} onClick={handleDownload}>
           {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           {downloading ? '下载中' : '下载'}
         </Button>
@@ -513,14 +541,22 @@ function FilePreviewInline({
   const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
   const isText = isTextPreviewFile(file)
+  const canDownload = file.is_deliverable === true
+  const previewUrl = file.preview_url || file.url || ''
   const [downloading, setDownloading] = useState(false)
 
   const handleDownload = async () => {
-    if (downloading) return
+    if (downloading || !canDownload) return
     setDownloading(true)
     try {
-      if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
-        return
+      const directDownloadURL = firstAbsoluteHTTPURL(file.download_url)
+      if (directDownloadURL) {
+        if (isDesktop()) {
+          if (await saveUrlToFile(directDownloadURL, file.file_name)) return
+        } else {
+          startBrowserDownload(directDownloadURL, file.file_name)
+          return
+        }
       }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
       // Native save dialog on desktop (WKWebView ignores <a download>); anchor
@@ -538,7 +574,7 @@ function FilePreviewInline({
   const blobUrlRef = useRef<string>('')
   useEffect(() => {
     if (!isImage && !isVideo) return
-    const url = file.url || ''
+    const url = previewUrl
     if (!url) {
       setImgSrc('')
       if (blobUrlRef.current) {
@@ -547,9 +583,12 @@ function FilePreviewInline({
       }
       return
     }
-    if (url.startsWith('/api/v1/files/')) {
+    if (!firstAbsoluteHTTPURL(url) && (file.preview_url || url.startsWith('/api/v1/files/'))) {
       let cancelled = false
-      api.tasks.downloadFileBlob(taskId, file.id).then(blob => {
+      const loader = file.preview_url
+        ? api.tasks.previewFileBlob(taskId, file.id)
+        : api.tasks.downloadFileBlob(taskId, file.id)
+      loader.then(blob => {
         if (!cancelled) {
           if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
           blobUrlRef.current = URL.createObjectURL(blob)
@@ -568,11 +607,11 @@ function FilePreviewInline({
       }
       setImgSrc(url)
     }
-  }, [isImage, isVideo, file.url, taskId, file.id])
+  }, [isImage, isVideo, file.url, file.preview_url, taskId, file.id])
 
   if (isImage) {
     return (
-      <div className="space-y-1">
+      <div className={`space-y-1 ${file.is_deliverable === true ? '' : 'opacity-55'}`}>
         {imgSrc ? (
           <img
             src={imgSrc}
@@ -585,7 +624,9 @@ function FilePreviewInline({
             加载中...
           </div>
         )}
-        <p className="truncate text-xs text-muted-foreground" title={file.file_name}>{file.file_name}</p>
+        <p className="truncate text-xs text-muted-foreground" title={file.file_name}>
+          {file.is_deliverable === true ? '交付文件 · ' : '过程文件 · '}{file.file_name}
+        </p>
       </div>
     )
   }
@@ -596,12 +637,12 @@ function FilePreviewInline({
   const roleLabel = taskFileRoleLabel(file, taskType)
   return (
     <div className="space-y-2">
-      <div className={`flex items-center justify-between rounded-lg border p-3 ${tone}`}>
+      <div className={`flex items-center justify-between rounded-lg border p-3 ${tone} ${file.is_deliverable === true ? 'ring-1 ring-emerald-500/20' : 'opacity-60 grayscale'}`}>
         <div className="flex min-w-0 items-center gap-3">
           <Icon className="h-5 w-5 shrink-0" />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>
-              {roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}
+              {file.is_deliverable === true ? '交付文件 · ' : '过程文件 · '}{roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}
             </p>
             <p className="text-xs text-muted-foreground">{file.mime_type} &middot; {formatSize(file.file_size)}</p>
           </div>
@@ -619,7 +660,8 @@ function FilePreviewInline({
           )}
           <button
             onClick={handleDownload}
-            disabled={downloading}
+            disabled={downloading || !canDownload}
+            title={!canDownload ? '过程文件仅支持预览' : undefined}
             className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
             aria-label={`下载 ${file.file_name}`}
           >

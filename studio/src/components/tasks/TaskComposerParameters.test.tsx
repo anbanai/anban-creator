@@ -121,6 +121,27 @@ describe('TaskComposerParameters', () => {
     expect(within(popover).queryByText('任务数量')).not.toBeInTheDocument()
   })
 
+  it('labels the shared ratio as a video setting for Montage', () => {
+    render(
+      <TaskComposerParameters
+        execution={{ profiles, value: 'effective', onChange: vi.fn(), taskType: 'montage' }}
+        image={{
+          ratios: ['9:16', '16:9', '1:1'],
+          ratio: '9:16',
+          onRatioChange: vi.fn(),
+          capabilities: [],
+          capabilityKey: '',
+          onCapabilityChange: vi.fn(),
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /创作参数：/ }))
+    const popover = screen.getByRole('dialog', { name: '创作参数' })
+    expect(within(popover).getByRole('group', { name: '视频比例' })).toBeInTheDocument()
+    expect(within(popover).queryByRole('group', { name: '图片比例' })).not.toBeInTheDocument()
+  })
+
   it('lets a fixed task quantity use the full compact row', () => {
     render(
       <TaskComposerParameters

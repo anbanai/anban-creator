@@ -626,7 +626,6 @@ describe('TasksPage Montage creation', () => {
     montage_defaults: {
       default_pipeline: 'social-short',
       preferences: {
-        aspect_ratio: '16:9',
         duration_seconds: 45,
         style: 'clean product film',
         music_prompt: 'minimal electronic',
@@ -694,7 +693,6 @@ describe('TasksPage Montage creation', () => {
           file_size: 42,
         }],
         preferences: {
-          aspect_ratio: '16:9',
           duration_seconds: 45,
           style: 'clean product film',
           music_prompt: 'minimal electronic',
@@ -720,7 +718,7 @@ describe('TasksPage Montage creation', () => {
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
   })
 
-  it('submits Montage creation when image capabilities are unavailable', async () => {
+  it('blocks Montage creation when required cover image capabilities are unavailable', async () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
@@ -730,12 +728,8 @@ describe('TasksPage Montage creation', () => {
     })
 
     const createButton = screen.getByRole('button', { name: '创建' })
-    await waitFor(() => expect(createButton).toBeEnabled())
-    fireEvent.click(createButton)
-
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'montage',
-      prompt: '不依赖图像能力的 Montage 视频',
-    })))
+    await waitFor(() => expect(createButton).toBeDisabled())
+    expect(screen.getByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
+    expect(api.tasks.create).not.toHaveBeenCalled()
   })
 })

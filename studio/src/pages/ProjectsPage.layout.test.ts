@@ -31,11 +31,12 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).not.toContain('<TemplatePicker type="ecommerce"')
   })
 
-  it('auto-analyzes uploaded reference images for every image-based project type', () => {
+  it('keeps Montage portrait references out of visual-style analysis', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
     expect(source).toContain('supportsVisualReference')
-    expect(source).toContain('!supportsVisualReference')
+    expect(source).toContain('shouldAnalyzeReferenceStyle = !isMontage')
+    expect(source).toContain('!shouldAnalyzeReferenceStyle')
     expect(source).not.toContain("selectedPlatform !== 'seednote'")
   })
 

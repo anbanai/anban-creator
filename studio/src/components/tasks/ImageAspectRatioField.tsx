@@ -1,6 +1,6 @@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
-export type ImageAspectRatio = 'auto' | '3:4' | '1:1' | '4:3' | '16:9'
+export type ImageAspectRatio = 'auto' | '9:16' | '3:4' | '1:1' | '4:3' | '16:9'
 
 export function ImageAspectRatioField({
   value,

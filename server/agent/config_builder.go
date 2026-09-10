@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -603,6 +604,18 @@ func inputAttachmentFilename(index int, attachment model.EntryAttachment) string
 		base += ext
 	}
 	return fmt.Sprintf("attachment_%02d_%s", index, base)
+}
+
+// InputAttachmentFilename returns the canonical runtime filename for a frozen
+// task attachment. Local and managed runtimes use this exact mapping.
+func InputAttachmentFilename(index int, attachment model.EntryAttachment) string {
+	return inputAttachmentFilename(index, attachment)
+}
+
+// InputAttachmentReferencePath returns the task-relative path exposed to image
+// tools and agent workflows for a frozen task attachment.
+func InputAttachmentReferencePath(index int, attachment model.EntryAttachment) string {
+	return path.Join(referenceImageDirName, "input-attachments", InputAttachmentFilename(index, attachment))
 }
 
 func firstNonEmptyAttachmentSource(values ...string) string {

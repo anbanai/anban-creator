@@ -4,6 +4,7 @@ export type { TaskFeedback } from './feedback'
 export type {
   AgentPack,
   AgentPackCatalog,
+  AgentPackDeliverySpec,
   AgentPackJSONSchema,
   AgentPackSurface,
 } from './agent-pack'

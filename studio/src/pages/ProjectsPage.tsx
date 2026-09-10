@@ -83,7 +83,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   montage_defaults: {
     default_pipeline: '',
     preferences: {
-      aspect_ratio: '9:16',
       duration_seconds: 30,
       style: '',
       music_prompt: '',
@@ -182,9 +181,10 @@ export default function ProjectsPage() {
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
-  const isEcommerce = selectedPlatform === 'ecommerce'
-  const isMontage = selectedPlatform === 'montage'
-  const supportsVisualReference = !isMontage
+	const isEcommerce = selectedPlatform === 'ecommerce'
+	const isMontage = selectedPlatform === 'montage'
+	const supportsVisualReference = true
+	const shouldAnalyzeReferenceStyle = !isMontage
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const publishMode = useWatch({ control: form.control, name: 'wechat_publish_mode' })
   const enablePublishing = publishMode !== 'disabled'
@@ -262,7 +262,7 @@ export default function ProjectsPage() {
 
   // Auto-analyze reference image to fill visual style for image-based project types.
   useEffect(() => {
-    if (!modalOpen || !referenceAnalysisUrl || !supportsVisualReference) return
+    if (!modalOpen || !referenceAnalysisUrl || !shouldAnalyzeReferenceStyle) return
     if (styleManuallyEditedRef.current) return
 
     let cancelled = false
@@ -283,7 +283,7 @@ export default function ProjectsPage() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [modalOpen, referenceAnalysisUrl, supportsVisualReference, form])
+  }, [modalOpen, referenceAnalysisUrl, shouldAnalyzeReferenceStyle, form])
 
   // Reset manual-edit flag when modal reopens
   useEffect(() => {
@@ -507,7 +507,6 @@ export default function ProjectsPage() {
       payload.montage_defaults = {
         default_pipeline: values.montage_defaults?.default_pipeline?.trim() || undefined,
         preferences: {
-          aspect_ratio: values.montage_defaults?.preferences?.aspect_ratio?.trim() || undefined,
           duration_seconds: values.montage_defaults?.preferences?.duration_seconds,
           style: values.montage_defaults?.preferences?.style?.trim() || undefined,
           music_prompt: values.montage_defaults?.preferences?.music_prompt?.trim() || undefined,
@@ -825,9 +824,11 @@ export default function ProjectsPage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">视觉参考</p>
+                      <p className="text-sm font-medium text-foreground">{isMontage ? '人物参考' : '视觉参考'}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        上传一张参考图，系统会尝试识别色彩、质感和构图。
+                        {isMontage
+                          ? '封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。'
+                          : '上传一张参考图，系统会尝试识别色彩、质感和构图。'}
                       </p>
                     </div>
                     <ReferenceAssetUpload
@@ -844,9 +845,8 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-              {!isMontage ? (
-                <>
-                <FormField control={form.control} name="visual_style" render={({ field }) => (
+			  {!isMontage ? (
+				<FormField control={form.control} name="visual_style" render={({ field }) => (
                   <FormItem>
                     <FormLabel>视觉风格</FormLabel>
                     <FormControl>
@@ -887,10 +887,12 @@ export default function ProjectsPage() {
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
-                )} />
-                <FormField control={form.control} name="image_ratio" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>默认图像比例</FormLabel>
+				)} />
+			  ) : null}
+
+			  <FormField control={form.control} name="image_ratio" render={({ field }) => (
+				  <FormItem>
+					<FormLabel>{isMontage ? '默认视频比例' : '默认图像比例'}</FormLabel>
                     <FormControl>
                       <ImageAspectRatioField
                         value={field.value || 'auto'}
@@ -899,12 +901,10 @@ export default function ProjectsPage() {
                         onChange={field.onChange}
                       />
                     </FormControl>
-                    <FormDescription>选择智能适配时，每个任务可再明确指定，或由创作流程按产物决定。</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                </>
-              ) : null}
+					<FormDescription>{isMontage ? '视频与封面使用同一个比例。' : '选择智能适配时，每个任务可再明确指定，或由创作流程按产物决定。'}</FormDescription>
+					<FormMessage />
+				  </FormItem>
+			  )} />
 
               {isMontage && <MontageProjectDefaultsPanel form={form} />}
 

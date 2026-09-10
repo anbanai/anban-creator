@@ -67,9 +67,10 @@ const fixtures = vi.hoisted(() => {
     id: 'montage-project',
     platform: 'montage',
     name: '剪辑项目',
+    image_ratio: '9:16',
     montage_defaults: {
       default_pipeline: 'social-short',
-      preferences: { aspect_ratio: '9:16', duration_seconds: 45, style: 'clean product film' },
+      preferences: { duration_seconds: 45, style: 'clean product film' },
       delivery_targets: ['final_video'],
     },
   } as Project
@@ -141,6 +142,7 @@ vi.mock('@/lib/api', async () => {
           { id: 'seednote', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
           { id: 'moments', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1'], fields: [] },
           { id: 'ecommerce', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4', '4:3', '16:9'], fields: [] },
+          { id: 'montage', default_image_ratio: '9:16', supported_image_ratios: ['9:16', '16:9', '1:1'], fields: [] },
         ]),
       },
       templates: {
@@ -500,6 +502,29 @@ describe('TaskFormDialog', () => {
     expect(await findImageSettings(dialog, '16:9 · 目录默认能力')).toBeInTheDocument()
   })
 
+  it('submits the catalog default capability shown for an empty form value', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
+      tier: 'pro',
+      default_capability: 'catalog-default',
+      items: [
+        { key: 'catalog-default', display_name: '目录默认能力', min_tier: 'free', enabled: true, price_available: true },
+      ],
+    })
+
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await findImageSettings(dialog, '16:9 · 目录默认能力')
+    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '创建一篇品牌文章' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      image_capability_key: 'catalog-default',
+    })))
+  })
+
   it('uses the selected project platform when initial type and project disagree', async () => {
     renderDialog({ initialType: 'seednote' })
 
@@ -787,6 +812,8 @@ describe('TaskFormDialog', () => {
     await selectProject(/剪辑项目/)
     expect(await within(dialog).findByRole('button', { name: /^创作参数：.*任务数量 1/ })).toBeInTheDocument()
     const montageParameters = await openTaskParameters(dialog)
+	  expect(within(montageParameters).getByRole('group', { name: '视频比例' })).toBeInTheDocument()
+	  expect(within(montageParameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(montageParameters).getByLabelText('任务数量：1，当前能力上限')).toBeInTheDocument()
     expect(within(montageParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
   })

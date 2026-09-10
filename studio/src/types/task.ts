@@ -177,6 +177,10 @@ export interface TaskFile {
   mime_type: string
   file_size: number
   url: string
+  is_deliverable?: boolean
+  delivery_role?: string
+  preview_url?: string
+  download_url?: string
   media_id?: string
   wechat_url?: string
   created_at: string

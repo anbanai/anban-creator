@@ -12,7 +12,6 @@ function PanelHarness() {
       montage_defaults: {
         default_pipeline: '',
         preferences: {
-          aspect_ratio: '9:16',
           duration_seconds: 30,
           style: '',
           music_prompt: '',
@@ -39,7 +38,6 @@ describe('MontageProjectDefaultsPanel', () => {
     render(<PanelHarness />)
 
     fireEvent.change(screen.getByLabelText('默认 Pipeline'), { target: { value: 'social-short' } })
-    fireEvent.change(screen.getByLabelText('默认画幅'), { target: { value: '16:9' } })
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
     fireEvent.change(screen.getByLabelText('风格偏好'), { target: { value: 'clean documentary' } })
     fireEvent.change(screen.getByLabelText('音乐提示'), { target: { value: 'minimal electronic' } })
@@ -55,7 +53,8 @@ describe('MontageProjectDefaultsPanel', () => {
 
     const output = screen.getByTestId('montage-defaults')
     expect(output).toHaveTextContent('"default_pipeline":"social-short"')
-    expect(output).toHaveTextContent('"aspect_ratio":"16:9"')
+    expect(screen.queryByLabelText('默认画幅')).not.toBeInTheDocument()
+    expect(output).not.toHaveTextContent('aspect_ratio')
     expect(output).toHaveTextContent('"duration_seconds":45')
     expect(output).toHaveTextContent('"style":"clean documentary"')
     expect(output).toHaveTextContent('"music_prompt":"minimal electronic"')

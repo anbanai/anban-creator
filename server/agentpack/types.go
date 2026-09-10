@@ -1,6 +1,9 @@
 package agentpack
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const (
 	KindPlugin  = "plugin"
@@ -25,6 +28,8 @@ type Manifest struct {
 	Progress           []ProgressStage            `yaml:"progress" json:"progress,omitempty"`
 	ProgressByTaskType map[string][]ProgressStage `yaml:"progress_by_task_type" json:"progress_by_task_type,omitempty"`
 	Artifacts          []ArtifactSpec             `yaml:"artifacts" json:"artifacts,omitempty"`
+	Delivery           []DeliverySpec             `yaml:"delivery" json:"delivery,omitempty"`
+	DeliveryByTaskType map[string][]DeliverySpec  `yaml:"delivery_by_task_type" json:"delivery_by_task_type,omitempty"`
 	SchemaFiles        SchemaRefs                 `yaml:"schemas" json:"-"`
 	Schemas            *SchemaDocuments           `yaml:"-" json:"schemas,omitempty"`
 	UI                 UISpec                     `yaml:"ui" json:"ui,omitempty"`
@@ -68,6 +73,15 @@ type ArtifactSpec struct {
 	Required bool   `yaml:"required" json:"required"`
 }
 
+// DeliverySpec declares a file that should be presented and downloadable as
+// part of a user-facing task result. Path accepts an exact output path or a
+// path.Match-compatible pattern.
+type DeliverySpec struct {
+	Role     string `yaml:"role" json:"role"`
+	Path     string `yaml:"path" json:"path"`
+	MIMEType string `yaml:"mime_type" json:"mime_type"`
+}
+
 type SchemaRefs struct {
 	ProjectConfig string `yaml:"project_config" json:"project_config,omitempty"`
 	TaskInput     string `yaml:"task_input" json:"task_input,omitempty"`
@@ -108,6 +122,69 @@ func (m Manifest) ProgressForTaskType(taskType string) []ProgressStage {
 		return progress
 	}
 	return m.Progress
+}
+
+// DeliveryForTaskType returns the task-type-specific delivery contract when
+// one is declared, otherwise the Pack-wide contract.
+func (m Manifest) DeliveryForTaskType(taskType string) []DeliverySpec {
+	if delivery, ok := m.DeliveryByTaskType[taskType]; ok {
+		return delivery
+	}
+	return m.Delivery
+}
+
+// RequiredArtifactsForTaskType resolves the paths named by the task's frozen
+// progress contract into role and MIME-aware artifact specifications.
+func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec, error) {
+	byPath := make(map[string]ArtifactSpec, len(m.Artifacts)+len(m.DeliveryForTaskType(taskType)))
+	for _, artifact := range m.Artifacts {
+		byPath[artifact.Path] = artifact
+	}
+	for _, delivery := range m.DeliveryForTaskType(taskType) {
+		if _, exists := byPath[delivery.Path]; !exists {
+			byPath[delivery.Path] = ArtifactSpec{
+				Role:     delivery.Role,
+				Path:     delivery.Path,
+				MIMEType: delivery.MIMEType,
+			}
+		}
+	}
+
+	progress := m.ProgressForTaskType(taskType)
+	hasProgressRequirements := false
+	for _, stage := range progress {
+		if len(stage.RequiredArtifacts) > 0 {
+			hasProgressRequirements = true
+			break
+		}
+	}
+	if !hasProgressRequirements {
+		required := make([]ArtifactSpec, 0)
+		for _, artifact := range m.Artifacts {
+			if artifact.Required {
+				required = append(required, artifact)
+			}
+		}
+		return required, nil
+	}
+
+	seen := make(map[string]struct{})
+	required := make([]ArtifactSpec, 0)
+	for _, stage := range progress {
+		for _, artifactPath := range stage.RequiredArtifacts {
+			if _, duplicate := seen[artifactPath]; duplicate {
+				continue
+			}
+			spec, ok := byPath[artifactPath]
+			if !ok {
+				return nil, fmt.Errorf("required artifact %q has no role and MIME contract", artifactPath)
+			}
+			spec.Required = true
+			required = append(required, spec)
+			seen[artifactPath] = struct{}{}
+		}
+	}
+	return required, nil
 }
 
 func (c *Catalog) Pack(id string) (Manifest, bool) {

@@ -32,7 +32,7 @@ func TestApplyAgentPackIdentityFreezesResolvedExecutionContract(t *testing.T) {
 			if err := applyAgentPackIdentity(execution, tt.taskType); err != nil {
 				t.Fatalf("applyAgentPackIdentity: %v", err)
 			}
-			if execution.AgentPackID != "seednote" || execution.AgentPackVersion != "1.0.0" || len(execution.AgentPackDigest) != 64 {
+			if execution.AgentPackID != "seednote" || execution.AgentPackVersion != pack.Version || len(execution.AgentPackDigest) != 64 {
 				t.Fatalf("Pack identity = %#v", execution)
 			}
 			if execution.RuntimeProfile != "seednote" || execution.RuntimeAdapter != "standard" {
@@ -55,8 +55,23 @@ func TestApplyAgentPackIdentityFreezesResolvedExecutionContract(t *testing.T) {
 			if !reflect.DeepEqual(progress[len(progress)-1].RequiredArtifacts, tt.wantLast) {
 				t.Fatalf("delivery artifacts = %#v, want %#v", progress[len(progress)-1].RequiredArtifacts, tt.wantLast)
 			}
+			var required []agentpack.ArtifactSpec
+			if err := json.Unmarshal(execution.AgentPackRequiredArtifactContract, &required); err != nil {
+				t.Fatalf("decode frozen required artifact contract: %v", err)
+			}
+			if got := artifactPathsForTest(required); !reflect.DeepEqual(got, tt.wantLast) {
+				t.Fatalf("required artifact contract = %#v, want %#v", got, tt.wantLast)
+			}
 		})
 	}
+}
+
+func artifactPathsForTest(artifacts []agentpack.ArtifactSpec) []string {
+	paths := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		paths = append(paths, artifact.Path)
+	}
+	return paths
 }
 
 func TestInheritAgentPackIdentityPreservesResolvedViralAnalysisContract(t *testing.T) {
@@ -70,6 +85,12 @@ func TestInheritAgentPackIdentityPreservesResolvedViralAnalysisContract(t *testi
 	}
 	if string(target.AgentPackProgressContract) != string(source.AgentPackProgressContract) {
 		t.Fatalf("progress snapshot = %s, want %s", target.AgentPackProgressContract, source.AgentPackProgressContract)
+	}
+	if string(target.AgentPackDeliveryContract) != string(source.AgentPackDeliveryContract) {
+		t.Fatalf("delivery snapshot = %s, want %s", target.AgentPackDeliveryContract, source.AgentPackDeliveryContract)
+	}
+	if string(target.AgentPackRequiredArtifactContract) != string(source.AgentPackRequiredArtifactContract) {
+		t.Fatalf("required artifact snapshot = %s, want %s", target.AgentPackRequiredArtifactContract, source.AgentPackRequiredArtifactContract)
 	}
 	progress, err := resolveFrozenExecutionProgressContract(target)
 	if err != nil || len(progress) != 2 || progress[0].ID != "research" || progress[1].ID != "delivery" {
@@ -86,8 +107,10 @@ func TestApplyAgentPackIdentityRejectsUnknownManagedTaskType(t *testing.T) {
 func TestInheritAgentPackIdentityPreservesRuntimeProfile(t *testing.T) {
 	source := &model.TaskExecution{
 		AgentPackID: "article", AgentPackVersion: "1.0.0", AgentPackDigest: "digest",
-		AgentPackProgressContract: datatypes.JSON(`[{"id":"writing","title":"Writing","active_percent":20,"complete_percent":60}]`),
-		RuntimeAdapter:            "standard", RuntimeProfile: "article",
+		AgentPackProgressContract:         datatypes.JSON(`[{"id":"writing","title":"Writing","active_percent":20,"complete_percent":60}]`),
+		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
+		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
+		RuntimeAdapter:                    "standard", RuntimeProfile: "article",
 	}
 	target := &model.TaskExecution{}
 	if !inheritAgentPackIdentity(target, source) {
@@ -108,7 +131,7 @@ func TestInheritAgentPackIdentityPreservesRuntimeProfile(t *testing.T) {
 func TestInheritAgentPackIdentityRejectsIncompleteRuntimeIdentity(t *testing.T) {
 	source := &model.TaskExecution{
 		AgentPackID: "article", AgentPackVersion: "1.0.0", AgentPackDigest: "digest",
-		AgentPackProgressContract: datatypes.JSON(`[]`), RuntimeAdapter: "standard",
+		AgentPackProgressContract: datatypes.JSON(`[]`), AgentPackDeliveryContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`), RuntimeAdapter: "standard",
 	}
 	if inheritAgentPackIdentity(&model.TaskExecution{}, source) {
 		t.Fatal("incomplete frozen Agent Pack identity was inherited")
@@ -118,7 +141,7 @@ func TestInheritAgentPackIdentityRejectsIncompleteRuntimeIdentity(t *testing.T) 
 func TestInheritAgentPackIdentityRejectsMissingProgressSnapshot(t *testing.T) {
 	source := &model.TaskExecution{
 		AgentPackID: "article", AgentPackVersion: "1.0.0", AgentPackDigest: "digest",
-		RuntimeAdapter: "standard", RuntimeProfile: "article",
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`), RuntimeAdapter: "standard", RuntimeProfile: "article",
 	}
 	if inheritAgentPackIdentity(&model.TaskExecution{}, source) {
 		t.Fatal("Agent Pack identity without progress snapshot was inherited")
@@ -129,8 +152,10 @@ func TestResolveFrozenExecutionPackProgressContractUsesSnapshotAfterCatalogChang
 	contract := datatypes.JSON(`[{"id":"writing","title":"Frozen Writing","active_percent":21,"complete_percent":61}]`)
 	valid := model.TaskExecution{
 		AgentPackID: "removed-pack", AgentPackVersion: "99.0.0", AgentPackDigest: "changed-current-digest",
-		AgentPackProgressContract: contract,
-		RuntimeAdapter:            "standard", RuntimeProfile: "article",
+		AgentPackProgressContract:         contract,
+		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
+		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
+		RuntimeAdapter:                    "standard", RuntimeProfile: "article",
 	}
 	resumed := &model.TaskExecution{}
 	if !inheritAgentPackIdentity(resumed, &valid) {

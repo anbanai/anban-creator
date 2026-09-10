@@ -65,7 +65,7 @@ export default function DashboardPage() {
   })
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
-  const usesImageSettings = Boolean(selectedProject) && selectedProject.platform !== 'montage'
+	const usesImageSettings = Boolean(selectedProject)
 
   const {
     data: apiKeysResponse,

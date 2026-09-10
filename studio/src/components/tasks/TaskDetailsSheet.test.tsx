@@ -513,6 +513,24 @@ describe('TaskDetailsSheet', () => {
 })
 
 describe('TaskConfigurationDetails', () => {
+  it('labels the frozen ratio as a video setting for Montage', () => {
+    const montageTask: Task = {
+      ...articleTask,
+      type: 'montage',
+      image_ratio: '9:16',
+      project_snapshot: {
+        project_name: '短片项目',
+        platform: 'montage',
+        image_ratio: '9:16',
+      },
+    }
+
+    render(<TaskConfigurationDetails task={montageTask} />)
+
+    expect(screen.getByText('视频比例')).toBeInTheDocument()
+    expect(screen.queryByText('图片比例')).not.toBeInTheDocument()
+  })
+
   it('renders the frozen task profile without exposing provider or model details', () => {
     const frozenTask: Task = {
       ...articleTask,

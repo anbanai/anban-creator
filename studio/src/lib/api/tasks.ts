@@ -76,6 +76,13 @@ export const tasksApi = {
     return response.data
   },
 
+  previewFileBlob: async (taskId: string, fileId: string): Promise<Blob> => {
+    const response = await http.get(`/tasks/${taskId}/files/${fileId}/preview`, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   downloadZipBlob: async (taskId: string): Promise<Blob> => {
     const response = await http.get(`/tasks/${taskId}/files/zip`, {
       responseType: 'blob',

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -19,7 +21,8 @@ func newFixedTaskBillingFixture(t *testing.T, paid, debt int64) (*TaskService, *
 	f := newBillingWalletFixture(t, paid, 0, debt)
 	enqueuer := &mockEnqueuer{}
 	logger := zerolog.New(io.Discard)
-	svc := newTestTaskService(f.repo, enqueuer, nil, &logger, "", nil, nil)
+	store := &fakeTaskStorage{files: map[string][]byte{}}
+	svc := newTestTaskService(f.repo, enqueuer, store, &logger, "", nil, nil)
 	svc.SetBillingCatalogService(f.catalog)
 	svc.SetBillingWalletService(f.wallet)
 	svc.SetNASResumeEnabled(true)
@@ -272,6 +275,10 @@ func seedHistoricalManagedLocalExecution(t *testing.T, f *billingWalletFixture, 
 	execution.Started = true
 	execution.StartedAt = &now
 	execution.RuntimeProfile = "local"
+	execution.AgentPackID = "article"
+	execution.AgentPackVersion = "test"
+	execution.AgentPackDigest = strings.Repeat("a", 64)
+	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"draft","path":"output/partial.md","mime_type":"text/markdown"}]`)
 	if err := f.repo.TaskExecutions().Create(ctx, execution); err != nil {
 		t.Fatalf("create historical local execution: %v", err)
 	}
@@ -371,9 +378,17 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	}
 	task := tasks[0]
 	seedHistoricalManagedLocalExecution(t, f, task)
+	content := "partial data"
+	key := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + "output/partial.md"
+	uploaded, err := svc.store.Upload(ctx, key, strings.NewReader(content), "text/markdown")
+	if err != nil {
+		t.Fatalf("upload durable partial output: %v", err)
+	}
 	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
-		TaskID: task.ID, State: model.TaskFileStatePublished, Role: model.FileRoleDraft,
-		FileName: "partial.md", FilePath: "output/partial.md", FileSize: 12,
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: *task.CurrentExecutionID,
+		State: model.TaskFileStatePublished, Role: model.FileRoleDraft,
+		FileName: "partial.md", FilePath: "output/partial.md", MimeType: "text/markdown",
+		FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL, StorageProvider: svc.store.Name(),
 	}); err != nil {
 		t.Fatalf("create durable partial output: %v", err)
 	}

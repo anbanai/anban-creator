@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	appimage "github.com/anbanai/anban-creator/app/image"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
@@ -43,11 +44,15 @@ func (f *taskImageResolverFake) ResolveImageModelForGeneration(_ context.Context
 }
 
 type taskImageGeneratorFake struct {
-	result       *ImageResult
-	calls        int
-	analyzeCalls int
-	uploadCalls  int
-	prompts      []string
+	result         *ImageResult
+	calls          int
+	analyzeCalls   int
+	uploadCalls    int
+	prompts        []string
+	aspectRatio    string
+	referencePaths []string
+	referenceData  [][]byte
+	readReferences bool
 }
 
 type failingTaskImageDeleteStorage struct {
@@ -57,9 +62,20 @@ type failingTaskImageDeleteStorage struct {
 
 func (s *failingTaskImageDeleteStorage) Delete(context.Context, string) error { return s.err }
 
-func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, _ []string, _ string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
+func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, referencePaths []string, _ string, aspectRatio string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
 	f.calls++
 	f.prompts = append(f.prompts, prompt)
+	f.aspectRatio = aspectRatio
+	f.referencePaths = append([]string(nil), referencePaths...)
+	if f.readReferences {
+		for _, referencePath := range referencePaths {
+			data, err := os.ReadFile(referencePath)
+			if err != nil {
+				return nil, err
+			}
+			f.referenceData = append(f.referenceData, data)
+		}
+	}
 	copy := *f.result
 	copy.FilePath = outputPath
 	return &copy, nil
@@ -180,6 +196,9 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 		asset.MimeType != "image/png" || asset.FileSize != int64(len(taskImageTinyPNG())) || asset.ContentHash != hashTaskFileContent(taskImageTinyPNG()) {
 		t.Fatalf("asset = %#v", asset)
 	}
+	if f.generator.aspectRatio != "3:4" {
+		t.Fatalf("provider aspect ratio = %q, want 3:4", f.generator.aspectRatio)
+	}
 	var files, settlements int64
 	if err := f.db.Model(&model.TaskFile{}).Count(&files).Error; err != nil {
 		t.Fatal(err)
@@ -199,6 +218,49 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	}
 	if account.PaidCredits != 500 {
 		t.Fatalf("paid credits = %d, want 500 after image charge", account.PaidCredits)
+	}
+}
+
+func TestGenerateTaskImageLegacyNonMontageTaskUsesResolverDefaultWithoutFrozenCapability(t *testing.T) {
+	f := newTaskImageFixture(t)
+	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.ImageCapabilityKey = ""
+	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
+		t.Fatalf("Generate legacy non-Montage image: %v", err)
+	}
+	if f.resolver.calls != 1 || f.resolver.imageCapabilityKey != "" {
+		t.Fatalf("resolver calls/key = %d/%q, want 1/empty default key", f.resolver.calls, f.resolver.imageCapabilityKey)
+	}
+}
+
+func TestGenerateTaskImageMontageTaskRequiresFrozenCapabilityBeforeResolution(t *testing.T) {
+	f := newTaskImageFixture(t)
+	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Type = model.PlatformMontage
+	task.ImageRatio = "9:16"
+	task.ImageCapabilityKey = ""
+	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	req := f.request()
+	req.AspectRatio = "9:16"
+
+	_, err = f.service.Generate(context.Background(), req)
+	if !errors.Is(err, ErrTaskImageCapabilityMissing) {
+		t.Fatalf("Generate Montage without frozen capability error = %v, want ErrTaskImageCapabilityMissing", err)
+	}
+	if f.resolver.calls != 0 || f.generator.calls != 0 {
+		t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
 	}
 }
 
@@ -249,6 +311,100 @@ func TestGenerateTaskImageInjectsStrictRatioRequirement(t *testing.T) {
 	}
 }
 
+func TestAppendStrictImageRatioRequirementDoesNotForbidRequestedRatio(t *testing.T) {
+	got := appendStrictImageRatioRequirement("draw a portrait video cover", "9:16")
+	if !strings.Contains(got, "最终图片画布宽高比必须严格为 9:16") {
+		t.Fatalf("prompt missing requested ratio: %s", got)
+	}
+	if strings.Contains(got, "不得输出 2:3、9:16") {
+		t.Fatalf("prompt forbids its requested ratio: %s", got)
+	}
+}
+
+func TestGenerateTaskImageRejectsAbsoluteReferencePathBeforeProviderCall(t *testing.T) {
+	f := newTaskImageFixture(t)
+	req := f.request()
+	req.ReferencePaths = []string{filepath.Join(t.TempDir(), "host-secret.png")}
+
+	if _, err := f.service.Generate(context.Background(), req); err == nil || !strings.Contains(err.Error(), "task-relative") {
+		t.Fatalf("Generate absolute reference error = %v, want task-relative rejection", err)
+	}
+	if f.generator.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", f.generator.calls)
+	}
+}
+
+func TestGenerateTaskImageUsesSystemProjectPortraitOnlyForMontage(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		taskType    string
+		imageRatio  string
+		wantAllowed bool
+	}{
+		{name: "montage", taskType: model.PlatformMontage, imageRatio: "9:16", wantAllowed: true},
+		{name: "seednote", taskType: model.PlatformSeednote, imageRatio: "3:4", wantAllowed: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTaskImageFixture(t)
+			ctx := context.Background()
+			imageBytes := taskImageTinyPNG()
+			assetID := uuid.NewString()
+			key := "assets/users/" + f.userID + "/" + assetID + "/portrait.png"
+			if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.repo.Assets().Create(ctx, &model.Asset{
+				ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
+				StorageKey: key, FileName: "portrait.png", ContentType: "image/png",
+				Size: int64(len(imageBytes)), ETag: "immutable",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task.Type = tt.taskType
+			task.ImageRatio = tt.imageRatio
+			task.SetProjectSnapshot(model.ProjectSnapshot{Platform: tt.taskType, ReferenceImageAssetID: assetID})
+			if err := f.repo.Tasks().Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantAllowed {
+				generatedPath := filepath.Join(t.TempDir(), "cover.png")
+				if err := os.WriteFile(generatedPath, taskImagePNG(9, 16), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				f.generator.result.LocalFilePath = generatedPath
+				f.generator.readReferences = true
+			}
+			req := f.request()
+			req.AspectRatio = tt.imageRatio
+			req.ReferencePaths = []string{".anban-creator/reference.png"}
+
+			_, err = f.service.Generate(ctx, req)
+			if !tt.wantAllowed {
+				if err == nil || !strings.Contains(err.Error(), "project style reference") || f.generator.calls != 0 {
+					t.Fatalf("non-Montage project reference = %v, calls=%d; want rejection", err, f.generator.calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Generate with Montage project portrait: %v", err)
+			}
+			if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+				t.Fatalf("materialized reference data = %#v", f.generator.referenceData)
+			}
+			if len(f.generator.referencePaths) != 1 {
+				t.Fatalf("materialized paths = %#v", f.generator.referencePaths)
+			}
+			if _, err := os.Stat(f.generator.referencePaths[0]); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("temporary reference still exists: %v", err)
+			}
+		})
+	}
+}
+
 func TestGenerateTaskImageRejectsExactRatioMismatchBeforePersistenceOrCharge(t *testing.T) {
 	f := newTaskImageFixture(t)
 	wrongPath := filepath.Join(t.TempDir(), "wrong.png")
@@ -270,6 +426,27 @@ func TestGenerateTaskImageRejectsExactRatioMismatchBeforePersistenceOrCharge(t *
 	}
 	if _, statErr := os.Stat(wrongPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("mismatched output still exists: %v", statErr)
+	}
+}
+
+func TestGenerateTaskImageCenterCropsApproximateProviderRatio(t *testing.T) {
+	f := newTaskImageFixture(t)
+	nearestPath := filepath.Join(t.TempDir(), "nearest.png")
+	if err := os.WriteFile(nearestPath, taskImagePNG(8, 12), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.result.LocalFilePath = nearestPath
+	f.generator.result.Width, f.generator.result.Height = 8, 12
+
+	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
+		t.Fatalf("Generate approximate ratio: %v", err)
+	}
+	width, height, err := appimage.GetImageDimensions(nearestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if width != 6 || height != 8 {
+		t.Fatalf("normalized dimensions = %dx%d, want 6x8", width, height)
 	}
 }
 

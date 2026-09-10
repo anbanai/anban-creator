@@ -92,6 +92,14 @@ func newTestTaskService(
 		panic(err)
 	}
 	svc.SetAgentProfileRegistry(registry)
+	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(nil, &serverconfig.Config{
+		ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
+				"standard": {Enabled: true, MinTier: string(model.TierFree)},
+			},
+		}},
+	}))
 	return svc
 }
 
@@ -940,7 +948,6 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 			Brief:       "做一条新品发布短片",
 			PipelineKey: "default",
 			Preferences: model.MontagePreferences{
-				AspectRatio:     "9:16",
 				DurationSeconds: 30,
 			},
 		},
@@ -951,14 +958,14 @@ func TestTaskServiceCreateManualMontageStoresInputAndClampsQuantity(t *testing.T
 	if len(tasks) != 1 {
 		t.Fatalf("len(tasks) = %d, want 1", len(tasks))
 	}
-	if tasks[0].ImageRatio != "" || tasks[0].ImageCapabilityKey != "" {
+	if tasks[0].ImageRatio != "16:9" || tasks[0].ImageCapabilityKey != "standard" {
 		t.Fatalf("Montage image settings = ratio %q, capability %q", tasks[0].ImageRatio, tasks[0].ImageCapabilityKey)
 	}
 	got := tasks[0].MontageInput.Data()
 	if got.Brief != "做一条新品发布短片" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
 	}
-	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
+	if got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
@@ -1002,7 +1009,6 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 		Brief:       "从计划生成发布会短片",
 		PipelineKey: "default",
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 		},
 	})
@@ -1011,14 +1017,14 @@ func TestTaskServiceCreateFromPlanMontageCopiesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFromPlan: %v", err)
 	}
-	if task.ImageRatio != "" || task.ImageCapabilityKey != "" {
+	if task.ImageRatio != "16:9" || task.ImageCapabilityKey != "standard" {
 		t.Fatalf("Montage image settings = ratio %q, capability %q", task.ImageRatio, task.ImageCapabilityKey)
 	}
 	got := task.MontageInput.Data()
 	if got.Brief != "从计划生成发布会短片" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
 	}
-	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 45 {
+	if got.Preferences.DurationSeconds != 45 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
@@ -1704,13 +1710,13 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 					MontageInput: &model.MontageInput{
 						Brief:       "edited montage brief",
 						PipelineKey: "default",
-						Preferences: model.MontagePreferences{AspectRatio: "16:9", DurationSeconds: 30},
+						Preferences: model.MontagePreferences{DurationSeconds: 30},
 					},
 				}
 			},
 			assert: func(t *testing.T, task *model.Task) {
 				got := task.MontageInput.Data()
-				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.DurationSeconds != 30 {
 					t.Fatalf("montage input = %#v", got)
 				}
 			},
@@ -1834,7 +1840,6 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 		Brief:       "保留克隆输入",
 		PipelineKey: "default",
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "1:1",
 			DurationSeconds: 20,
 		},
 	})
@@ -1854,7 +1859,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	if got.Brief != "保留克隆输入" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
 	}
-	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
+	if got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
@@ -2883,8 +2888,25 @@ func TestTaskService_GetVisibleFilesIncludesCollectedAfterPublished(t *testing.T
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	taskID := uuid.NewString()
+	executionID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackID: "seednote", AgentPackVersion: "1.0.1", AgentPackDigest: strings.Repeat("a", 64),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.Tasks().SetCurrentExecution(ctx, taskID, executionID); err != nil || !ok {
+		t.Fatalf("SetCurrentExecution = %v, %v", ok, err)
+	}
+	if _, err := repo.Tasks().CompareAndSwapStatus(ctx, taskID, model.TaskStatusRunning, model.TaskStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
 		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
@@ -2912,6 +2934,23 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	svc.store = store
 	ctx := context.Background()
 	taskID := uuid.NewString()
+	executionID := uuid.NewString()
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackID: "seednote", AgentPackVersion: "1.0.1", AgentPackDigest: strings.Repeat("b", 64),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.Tasks().SetCurrentExecution(ctx, taskID, executionID); err != nil || !ok {
+		t.Fatalf("SetCurrentExecution = %v, %v", ok, err)
+	}
+	if _, err := repo.Tasks().CompareAndSwapStatus(ctx, taskID, model.TaskStatusRunning, model.TaskStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
 	publishedUpload, err := store.Upload(ctx, "tasks/"+taskID+"/content.md", strings.NewReader("published"), "text/markdown")
 	if err != nil {
 		t.Fatal(err)
@@ -2922,7 +2961,7 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	}
 	collectedID := uuid.NewString()
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", OSSKey: publishedUpload.Key, FileSize: publishedUpload.Size, StorageProvider: store.Name()},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown", OSSKey: publishedUpload.Key, FileSize: publishedUpload.Size, StorageProvider: store.Name()},
 		{ID: collectedID, TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json", OSSKey: collectedUpload.Key, FileSize: collectedUpload.Size, StorageProvider: store.Name()},
 	}); err != nil {
 		t.Fatal(err)
@@ -2940,11 +2979,16 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 		t.Fatalf("downloaded collected file=%#v data=%q err=%v", file, data, readErr)
 	}
 
-	buf, _, err := svc.DownloadZip(ctx, taskID)
+	stream, _, err = svc.DownloadZip(ctx, taskID)
 	if err != nil {
 		t.Fatalf("DownloadZip: %v", err)
 	}
-	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	zipData, err := io.ReadAll(stream)
+	stream.Close()
+	if err != nil {
+		t.Fatalf("read DownloadZip stream: %v", err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2955,10 +2999,11 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 
 func TestTaskService_DownloadTasksZip(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
-	store, err := storage.NewLocalProvider(t.TempDir())
+	localStore, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
 		t.Fatalf("create local storage: %v", err)
 	}
+	store := &readTrackingLocalStorage{LocalProvider: localStore}
 	svc.store = store
 
 	ctx := context.Background()
@@ -2972,9 +3017,18 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 		UserID:    userID,
 		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusCompleted,
+		Status:    model.TaskStatusRunning,
 		Prompt:    "A finished task",
 		Title:     "Finished",
+	}
+	emptyCompleted := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "A completed task without delivery files",
+		Title:     "Empty",
 	}
 	pending := &model.Task{
 		ID:        uuid.New().String(),
@@ -2992,20 +3046,43 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "Foreign task",
 	}
-	for _, task := range []*model.Task{completed, pending, foreign} {
+	for _, task := range []*model.Task{completed, emptyCompleted, pending, foreign} {
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatalf("create task: %v", err)
 		}
 	}
+	completedExecutionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: completedExecutionID, TaskID: completed.ID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackID: "seednote", AgentPackVersion: "1.0.1", AgentPackDigest: strings.Repeat("c", 64),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`),
+	}); err != nil {
+		t.Fatalf("create completed execution: %v", err)
+	}
+	if ok, err := repo.Tasks().SetCurrentExecution(ctx, completed.ID, completedExecutionID); err != nil || !ok {
+		t.Fatalf("set completed current execution = %v, %v", ok, err)
+	}
+	if _, err := repo.Tasks().CompareAndSwapStatus(ctx, completed.ID, model.TaskStatusRunning, model.TaskStatusCompleted); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
 
-	if _, err := svc.UploadTaskFileFromReader(ctx, completed.ID, userID, "output/article.md", strings.NewReader("# hello"), "text/markdown", 7); err != nil {
+	completedUpload, err := store.Upload(ctx, "tasks/"+completed.ID+"/output/content.md", strings.NewReader("# hello"), "text/markdown")
+	if err != nil {
 		t.Fatalf("upload completed task file: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: uuid.NewString(), TaskID: completed.ID, ExecutionID: completedExecutionID,
+		State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown,
+		FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown",
+		FileSize: completedUpload.Size, OSSKey: completedUpload.Key, OSSURL: completedUpload.URL, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatalf("persist completed task file: %v", err)
 	}
 	if _, err := svc.UploadTaskFileFromReader(ctx, foreign.ID, otherUserID, "output/secret.md", strings.NewReader("secret"), "text/markdown", 6); err != nil {
 		t.Fatalf("upload foreign task file: %v", err)
 	}
 
-	buf, zipName, err := svc.DownloadTasksZip(ctx, userID, []string{completed.ID, pending.ID, foreign.ID})
+	buf, zipName, err := svc.DownloadTasksZip(ctx, userID, []string{completed.ID, emptyCompleted.ID, pending.ID, foreign.ID})
 	if err != nil {
 		t.Fatalf("DownloadTasksZip: %v", err)
 	}
@@ -3037,7 +3114,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 			if err := json.Unmarshal(data, &parsedManifest); err != nil {
 				t.Fatalf("parse manifest: %v", err)
 			}
-			for _, want := range []string{completed.ID, pending.ID, foreign.ID, "task_not_completed", "unavailable"} {
+			for _, want := range []string{completed.ID, emptyCompleted.ID, pending.ID, foreign.ID, "task_not_completed", "no_delivery_files", "unavailable"} {
 				if !strings.Contains(manifest, want) {
 					t.Fatalf("manifest missing %q: %s", want, manifest)
 				}
@@ -3051,7 +3128,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 				}
 			}
 		}
-		if strings.HasSuffix(file.Name, "output/article.md") {
+		if strings.HasSuffix(file.Name, "output/content.md") {
 			hasCompletedFile = true
 		}
 		if strings.Contains(file.Name, "secret.md") {
@@ -3063,6 +3140,9 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	}
 	if !hasCompletedFile {
 		t.Fatal("completed task file missing")
+	}
+	if store.readCalls != 0 {
+		t.Fatalf("storage Read calls = %d, want bulk ZIP to use bounded streaming reads", store.readCalls)
 	}
 }
 

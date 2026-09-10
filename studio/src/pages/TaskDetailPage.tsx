@@ -270,6 +270,8 @@ export default function TaskDetailPage() {
 
   const publishedFiles = files?.filter((file) => file.state !== 'collected') ?? []
   const collectedFiles = files?.filter((file) => file.state === 'collected') ?? []
+  const deliverableFiles = publishedFiles.filter((file) => file.is_deliverable === true)
+  const processFiles = publishedFiles.filter((file) => file.is_deliverable !== true)
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -823,9 +825,15 @@ export default function TaskDetailPage() {
       {publishedFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">生成文件 ({publishedFiles.length})</h2>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">交付文件 ({deliverableFiles.length})</h2>
+              {processFiles.length > 0 && (
+                <p className="mt-0.5 text-xs text-muted-foreground">过程文件 {processFiles.length} 个，仅供预览</p>
+              )}
+            </div>
             <Button
               size="sm"
+              disabled={deliverableFiles.length === 0}
               onClick={async () => {
                 try {
                   const blob = await api.tasks.downloadZipBlob(task.id)
@@ -841,20 +849,20 @@ export default function TaskDetailPage() {
               }}
             >
               <Download className="h-4 w-4" />
-              下载全部 (ZIP)
+              下载交付文件 (ZIP)
             </Button>
           </div>
           <div className="p-4 space-y-4">
             {task.type === 'ecommerce' ? (
               <EcommerceFilesGallery
-                files={publishedFiles}
+                files={deliverableFiles}
                 taskId={task.id}
               />
             ) : (
               <>
                 {/* Image files in compact grid */}
                 {(() => {
-                  const imageFiles = publishedFiles.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+                  const imageFiles = deliverableFiles.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
                   if (imageFiles.length === 0) return null
                   return (
                     <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
@@ -869,7 +877,7 @@ export default function TaskDetailPage() {
                 })()}
                 {/* Non-image files share the same full-width preview rows. */}
                 {(() => {
-                  const nonImageFiles = publishedFiles.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
+                  const nonImageFiles = deliverableFiles.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
                   if (nonImageFiles.length === 0) return null
                   return (
                     <div className="space-y-2">
@@ -882,6 +890,15 @@ export default function TaskDetailPage() {
                   )
                 })()}
               </>
+            )}
+            {processFiles.length > 0 && (
+              <section className="border-t border-border pt-4 opacity-70" aria-labelledby="process-files-heading">
+                <div className="mb-2">
+                  <h3 id="process-files-heading" className="text-xs font-medium text-muted-foreground">过程文件 ({processFiles.length})</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">保留用于预览和审计，不支持下载。</p>
+                </div>
+                <FilePreviewGallery files={processFiles} taskId={task.id} taskType={task.type} />
+              </section>
             )}
           </div>
         </Card>
@@ -982,7 +999,9 @@ export default function TaskDetailPage() {
                   <p className="mt-1 text-sm text-foreground">{contentTypeLabel[projectDialogPlatform] || projectDialogPlatform}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">图片比例</p>
+                  <p className="text-xs text-muted-foreground">
+                    {projectDialogPlatform === 'montage' ? '视频比例' : '图片比例'}
+                  </p>
                   <p className="mt-1 text-sm text-foreground">{project.image_ratio || snapshot?.image_ratio || '—'}</p>
                 </div>
               </div>

@@ -54,21 +54,12 @@ export function MontageCreationPanel({ form, fieldRoot, onUploadingChange, brief
         </FormItem>
       )} />
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         <FormField control={control} name={`${fieldRoot}.pipeline_key`} render={({ field }) => (
           <FormItem>
             <FormLabel>Pipeline</FormLabel>
             <FormControl>
               <Input {...field} value={field.value ?? ''} placeholder="pipeline（可选）" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={control} name={`${fieldRoot}.preferences.aspect_ratio`} render={({ field }) => (
-          <FormItem>
-            <FormLabel>画幅</FormLabel>
-            <FormControl>
-              <Input {...field} value={field.value ?? ''} placeholder="画幅，如 9:16" />
             </FormControl>
             <FormMessage />
           </FormItem>

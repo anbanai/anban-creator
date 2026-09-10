@@ -241,6 +241,8 @@ func managedRequiredPluginSkills(taskType string) []string {
 		return []string{"anban:humanizer"}
 	case model.TaskTypeLiveSlicer:
 		return []string{"anban:live-slice", "anban:capcut-draft"}
+	case model.PlatformMontage:
+		return []string{"anban:montage", "anban:video-cover-design"}
 	default:
 		return nil
 	}
@@ -316,7 +318,13 @@ func managedRequiredMCPTools(taskType string) []string {
 			"submit_agent_feedback",
 		}
 	case model.PlatformMontage:
-		return []string{"analyze_video"}
+		return []string{
+			"analyze_image",
+			"analyze_video",
+			"generate_image",
+			"get_project_profile",
+			"submit_agent_feedback",
+		}
 	default:
 		return nil
 	}

@@ -72,8 +72,6 @@ func (p *LocalProvider) safePath(key string) (string, error) {
 
 // Upload writes data from reader to {dataDir}/{key}, creating parent directories as needed.
 func (p *LocalProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.upload(key, reader, contentType)
 }
 
@@ -88,15 +86,31 @@ func (p *LocalProvider) upload(key string, reader io.Reader, contentType string)
 		return nil, fmt.Errorf("create directory %s: %w", destDir, err)
 	}
 
-	f, err := os.Create(destPath)
+	f, err := os.CreateTemp(destDir, "."+filepath.Base(destPath)+".upload-*")
 	if err != nil {
-		return nil, fmt.Errorf("create file %s: %w", destPath, err)
+		return nil, fmt.Errorf("create temporary file for %s: %w", destPath, err)
 	}
-	defer f.Close()
+	tempPath := f.Name()
+	defer os.Remove(tempPath)
 
 	size, err := io.Copy(f, reader)
 	if err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("write file %s: %w", destPath, err)
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("set permissions for file %s: %w", destPath, err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close file %s: %w", destPath, err)
+	}
+
+	p.mu.Lock()
+	err = os.Rename(tempPath, destPath)
+	p.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("replace file %s: %w", destPath, err)
 	}
 
 	p.logger.Debug().
@@ -147,6 +161,29 @@ func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("read file %s: %w", destPath, err)
 	}
 	return data, nil
+}
+
+// OpenObject opens a local object without buffering it. Upload replaces files
+// atomically, so an open descriptor remains a stable snapshot after the read
+// lock is released.
+func (p *LocalProvider) OpenObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	file, err := os.Open(destPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+		}
+		return nil, fmt.Errorf("open file %s: %w", destPath, err)
+	}
+	return file, nil
 }
 
 // StatObject returns local file metadata without reading its contents.

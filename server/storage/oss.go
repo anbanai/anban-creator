@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -224,6 +225,16 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 	return p.readObject(ctx, key, 0)
 }
 
+// OpenObject opens an OSS response body without materializing the complete
+// object in memory. The caller owns the returned stream.
+func (p *OSSProvider) OpenObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	stream, err := p.bucket.GetObject(key, oss.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("oss open object %s: %w", key, err)
+	}
+	return stream, nil
+}
+
 // ReadObject downloads an OSS object while retaining at most maxBytes+1 bytes,
 // allowing callers to reject oversized objects without unbounded allocation.
 func (p *OSSProvider) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
@@ -305,6 +316,20 @@ func (p *OSSProvider) DownloadURL(_ context.Context, key string, expirySeconds i
 	signedURL, err := p.bucket.SignURL(key, http.MethodGet, int64(expirySeconds))
 	if err != nil {
 		return "", fmt.Errorf("oss sign url for %s: %w", key, err)
+	}
+	return signedURL, nil
+}
+
+// DownloadAttachmentURL signs a GET URL that asks OSS to return a safe
+// attachment Content-Disposition without changing the stored object metadata.
+func (p *OSSProvider) DownloadAttachmentURL(_ context.Context, key, filename string, expirySeconds int) (string, error) {
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
+	if disposition == "" {
+		disposition = "attachment"
+	}
+	signedURL, err := p.bucket.SignURL(key, http.MethodGet, int64(expirySeconds), oss.ResponseContentDisposition(disposition))
+	if err != nil {
+		return "", fmt.Errorf("oss sign attachment url for %s: %w", key, err)
 	}
 	return signedURL, nil
 }

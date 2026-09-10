@@ -1,6 +1,10 @@
 package model
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 	project := &Project{
@@ -10,7 +14,6 @@ func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 	project.SetMontageDefaults(MontageDefaults{
 		DefaultPipeline: "social-short",
 		Preferences: MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 			SubtitleMode:    "burned-in",
 		},
@@ -25,14 +28,28 @@ func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
 	if got.DefaultPipeline != "social-short" {
 		t.Fatalf("DefaultPipeline = %q, want social-short", got.DefaultPipeline)
 	}
-	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 45 {
-		t.Fatalf("Preferences = %#v, want aspect 9:16 and duration 45", got.Preferences)
+	if got.Preferences.DurationSeconds != 45 {
+		t.Fatalf("Preferences = %#v, want duration 45", got.Preferences)
 	}
 	if got.AssetGuidance != "Use the latest product shots" {
 		t.Fatalf("AssetGuidance = %q", got.AssetGuidance)
 	}
 	if len(got.DeliveryTargets) != 2 || got.DeliveryTargets[0] != "wechat" || got.DeliveryTargets[1] != "seednote" {
 		t.Fatalf("DeliveryTargets = %#v", got.DeliveryTargets)
+	}
+}
+
+func TestMontagePreferencesDiscardLegacyAspectRatio(t *testing.T) {
+	var input MontageInput
+	if err := json.Unmarshal([]byte(`{"brief":"launch","preferences":{"aspect_ratio":"16:9","duration_seconds":30}}`), &input); err != nil {
+		t.Fatalf("unmarshal legacy montage input: %v", err)
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal montage input: %v", err)
+	}
+	if strings.Contains(string(data), "aspect_ratio") {
+		t.Fatalf("montage input retained a second ratio source: %s", data)
 	}
 }
 

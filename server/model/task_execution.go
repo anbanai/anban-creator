@@ -25,9 +25,15 @@ type TaskExecution struct {
 	AgentPackDigest   string `gorm:"type:char(64);index" json:"agent_pack_digest,omitempty"`
 	// AgentPackProgressContract freezes the stage contract for resume safety.
 	AgentPackProgressContract datatypes.JSON `gorm:"type:json" json:"-"`
-	RuntimeAdapter            string         `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
-	RuntimeProfile            string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
-	RuntimeImage              string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
+	// AgentPackDeliveryContract freezes the user-facing delivery contract for
+	// resume safety and consistent file presentation/downloads.
+	AgentPackDeliveryContract datatypes.JSON `gorm:"type:json" json:"-"`
+	// AgentPackRequiredArtifactContract freezes the complete set of artifacts
+	// that must be present and valid before this execution can succeed.
+	AgentPackRequiredArtifactContract datatypes.JSON `gorm:"type:json" json:"-"`
+	RuntimeAdapter                    string         `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
+	RuntimeProfile                    string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
+	RuntimeImage                      string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
 
 	ExecutionProfile   string            `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
 	Provider           string            `gorm:"type:varchar(80);not null;index" json:"provider"`

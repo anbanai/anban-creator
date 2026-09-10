@@ -122,6 +122,9 @@ func main() {
 		if err := service.MigratePlanReferenceAttachments(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate plan reference attachments")
 		}
+		if _, err := service.MigrateTaskExecutionContracts(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate task execution contracts")
+		}
 
 		// 6.1 One-time backfill: split the overloaded article Project.Style into
 		// the new orthogonal dimensions (Style=visual / WritingStyle=writer). Old

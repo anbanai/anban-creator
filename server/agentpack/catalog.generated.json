@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
@@ -92,14 +92,36 @@
           "required": true
         }
       ],
+      "delivery": [
+        {
+          "role": "final_markdown",
+          "path": "output/04-article-final.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "html",
+          "path": "output/05-article.html",
+          "mime_type": "text/html"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "image",
+          "path": "output/img_*.png",
+          "mime_type": "image/png"
+        }
+      ],
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "285f0c86e5a08d4d56d073f0f2cc89f389844e33cefbdfeb43dd308dcfd9fc0c"
+      "digest": "15b5e1e25a4da10e163da85f1e70fe3f2fbfadca1a72c403b1a76fdc9d0b8647"
     },
     {
       "id": "ecommerce",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -184,14 +206,51 @@
           "required": true
         }
       ],
+      "delivery": [
+        {
+          "role": "copywriting",
+          "path": "output/copywriting.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "manifest",
+          "path": "output/manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "main_image",
+          "path": "output/main_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "detail_image",
+          "path": "output/detail_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "cover_image",
+          "path": "output/cover_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "share_image",
+          "path": "output/share_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "sku_image",
+          "path": "output/sku_*.png",
+          "mime_type": "image/png"
+        }
+      ],
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "202c79302ce17d2c2585bbe0c861b8794025ad15b225fe373d33fe1113ef3c4d"
+      "digest": "ab5363c4bdb2fa2253af743ff62f10ac1f021e5d45efb967b747cc8098811155"
     },
     {
       "id": "live-slicer",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "直播切片",
       "description": "从直播视频转写、规划并批量导出短视频切片。",
@@ -265,12 +324,34 @@
           "required": true
         }
       ],
+      "delivery": [
+        {
+          "role": "summary",
+          "path": "output/summary.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "manifest",
+          "path": "output/clip-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "clip_video",
+          "path": "output/exports/*.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "clip_metadata",
+          "path": "output/exports/*.md",
+          "mime_type": "text/markdown"
+        }
+      ],
       "ui": {},
-      "digest": "2b8676fb0d8add71253eced5586e43b4fd0f9d835141a5b90e6d24154ac171a7"
+      "digest": "0a78ab15108bf95b98469e76493ce293bd16b6267fe25f7ccec6094936b00e2c"
     },
     {
       "id": "moments",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -402,21 +483,34 @@
           "required": true
         }
       ],
+      "delivery": [
+        {
+          "role": "final_markdown",
+          "path": "output/content.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "image",
+          "path": "output/moments-image.png",
+          "mime_type": "image/png"
+        }
+      ],
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "978b45a25bf490b0c8292eb51df6f21fc47e41d78f3d3cc79db2e22ba952d25a"
+      "digest": "1e9f7eb0b34b86b723234d4f2ffa436024fa2e8d380394baea0bc1b49f74996c"
     },
     {
       "id": "montage",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "Montage 视频",
       "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
       "agent": {
         "name": "montage",
         "skills": [
-          "montage"
+          "montage",
+          "video-cover-design"
         ],
         "max_turns": 180
       },
@@ -465,13 +559,20 @@
           "active_percent": 90,
           "complete_percent": 100,
           "required_artifacts": [
+            "output/final.mp4",
             "output/montage-project.json",
-            "output/delivery-manifest.json",
-            "output/final.mp4"
+            "output/cover.png",
+            "output/delivery-manifest.json"
           ]
         }
       ],
       "artifacts": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
         {
           "role": "project_manifest",
           "path": "output/montage-project.json",
@@ -479,26 +580,48 @@
           "required": true
         },
         {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
           "required": true
-        },
+        }
+      ],
+      "delivery": [
         {
           "role": "final_video",
           "path": "output/final.mp4",
-          "mime_type": "video/mp4",
-          "required": true
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "project_manifest",
+          "path": "output/montage-project.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
         }
       ],
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "0545c87a39d06108272fc36534b00837c74fe0e154865f914c1dbc0d2296a87b"
+      "digest": "63b42a10c810d0db7e19ee7ed918fe8bcf85dd5942907663e6caced4f05d145a"
     },
     {
       "id": "seednote",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -606,10 +729,46 @@
           "required": false
         }
       ],
+      "delivery": [
+        {
+          "role": "final_markdown",
+          "path": "output/content.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "image",
+          "path": "output/image_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "tail",
+          "path": "output/tail.png",
+          "mime_type": "image/png"
+        }
+      ],
+      "delivery_by_task_type": {
+        "viral_analysis": [
+          {
+            "role": "analysis",
+            "path": "output/source-analysis.md",
+            "mime_type": "text/markdown"
+          },
+          {
+            "role": "template",
+            "path": "output/viral-template.json",
+            "mime_type": "application/json"
+          }
+        ]
+      },
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "84c58f8e77326bfc818bcd7e36cacab18b52f7e5d8d61e775516bfdabb817933"
+      "digest": "e68373c7f40ae4da56f8cb513f2e730580438b541f932b3c1e6ebb9dc151f7f0"
     }
   ]
 }

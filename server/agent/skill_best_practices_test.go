@@ -166,7 +166,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
 		"live-slicer": {"live-slice", "capcut-draft"},
 		"moments":     {"moments", "humanizer"},
-		"montage":     {"montage"},
+		"montage":     {"montage", "video-cover-design"},
 		"seednote":    {"humanizer", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
 		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
 	}

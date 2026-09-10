@@ -2,12 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+)
+
+var (
+	ErrImageCapabilityResolverUnavailable = errors.New("image capability resolver is unavailable")
+	ErrTaskImageCapabilityMissing         = errors.New("task requires a frozen image capability")
 )
 
 type ImageCapabilityResolver struct {
@@ -112,6 +118,9 @@ func (s *ImageCapabilityResolver) ResolveImageModelForGeneration(
 }
 
 func (s *ImageCapabilityResolver) resolveRoute(ctx context.Context, userID, capabilityKey string) (config.ImageGenerationRouteConfig, string, error) {
+	if s == nil || s.cfg == nil {
+		return config.ImageGenerationRouteConfig{}, "", ErrImageCapabilityResolverUnavailable
+	}
 	key := strings.TrimSpace(capabilityKey)
 	if key == "" {
 		key = strings.TrimSpace(s.cfg.ModelRoutes.ImageGeneration.DefaultCapability)

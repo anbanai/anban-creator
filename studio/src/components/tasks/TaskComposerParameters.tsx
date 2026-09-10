@@ -92,7 +92,10 @@ export function TaskComposerParameters({
         {image ? (
           <>
             <Separator />
-            <ImageGenerationSettings {...image} />
+            <ImageGenerationSettings
+              {...image}
+              ratioLabel={image.ratioLabel ?? (execution.taskType === 'montage' ? '视频比例' : undefined)}
+            />
           </>
         ) : null}
         {quantity ? (

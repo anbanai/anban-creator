@@ -141,6 +141,9 @@ func mapToImageSize(size, model string) string {
 
 	if isGPTImageModel(model) {
 		w, h := parseRatioNumbers(ratio)
+		if requiresImageUsageForBilling(model) && isSupportedRatioSize(size) {
+			return exactOpenAIImageSize(w, h, 1536)
+		}
 		switch {
 		case w > h:
 			return "1536x1024"
@@ -152,6 +155,49 @@ func mapToImageSize(size, model string) string {
 	}
 
 	return "1024x1024"
+}
+
+func isSupportedRatioSize(size string) bool {
+	if SupportedRatios[size] {
+		return true
+	}
+	upper := strings.ToUpper(size)
+	for _, tier := range []string{"4K", "2K", "1K"} {
+		suffix := ":" + tier
+		if strings.HasSuffix(upper, suffix) {
+			return SupportedRatios[size[:len(size)-len(suffix)]]
+		}
+	}
+	return false
+}
+
+func exactOpenAIImageSize(widthRatio, heightRatio, maxDimension int) string {
+	if widthRatio <= 0 || heightRatio <= 0 || maxDimension <= 0 {
+		return "1024x1024"
+	}
+	if widthRatio == heightRatio {
+		return "1024x1024"
+	}
+	divisor := greatestCommonDivisor(widthRatio, heightRatio)
+	widthRatio /= divisor
+	heightRatio /= divisor
+	// GPT Image 2 requires dimensions divisible by 16. Use the largest exact
+	// ratio that fits the provider's 1536px standard envelope.
+	scale := (maxDimension / max(widthRatio, heightRatio) / 16) * 16
+	if scale <= 0 {
+		return "1024x1024"
+	}
+	return fmt.Sprintf("%dx%d", widthRatio*scale, heightRatio*scale)
+}
+
+func greatestCommonDivisor(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a <= 0 {
+		return 1
+	}
+	return a
 }
 
 func isGPTImageModel(model string) bool {
@@ -250,11 +296,11 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 }
 
 func openAIRequestSize(defaultSize, overrideSize, model string, semanticAspectRatio bool) string {
-	if semanticAspectRatio {
-		return "auto"
-	}
 	if overrideSize != "" {
 		return mapToImageSize(overrideSize, model)
+	}
+	if semanticAspectRatio {
+		return "auto"
 	}
 	return defaultSize
 }

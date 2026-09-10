@@ -259,7 +259,8 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
 	}
 	var files []BootstrapFile
-	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, referenceAsset != nil)
+	bindReferenceToGeneration := referenceAsset != nil && (strings.TrimSpace(task.ReferenceImageAssetID) != "" || model.IsMontagePlatform(task.Type))
+	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, bindReferenceToGeneration)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)
 	}
@@ -317,7 +318,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, err
 	}
-	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{TaskType: task.Type, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID, HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage, ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages})
+	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
+		TaskType: task.Type, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID,
+		ImageRatio: task.ImageRatio, HasReferenceImage: referenceAsset != nil,
+		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
+		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
+	})
 	resumeContextPath := ""
 	for _, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
@@ -660,7 +666,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 			attachment.ContentType = asset.ContentType
 			attachment.Size = asset.Size
 		}
-		name := bootstrapAttachmentName(i+1, attachment.FileName)
+		name := serveragent.InputAttachmentFilename(i+1, attachment)
 		dir := ".anban-creator/input-attachments"
 		var rel string
 		if attachment.Role == model.EntryAttachmentRoleResumeFile {

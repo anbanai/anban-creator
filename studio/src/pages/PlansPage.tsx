@@ -177,7 +177,7 @@ export default function PlansPage() {
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
 	const isMontagePlan = watchedType === 'montage'
-	const usesImageSettings = !isMontagePlan
+	const usesImageSettings = true
 	const {
 		items: imageCapabilityOptions,
 		defaultCapability: defaultImageCapability,
@@ -484,19 +484,17 @@ export default function PlansPage() {
       ?.find((profile) => profile.id === values.execution_profile)
       ?.available === true
     if (!submittedProfileAvailable) return
-    if (values.type !== 'montage') {
-      const submittedImageCapability = imageCapabilityOptions.find(
-        (option) => option.key === (values.image_capability_key || defaultImageCapability),
-      )
-      if (
-        !submittedImageCapability
-        || submittedImageCapability.enabled !== true
-        || submittedImageCapability.price_available !== true
-      ) {
-        toast.error('该图像能力已停用，请重新选择')
-        return
-      }
-    }
+	const submittedImageCapability = imageCapabilityOptions.find(
+		(option) => option.key === (values.image_capability_key || defaultImageCapability),
+	)
+	if (
+		!submittedImageCapability
+		|| submittedImageCapability.enabled !== true
+		|| submittedImageCapability.price_available !== true
+	) {
+		toast.error('该图像能力已停用，请重新选择')
+		return
+	}
     // For edit (PUT), image_capability_key is a *string on the backend: nil = leave
     // unchanged, "" = clear to system default. Always send it so explicit
     // "system default" selection actually clears the previously saved value.
@@ -520,10 +518,8 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
-      ...(values.type === 'montage' ? {} : {
-        image_capability_key: values.image_capability_key,
-        image_ratio: values.image_ratio,
-      }),
+	  image_capability_key: values.image_capability_key,
+	  image_ratio: values.image_ratio,
       ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
       agent_input: values.agent_input,
       watermark: values.watermark || undefined,

@@ -233,9 +233,16 @@ func TestManagedMCPBoundaryHookBlocksDirectMCPAndSeednoteSidecar(t *testing.T) {
 	}
 }
 
-func TestManagedRequiredMCPToolsRequiresAnalyzeVideoForMontage(t *testing.T) {
-	if got := managedRequiredMCPTools(model.PlatformMontage); !reflect.DeepEqual(got, []string{"analyze_video"}) {
-		t.Fatalf("managedRequiredMCPTools(montage) = %#v", got)
+func TestManagedRequiredMCPToolsRequiresFullMontageRuntimeSurface(t *testing.T) {
+	want := []string{
+		"analyze_image",
+		"analyze_video",
+		"generate_image",
+		"get_project_profile",
+		"submit_agent_feedback",
+	}
+	if got := managedRequiredMCPTools(model.PlatformMontage); !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedRequiredMCPTools(montage) = %#v, want %#v", got, want)
 	}
 }
 
@@ -304,9 +311,13 @@ func (s *managedMCPStatusSequence) GetMcpStatus(context.Context) (*claudecode.Mc
 }
 
 func TestWaitForManagedMCPReadyPollsPendingUntilConnected(t *testing.T) {
+	tools := make([]claudecode.McpToolInfo, 0, len(managedRequiredMCPTools(model.PlatformMontage)))
+	for _, name := range managedRequiredMCPTools(model.PlatformMontage) {
+		tools = append(tools, claudecode.McpToolInfo{Name: name})
+	}
 	client := &managedMCPStatusSequence{statuses: []*claudecode.McpStatusResponse{
 		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusPending}}},
-		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: []claudecode.McpToolInfo{{Name: "analyze_video"}}}}},
+		{McpServers: []claudecode.McpServerStatus{{Name: ManagedMCPServerName, Status: claudecode.McpServerConnectionStatusConnected, Tools: tools}}},
 	}}
 	if err := waitForManagedMCPReady(context.Background(), client, model.PlatformMontage, time.Second, time.Millisecond); err != nil {
 		t.Fatalf("waitForManagedMCPReady: %v", err)
@@ -388,6 +399,24 @@ func TestValidateManagedPluginInitRequiresTaskSkills(t *testing.T) {
 				t.Fatalf("error = %v, want missing skill %s", err, tc.missing)
 			}
 		})
+	}
+}
+
+func TestManagedPluginInitRequiresMontageSkills(t *testing.T) {
+	message := &claudecode.SystemMessage{
+		Subtype: "init",
+		Data: map[string]any{
+			"plugins": []any{map[string]any{"name": "anban", "path": "/plugins"}},
+			"skills":  []any{"anban:montage", "anban:video-cover-design"},
+		},
+	}
+	if err := ValidateManagedPluginInit(message, model.PlatformMontage); err != nil {
+		t.Fatalf("ValidateManagedPluginInit: %v", err)
+	}
+
+	message.Data["skills"] = []any{"anban:montage"}
+	if err := ValidateManagedPluginInit(message, model.PlatformMontage); err == nil || !strings.Contains(err.Error(), "anban:video-cover-design") {
+		t.Fatalf("error = %v, want missing Montage cover-design skill", err)
 	}
 }
 

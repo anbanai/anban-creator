@@ -11,6 +11,7 @@ export interface ImageGenerationSettingsProps {
   onCapabilityChange: (value: string) => void
   loading?: boolean
   disabled?: boolean
+  ratioLabel?: string
 }
 
 export function ImageGenerationSettings({
@@ -21,13 +22,14 @@ export function ImageGenerationSettings({
   capabilityKey,
   onCapabilityChange,
   disabled = false,
+  ratioLabel = '图片比例',
 }: ImageGenerationSettingsProps) {
   return (
     <>
       <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
-        <h3 className="pt-1 font-medium">图片比例</h3>
+        <h3 className="pt-1 font-medium">{ratioLabel}</h3>
         <ToggleGroup
-          aria-label="图片比例"
+          aria-label={ratioLabel}
           value={[ratio || 'auto']}
           onValueChange={(next) => {
             const selected = next[0]

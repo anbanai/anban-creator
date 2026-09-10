@@ -56,6 +56,10 @@ func TestMapToImageSize(t *testing.T) {
 		{"gpt-image-2 pixel passthrough 4K", "3840x2160", "gpt-image-2", "3840x2160"},
 		{"gpt-image-1 pixel passthrough HD", "1920x1080", "gpt-image-1", "1920x1080"},
 		{"chatgpt-image-latest pixel passthrough", "4096x4096", "chatgpt-image-latest", "4096x4096"},
+		{"gpt-image-2 exact portrait video ratio", "9:16", "gpt-image-2", "864x1536"},
+		{"gpt-image-2 exact landscape video ratio", "16:9", "gpt-image-2", "1536x864"},
+		{"gpt-image-2 square stays standard", "1:1", "gpt-image-2", "1024x1024"},
+		{"gpt-image-2 exact reduced ratio", "21:9", "gpt-image-2", "1456x624"},
 		// Unknown format defaults to 1024x1024
 		{"unknown format defaults", "badformat", "gpt-image-2", "1024x1024"},
 	}
@@ -70,11 +74,11 @@ func TestMapToImageSize(t *testing.T) {
 	}
 }
 
-func TestOpenAIRequestSizeUsesProviderAutoForSemanticTaskGeneration(t *testing.T) {
-	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", true); got != "auto" {
-		t.Fatalf("semantic request size = %q, want auto", got)
+func TestOpenAIRequestSizeUsesExplicitRatioForSemanticTaskGeneration(t *testing.T) {
+	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", true); got != "1152x1536" {
+		t.Fatalf("semantic request size = %q, want exact ratio", got)
 	}
-	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", false); got != "1024x1536" {
+	if got := openAIRequestSize("1024x1024", "3:4", "gpt-image-2", false); got != "1152x1536" {
 		t.Fatalf("image generation request size = %q, want fixed provider size", got)
 	}
 }

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,6 +46,35 @@ type ObjectStatProvider interface {
 // objects without first buffering the complete body.
 type BoundedObjectReader interface {
 	ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error)
+}
+
+// ObjectStreamProvider opens an object body without first buffering it in
+// memory. Callers must close the returned stream.
+type ObjectStreamProvider interface {
+	OpenObject(ctx context.Context, key string) (io.ReadCloser, error)
+}
+
+// AttachmentDownloadURLProvider signs a direct download URL whose response is
+// forced to an attachment with the user-facing filename.
+type AttachmentDownloadURLProvider interface {
+	DownloadAttachmentURL(ctx context.Context, key, filename string, expirySeconds int) (string, error)
+}
+
+// OpenObject prefers a storage backend's streaming capability. The buffered
+// fallback keeps legacy and test providers compatible; production providers
+// should implement ObjectStreamProvider for large-object paths.
+func OpenObject(ctx context.Context, provider Provider, key string) (io.ReadCloser, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("storage provider is unavailable")
+	}
+	if opener, ok := provider.(ObjectStreamProvider); ok {
+		return opener.OpenObject(ctx, key)
+	}
+	data, err := provider.Read(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 // ConditionalObjectPromoter copies a verified source object to an immutable

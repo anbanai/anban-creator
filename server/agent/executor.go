@@ -24,6 +24,10 @@ type UserPromptParams struct {
 	Topic     string // user prompt; empty triggers autonomous research mode
 	TaskID    string // injected as task_id=<x> into the prompt body
 	ProjectID string // injected as project_id=<x> into the prompt body
+	// ImageRatio and HasReferenceImage describe the frozen Montage video and
+	// portrait inputs. They are ignored for non-Montage task types.
+	ImageRatio        string
+	HasReferenceImage bool
 	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
 	// always generated. Ignored for non-seednote task types.
 	HasContentImage bool
@@ -62,10 +66,22 @@ func BuildUserPrompt(p UserPromptParams) string {
 				"to choose the optimal theme, then execute the full creation workflow.",
 			p.TaskType)
 	} else {
-		base = fmt.Sprintf("Run the full %s creation workflow; create content about: %s", p.TaskType, p.Topic)
+		topic := p.Topic
+		if model.IsMontagePlatform(p.TaskType) {
+			topic = strings.ReplaceAll(strings.ReplaceAll(topic, "\r\n", "\n"), "\r", "\n")
+			topic = strings.ReplaceAll(topic, "\n", "\n> ")
+		}
+		base = fmt.Sprintf("Run the full %s creation workflow; create content about: %s", p.TaskType, topic)
 	}
 	if controls := describeRuntimeControls(p); controls != "" {
 		base += "\n\n" + controls
+	}
+	if model.IsMontagePlatform(p.TaskType) {
+		portraitReference := "Portrait reference: no system portrait selected"
+		if p.HasReferenceImage {
+			portraitReference = "Portrait reference: use the system-provided portrait at .anban-creator/reference.png"
+		}
+		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + portraitReference
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)

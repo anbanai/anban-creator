@@ -310,7 +310,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
 }
 
-func TestCreateMontagePlanIgnoresUnavailableImageSettings(t *testing.T) {
+func TestCreateMontagePlanPersistsImageSettings(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := t.Context()
@@ -327,13 +327,13 @@ func TestCreateMontagePlanIgnoresUnavailableImageSettings(t *testing.T) {
 	h := NewPlanHandler(newHandlerPlanService(t, repo, &logger), &logger)
 	h.SetRepository(repo)
 	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{Capabilities: map[string]config.ImageGenerationRouteConfig{
-		"retired-capability": {Enabled: false, MinTier: "free"},
+		"standard": {Enabled: true, MinTier: "free"},
 	}})
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	app.Put("/plans/:id", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Update(c) })
 
-	resp := postJSON(t, app, "/plans", `{"execution_profile":"effective","project_id":"`+projectID+`","cron_expr":"0 9 * * *","image_ratio":"legacy-unsupported","image_capability_key":"retired-capability","montage_input":{"brief":"每天剪一条短片"}}`)
+	resp := postJSON(t, app, "/plans", `{"execution_profile":"effective","project_id":"`+projectID+`","cron_expr":"0 9 * * *","image_ratio":"16:9","image_capability_key":"standard","montage_input":{"brief":"每天剪一条短片"}}`)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -343,13 +343,13 @@ func TestCreateMontagePlanIgnoresUnavailableImageSettings(t *testing.T) {
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("plans = %#v, err=%v; want one", plans, err)
 	}
-	if plans[0].ImageRatio != "" || plans[0].ImageCapabilityKey != "" {
-		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want empty", plans[0].ImageRatio, plans[0].ImageCapabilityKey)
+	if plans[0].ImageRatio != "16:9" || plans[0].ImageCapabilityKey != "standard" {
+		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want 16:9 and standard", plans[0].ImageRatio, plans[0].ImageCapabilityKey)
 	}
 	updated := doRequest(t, app, http.MethodPut, "/plans/"+plans[0].ID, userID, map[string]any{
 		"execution_profile":    "effective",
-		"image_ratio":          "legacy-unsupported",
-		"image_capability_key": "retired-capability",
+		"image_ratio":          "1:1",
+		"image_capability_key": "standard",
 		"montage_input":        map[string]any{"brief": "更新后的短片"},
 	})
 	defer updated.Body.Close()
@@ -361,8 +361,8 @@ func TestCreateMontagePlanIgnoresUnavailableImageSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.ImageRatio != "" || persisted.ImageCapabilityKey != "" {
-		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want empty", persisted.ImageRatio, persisted.ImageCapabilityKey)
+	if persisted.ImageRatio != "1:1" || persisted.ImageCapabilityKey != "standard" {
+		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want 1:1 and standard", persisted.ImageRatio, persisted.ImageCapabilityKey)
 	}
 }
 

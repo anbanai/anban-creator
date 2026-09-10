@@ -16,7 +16,6 @@ export function initialMontageInput(
     pipeline_key: input?.pipeline_key ?? defaults?.default_pipeline ?? '',
     source_assets: input?.source_assets ?? [],
     preferences: {
-      aspect_ratio: input?.preferences?.aspect_ratio ?? defaults?.preferences?.aspect_ratio ?? '9:16',
       duration_seconds: input?.preferences?.duration_seconds ?? defaults?.preferences?.duration_seconds ?? 30,
       style: input?.preferences?.style ?? defaults?.preferences?.style ?? '',
       music_prompt: input?.preferences?.music_prompt ?? defaults?.preferences?.music_prompt ?? '',
@@ -36,7 +35,6 @@ export function buildMontageInputForSubmit(brief: string | undefined, input?: Pa
     pipeline_key: next.pipeline_key?.trim() || undefined,
     source_assets: next.source_assets ?? [],
     preferences: {
-      aspect_ratio: next.preferences?.aspect_ratio || undefined,
       duration_seconds: next.preferences?.duration_seconds,
       style: next.preferences?.style?.trim() || undefined,
       music_prompt: next.preferences?.music_prompt?.trim() || undefined,

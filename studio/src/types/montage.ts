@@ -11,7 +11,6 @@ export interface MontageAsset {
 }
 
 export interface MontagePreferences {
-  aspect_ratio?: string
   duration_seconds?: number
   style?: string
   music_prompt?: string

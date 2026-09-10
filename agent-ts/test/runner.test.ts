@@ -211,7 +211,6 @@ describe("validateManagedInit", () => {
       { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
       { taskType: "live-slicer", tool: "analyze_video", skills: ["anban:live-slice", "anban:capcut-draft"] },
       { taskType: "moments", tool: "get_project_profile", skills: [] },
-      { taskType: "montage", tool: "analyze_video", skills: [] },
     ];
     for (const fixture of taskTypes) {
       expect(() => validateManagedInit({
@@ -222,6 +221,39 @@ describe("validateManagedInit", () => {
         tools: [`mcp__anban__${fixture.tool}`],
         skills: fixture.skills,
       }, fixture.taskType)).not.toThrow();
+    }
+  });
+
+  test("requires the complete Montage cover runtime surface", () => {
+    const requiredTools = [
+      "analyze_image",
+      "analyze_video",
+      "generate_image",
+      "get_project_profile",
+      "submit_agent_feedback",
+    ];
+    const requiredSkills = ["anban:montage", "anban:video-cover-design"];
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: requiredTools.map((tool) => `mcp__anban__${tool}`),
+      skills: requiredSkills,
+    };
+
+    expect(() => validateManagedInit(message, "montage")).not.toThrow();
+    for (const missing of requiredTools) {
+      expect(() => validateManagedInit({
+        ...message,
+        tools: message.tools.filter((tool) => tool !== `mcp__anban__${missing}`),
+      }, "montage"), missing).toThrow(missing);
+    }
+    for (const missing of requiredSkills) {
+      expect(() => validateManagedInit({
+        ...message,
+        skills: message.skills.filter((skill) => skill !== missing),
+      }, "montage"), missing).toThrow(missing);
     }
   });
 

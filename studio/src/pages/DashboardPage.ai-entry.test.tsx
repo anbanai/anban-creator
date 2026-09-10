@@ -88,11 +88,11 @@ const {
       platform: 'montage',
       name: '短片项目',
       description: 'Montage 短片内容',
-      image_ratio: '',
+      image_ratio: '9:16',
       config: {},
       montage_defaults: {
         default_pipeline: 'social-short',
-        preferences: { aspect_ratio: '9:16', duration_seconds: 30 },
+        preferences: { duration_seconds: 30 },
         delivery_targets: ['final_video'] as string[],
       },
     } as const,
@@ -133,7 +133,7 @@ const {
       { id: 'seednote', label: '种草笔记', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
       { id: 'moments', label: '朋友圈', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4'], fields: [] },
       { id: 'ecommerce', label: '电商图', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
-      { id: 'montage', label: '智能剪辑', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '', supported_image_ratios: [], fields: [] },
+      { id: 'montage', label: '智能剪辑', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '9:16', supported_image_ratios: ['9:16', '16:9', '1:1'], fields: [] },
     ] as const,
     imageCapabilities: {
       tier: 'pro',
@@ -356,14 +356,14 @@ describe('DashboardPage AI entry', () => {
     }))
   })
 
-  it('creates a Montage task without image capabilities or image settings', async () => {
+  it('creates a Montage task with the selected video ratio and image capability', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...montageProject }])
-    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
     render(<DashboardPage />)
 
     expect(await screen.findByRole('combobox', { name: '项目：短片项目' })).toBeInTheDocument()
     const parameters = await openParameters()
-    expect(within(parameters).queryByText('图片比例')).not.toBeInTheDocument()
+    expect(within(parameters).getByText('视频比例')).toBeInTheDocument()
+	  expect(within(parameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(parameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
     await closeParameters()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
@@ -380,8 +380,10 @@ describe('DashboardPage AI entry', () => {
       execution_profile: 'effective',
       attachments: [],
       quantity: 1,
+	  image_ratio: '9:16',
+	  image_capability_key: 'standard',
     }))
-    expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
+	  expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
   })
 
   it('waits for platform defaults before enabling project choice or submission', async () => {

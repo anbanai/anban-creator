@@ -351,12 +351,11 @@ func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 		ProjectID:          projectID,
 		CronExpr:           "0 10 * * *",
 		ImageRatio:         "16:9",
-		ImageCapabilityKey: "retired-capability",
+		ImageCapabilityKey: "standard",
 		MontageInput: &model.MontageInput{
 			Brief:       "每日生成新品短片",
 			PipelineKey: "default",
 			Preferences: model.MontagePreferences{
-				AspectRatio:     "9:16",
 				DurationSeconds: 30,
 			},
 		},
@@ -367,14 +366,14 @@ func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
 	if plan.Type != model.PlatformMontage {
 		t.Fatalf("plan type = %q, want montage", plan.Type)
 	}
-	if plan.ImageRatio != "" || plan.ImageCapabilityKey != "" {
-		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want empty", plan.ImageRatio, plan.ImageCapabilityKey)
+	if plan.ImageRatio != "16:9" || plan.ImageCapabilityKey != "standard" {
+		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want 16:9 and standard", plan.ImageRatio, plan.ImageCapabilityKey)
 	}
 	got := plan.MontageInput.Data()
 	if got.Brief != "每日生成新品短片" || got.PipelineKey != "default" {
 		t.Fatalf("montage input = %#v", got)
 	}
-	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
+	if got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 }
@@ -402,7 +401,7 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	if err := repo.Plans().UpdateEditable(ctx, plan, false); err != nil {
 		t.Fatalf("seed legacy Montage image settings: %v", err)
 	}
-	nextRatio := "auto"
+	nextRatio := "1:1"
 	nextCapability := "professional"
 
 	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "effective",
@@ -413,7 +412,6 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 			Brief:       "更新后的短片",
 			PipelineKey: "social-short",
 			Preferences: model.MontagePreferences{
-				AspectRatio:     "1:1",
 				DurationSeconds: 20,
 			},
 		},
@@ -421,21 +419,21 @@ func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update montage plan: %v", err)
 	}
-	if updated.ImageRatio != "" || updated.ImageCapabilityKey != "" {
-		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want empty", updated.ImageRatio, updated.ImageCapabilityKey)
+	if updated.ImageRatio != "1:1" || updated.ImageCapabilityKey != "professional" {
+		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want 1:1 and professional", updated.ImageRatio, updated.ImageCapabilityKey)
 	}
 	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if persisted.ImageRatio != "" || persisted.ImageCapabilityKey != "" {
-		t.Fatalf("persisted Montage plan image settings = ratio %q, capability %q; want empty", persisted.ImageRatio, persisted.ImageCapabilityKey)
+	if persisted.ImageRatio != "1:1" || persisted.ImageCapabilityKey != "professional" {
+		t.Fatalf("persisted Montage plan image settings = ratio %q, capability %q; want 1:1 and professional", persisted.ImageRatio, persisted.ImageCapabilityKey)
 	}
 	got := updated.MontageInput.Data()
 	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
 		t.Fatalf("montage input = %#v", got)
 	}
-	if got.Preferences.AspectRatio != "1:1" || got.Preferences.DurationSeconds != 20 {
+	if got.Preferences.DurationSeconds != 20 {
 		t.Fatalf("preferences = %#v", got.Preferences)
 	}
 

@@ -384,7 +384,6 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 	project.SetMontageDefaults(model.MontageDefaults{
 		DefaultPipeline: "social-short",
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 			Style:           "documentary",
 			MusicPrompt:     "minimal electronic",
@@ -415,7 +414,7 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 	update := &model.Project{Platform: model.PlatformMontage}
 	update.SetMontageDefaults(model.MontageDefaults{
 		DefaultPipeline: "product-demo",
-		Preferences:     model.MontagePreferences{AspectRatio: "16:9", DurationSeconds: 30},
+		Preferences:     model.MontagePreferences{DurationSeconds: 30},
 		DeliveryTargets: []string{"final_video"},
 	})
 	update.MontageDefaultsSet = true
@@ -424,7 +423,7 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	got = updated.MontageDefaults.Data()
-	if got.DefaultPipeline != "product-demo" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+	if got.DefaultPipeline != "product-demo" || got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("updated MontageDefaults = %#v", got)
 	}
 }

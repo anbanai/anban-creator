@@ -22,7 +22,6 @@ type MontageAsset struct {
 }
 
 type MontagePreferences struct {
-	AspectRatio     string `json:"aspect_ratio,omitempty"`
 	DurationSeconds int64  `json:"duration_seconds,omitempty"`
 	Style           string `json:"style,omitempty"`
 	MusicPrompt     string `json:"music_prompt,omitempty"`

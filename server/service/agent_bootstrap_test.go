@@ -166,6 +166,63 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 	}
 }
 
+func TestBootstrapBuildsMontagePromptFromFrozenTaskImageSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		imageRatio        string
+		hasReferenceImage bool
+		wantLines         []string
+	}{
+		{
+			name:              "task portrait",
+			imageRatio:        "9:16",
+			hasReferenceImage: true,
+			wantLines: []string{
+				"Video aspect ratio: 9:16",
+				"Portrait reference: use the system-provided portrait at .anban-creator/reference.png",
+			},
+		},
+		{
+			name:       "no portrait",
+			imageRatio: "16:9",
+			wantLines: []string{
+				"Video aspect ratio: 16:9",
+				"Portrait reference: no system portrait selected",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := openBootstrapTestRepository(t)
+			tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := &model.Task{
+				ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformMontage,
+				Prompt: "turn this webinar into a launch video", ImageRatio: tc.imageRatio,
+			}
+			if tc.hasReferenceImage {
+				asset := referenceAssetFixture("asset-bootstrap", task.UserID, DirectUploadPurposeTaskReference)
+				if err := repo.Assets().Create(t.Context(), asset); err != nil {
+					t.Fatal(err)
+				}
+				task.ReferenceImageAssetID = asset.ID
+			}
+			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: &signFakeStore{}, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+			response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+			if err != nil {
+				t.Fatalf("buildResponse: %v", err)
+			}
+			for _, line := range tc.wantLines {
+				if !strings.Contains(response.Prompt, line) {
+					t.Errorf("bootstrap prompt = %q, want line %q", response.Prompt, line)
+				}
+			}
+		})
+	}
+}
+
 func TestBootstrapDoesNotMaterializeLegacyTaskContext(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
@@ -240,6 +297,57 @@ func TestBootstrapSignsInheritedProjectReferenceAsset(t *testing.T) {
 		}
 	}
 	t.Fatalf("reference file missing from %#v", response.Files)
+}
+
+func TestBootstrapKeepsInheritedProjectStyleReferenceOutOfGenerationSettings(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	asset := referenceAssetFixture("asset-project-style", "user-1", DirectUploadPurposeProjectReference)
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-1", UserID: asset.UserID, ProjectID: "project-1", Type: model.PlatformSeednote}
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: task.Type, ReferenceImageAssetID: asset.ID})
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+	response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settingsText string
+	foundReference := false
+	for _, file := range response.Files {
+		switch file.Path {
+		case ".anban-creator/reference.png":
+			foundReference = true
+		case ".anban-creator/settings.json":
+			settingsText = file.Text
+		}
+	}
+	if !foundReference {
+		t.Fatal("project style reference was not provided for prompt analysis")
+	}
+	var settings struct {
+		Seednote struct {
+			Cover struct {
+				Image struct {
+					Refer string `json:"refer"`
+				} `json:"image"`
+			} `json:"cover"`
+			Content struct {
+				Image struct {
+					Refer string `json:"refer"`
+				} `json:"image"`
+			} `json:"content"`
+		} `json:"seednote"`
+	}
+	if err := json.Unmarshal([]byte(settingsText), &settings); err != nil {
+		t.Fatalf("decode runtime settings: %v", err)
+	}
+	if settings.Seednote.Cover.Image.Refer != "" || settings.Seednote.Content.Image.Refer != "" {
+		t.Fatalf("project style reference leaked into generation settings: %#v", settings.Seednote)
+	}
 }
 
 func TestBootstrapPreservesReferenceRepositoryFailureBeforeSigning(t *testing.T) {
@@ -402,7 +510,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.AgentPackID != "seednote" || first.AgentPackVersion != "1.0.0" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
+	if first.AgentPackID != "seednote" || first.AgentPackVersion != "1.0.1" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
 		t.Fatalf("response Agent Pack identity = %#v", first)
 	}
 	if first.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.Envs["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.Envs["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.Envs) != 7 {
@@ -425,7 +533,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		}
 	}
 	resumeAttachmentPath, _ := serveragent.ExecutionResumeAttachmentPath(executionID, "foo.pdf")
-	for _, path := range []string{".anban-creator/input-attachments/01-brief.txt", ".anban-creator/input-attachments/02-input.png", ".anban-creator/input-attachments/03-key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
+	for _, path := range []string{".anban-creator/input-attachments/attachment_01_brief.txt", ".anban-creator/input-attachments/attachment_02_input.png", ".anban-creator/input-attachments/attachment_03_key-first.png", ".anban-creator/input-attachments/index.json", resumeContextPath, resumeAttachmentPath} {
 		if _, ok := paths[path]; !ok {
 			t.Fatalf("missing bootstrap path %q in %#v", path, first.Files)
 		}
@@ -441,7 +549,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 			t.Fatalf("legacy reference_image_url reached storage URL ownership parsing: %q", rawURL)
 		}
 	}
-	if paths[".anban-creator/input-attachments/02-input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/03-key-first.png"].DownloadURL == "" {
+	if paths[".anban-creator/input-attachments/attachment_02_input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/attachment_03_key-first.png"].DownloadURL == "" {
 		t.Fatal("private objects were not signed")
 	}
 	if !strings.Contains(paths[".anban-creator/settings.json"].Text, `"seednote"`) {
@@ -910,10 +1018,10 @@ func TestAgentBootstrapAttachmentTypeIndexPreservesSourceOrder(t *testing.T) {
 		t.Fatalf("files = %#v", files)
 	}
 	for i, want := range []string{
-		".anban-creator/input-attachments/01-brief.pdf",
-		".anban-creator/input-attachments/02-first.png",
-		".anban-creator/input-attachments/03-second.png",
-		".anban-creator/input-attachments/04-notes.txt",
+		".anban-creator/input-attachments/attachment_01_brief.pdf",
+		".anban-creator/input-attachments/attachment_02_first.png",
+		".anban-creator/input-attachments/attachment_03_second.png",
+		".anban-creator/input-attachments/attachment_04_notes.txt",
 	} {
 		if files[i].Path != want {
 			t.Fatalf("file %d path = %q, want %q", i, files[i].Path, want)
@@ -998,7 +1106,7 @@ func TestAgentBootstrapAssetAttachmentUsesRepositoryIdentity(t *testing.T) {
 	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 		t.Fatalf("signed keys = %#v, want repository key %q", store.signedKeys, asset.StorageKey)
 	}
-	if len(files) != 2 || files[0].DownloadURL == "" || files[0].ExpectedSize != asset.Size || files[0].Path != ".anban-creator/input-attachments/01-"+asset.FileName {
+	if len(files) != 2 || files[0].DownloadURL == "" || files[0].ExpectedSize != asset.Size || files[0].Path != ".anban-creator/input-attachments/attachment_01_"+asset.FileName {
 		t.Fatalf("files = %#v", files)
 	}
 }

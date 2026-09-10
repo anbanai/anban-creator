@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"gorm.io/gorm"
@@ -68,32 +69,56 @@ func approvedTaskBillingTerminalReason(reason string) bool {
 }
 
 func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string) (bool, error) {
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	return hasDurableDelivery(files), nil
-}
-
-func (s *TaskService) executionHasDurableDelivery(ctx context.Context, executionID string) (bool, error) {
-	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	files, err := s.repo.TaskFiles().FindAllByTaskID(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	return hasDurableDelivery(files), nil
-}
-
-func hasDurableDelivery(files []*model.TaskFile) bool {
+	executions := make(map[string]*model.TaskExecution)
 	for _, file := range files {
-		if file == nil || (file.State != model.TaskFileStatePublished && file.State != model.TaskFileStateCollected) {
+		if file == nil || file.TaskID != taskID || file.State != model.TaskFileStatePublished {
 			continue
 		}
-		if file.FileSize > 0 || strings.TrimSpace(file.OSSKey) != "" || strings.TrimSpace(file.OSSURL) != "" ||
-			strings.TrimSpace(file.MediaID) != "" || strings.TrimSpace(file.WechatURL) != "" {
-			return true
+		executionID := strings.TrimSpace(file.ExecutionID)
+		if executionID == "" {
+			continue
+		}
+		execution, resolved := executions[executionID]
+		if !resolved {
+			execution, err = s.repo.TaskExecutions().FindByID(ctx, executionID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				executions[executionID] = nil
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			if execution.TaskID != taskID {
+				execution = nil
+			}
+			executions[executionID] = execution
+		}
+		if execution == nil {
+			continue
+		}
+		contract, contractErr := resolveFrozenExecutionDeliveryContract(execution)
+		if contractErr != nil {
+			continue
+		}
+		spec, matched := agentpack.MatchDeliverySpec(contract, file.FilePath)
+		if !matched || normalizedMediaType(file.MimeType) != normalizedMediaType(spec.MIMEType) {
+			continue
+		}
+		if validateErr := s.validateStoredDeliveryObject(ctx, task, execution.ID, file, spec); validateErr == nil {
+			return true, nil
+		} else if !errors.Is(validateErr, ErrTaskDeliveryObjectInvalid) {
+			return false, validateErr
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (s *TaskService) persistTerminalBillingInTx(ctx context.Context, tx repository.Repository, task *model.Task, execution *model.TaskExecution, reason string, durableDelivery bool) error {

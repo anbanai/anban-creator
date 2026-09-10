@@ -176,6 +176,17 @@ export const mockPlatformConfigs: PlatformConfig[] = [
 	supported_image_ratios: ['3:4', '1:1'],
     fields: [],
   },
+  {
+    id: 'montage',
+    label: 'Montage',
+    badge_variant: 'secondary',
+    supports_publishing: false,
+    supports_auto_fetch: false,
+    profile_url_pattern: '',
+    default_image_ratio: '9:16',
+    supported_image_ratios: ['9:16', '16:9', '1:1'],
+    fields: [],
+  },
 ]
 
 export const mockApiKeys: APIKey[] = [

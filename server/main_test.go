@@ -141,6 +141,24 @@ func TestMainMigratesPlanReferencesAfterAutoMigrateAndFailsFast(t *testing.T) {
 	}
 }
 
+func TestMainMigratesExecutionContractsAfterAutoMigrateAndBeforeRepository(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	src := string(raw)
+	autoMigrate := strings.Index(src, "migrateModels(mysqlDB, model.AutoMigrate)")
+	contractMigration := strings.Index(src, "service.MigrateTaskExecutionContracts(context.Background(), mysqlDB, log)")
+	repositoryStartup := strings.Index(src, "// 7. Create repository.")
+	if autoMigrate < 0 || contractMigration <= autoMigrate || repositoryStartup <= contractMigration {
+		t.Fatalf("execution contract migration order invalid: auto_migrate=%d contract_migration=%d repository_startup=%d", autoMigrate, contractMigration, repositoryStartup)
+	}
+	section := src[contractMigration:repositoryStartup]
+	if !strings.Contains(section, `log.Fatal().Err(err).Msg("failed to migrate task execution contracts")`) {
+		t.Fatal("execution contract migration errors must terminate startup")
+	}
+}
+
 func TestMainRemovesGoalModeSchemaAfterAutoMigrate(t *testing.T) {
 	raw, err := os.ReadFile("main.go")
 	if err != nil {

@@ -8,7 +8,6 @@ describe('montage form helpers', () => {
       pipeline_key: '',
       source_assets: [],
       preferences: {
-        aspect_ratio: '9:16',
         duration_seconds: 30,
       },
     })
@@ -18,7 +17,6 @@ describe('montage form helpers', () => {
     expect(initialMontageInput('', undefined, {
       default_pipeline: 'social-short',
       preferences: {
-        aspect_ratio: '16:9',
         duration_seconds: 45,
         style: 'clean',
         music_prompt: 'minimal electronic',
@@ -30,7 +28,6 @@ describe('montage form helpers', () => {
       pipeline_key: 'social-short',
       source_assets: [],
       preferences: {
-        aspect_ratio: '16:9',
         duration_seconds: 45,
         style: 'clean',
         music_prompt: 'minimal electronic',
@@ -52,7 +49,6 @@ describe('montage form helpers', () => {
     }, {
       default_pipeline: 'project',
       preferences: {
-        aspect_ratio: '9:16',
         duration_seconds: 45,
         style: 'project style',
         music_prompt: 'project music',
@@ -61,7 +57,7 @@ describe('montage form helpers', () => {
     })
 
     expect(result.pipeline_key).toBe('manual')
-    expect(result.preferences?.aspect_ratio).toBe('9:16')
+    expect(result.preferences).not.toHaveProperty('aspect_ratio')
     expect(result.preferences?.duration_seconds).toBe(15)
     expect(result.preferences?.style).toBe('')
     expect(result.preferences?.music_prompt).toBe('project music')

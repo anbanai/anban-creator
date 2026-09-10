@@ -1010,6 +1010,7 @@ describe('TaskDetailPage', () => {
       file_name: 'article.html',
       mime_type: 'text/html',
       file_size: 1024,
+      is_deliverable: true,
       url: '/api/v1/files/file-1',
       created_at: '2026-07-06T03:00:00Z',
     }])
@@ -1017,7 +1018,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const review = await screen.findByText('发布前检查')
-    const files = await screen.findByText('生成文件 (1)')
+    const files = await screen.findByText('交付文件 (1)')
     const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(files.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1044,6 +1045,7 @@ describe('TaskDetailPage', () => {
         file_name: 'reference-usage-summary.json',
         mime_type: 'application/json',
         file_size: 1024,
+        is_deliverable: false,
         url: '/api/v1/files/file-summary',
         created_at: '2026-07-10T00:00:00Z',
       },
@@ -1054,6 +1056,7 @@ describe('TaskDetailPage', () => {
         file_name: 'article.html',
         mime_type: 'text/html',
         file_size: 1024,
+        is_deliverable: true,
         url: '/api/v1/files/file-1',
         created_at: '2026-07-10T00:00:01Z',
       },
@@ -1063,15 +1066,17 @@ describe('TaskDetailPage', () => {
 
     const taskStatus = await screen.findByText('已完成')
     expect(taskStatus).toBeInTheDocument()
-    const filesHeading = await screen.findByText('生成文件 (2)')
+    const filesHeading = await screen.findByText('交付文件 (1)')
     expect(filesHeading).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '过程文件 (1)' })).toBeInTheDocument()
     expect(screen.queryByText('参考素材摘要暂时无法显示')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /下载 reference-usage-summary\.json/ })).toBeDisabled()
 
     await openTaskDetails('素材')
     expect(await screen.findByText('参考素材摘要暂时无法显示')).toBeInTheDocument()
     expect(taskStatus).toBeInTheDocument()
-    expect(screen.getByText('生成文件 (2)')).toBeInTheDocument()
+    expect(screen.getByText('交付文件 (1)')).toBeInTheDocument()
   })
 
   it('separates collected failure artifacts from generated files', async () => {
@@ -1090,6 +1095,7 @@ describe('TaskDetailPage', () => {
         file_name: 'content.md',
         mime_type: 'text/markdown',
         file_size: 128,
+        is_deliverable: true,
         url: '/content.md',
         created_at: now,
       },
@@ -1110,14 +1116,14 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const generatedHeading = await screen.findByText('生成文件 (1)')
+    const generatedHeading = await screen.findByText('交付文件 (1)')
     const failedHeading = await screen.findByText('失败执行文件 (1)')
     const generatedSection = generatedHeading.closest('[data-slot="card"]') as HTMLElement
     const failedSection = failedHeading.closest('[data-slot="card"]') as HTMLElement
-    expect(within(generatedSection).getByText('content.md')).toBeInTheDocument()
-    expect(within(generatedSection).queryByText('failure-state.json')).not.toBeInTheDocument()
-    expect(within(failedSection).getByText('failure-state.json')).toBeInTheDocument()
-    expect(within(failedSection).queryByText('content.md')).not.toBeInTheDocument()
+    expect(within(generatedSection).getByRole('button', { name: '预览 content.md' })).toBeInTheDocument()
+    expect(within(generatedSection).queryByRole('button', { name: '预览 failure-state.json' })).not.toBeInTheDocument()
+    expect(within(failedSection).getByRole('button', { name: '预览 failure-state.json' })).toBeInTheDocument()
+    expect(within(failedSection).queryByRole('button', { name: '预览 content.md' })).not.toBeInTheDocument()
   })
 
   it('places Seednote analytics after generated deliverables without requiring published state', async () => {
@@ -1134,13 +1140,14 @@ describe('TaskDetailPage', () => {
       file_name: 'content.md',
       mime_type: 'text/markdown',
       file_size: 128,
+      is_deliverable: true,
       url: '/content.md',
       created_at: '2026-07-15T03:00:00Z',
     }])
 
     render(<TaskDetailPage />)
 
-    const generatedHeading = await screen.findByText('生成文件 (1)')
+    const generatedHeading = await screen.findByText('交付文件 (1)')
     const analyticsHeading = await screen.findByText('种草笔记数据')
     const context = screen.getByRole('region', { name: '任务上下文' })
     expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1208,6 +1215,7 @@ describe('TaskDetailPage', () => {
         file_name: 'article.html',
         mime_type: 'text/html',
         file_size: 1024,
+        is_deliverable: true,
         url: '/api/v1/files/file-1',
         created_at: '2026-07-06T03:00:00Z',
       },
@@ -1215,9 +1223,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('生成文件 (1)')).toBeInTheDocument()
+    expect(await screen.findByText('交付文件 (1)')).toBeInTheDocument()
     expect(screen.queryByText('交付已锁定')).not.toBeInTheDocument()
-    const zipButton = screen.getByRole('button', { name: /下载全部/ })
+    const zipButton = screen.getByRole('button', { name: /下载交付文件/ })
     expect(zipButton).toBeEnabled()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeEnabled()

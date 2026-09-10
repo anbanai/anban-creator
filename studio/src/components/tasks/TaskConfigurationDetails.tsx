@@ -119,6 +119,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
       : project?.ecommerce_defaults?.image_capability_key || '—')
   const imageCapability = imageCapabilities.find((option) => option.key === imageCapabilityKey)
   const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
+  const ratioLabel = platform === 'montage' ? '视频比例' : '图片比例'
 
   return (
     <div className="flex flex-col gap-5">
@@ -134,7 +135,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
           <Detail label="项目" value={projectName} />
           <Detail label="内容类型" value={contentTypeLabel[platform] || platform} />
           <Detail label="视觉风格" value={visualStyle} wide />
-          <Detail label="图片比例" value={imageRatio} />
+          <Detail label={ratioLabel} value={imageRatio} />
           <div className="flex min-w-0 flex-col gap-1">
             <dt className="text-xs text-muted-foreground">图像能力</dt>
             <dd className="break-words text-sm text-foreground"><ImageCapabilityDisplay option={imageCapability} fallback={imageCapabilityKey === '—' || imageCapabilityKey === '' ? '标准图像' : '已停用能力'} /></dd>

@@ -331,11 +331,12 @@ describe('createTaskSchema', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'project-montage',
       type: 'montage',
+      image_ratio: '9:16',
       montage_input: {
         brief: '做一条新品发布短片',
         pipeline_key: 'default',
         preferences: {
-          aspect_ratio: '9:16',
+          aspect_ratio: '16:9',
           duration_seconds: 30,
         },
       },
@@ -344,6 +345,8 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data).not.toHaveProperty('execution_target')
+      expect(result.data.image_ratio).toBe('9:16')
+      expect(result.data.montage_input?.preferences).not.toHaveProperty('aspect_ratio')
     }
   })
 
@@ -363,6 +366,7 @@ describe('createTaskSchema', () => {
 describe('normalizeImageRatio', () => {
   it('keeps supported ratios and maps unknown stored values to smart mode', () => {
     expect(normalizeImageRatio('3:4')).toBe('3:4')
+    expect(normalizeImageRatio('9:16')).toBe('9:16')
     expect(normalizeImageRatio('21:9')).toBe('auto')
     expect(normalizeImageRatio('900x383')).toBe('auto')
     expect(normalizeImageRatio(undefined)).toBe('auto')
@@ -550,18 +554,24 @@ describe('projectSchema', () => {
   })
 
   it('accepts montage project defaults', () => {
-    expect(projectSchema.safeParse({
+    const result = projectSchema.safeParse({
       platform: 'montage',
       name: 'Montage 项目',
+      image_ratio: '9:16',
       montage_defaults: {
         default_pipeline: 'social-short',
         preferences: {
-          aspect_ratio: '9:16',
+          aspect_ratio: '16:9',
           duration_seconds: 30,
         },
         delivery_targets: ['final_video'],
       },
-    }).success).toBe(true)
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.image_ratio).toBe('9:16')
+      expect(result.data.montage_defaults?.preferences).not.toHaveProperty('aspect_ratio')
+    }
   })
 
   it('accepts all optional fields', () => {

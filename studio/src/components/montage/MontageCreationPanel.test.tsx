@@ -38,7 +38,6 @@ function PanelHarness({ onUploadingChange }: { onUploadingChange?: (uploading: b
         pipeline_key: '',
         source_assets: [],
         preferences: {
-          aspect_ratio: '9:16',
           duration_seconds: 30,
           style: '',
           music_prompt: '',
@@ -100,7 +99,9 @@ describe('MontageCreationPanel', () => {
     expect(output).toHaveTextContent('"delivery_targets":["final_video"]')
     expect(screen.queryByText('执行位置')).not.toBeInTheDocument()
     expect(screen.queryByText('高级参数')).not.toBeInTheDocument()
+    expect(screen.queryByText('画幅')).not.toBeInTheDocument()
     expect(output).not.toHaveTextContent('execution_target')
+    expect(output).not.toHaveTextContent('aspect_ratio')
     expect(output).not.toHaveTextContent('advanced')
   })
 

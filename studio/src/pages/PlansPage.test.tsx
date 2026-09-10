@@ -845,7 +845,6 @@ describe('PlansPage Montage input', () => {
     montage_defaults: {
       default_pipeline: 'project-pipeline',
       preferences: {
-        aspect_ratio: '16:9',
         duration_seconds: 45,
         style: 'project style',
         music_prompt: 'project music',
@@ -872,11 +871,13 @@ describe('PlansPage Montage input', () => {
     next_run_at: '2025-01-20T09:00:00Z',
     project_id: montageProject.id,
     execution_profile: 'effective',
+    image_ratio: '16:9',
+    image_capability_key: 'standard',
     montage_input: {
       brief: '保存的 brief',
       pipeline_key: 'saved-pipeline',
       source_assets: [],
-      preferences: { aspect_ratio: '9:16', duration_seconds: 12 },
+      preferences: { duration_seconds: 12 },
       delivery_targets: [],
     },
     created_at: '2025-01-10T00:00:00Z',
@@ -902,7 +903,8 @@ describe('PlansPage Montage input', () => {
     expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
     const montageParameters = await openPlanParameters(dialog)
-    expect(within(montageParameters).queryByText('图片比例')).not.toBeInTheDocument()
+	  expect(within(montageParameters).getByText('视频比例')).toBeInTheDocument()
+	  expect(within(montageParameters).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
       target: { value: '按项目平台创建' },
@@ -919,8 +921,7 @@ describe('PlansPage Montage input', () => {
     })))
   })
 
-  it('creates a Montage plan without querying image capabilities', async () => {
-    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
+  it('creates a Montage plan with image settings', async () => {
     window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
     render(<PlansPage />)
 
@@ -937,9 +938,7 @@ describe('PlansPage Montage input', () => {
     })))
     const createCalls = vi.mocked(api.plans.create).mock.calls
     const payload = createCalls[createCalls.length - 1]?.[0]
-    expect(payload).not.toHaveProperty('image_ratio')
-    expect(payload).not.toHaveProperty('image_capability_key')
-    expect(api.imageCapabilities.list).not.toHaveBeenCalled()
+    expect(payload).toMatchObject({ image_ratio: '16:9' })
   })
 
   it('inherits project defaults and creates a plan with complete Montage input', async () => {
@@ -973,7 +972,6 @@ describe('PlansPage Montage input', () => {
         pipeline_key: 'project-pipeline',
         source_assets: [expect.objectContaining({ type: 'video_url', url: '/source.mp4' })],
         preferences: {
-          aspect_ratio: '16:9',
           duration_seconds: 45,
           style: 'project style',
           music_prompt: 'project music',
@@ -990,10 +988,12 @@ describe('PlansPage Montage input', () => {
     render(<PlansPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     expect(screen.getByDisplayValue('saved-pipeline')).toBeInTheDocument()
     expect(screen.getByLabelText('时长（秒）')).toHaveValue(12)
-    expect(screen.getByDisplayValue('9:16')).toBeInTheDocument()
+    const montageParameters = await openPlanParameters(dialog)
+    expect(within(montageParameters).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：/ }))
     expect(screen.queryByText('final_video')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
@@ -1001,9 +1001,11 @@ describe('PlansPage Montage input', () => {
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(
       savedMontagePlan.id,
       expect.objectContaining({
+        image_ratio: '16:9',
+        image_capability_key: 'standard',
         montage_input: expect.objectContaining({
           pipeline_key: 'saved-pipeline',
-          preferences: expect.objectContaining({ duration_seconds: 12, aspect_ratio: '9:16' }),
+          preferences: expect.objectContaining({ duration_seconds: 12 }),
           delivery_targets: [],
         }),
       }),

@@ -320,7 +320,7 @@ describe('task form mapping', () => {
         brief: 'Keep montage brief',
         pipeline_key: 'custom-pipeline',
         source_assets: [{ type: 'video_url' as const, url: 'oss://source.mp4' }],
-        preferences: { aspect_ratio: '9:16', duration_seconds: 37, style: 'kinetic' },
+        preferences: { duration_seconds: 37, style: 'kinetic' },
         delivery_targets: ['douyin'],
         advanced: { render: { fps: 60 } },
       },
@@ -332,7 +332,7 @@ describe('task form mapping', () => {
       ecommerce_defaults: { image_capability_key: 'destination-capability' },
       montage_defaults: {
         default_pipeline: 'destination-default',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 15, style: 'documentary' },
+        preferences: { duration_seconds: 15, style: 'documentary' },
         delivery_targets: ['wechat'],
       },
     })
@@ -349,7 +349,7 @@ describe('task form mapping', () => {
         brief: 'Keep montage brief',
         pipeline_key: 'destination-default',
         source_assets: [{ type: 'video_url', url: 'oss://source.mp4' }],
-        preferences: { aspect_ratio: '16:9', duration_seconds: 15, style: 'documentary' },
+        preferences: { duration_seconds: 15, style: 'documentary' },
         delivery_targets: ['wechat'],
         advanced: { render: { fps: 60 } },
       },
@@ -362,7 +362,7 @@ describe('task form mapping', () => {
       platform: 'montage',
       montage_defaults: {
         default_pipeline: 'social-short',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 45 },
+        preferences: { duration_seconds: 45 },
         delivery_targets: ['douyin'],
       },
     })
@@ -391,7 +391,7 @@ describe('task form mapping', () => {
       montage_input: {
         brief: 'Keep this video brief',
         pipeline_key: 'social-short',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 45 },
+        preferences: { duration_seconds: 45 },
         delivery_targets: ['douyin'],
       },
     })
@@ -408,7 +408,7 @@ describe('task form mapping', () => {
       platform: 'montage',
       montage_defaults: {
         default_pipeline: 'social-short',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 45, style: 'clean' },
+        preferences: { duration_seconds: 45, style: 'clean' },
         delivery_targets: ['douyin'],
       },
     })
@@ -422,7 +422,7 @@ describe('task form mapping', () => {
       montage_input: {
         brief: '',
         pipeline_key: 'social-short',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 45, style: 'clean' },
+        preferences: { duration_seconds: 45, style: 'clean' },
         delivery_targets: ['douyin'],
       },
     })
@@ -434,14 +434,14 @@ describe('task form mapping', () => {
     ['article', { article_with_cover: false, article_with_content_images: false }],
     ['seednote', { has_content_image: false, has_tail_image: false }],
     ['ecommerce', { selected_modules: { hero: 2 }, product_photos: ['oss://product.png'], target_platform: 'tmall', selling_points: 'Lightweight', language: 'zh-CN' }],
-    ['montage', { montage_input: { brief: 'Launch video', pipeline_key: 'launch', source_assets: [{ type: 'image_url', url: 'oss://asset.png' }], preferences: { aspect_ratio: '9:16', duration_seconds: 30 }, delivery_targets: ['douyin'], advanced: { render: { fps: 30 } } } }],
+    ['montage', { montage_input: { brief: 'Launch video', pipeline_key: 'launch', source_assets: [{ type: 'image_url', url: 'oss://asset.png' }], preferences: { duration_seconds: 30 }, delivery_targets: ['douyin'], advanced: { render: { fps: 30 } } } }],
   ] as const)('clones complete %s task creation defaults', (type, platformFields) => {
     const source = task({
       type,
       project_id: `${type}-project`,
       prompt: `${type} prompt`,
-      image_ratio: '16:9',
-      image_capability_key: `${type}-model`,
+      image_ratio: type === 'montage' ? '9:16' : '16:9',
+      image_capability_key: type === 'montage' ? 'montage-model' : `${type}-model`,
       skip_reference_image: false,
       watermark: false,
       has_content_image: false,
@@ -472,7 +472,7 @@ describe('task form mapping', () => {
         brief: 'Launch video',
         pipeline_key: 'launch',
         source_assets: [{ type: 'image_url', url: 'oss://asset.png' }],
-        preferences: { aspect_ratio: '9:16', duration_seconds: 30 },
+        preferences: { duration_seconds: 30 },
         delivery_targets: ['douyin'],
         advanced: { render: { fps: 30 } },
       } : undefined,
@@ -485,8 +485,8 @@ describe('task form mapping', () => {
       type,
       prompt: `${type} prompt`,
       quantity: 1,
-      image_ratio: type === 'montage' ? 'auto' : '16:9',
-      image_capability_key: type === 'montage' ? '' : `${type}-model`,
+      image_ratio: type === 'montage' ? '9:16' : '16:9',
+      image_capability_key: type === 'montage' ? 'montage-model' : `${type}-model`,
       skip_reference_image: false,
       execution_profile: 'effective',
       watermark: false,
@@ -550,7 +550,7 @@ describe('task form mapping', () => {
     })
   })
 
-  it('serializes active Montage fields without mutating form values', () => {
+  it('preserves and serializes top-level Montage image settings without mutating form values', () => {
     const values = cloneTaskFormDefaults(task({
       type: 'montage',
       image_ratio: '16:9',
@@ -563,8 +563,8 @@ describe('task form mapping', () => {
       ecommerce: { selected_modules: { hero: 1 }, product_photos: ['oss://product.png'] },
       montage_input: { advanced: { render: { fps: 30 } } },
     }))
-    expect(values.image_ratio).toBe('auto')
-    expect(values.image_capability_key).toBe('')
+    expect(values.image_ratio).toBe('16:9')
+    expect(values.image_capability_key).toBe('retired-capability')
     values.quantity = 3
 
     const request = taskFormValuesToRequest(values)
@@ -573,6 +573,8 @@ describe('task form mapping', () => {
       type: 'montage',
       project_id: 'project-1',
       quantity: 3,
+      image_ratio: '16:9',
+      image_capability_key: 'retired-capability',
       watermark: false,
       montage_input: { advanced: { render: { fps: 30 } } },
     })
@@ -582,8 +584,6 @@ describe('task form mapping', () => {
     expect(request).not.toHaveProperty('product_photos')
     expect(request).not.toHaveProperty('has_content_image')
     expect(request).not.toHaveProperty('article_with_cover')
-    expect(request).not.toHaveProperty('image_ratio')
-    expect(request).not.toHaveProperty('image_capability_key')
   })
 
   it.each([
@@ -671,7 +671,7 @@ describe('task form mapping', () => {
           brief: '  Launch video  ',
           pipeline_key: ' social-short ',
           source_assets: [{ type: 'image_url' as const, url: 'oss://source.png' }],
-          preferences: { aspect_ratio: '9:16', duration_seconds: 30, style: '  clean  ', music_prompt: '  upbeat  ' },
+          preferences: { duration_seconds: 30, style: '  clean  ', music_prompt: '  upbeat  ' },
           delivery_targets: ['douyin'],
         },
       },
@@ -681,11 +681,11 @@ describe('task form mapping', () => {
           brief: 'Launch video',
           pipeline_key: 'social-short',
           source_assets: [{ type: 'image_url', url: 'oss://source.png' }],
-          preferences: { aspect_ratio: '9:16', duration_seconds: 30, style: 'clean', music_prompt: 'upbeat' },
+          preferences: { duration_seconds: 30, style: 'clean', music_prompt: 'upbeat' },
           delivery_targets: ['douyin'],
         },
       },
-      omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'execution_target', 'image_ratio', 'image_capability_key'],
+      omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'product_photos', 'selected_modules', 'target_platform', 'selling_points', 'language', 'execution_target'],
     },
   ])('$name', ({ values, expected, omitted }) => {
     const formValues: TaskFormDefaults = {
@@ -709,8 +709,7 @@ describe('task form mapping', () => {
       skip_reference_image: false,
       ...expected,
     })
-    if (values.type === 'montage') expect(request).not.toHaveProperty('image_ratio')
-    else expect(request.image_ratio).toBe('auto')
+    expect(request.image_ratio).toBe('auto')
     expect(request.image_capability_key).toBeUndefined()
     expect(request.reference_image).toBeUndefined()
     for (const key of omitted) expect(request).not.toHaveProperty(key)

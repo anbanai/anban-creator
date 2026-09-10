@@ -36,6 +36,7 @@ type ImageGenerator interface {
 		userID, projectID, prompt, imageType, outputPath, refPath string,
 		refPaths []string,
 		taskID string,
+		aspectRatio string,
 		resolved *service.ResolvedImageModel,
 		watermark *bool,
 	) (*service.ImageResult, error)

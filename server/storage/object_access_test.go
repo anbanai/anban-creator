@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,14 @@ import (
 )
 
 type unboundedOnlyProvider struct{}
+
+type objectStreamOpener interface {
+	OpenObject(context.Context, string) (io.ReadCloser, error)
+}
+
+type attachmentURLSigner interface {
+	DownloadAttachmentURL(context.Context, string, string, int) (string, error)
+}
 
 func (*unboundedOnlyProvider) Name() string { return "unbounded" }
 func (*unboundedOnlyProvider) Upload(context.Context, string, io.Reader, string) (*UploadResult, error) {
@@ -68,6 +77,77 @@ func TestLocalProviderStatsAndBoundsObjectReads(t *testing.T) {
 	}
 }
 
+func TestLocalProviderStreamsObjectsWithoutBuffering(t *testing.T) {
+	provider, err := NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalProvider: %v", err)
+	}
+	const key = "tasks/task-1/output/final.mp4"
+	if _, err := provider.Upload(context.Background(), key, strings.NewReader("video-bytes"), "video/mp4"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	opener, ok := any(provider).(objectStreamOpener)
+	if !ok {
+		t.Fatal("LocalProvider does not expose streaming object reads")
+	}
+	stream, err := opener.OpenObject(context.Background(), key)
+	if err != nil {
+		t.Fatalf("OpenObject: %v", err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil || string(data) != "video-bytes" {
+		t.Fatalf("streamed data = %q, %v", data, err)
+	}
+}
+
+func TestLocalProviderUploadReplacesObjectWithoutBlockingOpenStream(t *testing.T) {
+	provider, err := NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalProvider: %v", err)
+	}
+	const key = "tasks/task-1/output/content.md"
+	if _, err := provider.Upload(context.Background(), key, strings.NewReader("old-content"), "text/markdown"); err != nil {
+		t.Fatalf("initial Upload: %v", err)
+	}
+
+	stream, err := provider.OpenObject(context.Background(), key)
+	if err != nil {
+		t.Fatalf("OpenObject: %v", err)
+	}
+	uploadDone := make(chan error, 1)
+	go func() {
+		_, uploadErr := provider.Upload(context.Background(), key, strings.NewReader("new-content"), "text/markdown")
+		uploadDone <- uploadErr
+	}()
+
+	select {
+	case err := <-uploadDone:
+		if err != nil {
+			_ = stream.Close()
+			t.Fatalf("replacement Upload: %v", err)
+		}
+	case <-time.After(time.Second):
+		_ = stream.Close()
+		if err := <-uploadDone; err != nil {
+			t.Fatalf("replacement Upload after closing stream: %v", err)
+		}
+		t.Fatal("replacement Upload blocked while the previous object stream remained open")
+	}
+
+	oldData, err := io.ReadAll(stream)
+	if closeErr := stream.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil || string(oldData) != "old-content" {
+		t.Fatalf("open stream after replacement = %q, %v; want old-content", oldData, err)
+	}
+	newData, err := provider.Read(context.Background(), key)
+	if err != nil || string(newData) != "new-content" {
+		t.Fatalf("stored object after replacement = %q, %v; want new-content", newData, err)
+	}
+}
+
 func TestLocalProviderStatObjectClassifiesNotFound(t *testing.T) {
 	provider, err := NewLocalProvider(t.TempDir())
 	if err != nil {
@@ -96,6 +176,47 @@ func TestOSSProviderBoundsObjectReadsAtMaxPlusOne(t *testing.T) {
 	provider := &OSSProvider{bucket: bucket}
 	if _, err := provider.ReadObject(context.Background(), "object", 5); !errors.Is(err, ErrObjectExceedsMaxSize) {
 		t.Fatalf("ReadObject error = %v, want ErrObjectExceedsMaxSize", err)
+	}
+}
+
+func TestOSSProviderStreamsObjects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "11")
+		_, _ = w.Write([]byte("video-bytes"))
+	}))
+	t.Cleanup(server.Close)
+	provider := newTestOSSProvider(t, server.URL)
+	opener, ok := any(provider).(objectStreamOpener)
+	if !ok {
+		t.Fatal("OSSProvider does not expose streaming object reads")
+	}
+	stream, err := opener.OpenObject(context.Background(), "tasks/task-1/output/final.mp4")
+	if err != nil {
+		t.Fatalf("OpenObject: %v", err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil || string(data) != "video-bytes" {
+		t.Fatalf("streamed data = %q, %v", data, err)
+	}
+}
+
+func TestOSSProviderSignsAttachmentDownloads(t *testing.T) {
+	provider := newTestOSSProvider(t, "https://oss.example.com")
+	signer, ok := any(provider).(attachmentURLSigner)
+	if !ok {
+		t.Fatal("OSSProvider does not expose attachment download URLs")
+	}
+	signed, err := signer.DownloadAttachmentURL(context.Background(), "tasks/task-1/output/final.mp4", "final.mp4", 300)
+	if err != nil {
+		t.Fatalf("DownloadAttachmentURL: %v", err)
+	}
+	parsed, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("parse signed URL: %v", err)
+	}
+	if got := parsed.Query().Get("response-content-disposition"); got != `attachment; filename=final.mp4` {
+		t.Fatalf("response-content-disposition = %q", got)
 	}
 }
 

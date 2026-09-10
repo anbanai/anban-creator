@@ -19,6 +19,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -930,12 +931,15 @@ func (s *TaskService) GetFileStream(ctx context.Context, fileID string) (io.Read
 		return nil, nil, fmt.Errorf("find task file: %w", err)
 	}
 
-	data, err := s.getFileContent(ctx, file)
+	if s.store == nil {
+		return nil, file, fmt.Errorf("read file content: no storage provider configured")
+	}
+	stream, err := storage.OpenObject(ctx, s.store, file.OSSKey)
 	if err != nil {
 		return nil, file, fmt.Errorf("read file content: %w", err)
 	}
 
-	return io.NopCloser(bytes.NewReader(data)), file, nil
+	return stream, file, nil
 }
 
 // EnrichFilesWithURLs populates the computed URL field for each task file.
@@ -967,52 +971,92 @@ func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.Ta
 	}
 }
 
-// DownloadZip creates a ZIP archive of all files belonging to a task.
-// Returns the ZIP buffer and the suggested download filename.
-func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (*bytes.Buffer, string, error) {
+// DownloadZip streams a ZIP archive containing a task's readable delivery
+// files. The caller must close the returned stream.
+func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (io.ReadCloser, string, error) {
 	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, "", fmt.Errorf("find task files: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, "", fmt.Errorf("no files found for task %s", taskID)
+		return nil, "", ErrNoDownloadableDeliveryFiles
+	}
+	files, err = s.FilterDeliverableFiles(ctx, taskID, files)
+	if err != nil {
+		return nil, "", fmt.Errorf("filter delivery files: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, "", ErrNoDownloadableDeliveryFiles
 	}
 
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
-
-	for _, file := range files {
-		data, err := s.getFileContent(ctx, file)
+	var firstStream io.ReadCloser
+	firstIndex := -1
+	for index, file := range files {
+		firstStream, err = storage.OpenObject(ctx, s.store, file.OSSKey)
 		if err != nil {
 			s.logger.Warn().Err(err).
 				Str("file_name", file.FileName).
 				Str("oss_key", file.OSSKey).
-				Msg("failed to read file for zip, skipping")
+				Msg("failed to open file for zip, skipping")
 			continue
 		}
-
-		w, err := zipWriter.Create(file.FileName)
-		if err != nil {
-			s.logger.Warn().Err(err).
-				Str("file_name", file.FileName).
-				Msg("failed to create zip entry, skipping")
-			continue
-		}
-
-		if _, err := w.Write(data); err != nil {
-			s.logger.Warn().Err(err).
-				Str("file_name", file.FileName).
-				Msg("failed to write file to zip, skipping")
-			continue
-		}
+		firstIndex = index
+		break
+	}
+	if firstIndex < 0 {
+		return nil, "", ErrNoDownloadableDeliveryFiles
 	}
 
-	if err := zipWriter.Close(); err != nil {
-		return nil, "", fmt.Errorf("close zip writer: %w", err)
-	}
+	reader, writer := io.Pipe()
+	go s.writeTaskZipStream(ctx, writer, files[firstIndex:], firstStream)
 
 	zipName := fmt.Sprintf("task_%s_files.zip", taskID)
-	return &buf, zipName, nil
+	return reader, zipName, nil
+}
+
+func (s *TaskService) writeTaskZipStream(ctx context.Context, pipeWriter *io.PipeWriter, files []*model.TaskFile, firstStream io.ReadCloser) {
+	zipWriter := zip.NewWriter(pipeWriter)
+	usedEntries := make(map[string]int, len(files))
+	for index, file := range files {
+		stream := firstStream
+		if index > 0 {
+			var err error
+			stream, err = storage.OpenObject(ctx, s.store, file.OSSKey)
+			if err != nil {
+				s.logger.Warn().Err(err).
+					Str("file_name", file.FileName).
+					Str("oss_key", file.OSSKey).
+					Msg("failed to open file for zip, skipping")
+				continue
+			}
+		}
+
+		entryName := file.FileName
+		if strings.TrimSpace(entryName) == "" {
+			entryName = file.FilePath
+		}
+		entryName = uniqueZipEntryName(usedEntries, entryName)
+		entry, err := zipWriter.Create(entryName)
+		if err != nil {
+			_ = stream.Close()
+			_ = pipeWriter.CloseWithError(fmt.Errorf("create zip entry %s: %w", entryName, err))
+			return
+		}
+		_, copyErr := io.Copy(entry, stream)
+		closeErr := stream.Close()
+		if copyErr != nil {
+			_ = pipeWriter.CloseWithError(fmt.Errorf("stream zip entry %s: %w", entryName, copyErr))
+			return
+		}
+		if closeErr != nil {
+			s.logger.Warn().Err(closeErr).Str("file_name", file.FileName).Msg("close zip source stream")
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		_ = pipeWriter.CloseWithError(fmt.Errorf("close zip writer: %w", err))
+		return
+	}
+	_ = pipeWriter.Close()
 }
 
 // BulkDownloadZipManifest describes what was included or skipped in a bulk task export.
@@ -1086,7 +1130,18 @@ func (s *TaskService) DownloadTasksZip(ctx context.Context, userID string, taskI
 			continue
 		}
 		if len(files) == 0 {
-			entry.Reason = "no_files"
+			entry.Reason = "no_delivery_files"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+		files, err = s.FilterDeliverableFiles(ctx, taskID, files)
+		if err != nil {
+			entry.Reason = "delivery_contract_failed"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+		if len(files) == 0 {
+			entry.Reason = "no_delivery_files"
 			manifest.Tasks = append(manifest.Tasks, entry)
 			continue
 		}
@@ -1102,18 +1157,30 @@ func (s *TaskService) DownloadTasksZip(ctx context.Context, userID string, taskI
 				break
 			}
 
-			data, err := s.getFileContent(ctx, file)
+			stream, err := storage.OpenObject(ctx, s.store, file.OSSKey)
 			if err != nil {
 				s.logger.Warn().Err(err).
 					Str("task_id", taskID).
 					Str("file_name", file.FileName).
 					Str("oss_key", file.OSSKey).
-					Msg("failed to read file for bulk zip, skipping")
+					Msg("failed to open file for bulk zip, skipping")
 				continue
 			}
-			if includedBytes+int64(len(data)) > maxBulkZipBytes {
-				entry.Reason = "export_size_limit_reached"
-				break
+
+			remaining := maxBulkZipBytes - includedBytes
+			staged, written, stageErr := stageBulkZipFile(stream, remaining)
+			if stageErr != nil {
+				if errors.Is(stageErr, storage.ErrObjectExceedsMaxSize) {
+					entry.Reason = "export_size_limit_reached"
+					break
+				}
+				entry.Reason = "file_read_failed"
+				s.logger.Warn().Err(stageErr).
+					Str("task_id", taskID).
+					Str("file_name", file.FileName).
+					Str("oss_key", file.OSSKey).
+					Msg("failed to stage file for bulk zip, skipping")
+				continue
 			}
 
 			fileName := file.FilePath
@@ -1124,16 +1191,27 @@ func (s *TaskService) DownloadTasksZip(ctx context.Context, userID string, taskI
 			zipPath := uniqueZipEntryName(usedEntries, taskDir+"/"+fileName)
 			w, err := zipWriter.Create(zipPath)
 			if err != nil {
+				_ = staged.Close()
+				_ = os.Remove(staged.Name())
 				s.logger.Warn().Err(err).Str("zip_path", zipPath).Msg("failed to create bulk zip entry, skipping")
 				continue
 			}
-			if _, err := w.Write(data); err != nil {
-				s.logger.Warn().Err(err).Str("zip_path", zipPath).Msg("failed to write bulk zip entry, skipping")
-				continue
+			_, copyErr := io.Copy(w, staged)
+			closeErr := staged.Close()
+			removeErr := os.Remove(staged.Name())
+			if copyErr != nil {
+				_ = zipWriter.Close()
+				return nil, "", fmt.Errorf("write staged bulk zip entry %s: %w", zipPath, copyErr)
+			}
+			if closeErr != nil {
+				s.logger.Warn().Err(closeErr).Str("zip_path", zipPath).Msg("close staged bulk zip file")
+			}
+			if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				s.logger.Warn().Err(removeErr).Str("zip_path", zipPath).Msg("remove staged bulk zip file")
 			}
 			entry.Files = append(entry.Files, zipPath)
 			includedFiles++
-			includedBytes += int64(len(data))
+			includedBytes += written
 		}
 
 		if len(entry.Files) == 0 {
@@ -1163,11 +1241,43 @@ func (s *TaskService) DownloadTasksZip(ctx context.Context, userID string, taskI
 		return nil, "", fmt.Errorf("close zip writer: %w", err)
 	}
 	if includedCount == 0 {
-		return nil, "", fmt.Errorf("no downloadable files found")
+		return nil, "", ErrNoDownloadableDeliveryFiles
 	}
 
 	zipName := fmt.Sprintf("tasks_export_%s.zip", time.Now().Format("20060102_150405"))
 	return &buf, zipName, nil
+}
+
+func stageBulkZipFile(stream io.ReadCloser, maxBytes int64) (*os.File, int64, error) {
+	staged, err := os.CreateTemp("", "anban-bulk-delivery-*")
+	if err != nil {
+		_ = stream.Close()
+		return nil, 0, fmt.Errorf("create bulk zip staging file: %w", err)
+	}
+	cleanup := func() {
+		_ = staged.Close()
+		_ = os.Remove(staged.Name())
+	}
+
+	written, copyErr := io.Copy(staged, io.LimitReader(stream, maxBytes+1))
+	closeErr := stream.Close()
+	if copyErr != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("read bulk zip source: %w", copyErr)
+	}
+	if closeErr != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("close bulk zip source: %w", closeErr)
+	}
+	if written > maxBytes {
+		cleanup()
+		return nil, 0, fmt.Errorf("%w: bulk delivery file exceeds remaining %d bytes", storage.ErrObjectExceedsMaxSize, maxBytes)
+	}
+	if _, err := staged.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("rewind bulk zip staging file: %w", err)
+	}
+	return staged, written, nil
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

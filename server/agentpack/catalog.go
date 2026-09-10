@@ -235,6 +235,20 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
 		}
 	}
+	if err := validateDeliveryContract(manifest.Delivery); err != nil {
+		return err
+	}
+	for taskType, deliveries := range manifest.DeliveryByTaskType {
+		if !taskTypes[taskType] {
+			return fmt.Errorf("delivery override references unbound task type %q", taskType)
+		}
+		if len(deliveries) == 0 {
+			return fmt.Errorf("delivery override for task type %q must not be empty", taskType)
+		}
+		if err := validateDeliveryContract(deliveries); err != nil {
+			return fmt.Errorf("delivery override for task type %q: %w", taskType, err)
+		}
+	}
 	if len(manifest.ProgressByTaskType) > 0 && len(manifest.Progress) == 0 {
 		return fmt.Errorf("progress_by_task_type requires non-empty progress")
 	}
@@ -257,6 +271,48 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if err := validateProgressContract(progress, true); err != nil {
 			return fmt.Errorf("progress override for task type %q: %w", taskType, err)
 		}
+	}
+	if manifest.Kind == KindManaged {
+		for _, taskType := range manifest.Bindings.TaskTypes {
+			if len(manifest.DeliveryForTaskType(taskType)) == 0 {
+				return fmt.Errorf("managed Pack task type %q requires a non-empty delivery contract", taskType)
+			}
+			required, err := manifest.RequiredArtifactsForTaskType(taskType)
+			if err != nil {
+				return fmt.Errorf("managed Pack task type %q: %w", taskType, err)
+			}
+			if len(required) == 0 {
+				return fmt.Errorf("managed Pack task type %q requires at least one required artifact", taskType)
+			}
+		}
+	}
+	return nil
+}
+
+func validateDeliveryContract(deliveries []DeliverySpec) error {
+	seen := make(map[string]struct{}, len(deliveries))
+	for _, delivery := range deliveries {
+		if err := validateDeliverySpec(delivery); err != nil {
+			return err
+		}
+		path := strings.TrimSpace(strings.ReplaceAll(delivery.Path, "\\", "/"))
+		if _, exists := seen[path]; exists {
+			return fmt.Errorf("duplicate delivery path %q", path)
+		}
+		seen[path] = struct{}{}
+	}
+	return nil
+}
+
+func validateDeliverySpec(delivery DeliverySpec) error {
+	if strings.TrimSpace(delivery.Role) == "" || strings.TrimSpace(delivery.MIMEType) == "" {
+		return fmt.Errorf("invalid delivery contract for %q", delivery.Path)
+	}
+	if err := validateOutputArtifactPath(delivery.Path); err != nil {
+		return fmt.Errorf("invalid delivery contract for %q: delivery path must be under output/", delivery.Path)
+	}
+	if _, err := pathpkg.Match(delivery.Path, delivery.Path); err != nil {
+		return fmt.Errorf("invalid delivery contract for %q: invalid glob: %w", delivery.Path, err)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -63,7 +64,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Template{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
@@ -147,8 +148,16 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	userID := uuid.NewString()
 	project := createAccountInfoProject(t, repo, userID, "")
 	task := createAccountInfoTask(t, repo, userID, project.ID, "")
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackID: "seednote", AgentPackVersion: "test", AgentPackDigest: strings.Repeat("a", 64),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "running", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/pending.md", FileName: "pending.md"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "old", State: model.TaskFileStateSuperseded, Role: model.FileRoleOther, FilePath: "output/old.md", FileName: "old.md"},
@@ -1041,7 +1050,6 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 	ch.SetMontageDefaults(model.MontageDefaults{
 		DefaultPipeline: "social-short",
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 45,
 		},
 		AssetGuidance:   "优先使用用户上传的视频素材",
@@ -1066,7 +1074,6 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 			URL:  "/api/v1/files/source.mp4",
 		}},
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 30,
 		},
 	})

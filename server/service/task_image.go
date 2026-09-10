@@ -47,7 +47,7 @@ type TaskImageModelResolver interface {
 }
 
 type TaskImageGenerator interface {
-	GenerateImage(context.Context, string, string, string, string, string, string, []string, string, *ResolvedImageModel, *bool) (*ImageResult, error)
+	GenerateImage(context.Context, string, string, string, string, string, string, []string, string, string, *ResolvedImageModel, *bool) (*ImageResult, error)
 }
 
 type TaskImageService struct {
@@ -137,15 +137,18 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 			RequestedRatio: req.AspectRatio, AllowedImageRatios: allowedRatios, TaskImageRatio: task.ImageRatio,
 		}
 	}
-	if req.ExecutionID == "" && task.CurrentExecutionID != nil {
-		req.ExecutionID = strings.TrimSpace(*task.CurrentExecutionID)
-	}
 	if req.ExecutionID == "" {
 		return nil, errors.New("current execution identity is required for fixed-SKU image settlement")
 	}
 	if req.Watermark == nil && task.Watermark {
 		watermark := true
 		req.Watermark = &watermark
+	}
+	if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+		return nil, fmt.Errorf("authorize image generation execution: %w", err)
+	}
+	if model.IsMontagePlatform(task.Type) && strings.TrimSpace(task.ImageCapabilityKey) == "" {
+		return nil, ErrTaskImageCapabilityMissing
 	}
 
 	resolved, err := s.resolver.ResolveImageModelForGeneration(ctx, req.UserID, task.ImageCapabilityKey, req.ImageType, len(req.ReferencePaths))
@@ -201,7 +204,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		return s.replayAsset(ctx, file, snapshot)
 	}
 
-	referencePaths, cleanupReferences, err := s.resolveReadablePaths(ctx, req.TaskID, req.ReferencePaths)
+	referencePaths, cleanupReferences, err := s.resolveReadablePaths(ctx, task, req, req.ReferencePaths)
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference images: %w", err)
 	}
@@ -210,7 +213,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 
 	req.Prompt = appendStrictImageRatioRequirement(req.Prompt, req.AspectRatio)
-	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, resolved, req.Watermark)
+	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, req.AspectRatio, resolved, req.Watermark)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -227,11 +230,18 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	result.Width, result.Height = actualWidth, actualHeight
 	if !imageDimensionsMatchRatio(actualWidth, actualHeight, req.AspectRatio) {
+		actualWidth, actualHeight, err = normalizeGeneratedTaskImageRatio(result, req.AspectRatio)
+	}
+	if err != nil || !imageDimensionsMatchRatio(actualWidth, actualHeight, req.AspectRatio) {
 		discardGeneratedTaskImage(result)
+		if err != nil {
+			return nil, fmt.Errorf("normalize generated image to %s: %w", req.AspectRatio, err)
+		}
 		return nil, &ImageRatioMismatchError{
 			RequestedRatio: req.AspectRatio, ActualWidth: actualWidth, ActualHeight: actualHeight, CapabilityKey: resolved.Key,
 		}
 	}
+	result.Width, result.Height = actualWidth, actualHeight
 
 	asset, err := s.persist(ctx, req, operationID, fingerprint, pricing, result)
 	if err != nil {
@@ -260,6 +270,41 @@ func discardGeneratedTaskImage(result *ImageResult) {
 	result.CleanupLocalFile()
 }
 
+func normalizeGeneratedTaskImageRatio(result *ImageResult, ratio string) (int, int, error) {
+	if result == nil || strings.TrimSpace(result.SavedFilePath()) == "" {
+		return 0, 0, errors.New("saved image path is required")
+	}
+	width, height, ok := largestExactRatioDimensions(result.Width, result.Height, ratio)
+	if !ok {
+		return result.Width, result.Height, nil
+	}
+	if err := appimage.CropToSizeWithAnchor(result.SavedFilePath(), result.SavedFilePath(), width, height, "center"); err != nil {
+		return result.Width, result.Height, err
+	}
+	actualWidth, actualHeight, err := appimage.GetImageDimensions(result.SavedFilePath())
+	if err != nil {
+		return 0, 0, err
+	}
+	return actualWidth, actualHeight, nil
+}
+
+func largestExactRatioDimensions(width, height int, ratio string) (int, int, bool) {
+	parts := strings.Split(ratio, ":")
+	if width <= 0 || height <= 0 || len(parts) != 2 {
+		return 0, 0, false
+	}
+	ratioWidth, errWidth := strconv.Atoi(parts[0])
+	ratioHeight, errHeight := strconv.Atoi(parts[1])
+	if errWidth != nil || errHeight != nil || ratioWidth <= 0 || ratioHeight <= 0 {
+		return 0, 0, false
+	}
+	scale := min(width/ratioWidth, height/ratioHeight)
+	if scale <= 0 {
+		return 0, 0, false
+	}
+	return ratioWidth * scale, ratioHeight * scale, true
+}
+
 func taskImageOperationIdentity(req GenerateTaskImageRequest) (string, string, error) {
 	canonical, err := json.Marshal(struct {
 		ExecutionID    string
@@ -285,9 +330,17 @@ func taskImageOperationIdentity(req GenerateTaskImageRequest) (string, string, e
 }
 
 func appendStrictImageRatioRequirement(prompt, ratio string) string {
+	forbidden := make([]string, 0, 5)
+	for _, fallbackRatio := range []string{"2:3", "9:16"} {
+		if fallbackRatio != ratio {
+			forbidden = append(forbidden, fallbackRatio)
+		}
+	}
+	forbidden = append(forbidden, "近似比例", "留白边框", "内嵌画布")
+	forbiddenText := strings.Join(forbidden[:len(forbidden)-1], "、") + "或" + forbidden[len(forbidden)-1]
 	return strings.TrimSpace(prompt) + "\n\n" + fmt.Sprintf(`输出规格：最终图片画布宽高比必须严格为 %s。
 该比例是交付要求，不是构图建议。
-不得输出 2:3、9:16、近似比例、留白边框或内嵌画布。`, ratio)
+不得输出 %s。`, ratio, forbiddenText)
 }
 
 func imageDimensionsMatchRatio(width, height int, ratio string) bool {
@@ -381,14 +434,17 @@ func firstTaskFileURL(file *model.TaskFile) string {
 	return file.OSSURL
 }
 
-func (s *TaskImageService) resolveReadablePaths(ctx context.Context, taskID string, paths []string) ([]string, func(), error) {
+func (s *TaskImageService) resolveReadablePaths(ctx context.Context, task *model.Task, req GenerateTaskImageRequest, paths []string) ([]string, func(), error) {
 	if len(paths) == 0 {
 		return nil, nil, nil
 	}
+	allowProjectStyleReference := model.IsMontagePlatform(task.Type)
 	result := make([]string, 0, len(paths))
 	cleanups := make([]func(), 0)
 	for _, path := range paths {
-		resolved, cleanup, err := s.resolveReadablePath(ctx, taskID, path)
+		resolved, cleanup, err := s.tasks.materializeAuthorizedTaskImageReference(
+			ctx, task, req.UserID, req.ProjectID, req.ExecutionID, path, allowProjectStyleReference, maxTaskImageReferenceBytes,
+		)
 		if err != nil {
 			for _, cleanup := range cleanups {
 				cleanup()
@@ -408,32 +464,6 @@ func (s *TaskImageService) resolveReadablePaths(ctx context.Context, taskID stri
 			cleanup()
 		}
 	}, nil
-}
-
-func (s *TaskImageService) resolveReadablePath(ctx context.Context, taskID, path string) (string, func(), error) {
-	path = strings.TrimSpace(path)
-	if path == "" || filepath.IsAbs(path) {
-		return path, nil, nil
-	}
-	if s.tasks.Repository() == nil || s.tasks.Storage() == nil {
-		return path, nil, nil
-	}
-	cleanPath, err := CleanTaskFileRelativePath(path)
-	if err != nil {
-		return path, nil, nil
-	}
-	taskFile, err := s.tasks.Repository().TaskFiles().FindExisting(ctx, taskID, cleanPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("find task file %s: %w", cleanPath, err)
-	}
-	if taskFile == nil || strings.TrimSpace(taskFile.OSSKey) == "" {
-		return path, nil, nil
-	}
-	data, err := s.tasks.Storage().Read(ctx, taskFile.OSSKey)
-	if err != nil {
-		return "", nil, fmt.Errorf("read task file %s: %w", cleanPath, err)
-	}
-	return writeTaskImageTemp(data, cleanPath)
 }
 
 func writeTaskImageTemp(data []byte, logicalPath string) (string, func(), error) {

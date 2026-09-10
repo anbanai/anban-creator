@@ -31,15 +31,6 @@ export function MontageProjectDefaultsPanel({ form }: MontageProjectDefaultsPane
             <FormMessage />
           </FormItem>
         )} />
-        <FormField control={form.control} name="montage_defaults.preferences.aspect_ratio" render={({ field }) => (
-          <FormItem>
-            <FormLabel>默认画幅</FormLabel>
-            <FormControl>
-              <Input aria-label="默认画幅" {...field} value={field.value ?? ''} placeholder="例如 9:16" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
         <FormField control={form.control} name="montage_defaults.preferences.duration_seconds" render={({ field }) => (
           <FormItem>
             <FormLabel>默认时长（秒）</FormLabel>

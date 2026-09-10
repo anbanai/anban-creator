@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -36,7 +37,8 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
+	store := &fakeTaskStorage{files: map[string][]byte{}}
+	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	profiles, err := NewAgentProfileRegistry(testAgentProfiles())
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +52,13 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	userID, projectID := uuid.NewString(), uuid.NewString()
+	if err := repo.Projects().Create(context.Background(), &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Cloud completion", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +75,11 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), task.ID, 1
 	execution.Target, execution.Status, execution.Started = "docker", executionStatus, started
 	execution.RuntimeProfile, execution.RuntimeImage = "article", "registry/content@sha256:test"
+	execution.AgentPackID = "article"
+	execution.AgentPackVersion = "test"
+	execution.AgentPackDigest = strings.Repeat("a", 64)
+	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`)
+	execution.AgentPackRequiredArtifactContract = datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown","required":true}]`)
 	if withArtifact {
 		execution.ManifestStatus = model.TaskExecutionManifestPending
 	}
@@ -78,9 +91,16 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	}
 	task.CurrentExecutionID = &execution.ID
 	if withArtifact {
+		content := []byte("artifact")
+		key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + "output/content.md"
+		uploaded, err := store.Upload(context.Background(), key, strings.NewReader(string(content)), "text/markdown")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{{
 			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
-			Role: "content", FilePath: "output/content.md", FileName: "content.md", FileSize: 8,
+			Role: "content", FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown",
+			FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL, StorageProvider: store.Name(),
 		}}); err != nil {
 			t.Fatal(err)
 		}

@@ -189,14 +189,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	isMontagePlan := req.MontageInput != nil
-	if h.repo != nil {
-		isMontagePlan = isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID)
-	}
-	if isMontagePlan {
-		req.ImageCapabilityKey = ""
-		req.ImageRatio = ""
-	}
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
@@ -388,11 +380,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	}
 	if existing.UserID != userID {
 		return Forbidden(c, "you do not have access to this plan")
-	}
-	if model.IsMontagePlatform(existing.Type) {
-		empty := ""
-		req.ImageCapabilityKey = &empty
-		req.ImageRatio = &empty
 	}
 	if req.ImageRatio != nil && *req.ImageRatio != "" && !model.ValidImageRatios[*req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)

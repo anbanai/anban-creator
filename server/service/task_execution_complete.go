@@ -172,6 +172,13 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 			result.Success, result.Error = false, validation.Error()
 			result.TerminalReason = model.TaskBillingTerminalPlatformError
 			failureReason = "deliverable_validation_failed"
+		} else if deliveryErr := s.validateExecutionDelivery(ctx, task.ID, execution, files); deliveryErr != nil {
+			if !errors.Is(deliveryErr, ErrTaskDeliveryObjectInvalid) && !errors.Is(deliveryErr, ErrTaskDeliveryContractUnavailable) {
+				return "", "", nil, deliveryErr
+			}
+			result.Success, result.Error = false, "delivery validation failed: "+deliveryErr.Error()
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
+			failureReason = "deliverable_validation_failed"
 		}
 	}
 	if result.Success {
@@ -533,7 +540,7 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
 	target, errMsg := taskTerminalFromExecution(execution, result)
 	reason := terminalBillingReason(execution, result)
-	durableDelivery, err := s.executionHasDurableDelivery(ctx, execution.ID)
+	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
 	if err != nil {
 		return fmt.Errorf("inspect durable task delivery: %w", err)
 	}

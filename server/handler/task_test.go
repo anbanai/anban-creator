@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
@@ -40,6 +42,47 @@ type capturingTaskEnqueuer struct {
 }
 
 type availableRuntimeDispatcher struct{}
+
+type readTrackingTaskStorage struct {
+	*storage.LocalProvider
+	readCalls int
+}
+
+type faultingTaskDownloadStorage struct {
+	*storage.LocalProvider
+	lastStream *faultingTaskDownloadStream
+}
+
+type faultingTaskDownloadStream struct {
+	data   []byte
+	err    error
+	closed bool
+}
+
+func (s *faultingTaskDownloadStorage) OpenObject(context.Context, string) (io.ReadCloser, error) {
+	stream := &faultingTaskDownloadStream{data: []byte("partial"), err: errors.New("storage stream interrupted")}
+	s.lastStream = stream
+	return stream, nil
+}
+
+func (s *faultingTaskDownloadStream) Read(p []byte) (int, error) {
+	if len(s.data) > 0 {
+		n := copy(p, s.data)
+		s.data = s.data[n:]
+		return n, nil
+	}
+	return 0, s.err
+}
+
+func (s *faultingTaskDownloadStream) Close() error {
+	s.closed = true
+	return nil
+}
+
+func (s *readTrackingTaskStorage) Read(ctx context.Context, key string) ([]byte, error) {
+	s.readCalls++
+	return s.LocalProvider.Read(ctx, key)
+}
 
 func handlerTestAgentProfileRegistry(t *testing.T) *service.AgentProfileRegistry {
 	t.Helper()
@@ -63,13 +106,31 @@ func freezeHandlerTaskProfile(t *testing.T, task *model.Task) {
 	task.ExecutionProfile = profile.ID
 	task.AgentProfileSnapshot = snapshot
 	task.AgentProfileFingerprint = fingerprint
+	if task.Type != model.TaskTypeViralAnalysis && task.ImageCapabilityKey == "" {
+		task.ImageCapabilityKey = "standard"
+	}
 }
 
 func newHandlerTaskService(t *testing.T, repo repository.Repository, enqueuer service.TaskEnqueuer, store storage.Provider, logger *zerolog.Logger, taskLogDir string, pubsub *service.RedisPubSub, publishing *service.PublishingService) *service.TaskService {
 	t.Helper()
 	svc := service.NewTaskService(repo, enqueuer, store, logger, taskLogDir, pubsub, publishing)
 	svc.SetAgentProfileRegistry(handlerTestAgentProfileRegistry(t))
+	svc.SetImageCapabilityResolver(service.NewImageCapabilityResolver(repo, &config.Config{
+		ModelRoutes: config.ModelRoutesConfig{ImageGeneration: config.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]config.ImageGenerationRouteConfig{
+				"standard": {Enabled: true, MinTier: string(model.TierFree)},
+			},
+		}},
+	}))
 	return svc
+}
+
+func setHandlerImageCapabilities(taskSvc *service.TaskService, handler *TaskHandler, repo repository.Repository, routes config.ImageGenerationRoutesConfig) {
+	taskSvc.SetImageCapabilityResolver(service.NewImageCapabilityResolver(repo, &config.Config{
+		ModelRoutes: config.ModelRoutesConfig{ImageGeneration: routes},
+	}))
+	handler.SetImageCapabilities(routes)
 }
 
 func newHandlerPlanService(t *testing.T, repo repository.Repository, logger *zerolog.Logger) *service.PlanService {
@@ -146,6 +207,48 @@ func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate db: %v", err)
 	}
 	return db
+}
+
+// seedHandlerFrozenExecution mirrors the production dispatch snapshot so file
+// API tests exercise the same delivery-contract lookup as real tasks.
+func seedHandlerFrozenExecution(t *testing.T, repo repository.Repository, taskID, taskType, terminalStatus string) string {
+	t.Helper()
+	ctx := context.Background()
+	pack, ok := agentpack.Default().ForTaskType(taskType)
+	if !ok {
+		t.Fatalf("missing Agent Pack for %s", taskType)
+	}
+	contract, err := json.Marshal(pack.DeliveryForTaskType(taskType))
+	if err != nil {
+		t.Fatalf("marshal delivery contract: %v", err)
+	}
+	required, err := pack.RequiredArtifactsForTaskType(taskType)
+	if err != nil {
+		t.Fatalf("resolve required artifact contract: %v", err)
+	}
+	requiredContract, err := json.Marshal(required)
+	if err != nil {
+		t.Fatalf("marshal required artifact contract: %v", err)
+	}
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackID: pack.ID, AgentPackVersion: pack.Version, AgentPackDigest: pack.Digest,
+		AgentPackDeliveryContract: contract, AgentPackRequiredArtifactContract: requiredContract,
+		ExecutionProfile: "effective", Provider: "test",
+		ProfileFingerprint: strings.Repeat("e", 64), Target: "docker",
+	}); err != nil {
+		t.Fatalf("create frozen execution: %v", err)
+	}
+	if ok, err := repo.Tasks().SetCurrentExecution(ctx, taskID, executionID); err != nil || !ok {
+		t.Fatalf("set current execution = %v, %v", ok, err)
+	}
+	if terminalStatus != model.TaskStatusRunning {
+		if _, err := repo.Tasks().CompareAndSwapStatus(ctx, taskID, model.TaskStatusRunning, terminalStatus); err != nil {
+			t.Fatalf("set terminal task status: %v", err)
+		}
+	}
+	return executionID
 }
 
 func seedHandlerUploadSession(t *testing.T, repo repository.Repository, userID, uploadID, purpose, filename, contentType string) string {
@@ -431,11 +534,12 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	userID := uuid.New().String()
 	taskID := uuid.New().String()
 	fileID := uuid.New().String()
-	store, err := storage.NewLocalProvider(t.TempDir())
+	localStore, err := storage.NewLocalProvider(t.TempDir())
 	if err != nil {
 		t.Fatalf("create local storage: %v", err)
 	}
-	upload, err := store.Upload(ctx, "tasks/"+taskID+"/article.html", strings.NewReader("<main>ok</main>"), "text/html")
+	store := &readTrackingTaskStorage{LocalProvider: localStore}
+	upload, err := store.Upload(ctx, "tasks/"+taskID+"/output/05-article.html", strings.NewReader("<main>ok</main>"), "text/html")
 	if err != nil {
 		t.Fatalf("upload file: %v", err)
 	}
@@ -449,15 +553,17 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
-		Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformArticle, model.TaskStatusCompleted)
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID:              fileID,
 		TaskID:          taskID,
+		ExecutionID:     executionID,
 		Role:            model.FileRoleHTML,
-		FilePath:        "article.html",
+		FilePath:        "output/05-article.html",
 		FileName:        "article.html",
 		MimeType:        "text/html",
 		FileSize:        upload.Size,
@@ -500,6 +606,13 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	if preview.StatusCode != fiber.StatusOK || !strings.Contains(string(previewBody), "<main>ok</main>") {
 		t.Fatalf("preview = status %d body=%s, want accessible HTML", preview.StatusCode, previewBody)
 	}
+	previewCSP := preview.Header.Get("Content-Security-Policy")
+	if !strings.Contains(previewCSP, "sandbox") || !strings.Contains(previewCSP, "default-src 'none'") || strings.Contains(previewCSP, "allow-scripts") {
+		t.Fatalf("legacy HTML preview CSP = %q, want script-free restrictive sandbox", previewCSP)
+	}
+	if store.readCalls != 0 {
+		t.Fatalf("storage Read calls = %d, want streaming downloads without full-object buffering", store.readCalls)
+	}
 }
 
 func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
@@ -527,22 +640,24 @@ func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
-		Type: model.PlatformSeednote, Status: model.TaskStatusCompleted,
+		Type: model.PlatformSeednote, Status: model.TaskStatusRunning,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
-		ID:        fileID,
-		TaskID:    taskID,
-		Role:      model.FileRoleImage,
-		FilePath:  "output/image_01.png",
-		FileName:  "image_01.png",
-		MimeType:  "image/png",
-		FileSize:  upload.Size,
-		OSSKey:    upload.Key,
-		OSSURL:    upload.URL,
-		MediaID:   "wechat-media-1",
-		WechatURL: "https://mmbiz.qpic.cn/wechat-media-1",
+		ID:          fileID,
+		TaskID:      taskID,
+		ExecutionID: executionID,
+		Role:        model.FileRoleImage,
+		FilePath:    "output/image_01.png",
+		FileName:    "image_01.png",
+		MimeType:    "image/png",
+		FileSize:    upload.Size,
+		OSSKey:      upload.Key,
+		OSSURL:      upload.URL,
+		MediaID:     "wechat-media-1",
+		WechatURL:   "https://mmbiz.qpic.cn/wechat-media-1",
 	}); err != nil {
 		t.Fatalf("create task file: %v", err)
 	}
@@ -582,6 +697,9 @@ func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 	if got.URL == "" || got.MediaID != "wechat-media-1" || got.WechatURL != "https://mmbiz.qpic.cn/wechat-media-1" {
 		t.Fatalf("delivery fields = url %q media_id %q wechat_url %q, want preserved", got.URL, got.MediaID, got.WechatURL)
 	}
+	if !got.IsDeliverable || got.DeliveryRole != "image" || got.PreviewURL == "" || got.DownloadURL == "" {
+		t.Fatalf("delivery metadata = %+v, want matched image with preview and download URLs", got)
+	}
 }
 
 func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
@@ -592,11 +710,12 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "visiblefiles"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusFailed}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusFailed)
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "successful", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
 		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
@@ -622,6 +741,169 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 	if len(body.Data) != 2 || body.Data[0].State != model.TaskFileStatePublished || body.Data[1].State != model.TaskFileStateCollected {
 		t.Fatalf("files = %#v", body.Data)
+	}
+	if !body.Data[0].IsDeliverable || body.Data[0].DownloadURL == "" || body.Data[0].PreviewURL == "" {
+		t.Fatalf("published delivery metadata = %+v", body.Data[0])
+	}
+	if body.Data[1].IsDeliverable || body.Data[1].DownloadURL != "" || body.Data[1].URL != "" || body.Data[1].PreviewURL == "" {
+		t.Fatalf("collected process metadata = %+v", body.Data[1])
+	}
+}
+
+func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID, fileID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "previewonly"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
+	upload, err := store.Upload(ctx, "tasks/"+taskID+"/output/review.html", strings.NewReader("<main>internal review</main>"), "text/html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: fileID, TaskID: taskID, State: model.TaskFileStatePublished, Role: model.FileRoleHTML,
+		FilePath: "output/review.html", FileName: `review".html`, MimeType: "text/html",
+		FileSize: upload.Size, OSSKey: upload.Key, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, store, &logger, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id/files/:fileId/download", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.DownloadFile(c)
+	})
+	app.Get("/tasks/:id/files/:fileId/preview", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.PreviewFile(c)
+	})
+
+	downloadResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/"+fileID+"/download", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != fiber.StatusForbidden {
+		body, _ := io.ReadAll(downloadResp.Body)
+		t.Fatalf("process download status = %d body=%s, want 403", downloadResp.StatusCode, body)
+	}
+
+	previewResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/"+fileID+"/preview", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer previewResp.Body.Close()
+	previewBody, _ := io.ReadAll(previewResp.Body)
+	if previewResp.StatusCode != fiber.StatusOK || string(previewBody) != "<main>internal review</main>" {
+		t.Fatalf("process preview = status %d body=%q, want authenticated preview", previewResp.StatusCode, previewBody)
+	}
+	if got := previewResp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	csp := previewResp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "sandbox") || strings.Contains(csp, "allow-scripts") {
+		t.Fatalf("Content-Security-Policy = %q, want script-free sandbox", csp)
+	}
+	if got := previewResp.Header.Get("Content-Disposition"); !strings.HasPrefix(got, "inline;") || strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("Content-Disposition = %q, want safe inline disposition", got)
+	}
+}
+
+func TestTaskFilePreviewSandboxesXHTML(t *testing.T) {
+	app := fiber.New()
+	app.Get("/preview", func(c fiber.Ctx) error {
+		setTaskFilePreviewHeaders(c, "application/xhtml+xml", "preview.xhtml")
+		return c.SendString("<html xmlns=\"http://www.w3.org/1999/xhtml\"><script>alert(1)</script></html>")
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/preview", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "sandbox") || !strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "allow-scripts") {
+		t.Fatalf("XHTML preview CSP = %q, want script-free restrictive sandbox", csp)
+	}
+	if got := resp.Header.Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("XHTML preview Referrer-Policy = %q", got)
+	}
+}
+
+func TestTaskFilePreviewForcesUnknownAndPDFContentToAttachment(t *testing.T) {
+	for _, contentType := range []string{"application/pdf", "application/octet-stream", "application/x-custom-active-content"} {
+		t.Run(contentType, func(t *testing.T) {
+			app := fiber.New()
+			app.Get("/preview", func(c fiber.Ctx) error {
+				setTaskFilePreviewHeaders(c, contentType, "untrusted.bin")
+				return c.SendString("untrusted")
+			})
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/preview", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if got := resp.Header.Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+				t.Fatalf("Content-Disposition = %q, want attachment", got)
+			}
+			if got := resp.Header.Get("Content-Type"); got != "application/octet-stream" {
+				t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+			}
+		})
+	}
+}
+
+func TestTaskFileDownloadSurfacesStorageStreamFailure(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID, fileID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "streamfail"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: fileID, TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished,
+		Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md",
+		MimeType: "text/markdown", FileSize: 32, OSSKey: "tasks/" + taskID + "/output/content.md",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	localStore, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &faultingTaskDownloadStorage{LocalProvider: localStore}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, store, &logger, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id/files/:fileId/download", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.DownloadFile(c)
+	})
+
+	resp, requestErr := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/"+fileID+"/download", nil))
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if requestErr == nil {
+		t.Fatal("download returned a successful HTTP response after the storage stream failed")
+	}
+	if store.lastStream == nil || !store.lastStream.closed {
+		t.Fatal("download did not close the failed storage stream")
 	}
 }
 
@@ -737,7 +1019,7 @@ func TestCreateTask_ImageCapabilityKeyTierForbidden(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
-	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: capabilities})
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{DefaultCapability: "volcengine-standard", Capabilities: capabilities})
 	h.SetRepository(repo)
 
 	app := fiber.New()
@@ -960,8 +1242,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	resp := postJSON(t, app, "/tasks", `{
 		"execution_profile":"effective","project_id": "`+projectID+`",
 		"quantity": 3,
-		"selected_modules": {"main_images": 1},
-		"product_photos": ["https://cdn.example.com/cup.png"]
+		"selected_modules": {"main_images": 1}
 	}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
@@ -1004,11 +1285,11 @@ func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *tes
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
-	h.SetImageCapabilities(routes)
+	setHandlerImageCapabilities(taskSvc, h, repo, routes)
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"3:4","product_photos":["https://cdn.example.com/cup.png"]}`)
+	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"3:4"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -1125,7 +1406,7 @@ func TestCloneMontageTaskIgnoresLegacyUnavailableImageSettings(t *testing.T) {
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
 		ExecutionProfile: "effective", Status: model.TaskStatusFailed,
-		ImageRatio: "16:9", ImageCapabilityKey: "retired-capability",
+		ImageRatio: "16:9", ImageCapabilityKey: "standard",
 	}
 	source.SetMontageInput(model.MontageInput{Brief: "历史短片", PipelineKey: "default"})
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -1137,7 +1418,7 @@ func TestCloneMontageTaskIgnoresLegacyUnavailableImageSettings(t *testing.T) {
 	taskSvc.SetRuntimeDispatcher(availableRuntimeDispatcher{})
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
-	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{Capabilities: map[string]config.ImageGenerationRouteConfig{
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{Capabilities: map[string]config.ImageGenerationRouteConfig{
 		"standard": {Enabled: true, MinTier: "free"},
 	}})
 	app := fiber.New()
@@ -1173,8 +1454,8 @@ func TestCloneMontageTaskIgnoresLegacyUnavailableImageSettings(t *testing.T) {
 		t.Fatalf("task count = %d, want source plus two clones", len(tasks))
 	}
 	for _, task := range tasks {
-		if task.ID != source.ID && (task.ImageRatio != "" || task.ImageCapabilityKey != "") {
-			t.Fatalf("cloned Montage image settings = ratio %q, capability %q; want empty", task.ImageRatio, task.ImageCapabilityKey)
+		if task.ID != source.ID && (task.ImageRatio != "16:9" || task.ImageCapabilityKey != "standard") {
+			t.Fatalf("cloned Montage image settings = ratio %q, capability %q; want source values", task.ImageRatio, task.ImageCapabilityKey)
 		}
 	}
 }
@@ -1221,7 +1502,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
-	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1"}}}}})
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1"}}}}})
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 
@@ -1334,6 +1615,12 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": {Enabled: true, MinTier: "free"},
+		},
+	})
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
@@ -1629,10 +1916,10 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 		{
 			name:       "ecommerce",
 			platform:   model.PlatformEcommerce,
-			typeFields: `"product_photos":["https://example.com/product.png"],"selected_modules":{"main_images":2},"target_platform":"amazon","selling_points":"durable","language":"en"`,
+			typeFields: `"selected_modules":{"main_images":2},"target_platform":"amazon","selling_points":"durable","language":"en"`,
 			assert: func(t *testing.T, task *model.Task) {
 				got := task.Ecommerce.Data()
-				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || len(got.ProductPhotos) != 1 {
+				if got.SelectedModules["main_images"] != 2 || got.TargetPlatform != "amazon" || got.SellingPoints != "durable" || got.Language != "en" || len(got.ProductPhotos) != 0 {
 					t.Fatalf("ecommerce config = %#v", got)
 				}
 			},
@@ -1640,10 +1927,10 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 		{
 			name:       "montage",
 			platform:   model.PlatformMontage,
-			typeFields: `"montage_input":{"brief":"edited montage brief","pipeline_key":"default","preferences":{"aspect_ratio":"16:9","duration_seconds":30}}`,
+			typeFields: `"montage_input":{"brief":"edited montage brief","pipeline_key":"default","preferences":{"duration_seconds":30}}`,
 			assert: func(t *testing.T, task *model.Task) {
 				got := task.MontageInput.Data()
-				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.AspectRatio != "16:9" || got.Preferences.DurationSeconds != 30 {
+				if got.Brief != "edited montage brief" || got.PipelineKey != "default" || got.Preferences.DurationSeconds != 30 {
 					t.Fatalf("montage input = %#v", got)
 				}
 			},
@@ -1913,7 +2200,7 @@ func cloneSourceReuseRequest(platform, projectID, rawURL string) string {
 }
 
 func TestCloneTask_FullEditableAllowsTrustedRootSourceReuse(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformMontage} {
 		t.Run(platform, func(t *testing.T) {
 			fixture := setupCloneSourceReuseFixture(t, platform)
 			rawURL := cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png")
@@ -2248,7 +2535,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			h.SetRepository(repo)
 			h.SetStore(store)
 			h.SetReferenceAssetService(referenceSvc)
-			h.SetImageCapabilities(config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1"}}}}})
+			setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{DefaultCapability: "free-image", Capabilities: map[string]config.ImageGenerationRouteConfig{"free-image": {Provider: "test", Model: "image-v1", MinTier: "free", Enabled: true, GenerationFeatures: config.ImageGenerationFeatures{SizePresets: []string{"1:1"}}}}})
 			app := fiber.New()
 			app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 

@@ -36,6 +36,26 @@ func applyAgentPackIdentity(execution *model.TaskExecution, taskType string) err
 		return fmt.Errorf("marshal Agent Pack progress contract: %w", err)
 	}
 	execution.AgentPackProgressContract = datatypes.JSON(progressContract)
+	deliveryContract, err := json.Marshal(pack.DeliveryForTaskType(taskType))
+	if err != nil {
+		return fmt.Errorf("marshal Agent Pack delivery contract: %w", err)
+	}
+	if len(pack.DeliveryForTaskType(taskType)) == 0 {
+		return fmt.Errorf("managed Agent Pack %q has no delivery contract for task type %q", pack.ID, taskType)
+	}
+	execution.AgentPackDeliveryContract = datatypes.JSON(deliveryContract)
+	requiredArtifacts, err := pack.RequiredArtifactsForTaskType(taskType)
+	if err != nil {
+		return fmt.Errorf("resolve Agent Pack required artifact contract: %w", err)
+	}
+	if len(requiredArtifacts) == 0 {
+		return fmt.Errorf("managed Agent Pack %q has no required artifact contract for task type %q", pack.ID, taskType)
+	}
+	requiredArtifactContract, err := json.Marshal(requiredArtifacts)
+	if err != nil {
+		return fmt.Errorf("marshal Agent Pack required artifact contract: %w", err)
+	}
+	execution.AgentPackRequiredArtifactContract = datatypes.JSON(requiredArtifactContract)
 	execution.RuntimeAdapter = pack.Runtime.Adapter
 	execution.RuntimeProfile = pack.Runtime.Profile
 	return nil
@@ -49,6 +69,8 @@ func inheritAgentPackIdentity(target, source *model.TaskExecution) bool {
 	target.AgentPackVersion = source.AgentPackVersion
 	target.AgentPackDigest = source.AgentPackDigest
 	target.AgentPackProgressContract = append(datatypes.JSON(nil), source.AgentPackProgressContract...)
+	target.AgentPackDeliveryContract = append(datatypes.JSON(nil), source.AgentPackDeliveryContract...)
+	target.AgentPackRequiredArtifactContract = append(datatypes.JSON(nil), source.AgentPackRequiredArtifactContract...)
 	target.RuntimeAdapter = source.RuntimeAdapter
 	target.RuntimeProfile = source.RuntimeProfile
 	return true
@@ -60,8 +82,43 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 		strings.TrimSpace(execution.AgentPackVersion) != "" &&
 		strings.TrimSpace(execution.AgentPackDigest) != "" &&
 		len(execution.AgentPackProgressContract) > 0 &&
+		len(execution.AgentPackDeliveryContract) > 0 &&
+		len(execution.AgentPackRequiredArtifactContract) > 0 &&
 		strings.TrimSpace(execution.RuntimeAdapter) != "" &&
 		strings.TrimSpace(execution.RuntimeProfile) != ""
+}
+
+func resolveFrozenExecutionRequiredArtifactContract(execution *model.TaskExecution) ([]agentpack.ArtifactSpec, error) {
+	if execution == nil || strings.TrimSpace(execution.AgentPackID) == "" || strings.TrimSpace(execution.AgentPackVersion) == "" || strings.TrimSpace(execution.AgentPackDigest) == "" || len(execution.AgentPackRequiredArtifactContract) == 0 {
+		return nil, ErrAgentProgressPackMismatch
+	}
+	var required []agentpack.ArtifactSpec
+	if err := json.Unmarshal(execution.AgentPackRequiredArtifactContract, &required); err != nil {
+		return nil, fmt.Errorf("%w: decode frozen required artifact contract", ErrAgentProgressPackMismatch)
+	}
+	if len(required) == 0 {
+		return nil, fmt.Errorf("%w: empty frozen required artifact contract", ErrAgentProgressPackMismatch)
+	}
+	for _, spec := range required {
+		if strings.TrimSpace(spec.Role) == "" || strings.TrimSpace(spec.Path) == "" || strings.TrimSpace(spec.MIMEType) == "" || !spec.Required {
+			return nil, fmt.Errorf("%w: invalid frozen required artifact contract", ErrAgentProgressPackMismatch)
+		}
+	}
+	return required, nil
+}
+
+func resolveFrozenExecutionDeliveryContract(execution *model.TaskExecution) ([]agentpack.DeliverySpec, error) {
+	if execution == nil || strings.TrimSpace(execution.AgentPackID) == "" || strings.TrimSpace(execution.AgentPackVersion) == "" || strings.TrimSpace(execution.AgentPackDigest) == "" || len(execution.AgentPackDeliveryContract) == 0 {
+		return nil, ErrAgentProgressPackMismatch
+	}
+	var delivery []agentpack.DeliverySpec
+	if err := json.Unmarshal(execution.AgentPackDeliveryContract, &delivery); err != nil {
+		return nil, fmt.Errorf("%w: decode frozen delivery contract", ErrAgentProgressPackMismatch)
+	}
+	if len(delivery) == 0 {
+		return nil, fmt.Errorf("%w: empty frozen delivery contract", ErrAgentProgressPackMismatch)
+	}
+	return delivery, nil
 }
 
 func resolveFrozenExecutionProgressContract(execution *model.TaskExecution) ([]agentpack.ProgressStage, error) {

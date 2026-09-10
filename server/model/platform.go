@@ -108,11 +108,13 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		BadgeVariant:         "secondary",
 		SupportsPublishing:   false,
 		SupportsAutoFetch:    false,
-		SupportedImageRatios: []string{},
+		DefaultImageRatio:    "9:16",
+		SupportedImageRatios: []string{"9:16", "16:9", "1:1"},
 		Fields: []PlatformFieldConfig{
 			{Key: "name", Label: "项目名称", Placeholder: "例如 产品发布短片", Required: true, Type: "text", Group: "basic"},
 			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向社交媒体的品牌短视频", Type: "textarea", Group: "basic"},
 			{Key: "keywords", Label: "关键词", Placeholder: "例如 产品发布, 竖屏短片, 节奏感", Type: "textarea", Group: "advanced"},
+			{Key: "image_ratio", Label: "视频比例", Placeholder: "9:16（短视频默认）", Type: "select", Group: "advanced"},
 		},
 	},
 }

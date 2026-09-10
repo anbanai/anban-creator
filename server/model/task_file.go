@@ -21,6 +21,10 @@ type TaskFile struct {
 	OSSURL          string    `gorm:"type:varchar(500)" json:"-"`
 	StorageProvider string    `gorm:"type:varchar(20);default:local" json:"-"`
 	URL             string    `gorm:"-" json:"url"`
+	IsDeliverable   bool      `gorm:"-" json:"is_deliverable"`
+	DeliveryRole    string    `gorm:"-" json:"delivery_role,omitempty"`
+	PreviewURL      string    `gorm:"-" json:"preview_url"`
+	DownloadURL     string    `gorm:"-" json:"download_url,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 

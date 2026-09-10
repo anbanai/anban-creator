@@ -172,7 +172,7 @@ export function TaskFormDialog({
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
-  const usesImageSettings = !isViralAnalysisTask && !isMontageTask
+	const usesImageSettings = !isViralAnalysisTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
@@ -331,6 +331,7 @@ export function TaskFormDialog({
     const submittedValues: TaskFormDefaults = {
       ...values,
       quantity: Math.min(values.quantity, maxTaskQuantity(values.type)),
+      image_capability_key: usesImageSettings ? effectiveImageCapabilityKey : values.image_capability_key,
       input_attachments: attachmentController.toInputAttachments(),
     }
     const request = taskFormValuesToRequest(submittedValues)

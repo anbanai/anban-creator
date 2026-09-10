@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -64,6 +67,37 @@ func (f *fakeTaskStorage) Read(_ context.Context, key string) ([]byte, error) {
 		return nil, errors.New("not found")
 	}
 	return append([]byte(nil), data...), nil
+}
+func (f *fakeTaskStorage) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, ok := f.files[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectExceedsMaxSize, key)
+	}
+	f.readKey = key
+	return append([]byte(nil), data...), nil
+}
+func (f *fakeTaskStorage) OpenObject(_ context.Context, key string) (io.ReadCloser, error) {
+	data, ok := f.files[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+func (f *fakeTaskStorage) StatObject(_ context.Context, key string) (*storage.ObjectInfo, error) {
+	data, ok := f.files[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
+	}
+	ext := strings.ToLower(filepath.Ext(key))
+	contentType := mimeTypes[ext]
+	if contentType == "" {
+		contentType = contentTypeForUploadExt(ext)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	return &storage.ObjectInfo{Key: key, Size: int64(len(data)), MimeType: contentType, ContentType: contentType, SHA256: digest}, nil
 }
 func (f *fakeTaskStorage) Delete(_ context.Context, key string) error {
 	f.deletedKeys = append(f.deletedKeys, key)

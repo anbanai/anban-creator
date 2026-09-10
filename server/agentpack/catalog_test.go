@@ -3,11 +3,30 @@ package agentpack
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
+
+func requiredArtifactPaths(manifest Manifest) []string {
+	paths := make([]string, 0, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Required {
+			paths = append(paths, artifact.Path)
+		}
+	}
+	return paths
+}
+
+func deliveryPaths(deliveries []DeliverySpec) []string {
+	paths := make([]string, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		paths = append(paths, delivery.Path)
+	}
+	return paths
+}
 
 func TestLoadCatalogValidatesAndResolvesManagedPack(t *testing.T) {
 	root := writePackFixture(t, `
@@ -42,6 +61,10 @@ artifacts:
     path: output/final.md
     mime_type: text/markdown
     required: true
+delivery:
+  - role: final
+    path: output/final.md
+    mime_type: text/markdown
 `)
 
 	catalog, err := LoadCatalog(root)
@@ -71,6 +94,60 @@ artifacts:
 	}
 }
 
+func TestRequiredArtifactsForTaskTypeResolvesTaskSpecificProgressContract(t *testing.T) {
+	pack, ok := Default().Pack("seednote")
+	if !ok {
+		t.Fatal("embedded seednote Pack missing")
+	}
+
+	seednote, err := pack.RequiredArtifactsForTaskType(model.PlatformSeednote)
+	if err != nil {
+		t.Fatalf("seednote required artifacts: %v", err)
+	}
+	if got := artifactPaths(seednote); !slices.Equal(got, []string{"output/content.md", "output/image-plan.md"}) {
+		t.Fatalf("seednote required artifacts = %v", got)
+	}
+
+	viral, err := pack.RequiredArtifactsForTaskType(model.TaskTypeViralAnalysis)
+	if err != nil {
+		t.Fatalf("viral-analysis required artifacts: %v", err)
+	}
+	if got := artifactPaths(viral); !slices.Equal(got, []string{"output/source-analysis.md", "output/viral-template.json"}) {
+		t.Fatalf("viral-analysis required artifacts = %v", got)
+	}
+}
+
+func TestRequiredArtifactsForTaskTypeFallsBackToRequiredArtifactSpecs(t *testing.T) {
+	pack := Manifest{
+		Artifacts: []ArtifactSpec{
+			{Role: "final", Path: "output/final.md", MIMEType: "text/markdown", Required: true},
+			{Role: "review", Path: "output/review.md", MIMEType: "text/markdown", Required: false},
+		},
+		Progress: []ProgressStage{{
+			ID:              "delivery",
+			Title:           "Delivery",
+			ActivePercent:   90,
+			CompletePercent: 100,
+		}},
+	}
+
+	required, err := pack.RequiredArtifactsForTaskType("demo-task")
+	if err != nil {
+		t.Fatalf("RequiredArtifactsForTaskType: %v", err)
+	}
+	if got := artifactPaths(required); !slices.Equal(got, []string{"output/final.md"}) {
+		t.Fatalf("required artifacts = %v, want [output/final.md]", got)
+	}
+}
+
+func artifactPaths(artifacts []ArtifactSpec) []string {
+	paths := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		paths = append(paths, artifact.Path)
+	}
+	return paths
+}
+
 func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -92,6 +169,46 @@ func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 			_, err := LoadCatalog(root)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest string
+		want     string
+	}{
+		{
+			name:     "delivery path outside output",
+			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md", "delivery:\n  - role: final\n    path: ../secret.txt", 1),
+			want:     "delivery path must be under output/",
+		},
+		{
+			name:     "delivery invalid glob",
+			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md", "delivery:\n  - role: final\n    path: \"output/[.md\"", 1),
+			want:     "invalid glob",
+		},
+		{
+			name:     "managed delivery required",
+			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n", "", 1),
+			want:     "requires a non-empty delivery contract",
+		},
+		{
+			name: "duplicate delivery pattern",
+			manifest: strings.Replace(validFixtureManifest,
+				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown",
+				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n  - role: duplicate\n    path: output/final.md\n    mime_type: text/markdown", 1),
+			want: "duplicate delivery path",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, tt.manifest)
+			_, err := LoadCatalog(root)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
 			}
 		})
 	}
@@ -175,7 +292,7 @@ func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
 		{
 			name: "accepts ordered stage contract",
 			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/topic-analysis.md]}
+  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/final.md]}
   - {id: writing, title: Writing, active_percent: 30, complete_percent: 100}`,
 		},
 	}
@@ -212,6 +329,10 @@ func TestLoadCatalogResolvesProgressContractByTaskType(t *testing.T) {
   viral-analysis:
     - {id: research, title: Research, active_percent: 10, complete_percent: 40}
     - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100, required_artifacts: [output/source-analysis.md, output/viral-template.json]}
+delivery_by_task_type:
+  viral-analysis:
+    - {role: analysis, path: output/source-analysis.md, mime_type: text/markdown}
+    - {role: template, path: output/viral-template.json, mime_type: application/json}
 artifacts:
 `, 1)
 	root := writePackFixture(t, manifest)
@@ -868,6 +989,26 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if pack, ok := catalog.ForProjectPlatform("montage"); !ok || pack.ID != "montage" {
 		t.Fatalf("montage project Pack = %#v, %v", pack, ok)
 	}
+	if pack, ok := catalog.Pack("montage"); !ok {
+		t.Fatal("montage Pack missing")
+	} else {
+		wantArtifacts := []string{
+			"output/final.mp4",
+			"output/montage-project.json",
+			"output/cover.png",
+			"output/delivery-manifest.json",
+		}
+		if got := requiredArtifactPaths(pack); !slices.Equal(got, wantArtifacts) {
+			t.Fatalf("montage required artifacts = %v, want %v", got, wantArtifacts)
+		}
+		if got := deliveryPaths(pack.DeliveryForTaskType("montage")); !slices.Equal(got, wantArtifacts) {
+			t.Fatalf("montage delivery paths = %v, want %v", got, wantArtifacts)
+		}
+		stage, ok := pack.ProgressStage("delivery")
+		if !ok || !slices.Equal(stage.RequiredArtifacts, wantArtifacts) {
+			t.Fatalf("montage delivery stage = %#v, want required artifacts %v", stage, wantArtifacts)
+		}
+	}
 	if _, ok := catalog.Pack("designer"); ok {
 		t.Fatal("removed Designer Pack is still present")
 	}
@@ -1267,6 +1408,10 @@ artifacts:
     path: output/final.md
     mime_type: text/markdown
     required: true
+delivery:
+  - role: final
+    path: output/final.md
+    mime_type: text/markdown
 `
 
 const validDSHComposition = `

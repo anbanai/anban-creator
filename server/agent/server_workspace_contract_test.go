@@ -80,8 +80,8 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		{path: "plugins/agents/moments.toml", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
 		{path: "plugins/agents/ecommerce.md", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
 		{path: "plugins/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
-		{path: "plugins/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
-		{path: "plugins/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4"}},
+		{path: "plugins/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
+		{path: "plugins/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
 		{path: "plugins/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 		{path: "plugins/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 	}

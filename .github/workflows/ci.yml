@@ -134,13 +134,13 @@ jobs:
         run: |
           node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
           pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
-          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.16
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.18
 
       - name: Upload exact DSH Desktop acceptance artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: anban-dsh-plugin
-          path: release/dsh/anban-dsh-plugin-4.1.16.tgz
+          path: release/dsh/anban-dsh-plugin-4.1.18.tgz
           if-no-files-found: error
           retention-days: 1
 
@@ -208,7 +208,7 @@ jobs:
         env:
           DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.16.tgz
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.18.tgz
         run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
 
       - name: Launch packaged DSH Desktop application
@@ -221,7 +221,7 @@ jobs:
       - name: Validate packaged Desktop profile exports and Skill catalogs
         env:
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop 4.1.16
+        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop 4.1.18
 
       - name: Run portable profile command tests
         working-directory: plugins

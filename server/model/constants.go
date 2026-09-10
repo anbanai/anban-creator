@@ -134,6 +134,7 @@ const ImageRatioAuto = "auto"
 // ValidImageRatios is the union of business image ratios, including explicit auto selection.
 var ValidImageRatios = map[string]bool{
 	ImageRatioAuto: true,
+	"9:16":         true,
 	"3:4":          true,
 	"1:1":          true,
 	"4:3":          true,

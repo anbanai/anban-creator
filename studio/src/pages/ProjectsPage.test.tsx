@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
+import { mockPlatformConfigs } from '@/test/mocks/handlers'
 import type { Project } from '@/types'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -100,7 +101,7 @@ describe('ProjectsPage', () => {
         last_activity_at: '',
       },
     })
-    vi.mocked(api.projects.platformConfigs).mockResolvedValue([])
+    vi.mocked(api.projects.platformConfigs).mockResolvedValue(mockPlatformConfigs)
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
@@ -332,7 +333,7 @@ describe('ProjectsPage', () => {
       author: '',
 
       reference_image: null,
-      image_ratio: '',
+      image_ratio: '9:16',
       montage_defaults: {},
       max_concurrent_tasks: 1,
       config: {},
@@ -344,6 +345,8 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     expect(await screen.findByText('Montage 默认配置')).toBeInTheDocument()
+    expect(screen.getByText('人物参考')).toBeInTheDocument()
+    expect(screen.getByText('封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: 'Launch montage' } })
     fireEvent.change(screen.getByLabelText('默认 Pipeline'), { target: { value: 'social-short' } })
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
@@ -362,7 +365,6 @@ describe('ProjectsPage', () => {
       montage_defaults: {
         default_pipeline: 'social-short',
         preferences: expect.objectContaining({
-          aspect_ratio: '9:16',
           duration_seconds: 45,
           music_prompt: 'minimal electronic',
           subtitle_mode: 'burned-in',
@@ -389,10 +391,10 @@ describe('ProjectsPage', () => {
       author: '',
 
       reference_image: null,
-      image_ratio: '',
+      image_ratio: '16:9',
       montage_defaults: {
         default_pipeline: 'social-short',
-        preferences: { aspect_ratio: '16:9', duration_seconds: 60, music_prompt: 'cinematic' },
+        preferences: { duration_seconds: 60, music_prompt: 'cinematic' },
         asset_guidance: '保留品牌标志',
         delivery_targets: ['final_video', 'subtitles'],
       },
@@ -409,7 +411,8 @@ describe('ProjectsPage', () => {
     await screen.findByText('Saved montage')
     await clickProjectAction('Saved montage', '编辑项目')
     expect(await screen.findByLabelText('默认 Pipeline')).toHaveValue('social-short')
-    expect(screen.getByLabelText('默认画幅')).toHaveValue('16:9')
+    expect(screen.getByText('默认视频比例')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText('默认时长（秒）')).toHaveValue(60)
     expect(screen.getByLabelText('音乐提示')).toHaveValue('cinematic')
     expect(screen.getByText('final_video')).toBeInTheDocument()
@@ -420,6 +423,7 @@ describe('ProjectsPage', () => {
 
     await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('montage-1', expect.objectContaining({
       platform: 'montage',
+      image_ratio: '16:9',
       montage_defaults: expect.objectContaining({
         default_pipeline: 'social-short',
         preferences: expect.objectContaining({ duration_seconds: 45, music_prompt: 'cinematic' }),

@@ -33,9 +33,17 @@ func newManagedCompletionFixture(t *testing.T, taskType string) *managedCompleti
 	}
 	repo := repository.New(db)
 	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: taskType,
+		Name: "Managed completion", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: taskType,
-		Status: model.TaskStatusRunning,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: taskType,
+		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard",
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -67,6 +75,9 @@ func attachManagedExecution(t *testing.T, repo repository.Repository, task *mode
 		Status: model.TaskExecutionRunning, Started: true,
 		RuntimeProfile: task.Type, RuntimeImage: "registry/runtime@sha256:test",
 	}
+	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+		t.Fatalf("freeze managed execution pack: %v", err)
+	}
 	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
 		t.Fatal(err)
 	}
@@ -80,18 +91,35 @@ func attachManagedExecution(t *testing.T, repo repository.Repository, task *mode
 func (f *managedCompletionFixture) addPendingFile(t *testing.T, name string, size int64, body string) *model.TaskFile {
 	t.Helper()
 	relPath := filepath.ToSlash(filepath.Join("output", name))
-	key := "managed-tests/" + f.execution.ID + "/" + relPath
+	key := buildTaskMCPArtifactStoragePrefix(f.task, f.execution.ID) + relPath
+	data := []byte(body)
+	if strings.EqualFold(filepath.Ext(name), ".png") && body != "" {
+		data = taskImageTinyPNG()
+	}
 	if body != "" {
-		f.store.files[key] = []byte(body)
+		f.store.files[key] = data
+		size = int64(len(data))
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	mimeType := mimeTypes[ext]
+	if mimeType == "" {
+		mimeType = contentTypeForUploadExt(ext)
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
 	}
 	file, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.execution.ID, &model.TaskFile{
 		Role: DetermineTaskFileRole(name, ""), FilePath: relPath, FileName: filepath.Base(name),
-		FileSize: size, OSSKey: key, OSSURL: f.store.GetURL(key), StorageProvider: f.store.Name(),
+		MimeType: mimeType, FileSize: size, OSSKey: key, OSSURL: f.store.GetURL(key), StorageProvider: f.store.Name(),
 	})
 	if err != nil {
 		t.Fatalf("add pending managed file %s: %v", relPath, err)
 	}
 	return file
+}
+
+func validTestMP4() string {
+	return "\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isommp42"
 }
 
 func (f *managedCompletionFixture) assertTerminal(t *testing.T, taskStatus, executionStatus, fileState string) {
@@ -131,10 +159,38 @@ func TestCompleteCloudExecutionPublishesSeednoteDeliverables(t *testing.T) {
 	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStatePublished)
 }
 
+func TestCompleteCloudExecutionRejectsDeliveryImageWithForgedMIME(t *testing.T) {
+	f := newManagedCompletionFixture(t, model.PlatformSeednote)
+	var cover *model.TaskFile
+	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
+		file := f.addPendingFile(t, name, 1, "fixture")
+		if name == "cover.png" {
+			cover = file
+		}
+	}
+	if cover == nil {
+		t.Fatal("cover fixture was not created")
+	}
+	forged := []byte("<html>not an image</html>")
+	f.store.files[cover.OSSKey] = forged
+	cover.FileSize = int64(len(forged))
+	cover.MimeType = "image/png"
+	if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.execution.ID, cover); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+}
+
 func TestCompleteCloudExecutionFinalizesMontageDeliverables(t *testing.T) {
 	f := newManagedCompletionFixture(t, model.PlatformMontage)
-	f.addPendingFile(t, "montage/final.mp4", 1024, "video")
-	f.addPendingFile(t, "montage/delivery-manifest.json", 2, `{}`)
+	f.addPendingFile(t, "final.mp4", 1024, validTestMP4())
+	f.addPendingFile(t, "montage-project.json", 2, `{}`)
+	f.addPendingFile(t, "cover.png", 1024, "image")
+	f.addPendingFile(t, "delivery-manifest.json", 2, `{}`)
 
 	if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 		t.Fatal(err)
@@ -142,20 +198,31 @@ func TestCompleteCloudExecutionFinalizesMontageDeliverables(t *testing.T) {
 	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStatePublished)
 }
 
-func TestCompleteCloudExecutionRejectsMissingOrInvalidMontageManifest(t *testing.T) {
+func TestManagedCompletionRejectsMissingMontageDeliverables(t *testing.T) {
 	for _, test := range []struct {
-		name         string
-		manifestSize int64
-		addManifest  bool
+		name    string
+		missing string
 	}{
-		{name: "missing"},
-		{name: "empty", addManifest: true},
+		{name: "final video", missing: "output/final.mp4"},
+		{name: "project", missing: "output/montage-project.json"},
+		{name: "cover", missing: "output/cover.png"},
+		{name: "manifest", missing: "output/delivery-manifest.json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newManagedCompletionFixture(t, model.PlatformMontage)
-			f.addPendingFile(t, "montage/final.mp4", 1024, "video")
-			if test.addManifest {
-				f.addPendingFile(t, "montage/delivery-manifest.json", test.manifestSize, "")
+			for _, file := range []struct {
+				name string
+				size int64
+				body string
+			}{
+				{name: "final.mp4", size: 1024, body: validTestMP4()},
+				{name: "montage-project.json", size: 2, body: `{}`},
+				{name: "cover.png", size: 1024, body: "image"},
+				{name: "delivery-manifest.json", size: 2, body: `{}`},
+			} {
+				if "output/"+file.name != test.missing {
+					f.addPendingFile(t, file.name, file.size, file.body)
+				}
 			}
 
 			if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
@@ -163,10 +230,86 @@ func TestCompleteCloudExecutionRejectsMissingOrInvalidMontageManifest(t *testing
 			}
 			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
 			found, err := f.repo.Tasks().FindByID(context.Background(), f.task.ID)
-			if err != nil || !strings.Contains(found.ErrorMessage, "delivery-manifest.json") {
+			if err != nil || !strings.Contains(found.ErrorMessage, test.missing) {
 				t.Fatalf("failure task=%#v err=%v", found, err)
 			}
 		})
+	}
+}
+
+func TestCompleteCloudExecutionRejectsForgedMontageMP4(t *testing.T) {
+	f := newManagedCompletionFixture(t, model.PlatformMontage)
+	f.addPendingFile(t, "final.mp4", 16, "not really an mp4")
+	f.addPendingFile(t, "montage-project.json", 2, `{}`)
+	f.addPendingFile(t, "cover.png", 1024, "image")
+	f.addPendingFile(t, "delivery-manifest.json", 2, `{}`)
+
+	if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+}
+
+func TestCompleteCloudExecutionRejectsInvalidMontageJSON(t *testing.T) {
+	for _, invalidName := range []string{"montage-project.json", "delivery-manifest.json"} {
+		t.Run(invalidName, func(t *testing.T) {
+			f := newManagedCompletionFixture(t, model.PlatformMontage)
+			f.addPendingFile(t, "final.mp4", 1024, validTestMP4())
+			f.addPendingFile(t, "montage-project.json", 2, `{}`)
+			f.addPendingFile(t, "cover.png", 1024, "image")
+			f.addPendingFile(t, "delivery-manifest.json", 2, `{}`)
+			files, err := f.repo.TaskFiles().FindByExecutionID(context.Background(), f.execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range files {
+				if file.FilePath != "output/"+invalidName {
+					continue
+				}
+				f.store.files[file.OSSKey] = []byte("{")
+				file.FileSize = 1
+				if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.execution.ID, file); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := f.svc.CompleteCloudExecution(context.Background(), f.execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+				t.Fatal(err)
+			}
+			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+		})
+	}
+}
+
+func TestValidateMontageCompletionArtifactsRejectsStaleRequiredFiles(t *testing.T) {
+	for _, staleState := range []string{model.TaskFileStateCollected, model.TaskFileStateSuperseded} {
+		t.Run(staleState, func(t *testing.T) {
+			files := []*model.TaskFile{
+				{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},
+				{State: model.TaskFileStatePublished, FilePath: "output/montage-project.json", FileSize: 1},
+				{State: staleState, FilePath: "output/cover.png", FileSize: 1},
+				{State: model.TaskFileStatePending, FilePath: "output/delivery-manifest.json", FileSize: 1},
+			}
+
+			validation := validateMontageCompletionArtifacts(files)
+			if validation.Valid || !strings.Contains(validation.Reason, "output/cover.png") {
+				t.Fatalf("validation = %#v, want stale cover reported missing", validation)
+			}
+		})
+	}
+}
+
+func TestValidateMontageCompletionArtifactsRequiresCanonicalPathCase(t *testing.T) {
+	files := []*model.TaskFile{
+		{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/montage-project.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "OUTPUT/COVER.PNG", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/delivery-manifest.json", FileSize: 1},
+	}
+
+	validation := validateMontageCompletionArtifacts(files)
+	if validation.Valid || !strings.Contains(validation.Reason, "output/cover.png") {
+		t.Fatalf("validation = %#v, want non-canonical cover path reported missing", validation)
 	}
 }
 
@@ -188,12 +331,14 @@ func TestCompleteCloudExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
 
 func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		durableFile bool
-		wantRefund  bool
+		name       string
+		filePath   string
+		mimeType   string
+		wantRefund bool
 	}{
 		{name: "provider failure without output reverses", wantRefund: true},
-		{name: "provider failure with collected output keeps charge", durableFile: true},
+		{name: "provider failure with process artifact reverses", filePath: "output/failure-state.json", mimeType: "application/json", wantRefund: true},
+		{name: "provider failure with collected contract file reverses", filePath: "output/04-article-final.md", mimeType: "text/markdown", wantRefund: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -207,9 +352,10 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 			}
 			task := tasks[0]
 			execution := attachManagedExecution(t, billing.repo, task)
-			if test.durableFile {
+			if test.filePath != "" {
 				if _, err := billing.repo.TaskFiles().UpsertPendingCurrentExecution(ctx, task.ID, execution.ID, &model.TaskFile{
-					Role: model.FileRoleDraft, FileName: "partial.md", FilePath: "output/partial.md", FileSize: 12,
+					Role: model.FileRoleDraft, FileName: filepath.Base(test.filePath), FilePath: test.filePath,
+					MimeType: test.mimeType, FileSize: 12, OSSKey: "managed-tests/" + execution.ID + "/" + test.filePath,
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -247,5 +393,73 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 				t.Fatalf("charged account=%#v", account)
 			}
 		})
+	}
+}
+
+func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t *testing.T) {
+	ctx := context.Background()
+	svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "original request", Quantity: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := tasks[0]
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
+	svc.store = store
+	priorExecution := &model.TaskExecution{
+		ID: "prior-successful-execution", TaskID: task.ID, Attempt: 1,
+		Target: "managed-test", Status: model.TaskExecutionSucceeded, Started: true,
+	}
+	if err := applyAgentPackIdentity(priorExecution, task.Type); err != nil {
+		t.Fatal(err)
+	}
+	if err := billing.repo.TaskExecutions().Create(ctx, priorExecution); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("published article")
+	key := buildTaskMCPArtifactStoragePrefix(task, priorExecution.ID) + "output/04-article-final.md"
+	store.files[key] = body
+	if _, err := billing.repo.TaskFiles().Upsert(ctx, &model.TaskFile{
+		TaskID: task.ID, ExecutionID: "prior-successful-execution", State: model.TaskFileStatePublished,
+		Role: model.FileRoleDraft, FilePath: "output/04-article-final.md", FileName: "04-article-final.md",
+		MimeType: "text/markdown", FileSize: int64(len(body)), OSSKey: key, OSSURL: store.GetURL(key), StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := billing.repo.Tasks().CompareAndSwapStatusAndStartedAt(ctx, task.ID, model.TaskStatusPending, model.TaskStatusRunning); err != nil || !won {
+		t.Fatalf("start resumed task: won=%v err=%v", won, err)
+	}
+	execution := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 2, ParentExecutionID: "prior-successful-execution",
+		Target: "managed-test", Status: model.TaskExecutionStarting,
+		RuntimeProfile: task.Type, RuntimeImage: "registry/runtime@sha256:test",
+	}
+	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+		t.Fatal(err)
+	}
+	if err := billing.repo.TaskExecutions().Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := billing.repo.Tasks().SetCurrentExecution(ctx, task.ID, execution.ID); err != nil || !won {
+		t.Fatalf("set resumed execution current: won=%v err=%v", won, err)
+	}
+
+	if err := svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "runtime_failed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := billing.repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil || found.Status != model.TaskStatusFailed {
+		t.Fatalf("resumed terminal task=%#v err=%v", found, err)
+	}
+	if _, err := billing.repo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", *task.BillingChargeID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("prior published delivery allowed task charge reversal: %v", err)
+	}
+	files, err := billing.repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if err != nil || len(files) != 1 || files[0].State != model.TaskFileStatePublished {
+		t.Fatalf("prior published delivery=%#v err=%v", files, err)
 	}
 }

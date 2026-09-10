@@ -367,6 +367,7 @@ func providerAttemptTimeout(resolved *ResolvedImageModel, imageType string) time
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
 	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID string,
+	aspectRatio string,
 	resolved *ResolvedImageModel,
 	watermark *bool,
 ) (*ImageResult, error) {
@@ -392,7 +393,7 @@ func (s *ImageService) GenerateImage(
 	// workflow decision and therefore belongs to the calling Agent or Skill.
 	providerRequestID := "internal:image:" + uuid.NewString()
 	rawResult, err := s.generateProviderImage(ctx, providerAttemptTimeout(resolved, imageType), func(attemptCtx context.Context) (*image.GenerateRawResult, error) {
-		return processor.GenerateRawSemantic(attemptCtx, prompt)
+		return processor.GenerateRawWithSize(attemptCtx, prompt, aspectRatio)
 	}, imageType)
 	if err != nil {
 		s.recordFailedImageProviderCost(ctx, taskID, providerRequestID, resolved)

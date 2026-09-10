@@ -30,31 +30,34 @@ const (
 )
 
 func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
-	hasFinal := false
-	hasManifest := false
+	required := []string{
+		"output/final.mp4",
+		"output/montage-project.json",
+		"output/cover.png",
+		"output/delivery-manifest.json",
+	}
+	requiredSet := make(map[string]bool, len(required))
+	for _, path := range required {
+		requiredSet[path] = true
+	}
+	present := make(map[string]bool, len(required))
 	meaningful := 0
 	for _, file := range files {
-		if file == nil || file.FileSize <= 0 {
+		if file == nil || file.FileSize <= 0 ||
+			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStatePublished) {
 			continue
 		}
-		role := strings.TrimSpace(file.Role)
-		name := strings.ToLower(strings.TrimSpace(file.FileName))
-		path := strings.ToLower(filepath.ToSlash(strings.TrimSpace(file.FilePath)))
-		switch {
-		case role == "final_video" || isMontageFinalVideoPath(name) || isMontageFinalVideoPath(path):
-			hasFinal = true
-			meaningful++
-		case role == "delivery_manifest" || name == "delivery-manifest.json" || strings.HasSuffix(path, "/delivery-manifest.json"):
-			hasManifest = true
+		path := filepath.ToSlash(strings.TrimSpace(file.FilePath))
+		if !present[path] && requiredSet[path] {
+			present[path] = true
 			meaningful++
 		}
 	}
 	var missing []string
-	if !hasFinal {
-		missing = append(missing, "final_video")
-	}
-	if !hasManifest {
-		missing = append(missing, "delivery-manifest.json")
+	for _, path := range required {
+		if !present[path] {
+			missing = append(missing, path)
+		}
 	}
 	if len(missing) > 0 {
 		return agent.ArtifactValidation{
@@ -64,15 +67,6 @@ func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactV
 		}
 	}
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
-}
-
-func isMontageFinalVideoPath(path string) bool {
-	switch filepath.Base(path) {
-	case "final.mp4", "final_video.mp4", "final-video.mp4":
-		return true
-	default:
-		return false
-	}
 }
 
 // HandleExecutionFromPayload loads a queued task and starts its durable managed

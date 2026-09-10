@@ -15,6 +15,12 @@ export interface AgentPackJSONSchema {
   maximum?: number
 }
 
+export interface AgentPackDeliverySpec {
+  role: string
+  path: string
+  mime_type: string
+}
+
 export interface AgentPack {
   id: string
   version: string
@@ -38,6 +44,8 @@ export interface AgentPack {
   surfaces: AgentPackSurface[]
   features?: string[]
   billing_operations?: Record<string, string>
+  delivery?: AgentPackDeliverySpec[]
+  delivery_by_task_type?: Record<string, AgentPackDeliverySpec[]>
   schemas?: {
     project_config?: AgentPackJSONSchema
     task_input?: AgentPackJSONSchema

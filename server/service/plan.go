@@ -146,22 +146,23 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if err != nil {
 		return nil, err
 	}
-	isMontagePlan := model.IsMontagePlatform(project.Platform)
-	effectiveImageRatio := ""
-	effectiveImageCapabilityKey := ""
-	if !isMontagePlan {
-		effectiveImageRatio = strings.TrimSpace(p.ImageRatio)
-		if effectiveImageRatio == "" {
-			effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
-		}
-		if effectiveImageRatio == "" {
-			effectiveImageRatio = model.DefaultImageRatio(project.Platform)
-		}
-		if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
-			return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
-		}
-		effectiveImageCapabilityKey = strings.TrimSpace(p.ImageCapabilityKey)
+	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
+	if model.IsMontagePlatform(project.Platform) && effectiveImageRatio == model.ImageRatioAuto {
+		effectiveImageRatio = ""
 	}
+	if effectiveImageRatio == "" {
+		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+	}
+	if model.IsMontagePlatform(project.Platform) && effectiveImageRatio == model.ImageRatioAuto {
+		effectiveImageRatio = ""
+	}
+	if effectiveImageRatio == "" {
+		effectiveImageRatio = model.DefaultImageRatio(project.Platform)
+	}
+	if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
+		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	}
+	effectiveImageCapabilityKey := strings.TrimSpace(p.ImageCapabilityKey)
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
 	if err != nil {
@@ -356,10 +357,7 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		}
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
-	if model.IsMontagePlatform(plan.Type) {
-		plan.ImageCapabilityKey = ""
-		plan.ImageRatio = ""
-	} else if p.ImageRatio != nil {
+	if p.ImageRatio != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, err
@@ -367,9 +365,13 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, strings.TrimSpace(*p.ImageRatio)) {
 			return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, *p.ImageRatio)
 		}
-		plan.ImageRatio = *p.ImageRatio
+		nextRatio := strings.TrimSpace(*p.ImageRatio)
+		if model.IsMontagePlatform(plan.Type) && nextRatio == model.ImageRatioAuto {
+			nextRatio = model.DefaultImageRatio(plan.Type)
+		}
+		plan.ImageRatio = nextRatio
 	}
-	if !model.IsMontagePlatform(plan.Type) && p.ImageCapabilityKey != nil {
+	if p.ImageCapabilityKey != nil {
 		plan.ImageCapabilityKey = *p.ImageCapabilityKey
 	}
 	if p.SkipReferenceImage != nil {

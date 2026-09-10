@@ -51,7 +51,6 @@ func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 		Brief:       "make a launch video",
 		PipelineKey: "social-short",
 		Preferences: model.MontagePreferences{
-			AspectRatio:     "9:16",
 			DurationSeconds: 30,
 		},
 	})
@@ -74,8 +73,11 @@ func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	if got.PipelineKey != "social-short" {
 		t.Fatalf("PipelineKey = %q, want social-short", got.PipelineKey)
 	}
-	if got.Preferences.AspectRatio != "9:16" || got.Preferences.DurationSeconds != 30 {
-		t.Fatalf("Preferences = %+v, want aspect 9:16 duration 30", got.Preferences)
+	if got.Preferences.DurationSeconds != 30 {
+		t.Fatalf("Preferences = %+v, want duration 30", got.Preferences)
+	}
+	if strings.Contains(string(data), "aspect_ratio") {
+		t.Fatalf("montage-input.json contains non-authoritative aspect ratio: %s", data)
 	}
 }
 
@@ -183,10 +185,18 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	for _, want := range []string{
 		"name: montage",
 		"  - montage",
+		"  - video-cover-design",
 		"montage-input.json",
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
+		"Video aspect ratio: <ratio>",
+		"$VIDEO_ASPECT_RATIO",
+		"不得读取 `montage_input.preferences.aspect_ratio`",
+		"output/cover.png",
+		"output/cover-quality.json",
+		"video-cover-design Skill",
+		"delivery_targets",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"/workspace/openmontage",
 		"provider_menu_summary",
@@ -206,6 +216,13 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
+		"Video aspect ratio: <ratio>",
+		"$VIDEO_ASPECT_RATIO",
+		"不得读取 montage_input.preferences.aspect_ratio",
+		"output/cover.png",
+		"output/cover-quality.json",
+		"video-cover-design Skill",
+		"delivery_targets",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"/workspace/openmontage",
 		"provider_menu_summary",
@@ -213,6 +230,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"final_video",
 		`submit_agent_feedback(agent_name=\"montage\"`,
 		"__PLUGIN_ROOT__/skills/montage/SKILL.md",
+		"__PLUGIN_ROOT__/skills/video-cover-design/SKILL.md",
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex montage agent missing %q", want)
