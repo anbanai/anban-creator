@@ -326,11 +326,15 @@ func validateDeliverySpec(delivery DeliverySpec) error {
 
 func validateContractMIMEType(value string) error {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
-	if err != nil || strings.Contains(mediaType, "*") {
-		if err == nil {
-			err = fmt.Errorf("wildcards are not allowed")
-		}
+	if err != nil {
 		return fmt.Errorf("invalid MIME type %q: %w", value, err)
+	}
+	typeName, subtype, ok := strings.Cut(mediaType, "/")
+	if !ok || typeName == "" || subtype == "" {
+		return fmt.Errorf("invalid MIME type %q: type and subtype are required", value)
+	}
+	if strings.Contains(mediaType, "*") {
+		return fmt.Errorf("invalid MIME type %q: wildcards are not allowed", value)
 	}
 	return nil
 }

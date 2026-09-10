@@ -234,8 +234,18 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 			want:     "invalid MIME type",
 		},
 		{
+			name:     "artifact MIME without subtype",
+			manifest: strings.Replace(validFixtureManifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text", 1),
+			want:     "invalid MIME type",
+		},
+		{
 			name:     "invalid delivery MIME",
 			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: not a mime", 1),
+			want:     "invalid MIME type",
+		},
+		{
+			name:     "delivery MIME without subtype",
+			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text", 1),
 			want:     "invalid MIME type",
 		},
 	}
