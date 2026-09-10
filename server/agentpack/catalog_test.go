@@ -140,6 +140,32 @@ func TestRequiredArtifactsForTaskTypeFallsBackToRequiredArtifactSpecs(t *testing
 	}
 }
 
+func TestRequiredArtifactsForTaskTypeDoesNotLetBaseProgressWeakenArtifacts(t *testing.T) {
+	pack := Manifest{
+		Artifacts: []ArtifactSpec{
+			{Role: "final", Path: "output/final.md", MIMEType: "text/markdown", Required: true},
+		},
+		Delivery: []DeliverySpec{
+			{Role: "report", Path: "output/report.json", MIMEType: "application/json"},
+		},
+		Progress: []ProgressStage{{
+			ID:                "delivery",
+			Title:             "Delivery",
+			ActivePercent:     90,
+			CompletePercent:   100,
+			RequiredArtifacts: []string{"output/report.json"},
+		}},
+	}
+
+	required, err := pack.RequiredArtifactsForTaskType("demo-task")
+	if err != nil {
+		t.Fatalf("RequiredArtifactsForTaskType: %v", err)
+	}
+	if got := artifactPaths(required); !slices.Equal(got, []string{"output/final.md", "output/report.json"}) {
+		t.Fatalf("required artifacts = %v, want artifacts.required plus progress requirements", got)
+	}
+}
+
 func artifactPaths(artifacts []ArtifactSpec) []string {
 	paths := make([]string, 0, len(artifacts))
 	for _, artifact := range artifacts {
@@ -201,6 +227,16 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown",
 				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n  - role: duplicate\n    path: output/final.md\n    mime_type: text/markdown", 1),
 			want: "duplicate delivery path",
+		},
+		{
+			name:     "invalid artifact MIME",
+			manifest: strings.Replace(validFixtureManifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: not a mime", 1),
+			want:     "invalid MIME type",
+		},
+		{
+			name:     "invalid delivery MIME",
+			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: not a mime", 1),
+			want:     "invalid MIME type",
 		},
 	}
 	for _, tt := range tests {
@@ -992,21 +1028,22 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if pack, ok := catalog.Pack("montage"); !ok {
 		t.Fatal("montage Pack missing")
 	} else {
-		wantArtifacts := []string{
+		wantRequiredArtifacts := []string{
 			"output/final.mp4",
 			"output/montage-project.json",
 			"output/cover.png",
 			"output/delivery-manifest.json",
 		}
-		if got := requiredArtifactPaths(pack); !slices.Equal(got, wantArtifacts) {
-			t.Fatalf("montage required artifacts = %v, want %v", got, wantArtifacts)
+		if got := requiredArtifactPaths(pack); !slices.Equal(got, wantRequiredArtifacts) {
+			t.Fatalf("montage required artifacts = %v, want %v", got, wantRequiredArtifacts)
 		}
-		if got := deliveryPaths(pack.DeliveryForTaskType("montage")); !slices.Equal(got, wantArtifacts) {
-			t.Fatalf("montage delivery paths = %v, want %v", got, wantArtifacts)
+		wantDelivery := []string{"output/final.mp4", "output/delivery-manifest.json"}
+		if got := deliveryPaths(pack.DeliveryForTaskType("montage")); !slices.Equal(got, wantDelivery) {
+			t.Fatalf("montage delivery paths = %v, want %v", got, wantDelivery)
 		}
 		stage, ok := pack.ProgressStage("delivery")
-		if !ok || !slices.Equal(stage.RequiredArtifacts, wantArtifacts) {
-			t.Fatalf("montage delivery stage = %#v, want required artifacts %v", stage, wantArtifacts)
+		if !ok || !slices.Equal(stage.RequiredArtifacts, wantRequiredArtifacts) {
+			t.Fatalf("montage delivery stage = %#v, want required artifacts %v", stage, wantRequiredArtifacts)
 		}
 	}
 	if _, ok := catalog.Pack("designer"); ok {

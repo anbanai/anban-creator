@@ -21,15 +21,22 @@ func TestDeliveryContractMatchesExactAndGlobPaths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mimeType := "image/png"
-			if tt.path == "output/content.md" {
-				mimeType = "text/markdown; charset=utf-8"
-			}
-			gotRole, ok := MatchDeliveryPath(contract, tt.path, mimeType)
+			gotRole, ok := MatchDeliveryPath(contract, tt.path)
 			if ok != tt.want || (ok && gotRole != tt.role) {
 				t.Fatalf("MatchDeliveryPath(%q) = %q, %v; want %q, %v", tt.path, gotRole, ok, tt.role, tt.want)
 			}
 		})
+	}
+}
+
+func TestDeliveryContractUsesPathAsTheDeliveryIdentity(t *testing.T) {
+	contract := []DeliverySpec{{
+		Role: "content", Path: "output/content.md", MIMEType: "text/markdown",
+	}}
+
+	role, ok := MatchDeliveryPath(contract, "output/content.md")
+	if !ok || role != "content" {
+		t.Fatalf("MatchDeliveryPath() = %q, %v; want path match to remain deliverable", role, ok)
 	}
 }
 

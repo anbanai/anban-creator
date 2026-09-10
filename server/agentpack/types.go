@@ -150,7 +150,10 @@ func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec,
 		}
 	}
 
-	progress := m.ProgressForTaskType(taskType)
+	progress, taskTypeOverride := m.ProgressByTaskType[taskType]
+	if !taskTypeOverride {
+		progress = m.Progress
+	}
 	hasProgressRequirements := false
 	for _, stage := range progress {
 		if len(stage.RequiredArtifacts) > 0 {
@@ -158,18 +161,17 @@ func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec,
 			break
 		}
 	}
-	if !hasProgressRequirements {
-		required := make([]ArtifactSpec, 0)
-		for _, artifact := range m.Artifacts {
-			if artifact.Required {
-				required = append(required, artifact)
-			}
-		}
-		return required, nil
-	}
-
 	seen := make(map[string]struct{})
 	required := make([]ArtifactSpec, 0)
+	if !taskTypeOverride || !hasProgressRequirements {
+		for _, artifact := range m.Artifacts {
+			if !artifact.Required {
+				continue
+			}
+			required = append(required, artifact)
+			seen[artifact.Path] = struct{}{}
+		}
+	}
 	for _, stage := range progress {
 		for _, artifactPath := range stage.RequiredArtifacts {
 			if _, duplicate := seen[artifactPath]; duplicate {

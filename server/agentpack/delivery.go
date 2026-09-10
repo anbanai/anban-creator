@@ -1,24 +1,15 @@
 package agentpack
 
 import (
-	"mime"
 	pathpkg "path"
 	"strings"
 )
 
-// MatchDeliveryPath matches a task file's canonical output path and media type
-// against a Pack delivery contract and returns the declared role.
-func MatchDeliveryPath(contract []DeliverySpec, rawPath, rawMIMEType string) (string, bool) {
+// MatchDeliveryPath matches a task file's canonical output path against a Pack
+// delivery contract and returns the declared role.
+func MatchDeliveryPath(contract []DeliverySpec, rawPath string) (string, bool) {
 	spec, ok := MatchDeliverySpec(contract, rawPath)
 	if !ok {
-		return "", false
-	}
-	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(rawMIMEType))
-	if err != nil {
-		return "", false
-	}
-	expectedType, _, typeErr := mime.ParseMediaType(strings.TrimSpace(spec.MIMEType))
-	if typeErr != nil || !strings.EqualFold(mediaType, expectedType) {
 		return "", false
 	}
 	return spec.Role, true

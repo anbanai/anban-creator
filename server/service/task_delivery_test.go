@@ -262,7 +262,7 @@ func TestTaskFileDeliveryMetadataUsesFrozenContractAndState(t *testing.T) {
 	}
 }
 
-func TestDeliveryMetadataRejectsMIMETypeMismatch(t *testing.T) {
+func TestDeliveryMetadataUsesFrozenPathWhenMIMETypeDiffers(t *testing.T) {
 	contract := []agentpack.DeliverySpec{{
 		Role: "content", Path: "output/content.md", MIMEType: "text/markdown",
 	}}
@@ -270,8 +270,8 @@ func TestDeliveryMetadataRejectsMIMETypeMismatch(t *testing.T) {
 		State: model.TaskFileStatePublished, FilePath: "output/content.md", MimeType: "text/html",
 	}
 
-	if role, deliverable := deliveryMetadataFromContract(contract, file); deliverable || role != "" {
-		t.Fatalf("delivery metadata = %q, %v; want MIME mismatch rejected", role, deliverable)
+	if role, deliverable := deliveryMetadataFromContract(contract, file); !deliverable || role != "content" {
+		t.Fatalf("delivery metadata = %q, %v; want frozen path match", role, deliverable)
 	}
 }
 

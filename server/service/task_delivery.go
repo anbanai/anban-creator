@@ -437,7 +437,7 @@ func deliveryMetadataFromContract(contract []agentpack.DeliverySpec, file *model
 	if file == nil || file.State != model.TaskFileStatePublished {
 		return "", false
 	}
-	return agentpack.MatchDeliveryPath(contract, filepath.ToSlash(file.FilePath), file.MimeType)
+	return agentpack.MatchDeliveryPath(contract, filepath.ToSlash(file.FilePath))
 }
 
 func taskFilePreviewURL(taskID, fileID string) string {

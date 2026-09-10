@@ -107,7 +107,7 @@ func (p *LocalProvider) upload(key string, reader io.Reader, contentType string)
 	}
 
 	p.mu.Lock()
-	err = os.Rename(tempPath, destPath)
+	err = replaceLocalObjectFile(tempPath, destPath)
 	p.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("replace file %s: %w", destPath, err)
@@ -176,7 +176,7 @@ func (p *LocalProvider) OpenObject(ctx context.Context, key string) (io.ReadClos
 	if err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
 	}
-	file, err := os.Open(destPath)
+	file, err := openLocalObjectFile(destPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, key)

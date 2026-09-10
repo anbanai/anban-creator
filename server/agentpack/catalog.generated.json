@@ -502,7 +502,7 @@
     },
     {
       "id": "montage",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "Montage 视频",
       "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
@@ -599,16 +599,6 @@
           "mime_type": "video/mp4"
         },
         {
-          "role": "project_manifest",
-          "path": "output/montage-project.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "cover",
-          "path": "output/cover.png",
-          "mime_type": "image/png"
-        },
-        {
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json"
@@ -617,7 +607,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "63b42a10c810d0db7e19ee7ed918fe8bcf85dd5942907663e6caced4f05d145a"
+      "digest": "a8be03e00779d8d29a0fc8a7e5142e3cd0fe943c9e6eaf8dd90d1fc0dce2a934"
     },
     {
       "id": "seednote",

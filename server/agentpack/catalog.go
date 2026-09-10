@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -231,8 +232,11 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	for _, artifact := range manifest.Artifacts {
-		if artifact.Role == "" || artifact.MIMEType == "" || validateOutputArtifactPath(artifact.Path) != nil {
+		if strings.TrimSpace(artifact.Role) == "" || validateOutputArtifactPath(artifact.Path) != nil {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
+		}
+		if err := validateContractMIMEType(artifact.MIMEType); err != nil {
+			return fmt.Errorf("invalid artifact contract for %q: %w", artifact.Path, err)
 		}
 	}
 	if err := validateDeliveryContract(manifest.Delivery); err != nil {
@@ -305,14 +309,28 @@ func validateDeliveryContract(deliveries []DeliverySpec) error {
 }
 
 func validateDeliverySpec(delivery DeliverySpec) error {
-	if strings.TrimSpace(delivery.Role) == "" || strings.TrimSpace(delivery.MIMEType) == "" {
+	if strings.TrimSpace(delivery.Role) == "" {
 		return fmt.Errorf("invalid delivery contract for %q", delivery.Path)
+	}
+	if err := validateContractMIMEType(delivery.MIMEType); err != nil {
+		return fmt.Errorf("invalid delivery contract for %q: %w", delivery.Path, err)
 	}
 	if err := validateOutputArtifactPath(delivery.Path); err != nil {
 		return fmt.Errorf("invalid delivery contract for %q: delivery path must be under output/", delivery.Path)
 	}
 	if _, err := pathpkg.Match(delivery.Path, delivery.Path); err != nil {
 		return fmt.Errorf("invalid delivery contract for %q: invalid glob: %w", delivery.Path, err)
+	}
+	return nil
+}
+
+func validateContractMIMEType(value string) error {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil || strings.Contains(mediaType, "*") {
+		if err == nil {
+			err = fmt.Errorf("wildcards are not allowed")
+		}
+		return fmt.Errorf("invalid MIME type %q: %w", value, err)
 	}
 	return nil
 }

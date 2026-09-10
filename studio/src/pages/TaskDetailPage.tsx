@@ -810,6 +810,10 @@ export default function TaskDetailPage() {
         logContainerRef={logContainerRef}
       />
 
+      {task.type === 'article' && task.status === 'completed' && project && (
+        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} />
+      )}
+
       {showPendingResultDestination && (
         <section aria-labelledby="task-result-heading" className="border-y border-border py-4">
           <h2 id="task-result-heading" className="px-4 text-sm font-semibold text-foreground">任务结果</h2>
@@ -821,7 +825,7 @@ export default function TaskDetailPage() {
         </section>
       )}
 
-      {/* Files (top priority - most useful content) */}
+      {/* Deliverables and preview-only process files. */}
       {publishedFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
@@ -925,10 +929,6 @@ export default function TaskDetailPage() {
 
       {task.type === 'seednote' && task.status === 'completed' && (
         <SeednoteAnalyticsPanel taskId={task.id} />
-      )}
-
-      {task.type === 'article' && task.status === 'completed' && project && (
-        <WechatAnalyticsPanel taskId={task.id} projectConfig={project?.config} />
       )}
 
       {task.type === 'montage' && task.status === 'completed' && (

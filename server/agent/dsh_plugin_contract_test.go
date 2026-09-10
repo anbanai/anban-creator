@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.18"
+	dshPluginVersion     = "4.1.19"
 	dshPluginReleaseDate = "2026-09-10"
 )
 

@@ -1161,11 +1161,56 @@ describe('TaskDetailPage', () => {
       result: null,
     }))
 
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'article-output',
+      task_id: 'task-1',
+      state: 'published',
+      role: 'html',
+      file_name: '05-article.html',
+      mime_type: 'text/html',
+      file_size: 128,
+      is_deliverable: true,
+      url: '/api/v1/tasks/task-1/files/article-output/preview',
+      preview_url: '/api/v1/tasks/task-1/files/article-output/preview',
+      download_url: '/api/v1/tasks/task-1/files/article-output/download',
+      created_at: '2026-07-15T03:00:00Z',
+    }])
+
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('已进入草稿箱')).toBeInTheDocument()
+    const draftStatus = await screen.findByText('已进入草稿箱')
+    const deliveryHeading = await screen.findByText('交付文件 (1)')
+    expect(draftStatus.compareDocumentPosition(deliveryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '立即检测' })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
+  })
+
+  it('uses only the common delivery ZIP action for ecommerce files', async () => {
+    mockTask(taskWith({
+      type: 'ecommerce',
+      status: 'completed',
+      result: null,
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'ecommerce-output',
+      task_id: 'task-1',
+      state: 'published',
+      role: 'copywriting',
+      file_name: 'copywriting.md',
+      mime_type: 'text/markdown',
+      file_size: 128,
+      is_deliverable: true,
+      url: '/api/v1/tasks/task-1/files/ecommerce-output/preview',
+      preview_url: '/api/v1/tasks/task-1/files/ecommerce-output/preview',
+      download_url: '/api/v1/tasks/task-1/files/ecommerce-output/download',
+      created_at: '2026-07-15T03:00:00Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    await screen.findByText('交付文件 (1)')
+    expect(screen.getAllByRole('button', { name: /下载交付文件|整包下载/ })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: '整包下载' })).not.toBeInTheDocument()
   })
 
   it('waits for project configuration before querying WeChat publication', async () => {
