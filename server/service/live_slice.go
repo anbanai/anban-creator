@@ -127,6 +127,9 @@ func (s *LiveSliceService) UploadLiveAudio(ctx context.Context, filePath string,
 	if info.IsDir() {
 		return nil, fmt.Errorf("file_path must point to an audio file, got directory")
 	}
+	if info.Size() > maxExecutionLiveAudioBytes {
+		return nil, fmt.Errorf("audio file size exceeds the %d MB limit", maxExecutionLiveAudioBytes/(1024*1024))
+	}
 	if expiresSeconds <= 0 {
 		expiresSeconds = defaultAudioURLTTL
 	}
@@ -136,6 +139,9 @@ func (s *LiveSliceService) UploadLiveAudio(ctx context.Context, filePath string,
 
 	ext := strings.ToLower(filepath.Ext(filePath))
 	contentType := audioContentType(ext)
+	if !isAllowedAudioContentType(contentType) {
+		return nil, fmt.Errorf("unsupported audio file type %q", contentType)
+	}
 	key := fmt.Sprintf("uploads/live-audio/%s%s", uuid.NewString(), ext)
 	uploaded, err := s.store.UploadFile(ctx, key, filePath, contentType)
 	if err != nil {

@@ -1238,6 +1238,39 @@ func TestUploadLiveAudioRejectsLocalStorage(t *testing.T) {
 	}
 }
 
+func TestUploadLiveAudioRejectsOversizedFile(t *testing.T) {
+	tmp := t.TempDir()
+	audio := filepath.Join(tmp, "audio.mp3")
+	if err := os.WriteFile(audio, []byte{0}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(audio, maxExecutionLiveAudioBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(nil, store, nil)
+
+	_, err := svc.UploadLiveAudio(context.Background(), audio, 3600)
+	if err == nil || !strings.Contains(err.Error(), "file size exceeds") {
+		t.Fatalf("UploadLiveAudio error = %v, want size limit rejection", err)
+	}
+}
+
+func TestUploadLiveAudioRejectsUnknownAudioType(t *testing.T) {
+	tmp := t.TempDir()
+	file := filepath.Join(tmp, "payload.bin")
+	if err := os.WriteFile(file, []byte("not audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(nil, store, nil)
+
+	_, err := svc.UploadLiveAudio(context.Background(), file, 3600)
+	if err == nil || !strings.Contains(err.Error(), "audio file type") {
+		t.Fatalf("UploadLiveAudio error = %v, want audio type rejection", err)
+	}
+}
+
 // argsHave reports whether the space-joined ffmpeg args contain substr. Filter chains (-vf / -af)
 // are passed as a single argv element, so whole-token equality would miss them; substring is robust.
 func argsHave(args []string, substr string) bool {
