@@ -91,6 +91,30 @@ func TestAgentExecutionProfileSchemaReadiness(t *testing.T) {
 	}
 }
 
+func TestTaskBillingSchemaReadiness(t *testing.T) {
+	legacy, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("CREATE TABLE tasks (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireTaskBillingSchema(legacy); err == nil || !strings.Contains(err.Error(), "20260911_task_fixed_sku_billing.sql") {
+		t.Fatalf("legacy task billing schema readiness = %v, want migration instruction", err)
+	}
+
+	ready, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireTaskBillingSchema(ready); err != nil {
+		t.Fatalf("current task billing schema readiness: %v", err)
+	}
+}
+
 func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	raw, err := os.ReadFile("main.go")
 	if err != nil {

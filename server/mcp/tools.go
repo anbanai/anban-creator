@@ -14,34 +14,6 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-// ImageModelResolver selects one immutable provider/model descriptor before an
-// image request reaches billing or generation.
-type ImageModelResolver interface {
-	ResolveImageModelForGeneration(
-		ctx context.Context,
-		userID string,
-		imageCapabilityKey string,
-		imageType string,
-		referenceCount int,
-	) (*service.ResolvedImageModel, error)
-}
-
-// ImageGenerator is the narrow generation surface used by generate_image.
-// ImageSvc remains concrete because the other image tools need upload,
-// compression, and download methods that are intentionally not part of this
-// request-scoped interface.
-type ImageGenerator interface {
-	GenerateImage(
-		ctx context.Context,
-		userID, projectID, prompt, imageType, outputPath, refPath string,
-		refPaths []string,
-		taskID string,
-		aspectRatio string,
-		resolved *service.ResolvedImageModel,
-		watermark *bool,
-	) (*service.ImageResult, error)
-}
-
 type TaskVideoAnalyzer interface {
 	Analyze(context.Context, service.AnalyzeTaskVideoRequest) (*service.AnalyzeTaskVideoResult, error)
 }
@@ -51,9 +23,6 @@ type Services struct {
 	ProjectSvc             *service.ProjectService
 	TaskSvc                *service.TaskService
 	PlanSvc                *service.PlanService
-	ImageSvc               *service.ImageService
-	ImageModelResolver     ImageModelResolver
-	ImageGenerator         ImageGenerator
 	ProviderCostSvc        *service.ProviderCostService
 	BillingCatalogSvc      *service.BillingCatalogService
 	GenerateImageTimeout   time.Duration

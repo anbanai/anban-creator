@@ -104,6 +104,17 @@ describe("scanWorkspaceArtifacts", () => {
     await expect(scanWorkspaceArtifacts(root, controller.signal)).rejects.toThrow("shutdown");
   });
 
+  test("rejects more files than one server manifest can accept", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
+    roots.push(root);
+    await mkdir(join(root, "output"), { recursive: true });
+    await Promise.all(Array.from({ length: 257 }, (_, index) =>
+      writeFile(join(root, "output", `file-${index.toString().padStart(3, "0")}.md`), "content"),
+    ));
+
+    await expect(scanWorkspaceArtifacts(root)).rejects.toThrow("at most 256 files");
+  });
+
   test("cancels a signed upload without submitting a partial manifest", async () => {
     const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
     roots.push(root);

@@ -18,7 +18,7 @@ func registerLiveSliceTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"file_path":       map[string]any{"type": "string", "description": "Server-local audio file path only. Do not pass an agent/client-local path such as /Users/... unless the MCP server runs on that same filesystem."},
-				"expires_seconds": map[string]any{"type": "integer", "description": "Signed URL TTL in seconds when no custom OSS domain is configured", "default": 86400},
+				"expires_seconds": map[string]any{"type": "integer", "description": "Signed URL TTL in seconds when no custom OSS domain is configured; cannot exceed the execution credential lifetime", "default": 7200, "maximum": 7200},
 			},
 			"required": []any{"file_path"},
 		},
@@ -31,7 +31,7 @@ func registerLiveSliceTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"audio_key":                  map[string]any{"type": "string", "description": "OSS object key returned by prepare_file_upload for purpose=live_audio. Preferred for agent/client-local files."},
-				"audio_url":                  map[string]any{"type": "string", "description": "Public or signed audio URL accessible by TingWu"},
+				"audio_url":                  map[string]any{"type": "string", "description": "Admin-only public or signed audio URL; execution credentials must use audio_key"},
 				"auto_chapters_enabled":      map[string]any{"type": "boolean", "description": "Enable auto chapters", "default": true},
 				"summarization_enabled":      map[string]any{"type": "boolean", "description": "Enable summary, Q&A, and mind map", "default": true},
 				"meeting_assistance_enabled": map[string]any{"type": "boolean", "description": "Enable keywords, actions, and key information", "default": true},
@@ -319,6 +319,9 @@ func uploadLiveAudioHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	if svcs == nil || svcs.LiveSliceSvc == nil {
 		return errorResult("live slice service not available"), nil
 	}
+	if hasMCPTokenInfo(ctx) && !isAdminCall(ctx) {
+		return errorResult("upload_live_audio requires an admin credential; use prepare_file_upload for execution uploads"), nil
+	}
 	args := parseArgs(req.Params.Arguments)
 	filePath, _ := args["file_path"].(string)
 	if filePath == "" {
@@ -343,8 +346,7 @@ func createLiveAnalysisTaskHandler(ctx context.Context, req *mcp.CallToolRequest
 	if audioKey == "" && audioURL == "" {
 		return errorResult("audio_key or audio_url is required"), nil
 	}
-
-	task, err := svcs.LiveSliceSvc.CreateLiveAnalysisTask(ctx, service.LiveAnalysisTaskRequest{
+	request := service.LiveAnalysisTaskRequest{
 		AudioKey:                 audioKey,
 		AudioURL:                 audioURL,
 		AutoChaptersEnabled:      boolFromArg(args["auto_chapters_enabled"], true),
@@ -352,7 +354,13 @@ func createLiveAnalysisTaskHandler(ctx context.Context, req *mcp.CallToolRequest
 		MeetingAssistanceEnabled: boolFromArg(args["meeting_assistance_enabled"], true),
 		DiarizationEnabled:       boolFromArg(args["diarization_enabled"], false),
 		ScriptTemplateEnable:     boolFromArg(args["script_template_enable"], false),
-	})
+	}
+	if identity, ok := getMCPExecutionIdentity(ctx); ok {
+		request.UserID, request.ProjectID, request.TaskID, request.ExecutionID = identity.UserID, identity.ProjectID, identity.TaskID, identity.ExecutionID
+	} else if hasMCPTokenInfo(ctx) && !isAdminCall(ctx) {
+		return errorResult("create_live_analysis_task requires an execution-scoped credential"), nil
+	}
+	task, err := svcs.LiveSliceSvc.CreateLiveAnalysisTask(ctx, request)
 	if err != nil {
 		return errorResult("create live analysis task: " + err.Error()), nil
 	}
@@ -368,8 +376,13 @@ func queryLiveAnalysisTaskHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
-
-	result, err := svcs.LiveSliceSvc.QueryLiveAnalysisTask(ctx, taskID)
+	identity := service.LiveAnalysisExecutionIdentity{}
+	if mcpIdentity, ok := getMCPExecutionIdentity(ctx); ok {
+		identity = service.LiveAnalysisExecutionIdentity{UserID: mcpIdentity.UserID, ProjectID: mcpIdentity.ProjectID, TaskID: mcpIdentity.TaskID, ExecutionID: mcpIdentity.ExecutionID}
+	} else if hasMCPTokenInfo(ctx) && !isAdminCall(ctx) {
+		return errorResult("query_live_analysis_task requires an execution-scoped credential"), nil
+	}
+	result, err := svcs.LiveSliceSvc.QueryLiveAnalysisTaskForCaller(ctx, taskID, identity)
 	if err != nil {
 		return errorResult("query live analysis task: " + err.Error()), nil
 	}

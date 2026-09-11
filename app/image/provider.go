@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"mime"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -206,7 +205,7 @@ func validateOpenAIConfig(apiCfg *config.ImageAPI) error {
 
 // ReadRefImage 读取参考图文件，返回文件内容、MIME 类型和错误
 func ReadRefImage(path string) ([]byte, string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readGeneratedImageFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("读取参考图失败: %w", err)
 	}

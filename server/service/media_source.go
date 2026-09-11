@@ -76,7 +76,7 @@ func ResolveMediaSource(ctx context.Context, store storage.Provider, log *zerolo
 		url, err := mediaSourceURLForKey(ctx, store, key, ttl)
 		if err != nil {
 			if log != nil {
-				log.Warn().Err(err).Str("url", rawURL).Msg("resolve owned media URL failed")
+				log.Warn().Err(err).Str("url", redactURLForLog(rawURL)).Msg("resolve owned media URL failed")
 			}
 			return nil, err
 		}
@@ -97,6 +97,20 @@ func ResolveMediaSource(ctx context.Context, store storage.Provider, log *zerolo
 		ContentType: req.ContentType,
 		External:    true,
 	}, nil
+}
+
+// redactURLForLog removes query parameters, which commonly contain signed
+// storage credentials. Keep the path for diagnostics while ensuring malformed
+// URLs are redacted conservatively as well.
+func redactURLForLog(rawURL string) string {
+	if index := strings.IndexByte(rawURL, '?'); index >= 0 {
+		fragment := ""
+		if fragmentIndex := strings.IndexByte(rawURL[index+1:], '#'); fragmentIndex >= 0 {
+			fragment = rawURL[index+1+fragmentIndex:]
+		}
+		return rawURL[:index] + "?REDACTED" + fragment
+	}
+	return rawURL
 }
 
 // ResolveMediaSourceBytes resolves a media source and returns its content. Owned

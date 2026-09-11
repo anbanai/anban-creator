@@ -1,7 +1,11 @@
 package image
 
 import (
+	"errors"
+	"os"
 	"testing"
+
+	"google.golang.org/genai"
 )
 
 func TestMapSizeToGeminiAspectRatio(t *testing.T) {
@@ -42,5 +46,23 @@ func TestGeminiProviderName(t *testing.T) {
 	p := &GeminiProvider{}
 	if p.Name() != "Gemini" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "Gemini")
+	}
+}
+
+func TestGeminiSaveInlineDataRejectsOversizedPayload(t *testing.T) {
+	const maxGeneratedBytes = 25 << 20
+	provider := &GeminiProvider{}
+
+	path, err := provider.saveInlineData(&genai.Blob{
+		MIMEType: "image/png",
+		Data:     make([]byte, maxGeneratedBytes+1),
+	})
+	defer os.Remove(path)
+	if err == nil {
+		t.Fatal("saveInlineData error = nil, want oversized payload rejection")
+	}
+	var generateErr *GenerateError
+	if !errors.As(err, &generateErr) || generateErr.Code != "response_too_large" {
+		t.Fatalf("saveInlineData error = %T %v, want response_too_large GenerateError", err, err)
 	}
 }

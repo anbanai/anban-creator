@@ -480,6 +480,32 @@ func TestFinalizeTaskArtifactManifestRejectsOversizeBeforeSideEffects(t *testing
 	}
 }
 
+func TestFinalizeTaskArtifactManifestRejectsTooManyFilesBeforeStorageAccess(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	files := make([]TaskArtifactManifestFile, 257)
+	for i := range files {
+		relPath := fmt.Sprintf("output/file-%03d.md", i)
+		files[i] = taskArtifactManifestEntry(
+			relPath,
+			expectedTaskArtifactFinalKey(task, executionID, taskArtifactTestSHA256, relPath),
+			7,
+			taskArtifactTestSHA256,
+		)
+	}
+
+	err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID, Files: files,
+	})
+	if !errors.Is(err, ErrTaskArtifactInvalid) || !strings.Contains(err.Error(), "at most 256 files") {
+		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want manifest file-count limit", err)
+	}
+	if len(store.statKeys) != 0 || len(store.promoteCalls) != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("oversized manifest touched storage: stat=%#v promote=%#v delete=%#v", store.statKeys, store.promoteCalls, store.deletedKeys)
+	}
+}
+
 func TestPrepareTaskArtifactUploadRejectsStorageWithoutConditionalPromotion(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
@@ -1107,7 +1133,7 @@ func TestFinalizeTaskArtifactManifestRejectsMalformedOrCrossScopeStagingKeys(t *
 	}
 }
 
-func TestTaskArtifactImmutableVersionsPreserveRowIdentityAndReuseFinal(t *testing.T) {
+func TestTaskArtifactSealedManifestReusesIdenticalFinalAndRejectsNewVersion(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
 	ctx := context.Background()
 	executionID := startTaskArtifactExecution(t, repo, task)
@@ -1148,13 +1174,22 @@ func TestTaskArtifactImmutableVersionsPreserveRowIdentityAndReuseFinal(t *testin
 		t.Fatalf("unchanged retry = %#v credentials=%d, want immutable reuse", retry, credentialCalls)
 	}
 	secondHash := strings.Repeat("b", 64)
-	secondKey := uploadVersion(secondHash, "etag-b")
+	credentialCalls = 0
+	_, err = svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, taskArtifactDirectUploadConfigWithCredentialCounter(t, &credentialCalls), TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: secondHash,
+	})
+	if !errors.Is(err, ErrTaskArtifactExecutionConflict) || !errors.Is(err, repository.ErrTaskFileManifestState) {
+		t.Fatalf("new version after seal error = %v, want manifest state conflict", err)
+	}
+	if credentialCalls != 0 {
+		t.Fatalf("credential calls = %d, want no upload credential after seal", credentialCalls)
+	}
 	secondRows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if err != nil || len(secondRows) != 1 {
 		t.Fatalf("second rows = %#v, err=%v", secondRows, err)
 	}
-	if secondKey == firstKey || secondRows[0].ID != firstID || secondRows[0].OSSKey != secondKey || secondRows[0].ContentHash != secondHash {
-		t.Fatalf("versioned row = %#v, want stable ID %s and new key distinct from %s", secondRows[0], firstID, firstKey)
+	if secondRows[0].ID != firstID || secondRows[0].OSSKey != firstKey || secondRows[0].ContentHash != taskArtifactTestSHA256 {
+		t.Fatalf("sealed row changed = %#v, want original ID %s and key %s", secondRows[0], firstID, firstKey)
 	}
 }
 
@@ -1213,9 +1248,11 @@ func TestFinalizeTaskArtifactManifestRetriesPartialPromotionIdempotently(t *test
 }
 
 func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
-	svc, _, store, task := newTaskArtifactTestService(t)
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
 
-	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		ExecutionID:  executionID,
 		RelativePath: "output/article.md",
 		Filename:     "article.md",
 		ContentType:  "text/markdown",
@@ -1226,7 +1263,7 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 		t.Fatalf("PrepareTaskArtifactUpload: %v", err)
 	}
 
-	assertTaskArtifactStagingKey(t, task, "", taskArtifactTestSHA256, "output/article.md", result.Key)
+	assertTaskArtifactStagingKey(t, task, executionID, taskArtifactTestSHA256, "output/article.md", result.Key)
 	if store.uploadKey != result.Key || store.uploadContentType != "text/markdown" {
 		t.Fatalf("signed upload = key %q content-type %q, want %q text/markdown", store.uploadKey, store.uploadContentType, result.Key)
 	}
@@ -1797,8 +1834,8 @@ func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, gorm.ErrRecordNotFound) {
-			t.Fatalf("late metadata error = %v, want gorm.ErrRecordNotFound", err)
+		if _, err := svc.UpdateTaskFileMetadata(ctx, original, model.FileRoleCover, "late-media", "https://late.example/image"); !errors.Is(err, repository.ErrTaskFileManifestState) {
+			t.Fatalf("late metadata error = %v, want ErrTaskFileManifestState", err)
 		}
 		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
 		if err != nil || len(rows) != 0 {
@@ -1836,6 +1873,11 @@ func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
 			"output/cover.png", strings.NewReader("old"), "image/png", 3)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+			TaskID: task.ID, ExecutionID: executionID,
+		}); err != nil {
+			t.Fatalf("seal manifest: %v", err)
 		}
 		if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
 			t.Fatal(err)
@@ -1902,7 +1944,8 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 }
 
 func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
-	svc, _, _, task := newTaskArtifactTestService(t)
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
 
 	for _, tt := range []struct {
 		name        string
@@ -1914,7 +1957,8 @@ func TestPrepareTaskArtifactUploadRejectsUnsafeRelativePath(t *testing.T) {
 		{name: "runtime directory", relPath: ".git/config", wantMessage: "refusing to upload runtime directory"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+			_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+				ExecutionID:  executionID,
 				RelativePath: tt.relPath,
 				Filename:     "secret.md",
 				ContentType:  "text/markdown",
@@ -1951,14 +1995,16 @@ func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T)
 }
 
 func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
-	svc, _, _, task := newTaskArtifactTestService(t)
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
 	cfg := taskArtifactDirectUploadConfig(t)
 	cfg.Storage.STSRoleArn = ""
 	cfg.CredentialIssuer = nil
 	cfg.Storage.AccessKeyID = "ak"
 	cfg.Storage.AccessKeySecret = "secret"
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, "", cfg, TaskArtifactPrepareRequest{
+	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
+		ExecutionID:  executionID,
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
@@ -1970,10 +2016,11 @@ func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
 }
 
 func TestFinalizeTaskArtifactManifestRejectsObjectOutsideTaskPrefix(t *testing.T) {
-	svc, _, _, task := newTaskArtifactTestService(t)
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
 
-	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
-		TaskID: task.ID,
+	err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
 			ObjectKey:    "uploads/users/other/projects/" + task.ProjectID + "/tasks/" + task.ID + "/artifacts/output/article.md",
@@ -1987,12 +2034,13 @@ func TestFinalizeTaskArtifactManifestRejectsObjectOutsideTaskPrefix(t *testing.T
 	}
 }
 
-func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
+func TestFinalizeTaskArtifactManifestPersistsExecutionTaskFile(t *testing.T) {
 	svc, repo, store, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
 	body := []byte("# title\n\nbody")
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
-	objectKey := expectedTaskArtifactFinalKey(task, "", hash, "output/article.md")
+	objectKey := expectedTaskArtifactFinalKey(task, executionID, hash, "output/article.md")
 	store.stats = map[string]*storage.ObjectInfo{
 		objectKey: {
 			Key:         objectKey,
@@ -2003,8 +2051,8 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 		},
 	}
 
-	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, "", TaskArtifactManifestRequest{
-		TaskID: task.ID,
+	if err := svc.FinalizeTaskArtifactManifest(context.Background(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: "output/article.md",
 			ObjectKey:    objectKey,
@@ -2016,7 +2064,7 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 		t.Fatalf("FinalizeTaskArtifactManifest: %v", err)
 	}
 
-	files, err := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
+	files, err := repo.TaskFiles().FindByExecutionID(context.Background(), executionID)
 	if err != nil {
 		t.Fatalf("find task files: %v", err)
 	}
@@ -2024,6 +2072,9 @@ func TestFinalizeTaskArtifactManifestPersistsTaskFile(t *testing.T) {
 		t.Fatalf("file count = %d, want 1", len(files))
 	}
 	file := files[0]
+	if file.State != model.TaskFileStatePending || file.ExecutionID != executionID {
+		t.Fatalf("file state/execution = %q/%q, want pending/%q", file.State, file.ExecutionID, executionID)
+	}
 	if file.FilePath != "output/article.md" || file.OSSKey != objectKey {
 		t.Fatalf("file path/key = %q/%q, want output/article.md/%q", file.FilePath, file.OSSKey, objectKey)
 	}
@@ -2130,5 +2181,39 @@ func TestCloudTaskRejectsLegacyArtifactRequestsWithoutExecutionIdentity(t *testi
 	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if findErr != nil || len(rows) != 0 {
 		t.Fatalf("rejected manifest rows = %#v, %v", rows, findErr)
+	}
+}
+
+func TestTaskArtifactRequestsRequireExecutionIdentityBeforeStorageAccess(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, "", taskArtifactDirectUploadConfig(t), TaskArtifactPrepareRequest{
+		TaskID: task.ID, RelativePath: "output/article.md", ContentType: "text/markdown",
+		Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if !errors.Is(err, ErrTaskArtifactExecutionConflict) {
+		t.Fatalf("prepare error = %v, want ErrTaskArtifactExecutionConflict", err)
+	}
+	if store.uploadURLCalls != 0 || len(store.statKeys) != 0 {
+		t.Fatalf("rejected prepare touched storage: upload_url_calls=%d stat_keys=%#v", store.uploadURLCalls, store.statKeys)
+	}
+
+	err = svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, "", TaskArtifactManifestRequest{
+		TaskID: task.ID,
+		Files: []TaskArtifactManifestFile{{
+			RelativePath: "output/article.md", ObjectKey: "untrusted", ContentType: "text/markdown",
+			Size: 7, SHA256: taskArtifactTestSHA256,
+		}},
+	})
+	if !errors.Is(err, ErrTaskArtifactExecutionConflict) {
+		t.Fatalf("manifest error = %v, want ErrTaskArtifactExecutionConflict", err)
+	}
+	if len(store.statKeys) != 0 || len(store.promoteCalls) != 0 {
+		t.Fatalf("rejected manifest touched storage: stat_keys=%#v promote_calls=%#v", store.statKeys, store.promoteCalls)
+	}
+	files, findErr := repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if findErr != nil || len(files) != 0 {
+		t.Fatalf("rejected requests persisted files: files=%#v err=%v", files, findErr)
 	}
 }

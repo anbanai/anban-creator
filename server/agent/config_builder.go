@@ -29,9 +29,11 @@ import (
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
 const (
-	referenceImageDirName  = ".anban-creator"
-	referenceImageFileName = "reference.png"
-	ReferenceImagePath     = referenceImageDirName + "/" + referenceImageFileName
+	referenceImageDirName          = ".anban-creator"
+	taskReferenceImageFileName     = "task-reference.png"
+	projectStyleReferenceFileName  = "project-style-reference.png"
+	TaskReferenceImagePath         = referenceImageDirName + "/" + taskReferenceImageFileName
+	ProjectStyleReferenceImagePath = referenceImageDirName + "/" + projectStyleReferenceFileName
 )
 
 var referenceMaterializeBeforeCommitHook func() error
@@ -43,6 +45,7 @@ var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 type MaterializedInputAttachment struct {
 	AttachmentIndex int    `json:"attachment_index"`
 	Type            string `json:"type,omitempty"`
+	Role            string `json:"role,omitempty"`
 	URL             string `json:"url,omitempty"`
 	Text            string `json:"text,omitempty"`
 	FileName        string `json:"file_name,omitempty"`
@@ -57,6 +60,7 @@ type MaterializedInputAttachment struct {
 type MaterializedInputAttachmentError struct {
 	AttachmentIndex int    `json:"attachment_index"`
 	Type            string `json:"type,omitempty"`
+	Role            string `json:"role,omitempty"`
 	URL             string `json:"url,omitempty"`
 	FileName        string `json:"file_name,omitempty"`
 	Instruction     string `json:"instruction,omitempty"`
@@ -85,7 +89,7 @@ func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
 // the dimensions each platform's settings.json slot consumes are read here:
 // Article.Writer / Article.Author / Article.Theme and Seednote.VisualStyle,
 // each driven by the resolved value (not the raw project column).
-func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, hasReference bool) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, hasTaskReference bool) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Instructions,
@@ -153,15 +157,16 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 		}
 	}
 
-	// Runtime reference assets always materialize at this fixed private path.
-	if hasReference {
+	// Only a direct task reference may enter the image-generation config. Project
+	// style references are materialized separately for prompt analysis.
+	if hasTaskReference {
 		switch ch.Platform {
 		case model.ScopeArticle:
-			cfg.Wechat.Article.Cover.Image.Refer = ReferenceImagePath
-			cfg.Wechat.Article.Content.Image.Refer = ReferenceImagePath
+			cfg.Wechat.Article.Cover.Image.Refer = TaskReferenceImagePath
+			cfg.Wechat.Article.Content.Image.Refer = TaskReferenceImagePath
 		case model.ScopeSeednote:
-			cfg.Seednote.Cover.Image.Refer = ReferenceImagePath
-			cfg.Seednote.Content.Image.Refer = ReferenceImagePath
+			cfg.Seednote.Cover.Image.Refer = TaskReferenceImagePath
+			cfg.Seednote.Content.Image.Refer = TaskReferenceImagePath
 		}
 	}
 
@@ -271,57 +276,6 @@ func MaterializeReferenceAsset(ctx context.Context, store storage.Provider, work
 	return materializeReferenceAssetBytes(ctx, workDir, data)
 }
 
-// DownloadProductImages downloads each product photo URL into the workspace's
-// .anban-creator/products/ directory (used by e-commerce tasks), preserving upload
-// order with 1-indexed names (product_01.<ext>, product_02.<ext>, ...). It also
-// writes index.json listing the exact filenames so the agent can reference them
-// deterministically (extensions vary by upload). Returns the count successfully
-// materialized; per-image failures are logged and skipped (best-effort).
-//
-// Product-photo resolution retains its independent attachment URL contract.
-func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, urls []string) int {
-	if len(urls) == 0 {
-		return 0
-	}
-	destDir := filepath.Join(workDir, appconfig.ConfigDir, "products")
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		if logger != nil {
-			logger.Warn().Err(err).Msg("create products dir failed")
-		}
-		return 0
-	}
-
-	names := make([]string, 0, len(urls))
-	for i, imageURL := range urls {
-		data, err := fetchImageBytes(ctx, store, userID, imageURL)
-		if err != nil {
-			if logger != nil {
-				logger.Warn().Err(err).Str("url", imageURL).Int("index", i+1).Msg("failed to download product photo, skipping")
-			}
-			continue
-		}
-		name := fmt.Sprintf("product_%02d%s", i+1, imageExtFromURL(imageURL))
-		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
-			if logger != nil {
-				logger.Warn().Err(err).Str("name", name).Msg("write product photo failed, skipping")
-			}
-			continue
-		}
-		names = append(names, name)
-	}
-
-	if len(names) > 0 {
-		if indexBytes, err := json.Marshal(names); err == nil {
-			if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil {
-				if logger != nil {
-					logger.Warn().Err(err).Msg("write products index.json failed")
-				}
-			}
-		}
-	}
-	return len(names)
-}
-
 // DownloadInputAttachments materializes AI-entry attachments into
 // .anban-creator/input-attachments and writes index.json with stable local paths.
 func DownloadInputAttachments(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, userID string, attachments []model.EntryAttachment) int {
@@ -340,7 +294,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 			continue
 		}
 		attachmentIndex := i + 1
-		name := inputAttachmentFilename(attachmentIndex, attachment)
+		name := InputAttachmentFilename(attachmentIndex, attachment)
 		path := filepath.Join(destDir, name)
 		var data []byte
 		var err error
@@ -365,6 +319,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 			failures = append(failures, MaterializedInputAttachmentError{
 				AttachmentIndex: attachmentIndex,
 				Type:            attachment.Type,
+				Role:            attachment.Role,
 				URL:             attachment.URL,
 				FileName:        attachment.FileName,
 				Instruction:     attachment.Instruction,
@@ -397,6 +352,7 @@ func DownloadInputAttachments(ctx context.Context, store storage.Provider, logge
 		index = append(index, MaterializedInputAttachment{
 			AttachmentIndex: attachmentIndex,
 			Type:            attachment.Type,
+			Role:            attachment.Role,
 			URL:             attachment.URL,
 			Text:            attachment.Text,
 			FileName:        attachment.FileName,
@@ -588,7 +544,9 @@ func fetchAttachmentBytes(ctx context.Context, store storage.Provider, rawURL, u
 	return data, nil
 }
 
-func inputAttachmentFilename(index int, attachment model.EntryAttachment) string {
+// InputAttachmentFilename returns the canonical runtime filename for a frozen
+// task attachment. Local and managed runtimes must use this exact mapping.
+func InputAttachmentFilename(index int, attachment model.EntryAttachment) string {
 	base := sanitizeAttachmentFilename(attachment.FileName)
 	source := firstNonEmptyAttachmentSource(attachment.URL, attachment.Key)
 	if base == "" {
@@ -604,12 +562,6 @@ func inputAttachmentFilename(index int, attachment model.EntryAttachment) string
 		base += ext
 	}
 	return fmt.Sprintf("attachment_%02d_%s", index, base)
-}
-
-// InputAttachmentFilename returns the canonical runtime filename for a frozen
-// task attachment. Local and managed runtimes use this exact mapping.
-func InputAttachmentFilename(index int, attachment model.EntryAttachment) string {
-	return inputAttachmentFilename(index, attachment)
 }
 
 // InputAttachmentReferencePath returns the task-relative path exposed to image
@@ -701,50 +653,6 @@ func inputAttachmentExt(contentType, rawURL string) string {
 	return ".bin"
 }
 
-// fetchImageBytes resolves an image URL to its bytes. For URLs owned by this
-// backend (OSS / local storage) it reads via the storage provider (works on
-// private buckets); otherwise it downloads via HTTP. This remains isolated to
-// the product-photo URL contract.
-func fetchImageBytes(ctx context.Context, store storage.Provider, userID, imageURL string) ([]byte, error) {
-	if key, ok := explicitStorageObjectKey(imageURL); ok {
-		key, err := runtimeStorageObjectKey(key, userID, "", false)
-		if err != nil {
-			return nil, err
-		}
-		if store == nil {
-			return nil, fmt.Errorf("storage provider is required for object key %q", key)
-		}
-		return readStorageObject(ctx, store, key, maxReferenceImageBytes)
-	}
-	if store != nil && store.IsOwnedURL(imageURL) {
-		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-			key, err := runtimeStorageObjectKey(key, userID, "", false)
-			if err != nil {
-				return nil, err
-			}
-			if data, err := storage.ReadObject(ctx, store, key, maxReferenceImageBytes); err == nil {
-				return data, nil
-			} else if errors.Is(err, storage.ErrObjectExceedsMaxSize) || errors.Is(err, storage.ErrBoundedReadUnsupported) {
-				return nil, fmt.Errorf("download: %w", err)
-			}
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxReferenceImageBytes))
-}
-
 func explicitStorageObjectKey(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "/") {
@@ -784,16 +692,4 @@ func readStorageObject(ctx context.Context, store storage.Provider, key string, 
 		return nil, fmt.Errorf("read storage object: %w", err)
 	}
 	return data, nil
-}
-
-// imageExtFromURL infers a lowercase image extension from the URL path, defaulting
-// to .png when unknown. Extension is taken from the URL (the canonical source for
-// server-owned storage URLs and OSS object keys) rather than sniffing bytes.
-func imageExtFromURL(imageURL string) string {
-	switch ext := strings.ToLower(filepath.Ext(imageURL)); ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
-		return ext
-	default:
-		return ".png"
-	}
 }

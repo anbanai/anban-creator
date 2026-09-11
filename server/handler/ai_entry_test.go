@@ -153,14 +153,13 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 			"text":"帮我写文章",
 			"quantity":2,
 			"image_ratio":"3:4",
-			"image_capability_key":"professional",
+		"image_capability_key":"professional",
 		"execution_target":"local",
 		"attachments":[{
-			"type":"image",
-			"url":"/api/v1/files/uploads/references/user-1/ref.png",
-			"file_name":"ref.png",
-			"content_type":"image/png",
-			"size":123
+			"type":"text",
+			"text":"补充材料",
+			"file_name":"brief.md",
+			"content_type":"text/markdown"
 		}]
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/ai-entry/submit", strings.NewReader(body))
@@ -182,7 +181,7 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 	if submitter.req.ExecutionTarget != model.ExecutionTargetLocal {
 		t.Fatalf("execution target = %q", submitter.req.ExecutionTarget)
 	}
-	if len(submitter.req.Attachments) != 1 || submitter.req.Attachments[0].FileName != "ref.png" {
+	if len(submitter.req.Attachments) != 1 || submitter.req.Attachments[0].FileName != "brief.md" {
 		t.Fatalf("attachments = %#v", submitter.req.Attachments)
 	}
 	var decoded Response
@@ -301,7 +300,7 @@ func TestAIEntryHandlerSubmitFinalizesUploadSession(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	assertFinalizedAsset(t, uploadRepo, "upload-1", "assets/users/user-1/upload-1/ref.png")
-	if got := submitter.req.Attachments[0]; got.UploadID != "upload-1" || got.Key != "assets/users/user-1/upload-1/ref.png" || got.URL != "" ||
+	if got := submitter.req.Attachments[0]; got.AssetID != "upload-1" || got.UploadID != "" || got.Key != "" || got.URL != "" ||
 		got.FileName != session.FileName || got.ContentType != session.ContentType || got.Size != session.Size {
 		t.Fatalf("verified storage metadata not persisted: %#v", got)
 	}

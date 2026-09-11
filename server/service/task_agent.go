@@ -95,7 +95,7 @@ func (s *TaskService) ValidateAgentExecutionAccess(ctx context.Context, userID, 
 	return nil
 }
 
-// ValidateAgentCompletionAccess binds a cloud completion credential to the
+// ValidateAgentCompletionAccess binds a completion credential to the
 // current execution identity without requiring that execution to remain active.
 // This lets a response-loss retry reach the idempotent completion finalizer.
 func (s *TaskService) ValidateAgentCompletionAccess(ctx context.Context, userID, projectID, taskID, executionID string) error {
@@ -108,9 +108,8 @@ func (s *TaskService) ValidateAgentCompletionAccess(ctx context.Context, userID,
 	}
 	executionID = strings.TrimSpace(executionID)
 	if task.DeletingAt != nil || task.UserID != userID || task.ProjectID != projectID ||
-		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
-		task.ExecutionTarget == model.ExecutionTargetLocalClaimed {
-		return agentAccessDenied("execution token does not match current cloud task execution")
+		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return agentAccessDenied("execution token does not match current task execution")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -119,52 +118,8 @@ func (s *TaskService) ValidateAgentCompletionAccess(ctx context.Context, userID,
 	if err != nil {
 		return fmt.Errorf("find execution: %w", err)
 	}
-	if execution.TaskID != taskID || execution.Target == model.ExecutionTargetLocalClaimed {
-		return agentAccessDenied("execution token does not match cloud execution identity")
-	}
-	return nil
-}
-
-// ValidateLocalAgentExecutionAccess binds an API-key-authenticated desktop
-// request to the active local execution. API keys identify a user, not an
-// execution, so the requested execution ID must still match both the task's
-// current authority and a running local-claimed execution record.
-func (s *TaskService) ValidateLocalAgentExecutionAccess(ctx context.Context, task *model.Task, authenticatedUserID, executionID string) error {
-	if task == nil || task.ExecutionTarget != model.ExecutionTargetLocalClaimed {
-		return fmt.Errorf("task is not running on a local executor")
-	}
-	executionID = strings.TrimSpace(executionID)
-	if err := s.ValidateAgentExecutionAccess(ctx, authenticatedUserID, task.ProjectID, task.ID, executionID); err != nil {
-		return err
-	}
-	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("find local execution: %w", err)
-	}
-	if execution.Target != model.ExecutionTargetLocalClaimed {
-		return fmt.Errorf("execution is not a local claimed execution")
-	}
-	return nil
-}
-
-// ValidateLocalAgentCompletionAccess binds an API-key completion to the current
-// local claim while allowing a terminal execution to be acknowledged again.
-func (s *TaskService) ValidateLocalAgentCompletionAccess(ctx context.Context, task *model.Task, authenticatedUserID, executionID string) error {
-	executionID = strings.TrimSpace(executionID)
-	if task == nil || task.DeletingAt != nil || task.UserID != authenticatedUserID ||
-		task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
-		task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
-		return agentAccessDenied("task does not match current local execution identity")
-	}
-	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return agentAccessDenied("execution not found")
-	}
-	if err != nil {
-		return fmt.Errorf("find local execution: %w", err)
-	}
-	if execution.TaskID != task.ID || execution.Target != model.ExecutionTargetLocalClaimed {
-		return agentAccessDenied("execution is not the current local claimed execution")
+	if execution.TaskID != taskID {
+		return agentAccessDenied("execution token does not match execution identity")
 	}
 	return nil
 }

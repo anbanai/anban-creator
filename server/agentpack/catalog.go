@@ -231,6 +231,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
+	artifactPaths := make(map[string]struct{}, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		if strings.TrimSpace(artifact.Role) == "" || validateOutputArtifactPath(artifact.Path) != nil {
 			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
@@ -238,6 +239,11 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if err := validateContractMIMEType(artifact.MIMEType); err != nil {
 			return fmt.Errorf("invalid artifact contract for %q: %w", artifact.Path, err)
 		}
+		artifactPath := strings.TrimSpace(strings.ReplaceAll(artifact.Path, "\\", "/"))
+		if _, exists := artifactPaths[artifactPath]; exists {
+			return fmt.Errorf("duplicate artifact path %q", artifactPath)
+		}
+		artifactPaths[artifactPath] = struct{}{}
 	}
 	if err := validateDeliveryContract(manifest.Delivery); err != nil {
 		return err
@@ -294,18 +300,51 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 }
 
 func validateDeliveryContract(deliveries []DeliverySpec) error {
-	seen := make(map[string]struct{}, len(deliveries))
+	seen := make([]string, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		if err := validateDeliverySpec(delivery); err != nil {
 			return err
 		}
-		path := strings.TrimSpace(strings.ReplaceAll(delivery.Path, "\\", "/"))
-		if _, exists := seen[path]; exists {
-			return fmt.Errorf("duplicate delivery path %q", path)
+		current := strings.TrimSpace(strings.ReplaceAll(delivery.Path, "\\", "/"))
+		for _, previous := range seen {
+			if current == previous {
+				return fmt.Errorf("duplicate delivery path %q", current)
+			}
+			if deliveryPatternsOverlap(previous, current) {
+				return fmt.Errorf("overlapping delivery paths %q and %q", previous, current)
+			}
 		}
-		seen[path] = struct{}{}
+		seen = append(seen, current)
 	}
 	return nil
+}
+
+func deliveryPatternsOverlap(left, right string) bool {
+	leftGlob := strings.Contains(left, "*")
+	rightGlob := strings.Contains(right, "*")
+	switch {
+	case !leftGlob && !rightGlob:
+		return left == right
+	case !leftGlob:
+		matched, _ := pathpkg.Match(right, left)
+		return matched
+	case !rightGlob:
+		matched, _ := pathpkg.Match(left, right)
+		return matched
+	}
+	leftPrefix, leftSuffix := splitDeliveryPattern(left)
+	rightPrefix, rightSuffix := splitDeliveryPattern(right)
+	prefixesCompatible := strings.HasPrefix(leftPrefix, rightPrefix) || strings.HasPrefix(rightPrefix, leftPrefix)
+	suffixesCompatible := strings.HasSuffix(leftSuffix, rightSuffix) || strings.HasSuffix(rightSuffix, leftSuffix)
+	return prefixesCompatible && suffixesCompatible
+}
+
+func splitDeliveryPattern(pattern string) (string, string) {
+	index := strings.IndexByte(pattern, '*')
+	if index < 0 {
+		return pattern, ""
+	}
+	return pattern[:index], pattern[index+1:]
 }
 
 func validateDeliverySpec(delivery DeliverySpec) error {
@@ -320,6 +359,13 @@ func validateDeliverySpec(delivery DeliverySpec) error {
 	}
 	if _, err := pathpkg.Match(delivery.Path, delivery.Path); err != nil {
 		return fmt.Errorf("invalid delivery contract for %q: invalid glob: %w", delivery.Path, err)
+	}
+	pattern := strings.TrimSpace(strings.ReplaceAll(delivery.Path, "\\", "/"))
+	if strings.Count(pattern, "*") > 1 || strings.ContainsAny(pattern, "?[") {
+		return fmt.Errorf("invalid delivery contract for %q: only one basename wildcard is supported", delivery.Path)
+	}
+	if wildcard := strings.IndexByte(pattern, '*'); wildcard >= 0 && wildcard < strings.LastIndexByte(pattern, '/') {
+		return fmt.Errorf("invalid delivery contract for %q: wildcard must be in the basename", delivery.Path)
 	}
 	return nil
 }

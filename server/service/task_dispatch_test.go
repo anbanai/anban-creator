@@ -592,10 +592,16 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		Type:                    model.PlatformArticle,
 		Status:                  model.TaskStatusPending,
 		Prompt:                  "dispatch me",
+		ImageCapabilityKey:      "standard",
 		ExecutionProfile:        profile.ID,
 		AgentProfileSnapshot:    snapshot,
 		AgentProfileFingerprint: fingerprint,
 	}
+	imageSnapshot, err := svc.imageCapabilities.FreezeImageCapability(context.Background(), task.UserID, task.ImageCapabilityKey)
+	if err != nil {
+		t.Fatalf("freeze dispatch image capability: %v", err)
+	}
+	task.SetImageCapabilitySnapshot(imageSnapshot)
 	if err := repo.Projects().Create(context.Background(), &model.Project{
 		ID:       task.ProjectID,
 		UserID:   task.UserID,
@@ -609,6 +615,26 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		t.Fatalf("create task: %v", err)
 	}
 	return svc, repo, db, dispatcher, task
+}
+
+func TestCreateCurrentExecutionRejectsMissingFrozenImageCapabilityBeforePersistence(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	task.ImageCapabilityKey = ""
+	if err := repo.Tasks().Update(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	execution, created, err := svc.createCurrentExecution(t.Context(), task)
+	if execution != nil || created || err == nil || !strings.Contains(err.Error(), "frozen image capability") {
+		t.Fatalf("createCurrentExecution = %#v, created=%v, err=%v", execution, created, err)
+	}
+	stored, findErr := repo.Tasks().FindByID(t.Context(), task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if stored.Status != model.TaskStatusPending || stored.CurrentExecutionID != nil || dispatcher.callCount() != 0 {
+		t.Fatalf("missing capability mutated task or called provider: task=%#v calls=%d", stored, dispatcher.callCount())
+	}
 }
 
 func TestCreateCurrentExecutionRejectsDeletedFrozenProviderBeforePersistence(t *testing.T) {
@@ -1139,6 +1165,42 @@ func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing
 	}
 }
 
+func TestResumeExecutionWithIncompleteFrozenAgentPackStartsFreshSession(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
+	result, err := json.Marshal(&agent.ExecutionResult{Success: false, Error: "max turns", SessionID: "legacy-session", RemoteArtifacts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
+		RuntimeImage: "registry/content@sha256:legacy",
+	}
+	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
+		t.Fatal(err)
+	}
+	parent.AgentPackDeliveryContract = nil
+	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatalf("HandleExecutionFromPayload: %v", err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.ResumeSessionID != "" {
+		t.Fatalf("resume session = %q, want a fresh session when the parent Pack identity is incomplete", current.ResumeSessionID)
+	}
+	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != "article" || current.ParentExecutionID != parent.ID {
+		t.Fatalf("resumed execution = %#v, want current Pack and runtime with preserved lineage", current)
+	}
+}
+
 func TestDispatchCloudTaskConcurrentHandlersCreateAndDispatchOneAttempt(t *testing.T) {
 	svc, repo, db, dispatcher, task := setupDispatchTest(t)
 	dispatcher.started = make(chan struct{}, 1)
@@ -1485,7 +1547,7 @@ func TestDispatchCloudTaskFailureFinalizationResumesWithoutRedispatch(t *testing
 	}
 	execution := mustCurrentExecution(t, repo, task.ID)
 	currentTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
-	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationDraftDelivery || currentTask.Status != model.TaskStatusRunning {
+	if execution.Status != model.TaskExecutionFailed || execution.FinalizationStatus != model.TaskExecutionFinalizationTerminal || currentTask.Status != model.TaskStatusRunning {
 		t.Fatalf("durable interrupted state: execution=%s finalization=%s task=%s", execution.Status, execution.FinalizationStatus, currentTask.Status)
 	}
 	if err := db.Exec("DROP TRIGGER reject_task_failure").Error; err != nil {
@@ -1604,7 +1666,12 @@ func TestHandleExecutionFromPayloadWithoutDispatcherFinalizesPendingTask(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
+		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1752,7 +1819,7 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1793,7 +1860,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesTerminalPersist
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1836,7 +1903,7 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 		t.Fatal(err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1896,7 +1963,7 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "asset-1"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1941,7 +2008,7 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1993,9 +2060,10 @@ func TestEnqueueExecutionFallbackFinalizesPendingDispatchFailure(t *testing.T) {
 	}
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusPending,
+		Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard",
 		ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2039,7 +2107,7 @@ func TestEnqueueExecutionFallbackRetriesPendingFailurePersistence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2117,7 +2185,7 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "asset-1"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2166,7 +2234,12 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
+		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

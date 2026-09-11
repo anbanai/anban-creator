@@ -145,9 +145,20 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 	refreshed := seedTaskExecution(t, repo, model.TaskExecutionStarting)
 	stale := seedTaskExecution(t, repo, model.TaskExecutionDispatching)
 	terminal := seedTaskExecution(t, repo, model.TaskExecutionSucceeded)
+	localActive := seedTaskExecution(t, repo, model.TaskExecutionRunning)
+	localTerminal := seedTaskExecution(t, repo, model.TaskExecutionFailed)
 	cutoff := time.Now().UTC().Add(-time.Minute)
 	old := cutoff.Add(-time.Minute)
-	if err := repo.db.Model(&model.TaskExecution{}).Where("id IN ?", []string{stale.ID, terminal.ID}).Update("updated_at", old).Error; err != nil {
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id IN ?", []string{localActive.ID, localTerminal.ID}).Update("target", model.ExecutionTargetLocalClaimed).Error; err != nil {
+		t.Fatalf("mark local executions: %v", err)
+	}
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", localTerminal.ID).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationTerminal,
+		"cleanup_status":      model.TaskExecutionCleanupDone,
+	}).Error; err != nil {
+		t.Fatalf("mark terminal local finalization: %v", err)
+	}
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id IN ?", []string{stale.ID, terminal.ID, localActive.ID, localTerminal.ID}).Update("updated_at", old).Error; err != nil {
 		t.Fatalf("age executions: %v", err)
 	}
 
@@ -169,13 +180,62 @@ func TestTaskExecutionRepositoryRuntimeAndReconciliation(t *testing.T) {
 		t.Fatalf("last heartbeat = %v, want %v", found.LastHeartbeatAt, heartbeat)
 	}
 
-	// The stale active attempt is selected; refreshed and terminal attempts are not.
+	// Only cloud runtime attempts are selected. Local attempts have no Docker or
+	// Kubernetes workload and are owned by the local execution reaper.
 	reconcilable, err := repo.TaskExecutions().FindReconcilable(ctx, cutoff, 10)
 	if err != nil {
 		t.Fatalf("find reconcilable: %v", err)
 	}
 	if len(reconcilable) != 1 || reconcilable[0].ID != stale.ID {
-		t.Fatalf("reconcilable executions = %+v, want only %s", reconcilable, stale.ID)
+		t.Fatalf("reconcilable executions = %+v, want only cloud active %s", reconcilable, stale.ID)
+	}
+}
+
+func TestTaskExecutionRepositoryFindsLocalReconcileCandidates(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	stale := now.Add(-10 * time.Minute)
+	fresh := now.Add(-time.Minute)
+	deadlineStale := now.Add(-2 * time.Hour)
+
+	newLocal := func(startedAt, heartbeatAt time.Time) *model.TaskExecution {
+		execution := &model.TaskExecution{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), Attempt: 1,
+			Target: model.ExecutionTargetLocalClaimed, Status: model.TaskExecutionRunning,
+			Started: true, StartedAt: &startedAt, LastHeartbeatAt: &heartbeatAt, CreatedAt: startedAt,
+		}
+		if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
+			t.Fatalf("create local execution: %v", err)
+		}
+		return execution
+	}
+	staleHeartbeat := newLocal(stale, stale)
+	staleDeadline := newLocal(deadlineStale, fresh)
+	_ = newLocal(stale, fresh)
+	incompleteFinalization := newLocal(fresh, fresh)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", incompleteFinalization.ID).Updates(map[string]any{
+		"status": model.TaskExecutionFailed, "finalization_status": model.TaskExecutionFinalizationTerminal,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	cloud := seedTaskExecution(t, repo, model.TaskExecutionRunning)
+	if err := repo.db.Model(&model.TaskExecution{}).Where("id = ?", cloud.ID).Updates(map[string]any{
+		"started": true, "started_at": stale, "last_heartbeat_at": stale, "created_at": stale,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := repo.TaskExecutions().FindLocalReconcileCandidates(ctx, now.Add(-5*time.Minute), now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("FindLocalReconcileCandidates: %v", err)
+	}
+	got := make(map[string]bool, len(found))
+	for _, execution := range found {
+		got[execution.ID] = true
+	}
+	if len(got) != 3 || !got[staleHeartbeat.ID] || !got[staleDeadline.ID] || !got[incompleteFinalization.ID] {
+		t.Fatalf("local reconcile candidates = %#v, want heartbeat %s, deadline %s, and finalization %s", got, staleHeartbeat.ID, staleDeadline.ID, incompleteFinalization.ID)
 	}
 }
 

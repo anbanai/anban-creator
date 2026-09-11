@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -218,6 +219,12 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": handlerTestImageCapabilityRoute("image.standard", model.TierFree),
+		},
+	})
 	app := fiber.New()
 	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
 	resp := postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+source.ID+`"],"execution_profile":"effective"}`)
@@ -390,6 +397,12 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": handlerTestImageCapabilityRoute("image.standard", model.TierFree),
+		},
+	})
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+projectID+`","prompt":"write"}`)
@@ -548,6 +561,7 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
+	freezeHandlerTaskImageCapability(t, source, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -560,6 +574,12 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	h.SetRepository(repo)
 	h.SetStore(store)
 	h.SetReferenceAssetService(referenceSvc)
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": handlerTestImageCapabilityRoute("image.standard", model.TierFree),
+		},
+	})
 	app := fiber.New()
 	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Clone(c) })
 	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", `{"execution_profile":"effective"}`)

@@ -15,7 +15,7 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export interface LocalConfig {
   serverURL: string;
-  apiKey: string;
+  executionToken: string;
   taskID: string;
   executionID: string;
   taskType: string;
@@ -30,7 +30,7 @@ export interface LocalConfig {
   maxTurns: number;
   model?: string;
   autoMemoryDirectory?: string;
-  artifactUploadMode: "off" | "direct" | "stream";
+  artifactUploadMode: "direct" | "stream";
   hasContentImage: boolean;
   hasTailImage: boolean;
   articleWithCover: boolean;
@@ -59,7 +59,7 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     if (!value || value.startsWith("--")) throw new Error(`${flag} is required`);
     index += 1;
     if (flag === "--model-usage-alias") aliases.push(value);
-    else if (["--server-url", "--api-key", "--task-id", "--execution-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--auto-memory-directory", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
+    else if (["--server-url", "--task-id", "--execution-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--auto-memory-directory", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
     else throw new Error(`unknown argument ${flag}`);
   }
 
@@ -86,14 +86,14 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
   if (!["http:", "https:"].includes(server.protocol) || server.username || server.password || server.search || server.hash || (server.pathname && server.pathname !== "/")) throw new Error("server URL is invalid");
   const maxTurns = values.has("--max-turns") ? Number(values.get("--max-turns")) : pack.runtime.max_turns ?? 40;
   if (!Number.isInteger(maxTurns) || maxTurns < 1) throw new Error("--max-turns must be a positive integer");
-  const artifactUploadMode = (values.get("--artifact-upload-mode") || env.ANBAN_ARTIFACT_UPLOAD_MODE || "off").toLowerCase();
-  if (artifactUploadMode !== "off" && artifactUploadMode !== "direct" && artifactUploadMode !== "stream") throw new Error("--artifact-upload-mode must be one of: off, direct, stream");
+  const artifactUploadMode = required("--artifact-upload-mode").toLowerCase();
+  if (artifactUploadMode !== "direct" && artifactUploadMode !== "stream") throw new Error("--artifact-upload-mode must be one of: direct, stream");
   const runtimeAdapter = pack.runtime.adapter;
   if (runtimeAdapter !== "standard" && runtimeAdapter !== "openmontage") throw new Error("Agent Pack runtime adapter is invalid");
 
   return {
     serverURL: server.origin,
-    apiKey: required("--api-key"),
+    executionToken: env.ANBAN_EXECUTION_TOKEN?.trim() || (() => { throw new Error("ANBAN_EXECUTION_TOKEN is required"); })(),
     taskID: required("--task-id"),
     executionID: required("--execution-id"),
     taskType,
@@ -133,15 +133,13 @@ export async function runLocal(
   process.once("SIGTERM", onShutdown);
   const stopHeartbeat = startHeartbeat(reporter, stderr, shutdown.signal);
   try {
-    let result = await runClaude(config.workspace, data, config.serverURL, config.apiKey, reporter, shutdown.signal, config.executionID);
-    if (config.artifactUploadMode !== "off") {
-      try {
-        await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "artifact upload failed";
-        void reporter.progress(`artifact upload failed: ${message}`, shutdown.signal).catch(() => {});
-        if (result.success) result = { ...result, success: false, terminal_reason: "platform_error", error: `artifact upload failed: ${message}` };
-      }
+    let result = await runClaude(config.workspace, data, config.serverURL, config.executionToken, reporter, shutdown.signal, config.executionID);
+    try {
+      await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "artifact upload failed";
+      void reporter.progress(`artifact upload failed: ${message}`, shutdown.signal).catch(() => {});
+      if (result.success) result = { ...result, success: false, terminal_reason: "platform_error", error: `artifact upload failed: ${message}` };
     }
     let completionError: Error | undefined;
     try {
@@ -166,8 +164,8 @@ export async function runLocal(
   }
 }
 
-export function createLocalReporter(config: Pick<LocalConfig, "serverURL" | "executionID" | "apiKey" | "taskID">): Reporter {
-  return new Reporter({ serverURL: config.serverURL, executionID: config.executionID }, config.apiKey, config.taskID);
+export function createLocalReporter(config: Pick<LocalConfig, "serverURL" | "executionID" | "executionToken" | "taskID">): Reporter {
+  return new Reporter({ serverURL: config.serverURL, executionID: config.executionID }, config.executionToken, config.taskID);
 }
 
 function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {
@@ -176,7 +174,7 @@ function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {
   if (inheritedKey) envs.ANTHROPIC_API_KEY = inheritedKey;
   if (config.model) envs.ANTHROPIC_MODEL = config.model;
   return {
-    execution_token: config.apiKey,
+    execution_token: config.executionToken,
     task_id: config.taskID,
     task_type: config.taskType,
     project_id: process.env.ANBAN_DEFAULT_PROJECT?.trim() || "",

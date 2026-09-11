@@ -170,7 +170,7 @@ func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
 	p.log.Info().Str("url", url).Msg("downloading and uploading image")
 
 	// 下载图片
-	tmpPath, err := wechat.DownloadFile(url)
+	tmpPath, err := wechat.DownloadPublicImageFile(url)
 	if err != nil {
 		return nil, fmt.Errorf("download failed: %w", err)
 	}
@@ -381,11 +381,11 @@ func (p *Processor) resolveRawURL(rawURL string) (string, error) {
 		return rawURL, nil
 	}
 	// 本地临时文件 → 转 data URL
-	data, err := os.ReadFile(rawURL)
+	defer os.Remove(rawURL)
+	data, err := readGeneratedImageFile(rawURL)
 	if err != nil {
 		return "", fmt.Errorf("read provider temp file: %w", err)
 	}
-	defer os.Remove(rawURL)
 
 	mime := http.DetectContentType(data)
 	encoded := base64.StdEncoding.EncodeToString(data)
@@ -406,7 +406,7 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 	// 远程 URL 需要下载，本地路径（Gemini）直接使用
 	sourcePath := result.URL
 	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
-		tmpPath, err := wechat.DownloadFile(result.URL)
+		tmpPath, err := wechat.DownloadPublicImageFile(result.URL)
 		if err != nil {
 			return nil, fmt.Errorf("download generated image: %w", err)
 		}
@@ -432,7 +432,7 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 
 	finalPath := processedPath
 	if outputPath != "" {
-		data, err := os.ReadFile(processedPath)
+		data, err := readGeneratedImageFile(processedPath)
 		if err != nil {
 			return nil, fmt.Errorf("read processed image: %w", err)
 		}
@@ -573,7 +573,7 @@ type DownloadResult struct {
 func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error) {
 	p.log.Info().Str("url", url).Msg("downloading image")
 
-	tmpPath, err := wechat.DownloadFile(url)
+	tmpPath, err := wechat.DownloadPublicImageFile(url)
 	if err != nil {
 		return nil, fmt.Errorf("download failed: %w", err)
 	}
@@ -594,7 +594,7 @@ func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error
 		}
 	}
 
-	data, err := os.ReadFile(processedPath)
+	data, err := readGeneratedImageFile(processedPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}

@@ -26,12 +26,12 @@ const inputStatusMeta: Record<
   ReferenceUsageSummaryData['inputs'][number]['status'],
   { label: string; variant: 'secondary' | 'outline' | 'destructive'; className?: string }
 > = {
-  used: {
-    label: '已使用',
+  passed_to_generation: {
+    label: '已传入生成',
     variant: 'secondary',
     className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
   },
-  excluded: { label: '未采用', variant: 'outline' },
+  analyzed_only: { label: '仅用于分析', variant: 'outline' },
   analysis_failed: { label: '分析失败', variant: 'destructive' },
 }
 
@@ -73,7 +73,7 @@ export function isReferenceUsageSummaryData(value: unknown): value is ReferenceU
   if (!Array.isArray(value.inputs) || !Array.isArray(value.outputs)) return false
   if (value.warnings !== undefined && !isStringArray(value.warnings)) return false
 
-  const validInputStatuses = new Set(['used', 'excluded', 'analysis_failed'])
+  const validInputStatuses = new Set(['analyzed_only', 'passed_to_generation', 'analysis_failed'])
   const validVerificationStatuses = new Set(['passed', 'warning', 'failed'])
 
   const inputsValid = value.inputs.every((input) => {
@@ -490,7 +490,7 @@ export function ReferenceUsageSummary({
     let cancelled = false
     if (!summaryFile) return undefined
 
-    void api.tasks.downloadFileBlob(task.id, summaryFile.id)
+    void api.tasks.previewFileBlob(task.id, summaryFile.id)
       .then((blob) => blob.text())
       .then((text) => JSON.parse(text) as unknown)
       .then((value) => {

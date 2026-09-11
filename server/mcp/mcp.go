@@ -3,9 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -103,24 +102,15 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 				Dur("duration", time.Since(start)).
 				Str("remote_addr", r.RemoteAddr)
 
-			// Log Authorization header for auth debugging (strips "Bearer " prefix).
+			// Authentication diagnostics deliberately record no credential bytes or
+			// derivatives that could be correlated across requests.
 			if sw.status == 401 {
-				authHeader := r.Header.Get("Authorization")
-				var tokenPreview string
-				if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
-					token := strings.TrimPrefix(authHeader, "Bearer ")
-					if len(token) > 8 {
-						tokenPreview = token[:8] + "..."
-					} else {
-						tokenPreview = token
-					}
-				} else if len(authHeader) > 0 {
-					tokenPreview = "(non-bearer)"
-				} else {
-					tokenPreview = "(empty)"
-				}
+				authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+				parts := strings.SplitN(authHeader, " ", 2)
+				bearerFormat := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && strings.TrimSpace(parts[1]) != ""
 				evt = evt.
-					Str("auth_token_preview", tokenPreview)
+					Bool("authorization_present", authHeader != "").
+					Bool("bearer_format", bearerFormat)
 			}
 			evt.Msg("mcp request")
 		}
@@ -241,12 +231,8 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 		}
 
 		if zlog != nil {
-			tokenHashBytes := sha256.Sum256([]byte(token))
-			tokenHash := hex.EncodeToString(tokenHashBytes[:])[:16]
 			zlog.Warn().
 				Str("remote_addr", r.RemoteAddr).
-				Int("token_len", len(token)).
-				Str("token_hash_prefix", tokenHash).
 				Bool("static_key_set", staticKey != "").
 				Bool("api_key_svc_available", apiKeySvc != nil).
 				Msg("mcp auth failed: invalid token")
@@ -289,16 +275,8 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 				continue
 			}
 			toolCallFound = true
-			if requested, ok := stringArgument(request.Params.Arguments, "project_id"); ok && requested != projectID {
-				http.Error(w, "execution token cannot access requested project", http.StatusForbidden)
-				return
-			}
-			if requested, ok := stringArgument(request.Params.Arguments, "task_id"); ok && requested != taskID {
-				http.Error(w, "execution token cannot access requested task", http.StatusForbidden)
-				return
-			}
-			if requested, ok := stringArgument(request.Params.Arguments, "execution_id"); ok && requested != executionID {
-				http.Error(w, "execution token cannot access requested execution", http.StatusForbidden)
+			if err := validateExecutionToolScope(request.Params.Name, request.Params.Arguments, projectID, taskID, executionID); err != nil {
+				http.Error(w, err.Error(), http.StatusForbidden)
 				return
 			}
 		}
@@ -310,15 +288,113 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withMCPExecutionID(r.Context(), executionID)))
+		next.ServeHTTP(w, r.WithContext(withMCPExecutionIdentity(r.Context(), info.UserID, projectID, taskID, executionID)))
 	})
 }
 
 type scopeRequest struct {
 	Method string `json:"method"`
 	Params struct {
+		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	} `json:"params"`
+}
+
+// executionToolScope describes the identity fields an execution-scoped MCP
+// call must carry. The table is deliberately fail-closed: adding a new MCP
+// tool without an explicit entry cannot silently widen an execution token.
+type executionToolScope struct {
+	Denied           bool
+	RequireProjectID bool
+	RequireTaskID    bool
+	RequireExecution bool
+}
+
+var executionToolScopes = map[string]executionToolScope{
+	// User-wide enumeration and scheduling are never part of one task's
+	// execution authority.
+	"list_projects":     {Denied: true},
+	"list_tasks":        {Denied: true},
+	"list_plans":        {Denied: true},
+	"create_plan":       {Denied: true},
+	"add_topic":         {Denied: true},
+	"upload_live_audio": {Denied: true},
+
+	// Project-scoped reads and publication listings are restricted to the
+	// project frozen into the execution token.
+	"get_project":             {RequireProjectID: true},
+	"get_project_profile":     {RequireProjectID: true, RequireTaskID: true},
+	"list_project_titles":     {RequireProjectID: true},
+	"list_drafts":             {RequireProjectID: true},
+	"list_published_articles": {RequireProjectID: true},
+	"list_topics":             {RequireProjectID: true},
+	"claim_topic":             {RequireProjectID: true, RequireTaskID: true},
+	"convert_markdown":        {RequireProjectID: true, RequireTaskID: true},
+	"render_template":         {RequireProjectID: true, RequireTaskID: true},
+
+	// Task-scoped reads and mutations must name the exact current task.
+	"get_task":                       {RequireTaskID: true},
+	"cancel_task":                    {RequireTaskID: true},
+	"finalize_task_title":            {RequireTaskID: true},
+	"list_task_files":                {RequireTaskID: true},
+	"update_task_progress":           {RequireTaskID: true},
+	"submit_agent_feedback":          {RequireTaskID: true},
+	"submit_completion_metadata":     {RequireTaskID: true, RequireExecution: true},
+	"recompute_content_tags":         {RequireTaskID: true, RequireExecution: true},
+	"recompute_agent_feedback":       {RequireTaskID: true, RequireExecution: true},
+	"get_completion_metadata_status": {RequireTaskID: true, RequireExecution: true},
+	"create_draft":                   {RequireProjectID: true, RequireTaskID: true},
+	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
+	"crop_image":                     {RequireTaskID: true},
+	"upload_image":                   {RequireProjectID: true, RequireTaskID: true},
+	"compress_image":                 {RequireTaskID: true},
+	"download_image":                 {RequireProjectID: true, RequireTaskID: true},
+	"analyze_image":                  {RequireProjectID: true, RequireTaskID: true},
+	"analyze_video":                  {RequireProjectID: true, RequireTaskID: true},
+
+	// These tools are deterministic, read-only, or operate on the external
+	// live/Seednote capability already selected for the current execution. The
+	// central authorizer still runs before dispatch, so stale executions cannot
+	// use them.
+	"score_article":                {},
+	"export_seednote":              {},
+	"list_resources":               {},
+	"get_resource":                 {},
+	"search_seednote_feeds":        {},
+	"get_seednote_feed_detail":     {},
+	"get_seednote_user_profile":    {},
+	"get_media_pipeline_status":    {},
+	"prepare_file_upload":          {RequireProjectID: true, RequireTaskID: true},
+	"create_live_analysis_task":    {},
+	"query_live_analysis_task":     {},
+	"build_live_clip_plan":         {},
+	"build_live_subject_clip_plan": {},
+	"build_live_clip_manifest":     {},
+}
+
+func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {
+	rule, ok := executionToolScopes[strings.TrimSpace(toolName)]
+	if !ok || rule.Denied {
+		return fmt.Errorf("execution token cannot call MCP tool %q", strings.TrimSpace(toolName))
+	}
+	for _, field := range []struct {
+		name     string
+		expected string
+		required bool
+	}{
+		{name: "project_id", expected: projectID, required: rule.RequireProjectID},
+		{name: "task_id", expected: taskID, required: rule.RequireTaskID},
+		{name: "execution_id", expected: executionID, required: rule.RequireExecution},
+	} {
+		requested, present := stringArgument(arguments, field.name)
+		if field.required && (!present || strings.TrimSpace(requested) == "") {
+			return fmt.Errorf("execution-scoped MCP tool %q requires %s", toolName, field.name)
+		}
+		if present && requested != field.expected {
+			return fmt.Errorf("execution token cannot access requested %s", field.name)
+		}
+	}
+	return nil
 }
 
 func parseScopeRequests(body []byte) ([]scopeRequest, error) {
@@ -342,32 +418,18 @@ func stringArgument(arguments map[string]any, key string) (string, bool) {
 	return valueString, ok
 }
 
-var mcpLogURLArgKeys = map[string]bool{
-	"audio_url":    true,
-	"image_url":    true,
-	"url":          true,
-	"upload_url":   true,
-	"download_url": true,
-}
-
-var mcpLogSensitiveArgKeys = map[string]bool{
-	"xsec_token": true,
-}
-
 func redactMCPLogValue(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, item := range x {
-			if mcpLogSensitiveArgKeys[k] {
+			if isMCPLogSensitiveKey(k) {
 				out[k] = "REDACTED"
 				continue
 			}
-			if mcpLogURLArgKeys[k] {
-				if s, ok := item.(string); ok {
-					out[k] = redactURLQuery(s)
-					continue
-				}
+			if isMCPLogURLKey(k) {
+				out[k] = redactMCPLogURLValue(item)
+				continue
 			}
 			out[k] = redactMCPLogValue(item)
 		}
@@ -383,16 +445,69 @@ func redactMCPLogValue(v any) any {
 	}
 }
 
+func isMCPLogSensitiveKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return false
+	}
+	for _, marker := range []string{"token", "secret", "password", "authorization", "api_key", "apikey"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMCPLogURLKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return key == "url" || strings.HasSuffix(key, "_url") || strings.HasSuffix(key, "_urls")
+}
+
+func redactMCPLogURLValue(value any) any {
+	switch x := value.(type) {
+	case string:
+		return redactURLQuery(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			if raw, ok := item.(string); ok {
+				out[i] = redactURLQuery(raw)
+			} else {
+				out[i] = redactMCPLogValue(item)
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, len(x))
+		for i, item := range x {
+			out[i] = redactURLQuery(item)
+		}
+		return out
+	default:
+		return redactMCPLogValue(value)
+	}
+}
+
 func redactURLQuery(raw string) string {
 	if raw == "" {
 		return raw
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.RawQuery == "" {
-		return raw
+	if err == nil && parsed.RawQuery != "" {
+		parsed.RawQuery = "REDACTED"
+		return parsed.String()
 	}
-	parsed.RawQuery = "REDACTED"
-	return parsed.String()
+	// url.Parse can reject malformed percent escapes, but a malformed URL may
+	// still carry a credential in its query string. Redact conservatively rather
+	// than returning that value to logs.
+	if index := strings.IndexByte(raw, '?'); index >= 0 {
+		fragment := ""
+		if fragmentIndex := strings.IndexByte(raw[index+1:], '#'); fragmentIndex >= 0 {
+			fragment = raw[index+1+fragmentIndex:]
+		}
+		return raw[:index] + "?REDACTED" + fragment
+	}
+	return raw
 }
 
 // getUserID extracts the authenticated user ID from the MCP request context.
@@ -412,12 +527,42 @@ type mcpUserIDContextKey struct{}
 
 type mcpExecutionIDContextKey struct{}
 
+type mcpExecutionIdentityContextKey struct{}
+
+type mcpExecutionIdentity struct {
+	UserID      string
+	ProjectID   string
+	TaskID      string
+	ExecutionID string
+}
+
 func withMCPUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, mcpUserIDContextKey{}, userID)
 }
 
 func withMCPExecutionID(ctx context.Context, executionID string) context.Context {
 	return context.WithValue(ctx, mcpExecutionIDContextKey{}, strings.TrimSpace(executionID))
+}
+
+func withMCPExecutionIdentity(ctx context.Context, userID, projectID, taskID, executionID string) context.Context {
+	identity := mcpExecutionIdentity{
+		UserID: strings.TrimSpace(userID), ProjectID: strings.TrimSpace(projectID),
+		TaskID: strings.TrimSpace(taskID), ExecutionID: strings.TrimSpace(executionID),
+	}
+	ctx = context.WithValue(ctx, mcpExecutionIdentityContextKey{}, identity)
+	return withMCPExecutionID(ctx, identity.ExecutionID)
+}
+
+func getMCPExecutionIdentity(ctx context.Context) (mcpExecutionIdentity, bool) {
+	identity, ok := ctx.Value(mcpExecutionIdentityContextKey{}).(mcpExecutionIdentity)
+	if !ok || identity.ExecutionID == "" {
+		return mcpExecutionIdentity{}, false
+	}
+	return identity, true
+}
+
+func hasMCPTokenInfo(ctx context.Context) bool {
+	return mcpauth.TokenInfoFromContext(ctx) != nil
 }
 
 func getExecutionID(ctx context.Context) string {

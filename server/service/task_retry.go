@@ -59,6 +59,11 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if src.Status != model.TaskStatusCompleted && src.Status != model.TaskStatusFailed && src.Status != model.TaskStatusCancelled {
 		return nil, fmt.Errorf("only completed, failed, or cancelled tasks can be cloned (current status: %s)", src.Status)
 	}
+	if cloneParams.Overrides == nil && taskUsesFrozenImageCapability(src.Type) {
+		if strings.TrimSpace(src.ImageCapabilityKey) == "" || src.ImageCapabilitySnapshot.Data().Key != strings.TrimSpace(src.ImageCapabilityKey) {
+			return nil, ErrTaskImageCapabilityMissing
+		}
+	}
 
 	inputSourceTaskID, inputSourceProjectID := ResolveCloneInputSource(src)
 
@@ -132,27 +137,28 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		return nil, err
 	}
 	params := CreateManualParams{
-		UserID:                   src.UserID,
-		ProjectID:                src.ProjectID,
-		ExecutionProfile:         cloneParams.ExecutionProfile,
-		FrozenTaskType:           src.Type,
-		PreserveFrozenConfig:     true,
-		Prompt:                   prompt,
-		Quantity:                 1,
-		ImageRatio:               src.ImageRatio,
-		ImageCapabilityKey:       src.ImageCapabilityKey,
-		SkipRefImage:             &skipRef,
-		InputSourceTaskID:        inputSourceTaskID,
-		InputSourceProjectID:     inputSourceProjectID,
-		Overrides:                &overrides,
-		ProjectSnapshot:          &snapshot,
-		Watermark:                &watermark,
-		HasContentImage:          &hasContent,
-		HasTailImage:             &hasTail,
-		ArticleWithCover:         articleCover,
-		ArticleWithContentImages: articleContent,
-		ExecutionTarget:          executionTarget,
-		AgentInput:               src.AgentInput.Data(),
+		UserID:                        src.UserID,
+		ProjectID:                     src.ProjectID,
+		ExecutionProfile:              cloneParams.ExecutionProfile,
+		FrozenTaskType:                src.Type,
+		PreserveFrozenConfig:          true,
+		Prompt:                        prompt,
+		Quantity:                      1,
+		ImageRatio:                    src.ImageRatio,
+		ImageCapabilityKey:            src.ImageCapabilityKey,
+		frozenImageCapabilitySnapshot: ptrImageCapabilitySnapshot(src.ImageCapabilitySnapshot.Data()),
+		SkipRefImage:                  &skipRef,
+		InputSourceTaskID:             inputSourceTaskID,
+		InputSourceProjectID:          inputSourceProjectID,
+		Overrides:                     &overrides,
+		ProjectSnapshot:               &snapshot,
+		Watermark:                     &watermark,
+		HasContentImage:               &hasContent,
+		HasTailImage:                  &hasTail,
+		ArticleWithCover:              articleCover,
+		ArticleWithContentImages:      articleContent,
+		ExecutionTarget:               executionTarget,
+		AgentInput:                    src.AgentInput.Data(),
 	}
 	if cloneParams.AgentInput != nil {
 		params.AgentInput = *cloneParams.AgentInput
@@ -193,6 +199,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks, nil
+}
+
+func ptrImageCapabilitySnapshot(snapshot model.ImageCapabilitySnapshot) *model.ImageCapabilitySnapshot {
+	return &snapshot
 }
 
 func (s *TaskService) prependClonedReferenceAttachment(ctx context.Context, source *model.Task, attachments []model.EntryAttachment) ([]model.EntryAttachment, error) {

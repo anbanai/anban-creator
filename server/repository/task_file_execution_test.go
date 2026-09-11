@@ -70,8 +70,8 @@ func TestTaskFileRepositoryPublishMySQLLockOrderContract(t *testing.T) {
 	db, mock, logs := openTaskFileMutationMySQLMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status"}).
-			AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "manifest_status", "manifest_sealed"}).
+			AddRow("e1", "t1", model.TaskExecutionRunning, model.TaskExecutionManifestPending, true))
 	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "current_execution_id"}).
 			AddRow("t1", model.TaskStatusRunning, "e1"))
@@ -159,6 +159,7 @@ func TestTaskFileRepositoryPublishesExecutionAtomicallyAndIdempotently(t *testin
 	if err := repo.TaskFiles().BatchCreate(ctx, rows); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e2")
 	visible, err := repo.TaskFiles().FindByTaskID(ctx, "t1")
 	if err != nil || len(visible) != 1 || visible[0].ExecutionID != "e1" {
 		t.Fatalf("visible before publish = %#v, %v", visible, err)
@@ -197,6 +198,7 @@ func TestTaskFileRepositoryPublishWithNoTargetRowsPreservesPublishedSet(t *testi
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"}); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e2")
 	err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e2")
 	if !errors.Is(err, ErrNoPendingExecutionArtifacts) {
 		t.Fatalf("error = %v, want ErrNoPendingExecutionArtifacts", err)
@@ -238,6 +240,7 @@ func TestTaskFileRepositoryPublishRollbackPreservesOldSet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e2")
 	if err := db.Exec(`CREATE TRIGGER fail_publish BEFORE UPDATE ON task_files WHEN OLD.execution_id = 'e2' BEGIN SELECT RAISE(ABORT, 'forced publish failure'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +288,7 @@ func TestTaskFileRepositoryConcurrentAttemptsOnlyCurrentPublishes(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e2")
 	start := make(chan struct{})
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -314,6 +318,7 @@ func TestTaskFileRepositoryPublishRacingReplacementHasNoLatePendingRows(t *testi
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "first.md", FileName: "first.md"}); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e1")
 	replacement := []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "replacement.md", FileName: "replacement.md"}}
 	publishErr, replaceErr := runArtifactMutationRace(
 		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
@@ -350,6 +355,7 @@ func TestTaskFileRepositoryPublishRacingDiscardPreservesVisibleSet(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sealCurrentTaskArtifacts(t, repo, "t1", "e1")
 	publishErr, discardErr := runArtifactMutationRace(
 		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
 		func() error { return repo.TaskFiles().DiscardCurrentExecution(ctx, "t1", "e1") },
@@ -411,6 +417,24 @@ func seedCurrentTaskForArtifacts(t *testing.T, repo Repository, taskID, executio
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, ManifestStatus: model.TaskExecutionManifestPending}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func sealCurrentTaskArtifacts(t *testing.T, repo Repository, taskID, executionID string) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := make([]*model.TaskFile, 0, len(rows))
+	for _, row := range rows {
+		if row.State == model.TaskFileStatePending {
+			pending = append(pending, row)
+		}
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, taskID, executionID, pending); err != nil {
+		t.Fatalf("seal artifact manifest: %v", err)
 	}
 }
 
@@ -487,6 +511,40 @@ func TestTaskFileRepositoryCollectCurrentExecutionIsIdempotent(t *testing.T) {
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
 	if err != nil || len(rows) != 1 || rows[0].State != "collected" {
 		t.Fatalf("collected rows = %#v, err=%v", rows, err)
+	}
+}
+
+func TestFinalizeCloudTaskWithArtifactsRejectsTaskStatusThatContradictsExecution(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending,
+		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repo.TaskExecutions().Transition(ctx, "e1", []string{model.TaskExecutionRunning}, model.TaskExecutionFailed, model.ExecutionTransition{})
+	if err != nil || !changed {
+		t.Fatalf("mark execution failed: changed=%v err=%v", changed, err)
+	}
+
+	err = repo.WithTx(ctx, func(tx Repository) error {
+		_, finalizeErr := tx.Tasks().FinalizeCloudTaskWithArtifactsInTx(
+			ctx, "t1", "e1", model.TaskStatusCancelled, "failed", `{"success":false}`,
+			nil, "unreconciled", CloudTaskArtifactsCollect,
+		)
+		return finalizeErr
+	})
+	if !errors.Is(err, ErrCloudTaskExecutionCASLost) {
+		t.Fatalf("contradictory cloud finalization error = %v, want CAS lost", err)
+	}
+	task, _ := repo.Tasks().FindByID(ctx, "t1")
+	execution, _ := repo.TaskExecutions().FindByID(ctx, "e1")
+	files, _ := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if task.Status != model.TaskStatusRunning || task.Result != nil || execution.ManifestStatus != model.TaskExecutionManifestPending ||
+		len(files) != 1 || files[0].State != model.TaskFileStatePending {
+		t.Fatalf("contradictory finalization mutated state: task=%#v execution=%#v files=%#v", task, execution, files)
 	}
 }
 
@@ -826,25 +884,69 @@ func TestTaskFileRepositoryEmptyWorkspaceManifestRejectsLateMCPUpsert(t *testing
 	}
 }
 
-func TestTaskFileRepositoryWorkspaceManifestReplayRemainsAllowedAfterSeal(t *testing.T) {
+func TestTaskFileRepositorySealedWorkspaceManifestAllowsOnlyIdenticalReplay(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
-	for _, contentHash := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64)} {
-		if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{{
-			Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
-			OSSKey: "workspace/article.md", ContentHash: contentHash,
-		}}); err != nil {
-			t.Fatalf("workspace manifest replay: %v", err)
-		}
+	original := &model.TaskFile{
+		Role: model.FileRoleMarkdown, FilePath: "output/article.md", FileName: "article.md",
+		MimeType: "text/markdown", FileSize: 12, OSSKey: "workspace/article.md",
+		OSSURL: "https://storage.example/article.md", StorageProvider: "oss", ContentHash: strings.Repeat("a", 64),
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{original}); err != nil {
+		t.Fatalf("initial workspace manifest: %v", err)
+	}
+	identical := *original
+	identical.ID = ""
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{&identical}); err != nil {
+		t.Fatalf("identical workspace manifest replay: %v", err)
+	}
+
+	mutations := []struct {
+		name  string
+		files func() []*model.TaskFile
+	}{
+		{name: "hash", files: func() []*model.TaskFile {
+			changed := identical
+			changed.ContentHash = strings.Repeat("b", 64)
+			return []*model.TaskFile{&changed}
+		}},
+		{name: "object key", files: func() []*model.TaskFile {
+			changed := identical
+			changed.OSSKey = "workspace/other.md"
+			return []*model.TaskFile{&changed}
+		}},
+		{name: "mime type", files: func() []*model.TaskFile {
+			changed := identical
+			changed.MimeType = "text/plain"
+			return []*model.TaskFile{&changed}
+		}},
+		{name: "role", files: func() []*model.TaskFile {
+			changed := identical
+			changed.Role = model.FileRoleOther
+			return []*model.TaskFile{&changed}
+		}},
+		{name: "removed file", files: func() []*model.TaskFile { return nil }},
+		{name: "added file", files: func() []*model.TaskFile {
+			added := identical
+			added.FilePath, added.FileName, added.OSSKey, added.ContentHash = "output/extra.md", "extra.md", "workspace/extra.md", strings.Repeat("c", 64)
+			return []*model.TaskFile{&identical, &added}
+		}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", mutation.files()); !errors.Is(err, ErrTaskFileManifestState) {
+				t.Fatalf("sealed workspace manifest mutation error = %v, want ErrTaskFileManifestState", err)
+			}
+		})
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
-	if err != nil || len(rows) != 1 || rows[0].ContentHash != strings.Repeat("b", 64) {
-		t.Fatalf("replayed workspace rows = %#v, err=%v", rows, err)
+	if err != nil || len(rows) != 1 || rows[0].ContentHash != strings.Repeat("a", 64) {
+		t.Fatalf("sealed workspace rows changed = %#v, err=%v", rows, err)
 	}
 }
 
-func TestTaskFileRepositorySealedManifestAllowsMetadataForPreservedMCPIdentity(t *testing.T) {
+func TestTaskFileRepositorySealedManifestRejectsMetadataMutation(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
@@ -863,13 +965,18 @@ func TestTaskFileRepositorySealedManifestAllowsMetadataForPreservedMCPIdentity(t
 		t.Fatalf("workspace replacement: %v", err)
 	}
 
-	updated, err := repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, original, model.FileRoleCover, "media-1", "https://wechat.example/cover.png")
-	if err != nil {
-		t.Fatalf("metadata update for preserved MCP identity: %v", err)
+	_, err = repo.TaskFiles().UpdatePendingCurrentExecutionMetadata(ctx, original, model.FileRoleCover, "media-1", "https://wechat.example/cover.png")
+	if !errors.Is(err, ErrTaskFileManifestState) {
+		t.Fatalf("sealed metadata mutation error = %v, want ErrTaskFileManifestState", err)
 	}
-	if updated.ID != original.ID || updated.OSSKey != original.OSSKey || updated.ContentHash != original.ContentHash ||
-		updated.Role != model.FileRoleCover || updated.MediaID != "media-1" || updated.WechatURL != "https://wechat.example/cover.png" {
-		t.Fatalf("updated preserved MCP row = %#v", updated)
+	rows, findErr := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if findErr != nil || len(rows) != 2 {
+		t.Fatalf("sealed rows = %#v, err=%v", rows, findErr)
+	}
+	for _, row := range rows {
+		if row.ID == original.ID && (row.Role != model.FileRoleImage || row.MediaID != "" || row.WechatURL != "") {
+			t.Fatalf("sealed MCP row changed: %#v", row)
+		}
 	}
 }
 
@@ -973,6 +1080,9 @@ func TestTaskFileMutationRacingLocalCompletionLeavesLegalTerminalState(t *testin
 				Role: model.FileRoleOther, FilePath: "output/original.md", FileName: "original.md",
 			}); err != nil {
 				t.Fatal(err)
+			}
+			if mutation == "publish" {
+				sealCurrentTaskArtifacts(t, repo, "t1", "e1")
 			}
 
 			type completionResult struct {
@@ -1416,7 +1526,6 @@ func TestTaskFileRepositoryReplacePendingExecutionMySQLIdenticalRetrySkipsNoOpUp
 			"persisted-id", "t1", "e1", model.TaskFileStatePending, model.FileRoleMarkdown, "output/article.md", "article.md", "text/markdown", int64(42),
 			strings.Repeat("a", 64), "known-media", "https://example.com/wechat", "known-key", "https://example.com/file", "oss",
 		))
-	mock.ExpectExec("DELETE FROM `task_files`").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	repo := New(db)

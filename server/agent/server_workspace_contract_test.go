@@ -231,7 +231,7 @@ func containsOutputPath(values []string, want string) bool {
 	return false
 }
 
-func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
+func TestEcommerceWorkflowsUseUnifiedInputAttachmentIndex(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
 		"plugins/agents/ecommerce.md",
@@ -241,19 +241,14 @@ func TestEcommerceWorkflowsResolveServerProductPhotoDirectory(t *testing.T) {
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
-			if strings.Contains(body, "output/.anban-creator/products") {
-				t.Fatalf("%s incorrectly resolves product photos under output/", relativePath)
+			for _, forbidden := range []string{".anban-creator/products", "product_photo_dir", "$PRODUCT_PHOTO_DIR"} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s retains removed product-photo runtime contract %q", relativePath, forbidden)
+				}
 			}
-			const definition = "将 `ecommerce.product_photo_dir` 读取为 `$PRODUCT_PHOTO_DIR`"
-			assertVariableDefinedBeforeUse(t, relativePath, body, "$PRODUCT_PHOTO_DIR", definition)
-			definitionAt := strings.Index(body, definition)
-			indexCheckAt := indexAfterText(body, "`index.json`", definitionAt)
-			if indexCheckAt <= definitionAt {
-				t.Fatalf("%s must assign $PRODUCT_PHOTO_DIR before checking index.json", relativePath)
-			}
-			for _, term := range []string{"相对路径以当前任务 CWD 为根", "$PRODUCT_PHOTO_DIR/<filename>", "缺失或全无可访问"} {
-				if !strings.Contains(body[definitionAt:indexCheckAt+len("`index.json`")], term) && !strings.Contains(body[indexCheckAt:], term) {
-					t.Errorf("%s missing product photo directory contract %q", relativePath, term)
+			for _, required := range []string{".anban-creator/input-attachments/index.json", "ecommerce_product", "ref_image_paths"} {
+				if !strings.Contains(body, required) {
+					t.Errorf("%s missing unified product attachment contract %q", relativePath, required)
 				}
 			}
 		})
@@ -266,16 +261,16 @@ func TestEcommerceProductAnalysisPreservesBootstrapInputDirectory(t *testing.T) 
 	body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 
 	for _, forbidden := range []string{
-		"output/.anban-creator/products/index.json",
-		"output/.anban-creator/products/product_01.png",
+		".anban-creator/products",
+		"$PRODUCT_PHOTO_DIR",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("%s incorrectly relocates bootstrap input under output: %q", relativePath, forbidden)
 		}
 	}
 	for _, required := range []string{
-		"`$PRODUCT_PHOTO_DIR/index.json`",
-		"`$PRODUCT_PHOTO_DIR/product_01.png`",
+		"`.anban-creator/input-attachments/index.json`",
+		"`ecommerce_product`",
 		"`output/product-photos.md`",
 		"`output/product-bible.md`",
 	} {

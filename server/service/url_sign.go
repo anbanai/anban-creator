@@ -62,7 +62,7 @@ func SignURL(ctx context.Context, store storage.Provider, log *zerolog.Logger, r
 	signed, err := store.DownloadURL(ctx, key, ttl)
 	if err != nil {
 		if log != nil {
-			log.Warn().Err(err).Str("url", rawURL).Msg("sign image url failed, returning original")
+			log.Warn().Err(err).Str("url", redactURLForLog(rawURL)).Msg("sign image url failed, returning original")
 		}
 		return rawURL
 	}

@@ -117,7 +117,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "15b5e1e25a4da10e163da85f1e70fe3f2fbfadca1a72c403b1a76fdc9d0b8647"
+      "digest": "b243b5814405f556856f8e433d1570d9231eb670e2112cf79dd4b977175b31b1"
     },
     {
       "id": "ecommerce",
@@ -246,7 +246,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "ab5363c4bdb2fa2253af743ff62f10ac1f021e5d45efb967b747cc8098811155"
+      "digest": "4c2d9545eca7b84920e84fce2ff594cde440dbd7d959a663539f4b363764edc1"
     },
     {
       "id": "live-slicer",
@@ -347,7 +347,7 @@
         }
       ],
       "ui": {},
-      "digest": "0a78ab15108bf95b98469e76493ce293bd16b6267fe25f7ccec6094936b00e2c"
+      "digest": "1e49fa787c42abb985a997550c6da141fd2a1c141c9db8987d537341d2367e1f"
     },
     {
       "id": "moments",
@@ -607,7 +607,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "a8be03e00779d8d29a0fc8a7e5142e3cd0fe943c9e6eaf8dd90d1fc0dce2a934"
+      "digest": "4cda1a715834b8dbdb8e00419d2d9710d224426be346b50d828423d8a4af980e"
     },
     {
       "id": "seednote",
@@ -758,7 +758,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "e68373c7f40ae4da56f8cb513f2e730580438b541f932b3c1e6ebb9dc151f7f0"
+      "digest": "0722dea597b55b661ed96149672a1d124afd66131bbf0f77d3e53b932f42765d"
     }
   ]
 }

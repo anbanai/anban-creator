@@ -122,7 +122,7 @@ func TestMaterializeReferenceAssetUsesBoundedRepositoryKeyRead(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "reference.png"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, taskReferenceImageFileName), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,11 +132,11 @@ func TestMaterializeReferenceAssetUsesBoundedRepositoryKeyRead(t *testing.T) {
 	if len(store.readKeys) != 1 || store.readKeys[0] != key {
 		t.Fatalf("read keys = %#v, want [%s]", store.readKeys, key)
 	}
-	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+	got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, taskReferenceImageFileName))
 	if err != nil || string(got) != "image" {
 		t.Fatalf("materialized bytes = %q, err=%v", got, err)
 	}
-	info, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, "reference.png"))
+	info, err := os.Stat(filepath.Join(workDir, appconfig.ConfigDir, taskReferenceImageFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestMaterializeReferenceAssetReplacesSymlinkWithoutWritingTarget(t *testing
 	if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(dir, "reference.png")
+	dest := filepath.Join(dir, taskReferenceImageFileName)
 	if err := os.Symlink(target, dest); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestMaterializeReferenceAssetRenameFailureCleansTempAndPreservesDestination
 	store := &fakeStore{readData: map[string][]byte{key: []byte("image")}}
 	workDir := t.TempDir()
 	dir := filepath.Join(workDir, appconfig.ConfigDir)
-	dest := filepath.Join(dir, "reference.png")
+	dest := filepath.Join(dir, taskReferenceImageFileName)
 	if err := os.MkdirAll(filepath.Join(dest, "marker"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestMaterializeReferenceAssetReadFailurePreservesExistingDestination(t *tes
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(dir, "reference.png")
+	dest := filepath.Join(dir, taskReferenceImageFileName)
 	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestMaterializeReferenceAssetRejectsObjectSizeMismatchAndPreservesDestinati
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			dest := filepath.Join(dir, "reference.png")
+			dest := filepath.Join(dir, taskReferenceImageFileName)
 			if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -294,20 +294,6 @@ func cancelledContext() context.Context {
 }
 
 func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
-	t.Run("product image", func(t *testing.T) {
-		workDir := t.TempDir()
-		key := "uploads/finalized/user-1/product/product.webp"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("product-bytes")}}
-
-		if count := DownloadProductImages(context.Background(), store, noopLogger(), workDir, "user-1", []string{key}); count != 1 {
-			t.Fatalf("DownloadProductImages count = %d, want 1", count)
-		}
-		got, err := os.ReadFile(filepath.Join(workDir, appconfig.ConfigDir, "products", "product_01.webp"))
-		if err != nil || string(got) != "product-bytes" {
-			t.Fatalf("product = %q, %v", got, err)
-		}
-	})
-
 	t.Run("input attachment", func(t *testing.T) {
 		workDir := t.TempDir()
 		key := "uploads/finalized/user-1/attachment/brief.pdf"
@@ -328,17 +314,6 @@ func TestDownloadKeyFirstSourcesReadStorageForSharedExecutors(t *testing.T) {
 }
 
 func TestRuntimeMaterializersRejectPendingDirectUploadKeys(t *testing.T) {
-	t.Run("product image", func(t *testing.T) {
-		key := "uploads/pending/user-1/product/product.webp"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
-		if count := DownloadProductImages(context.Background(), store, noopLogger(), t.TempDir(), "user-1", []string{key}); count != 0 {
-			t.Fatalf("pending product materialized count = %d", count)
-		}
-		if len(store.readKeys) != 0 {
-			t.Fatalf("pending product reached storage read: %#v", store.readKeys)
-		}
-	})
-
 	t.Run("input attachment", func(t *testing.T) {
 		key := "uploads/pending/user-1/attachment/brief.pdf"
 		store := &fakeStore{readData: map[string][]byte{key: []byte("mutable")}}
@@ -368,17 +343,6 @@ func TestRuntimeMaterializersRejectPendingDirectUploadKeys(t *testing.T) {
 }
 
 func TestRuntimeMaterializersRejectMismatchedFinalizedIdentity(t *testing.T) {
-	t.Run("product user", func(t *testing.T) {
-		key := "uploads/finalized/user-2/product/product.webp"
-		store := &fakeStore{readData: map[string][]byte{key: []byte("other-user")}}
-		if count := DownloadProductImages(context.Background(), store, noopLogger(), t.TempDir(), "user-1", []string{key}); count != 0 {
-			t.Fatalf("other user's product materialized count = %d", count)
-		}
-		if len(store.readKeys) != 0 {
-			t.Fatalf("mismatched product reached storage read: %#v", store.readKeys)
-		}
-	})
-
 	t.Run("attachment upload", func(t *testing.T) {
 		key := "uploads/finalized/user-1/other-upload/brief.pdf"
 		store := &fakeStore{readData: map[string][]byte{key: []byte("other-upload")}}
@@ -403,15 +367,6 @@ func TestKeyFirstMaterializationUsesBoundedStorageReads(t *testing.T) {
 			name: "reference image", maxBytes: maxReferenceImageBytes, wantErr: true,
 			run: func(ctx context.Context, store storage.Provider, workDir string) error {
 				return MaterializeReferenceAsset(ctx, store, workDir, &model.Asset{StorageKey: "assets/users/user-1/reference/image.png", Size: maxReferenceImageBytes})
-			},
-		},
-		{
-			name: "product image", maxBytes: maxReferenceImageBytes,
-			run: func(ctx context.Context, store storage.Provider, workDir string) error {
-				if got := DownloadProductImages(ctx, store, noopLogger(), workDir, "user-1", []string{"uploads/finalized/user-1/product/image.png"}); got != 0 {
-					return fmt.Errorf("materialized %d oversized product images", got)
-				}
-				return nil
 			},
 		},
 		{

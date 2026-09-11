@@ -334,6 +334,9 @@ func normalizeRuntimeIdentity(identity *model.RuntimeIdentity) (model.RuntimeIde
 }
 
 func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Task) (*model.TaskExecution, bool, error) {
+	if err := s.validateFrozenTaskImageCapability(ctx, task); err != nil {
+		return nil, false, err
+	}
 	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
 		return nil, false, err
 	}
@@ -395,6 +398,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 		execution = &profiledExecution
 		if parent == nil || refreshRuntime || !inheritAgentPackIdentity(execution, parent) {
+			resumeSessionID = ""
 			if err := applyAgentPackIdentity(execution, task.Type); err != nil {
 				return err
 			}
@@ -438,6 +442,33 @@ func (s *TaskService) validateFrozenTaskProfileRuntime(task *model.Task) error {
 	}
 	_, err := s.agentProfiles.ResolveRuntime(task.ExecutionProfile, task.AgentProfileSnapshot, task.AgentProfileFingerprint)
 	return err
+}
+
+func (s *TaskService) validateFrozenTaskImageCapability(ctx context.Context, task *model.Task) error {
+	if task == nil {
+		return ErrTaskImageCapabilityMissing
+	}
+	if !taskUsesFrozenImageCapability(task.Type) {
+		return nil
+	}
+	if strings.TrimSpace(task.ImageCapabilityKey) == "" {
+		return ErrTaskImageCapabilityMissing
+	}
+	if s.imageCapabilities == nil {
+		return ErrImageCapabilityResolverUnavailable
+	}
+	snapshot := task.ImageCapabilitySnapshot.Data()
+	if snapshot.Key != strings.TrimSpace(task.ImageCapabilityKey) {
+		return ErrTaskImageCapabilityInvalid
+	}
+	if err := s.imageCapabilities.ValidateFrozenImageCapability(ctx, task.UserID, snapshot); err != nil {
+		return fmt.Errorf("validate frozen task image capability: %w", err)
+	}
+	return nil
+}
+
+func taskUsesFrozenImageCapability(taskType string) bool {
+	return strings.TrimSpace(taskType) != model.TaskTypeViralAnalysis
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {

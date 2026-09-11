@@ -3,21 +3,19 @@ package handler
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/auth"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
-	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
@@ -36,11 +34,9 @@ type agentBootstrapper interface {
 type AgentHandler struct {
 	taskSvc          *service.TaskService
 	apiKeySvc        *service.APIKeyService
-	store            storage.Provider
-	staticKey        string
-	adminAPIKey      string
 	directUploadCfg  service.DirectUploadConfig
 	executionTokens  *auth.ExecutionTokenService
+	localTokenTTL    time.Duration
 	workloadVerifier serveragent.WorkloadVerifier
 	bootstrapper     agentBootstrapper
 	logger           *zerolog.Logger
@@ -50,8 +46,10 @@ func (h *AgentHandler) SetExecutionTokenService(tokens *auth.ExecutionTokenServi
 	h.executionTokens = tokens
 }
 
-func (h *AgentHandler) SetAdminAPIKey(key string) {
-	h.adminAPIKey = key
+// SetLocalExecutionTokenTTL sets the complete local execution credential
+// lifetime, including the configured execution and persistence windows.
+func (h *AgentHandler) SetLocalExecutionTokenTTL(ttl time.Duration) {
+	h.localTokenTTL = ttl
 }
 
 func (h *AgentHandler) SetBootstrap(verifier serveragent.WorkloadVerifier, bootstrapper agentBootstrapper) {
@@ -59,12 +57,10 @@ func (h *AgentHandler) SetBootstrap(verifier serveragent.WorkloadVerifier, boots
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(taskSvc *service.TaskService, apiKeySvc *service.APIKeyService, store storage.Provider, staticKey string, logger *zerolog.Logger) *AgentHandler {
+func NewAgentHandler(taskSvc *service.TaskService, apiKeySvc *service.APIKeyService, logger *zerolog.Logger) *AgentHandler {
 	return &AgentHandler{
 		taskSvc:   taskSvc,
 		apiKeySvc: apiKeySvc,
-		store:     store,
-		staticKey: staticKey,
 		logger:    logger,
 	}
 }
@@ -75,10 +71,13 @@ func (h *AgentHandler) SetDirectUploadConfig(cfg service.DirectUploadConfig) {
 	h.directUploadCfg = cfg
 }
 
-// AuthMiddleware validates bearer-style API keys for agent endpoints.
-func (h *AgentHandler) AuthMiddleware(c fiber.Ctx) error {
+// ClaimAuthMiddleware accepts only a user API key for the desktop claim route.
+// Execution tokens cannot claim new work, and server-wide static keys are not
+// user identities.
+func (h *AgentHandler) ClaimAuthMiddleware(c fiber.Ctx) error {
 	authorization := strings.TrimSpace(c.Get("Authorization"))
 	secondary, secondaryCount := extractAgentHeaderCredential(c)
+	var token string
 	if authorization != "" {
 		if secondaryCount > 0 {
 			return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
@@ -87,42 +86,50 @@ func (h *AgentHandler) AuthMiddleware(c fiber.Ctx) error {
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
 			return Error(c, fiber.StatusUnauthorized, "invalid agent authorization")
 		}
-		token := strings.TrimSpace(parts[1])
-		if h.executionTokens != nil && strings.Count(token, ".") == 2 {
-			claims, err := h.executionTokens.Validate(token)
-			if err != nil {
-				return Error(c, fiber.StatusUnauthorized, "invalid agent execution token")
-			}
-			c.Locals(agentUserIDContextKey, claims.UserID)
-			c.Locals(agentProjectIDContextKey, claims.ProjectID)
-			c.Locals(agentTaskIDContextKey, claims.TaskID)
-			c.Locals(agentExecutionIDContextKey, claims.ExecutionID)
-			return c.Next()
+		token = strings.TrimSpace(parts[1])
+	} else {
+		if secondaryCount == 0 {
+			return Error(c, fiber.StatusUnauthorized, "missing agent api key")
 		}
-		if h.authenticateLegacyToken(c, token) {
-			return c.Next()
+		if secondaryCount > 1 {
+			return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
 		}
-		return Error(c, fiber.StatusUnauthorized, "invalid agent api key")
+		token = secondary
 	}
-	if secondaryCount == 0 {
-		return Error(c, fiber.StatusUnauthorized, "missing agent api key")
-	}
-	if secondaryCount > 1 {
-		return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
-	}
-	if h.authenticateLegacyToken(c, secondary) {
+	if h.authenticateUserAPIKey(c, token) {
 		return c.Next()
 	}
 
 	if h.logger != nil {
-		h.logger.Warn().
-			Int("token_len", len(secondary)).
-			Msg("agent auth failed: invalid token")
+		h.logger.Warn().Msg("agent auth failed: invalid token")
 	}
 	return Error(c, fiber.StatusUnauthorized, "invalid agent api key")
 }
 
-func (h *AgentHandler) authenticateLegacyToken(c fiber.Ctx, token string) bool {
+// ExecutionAuthMiddleware is used by execution-scoped agent routes. It never
+// falls back to a user API key, because an API key is not sufficient authority
+// to mutate a particular execution attempt.
+func (h *AgentHandler) ExecutionAuthMiddleware(c fiber.Ctx) error {
+	authorization := strings.TrimSpace(c.Get("Authorization"))
+	if strings.TrimSpace(c.Get("X-Agent-API-Key")) != "" || strings.TrimSpace(c.Get("X-API-Key")) != "" || strings.TrimSpace(c.Get("X-Admin-API-Key")) != "" {
+		return Error(c, fiber.StatusUnauthorized, "execution credentials cannot be combined with api keys")
+	}
+	parts := strings.SplitN(authorization, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" || h.executionTokens == nil {
+		return Error(c, fiber.StatusUnauthorized, "execution token is required")
+	}
+	claims, err := h.executionTokens.Validate(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return Error(c, fiber.StatusUnauthorized, "invalid agent execution token")
+	}
+	c.Locals(agentUserIDContextKey, claims.UserID)
+	c.Locals(agentProjectIDContextKey, claims.ProjectID)
+	c.Locals(agentTaskIDContextKey, claims.TaskID)
+	c.Locals(agentExecutionIDContextKey, claims.ExecutionID)
+	return c.Next()
+}
+
+func (h *AgentHandler) authenticateUserAPIKey(c fiber.Ctx, token string) bool {
 	if token == "" {
 		return false
 	}
@@ -131,10 +138,6 @@ func (h *AgentHandler) authenticateLegacyToken(c fiber.Ctx, token string) bool {
 			c.Locals(agentUserIDContextKey, apiKey.UserID)
 			return true
 		}
-	}
-	if h.staticKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.staticKey)) == 1 {
-		c.Locals(agentUserIDContextKey, "")
-		return true
 	}
 	return false
 }
@@ -172,25 +175,28 @@ func (h *AgentHandler) authenticatedExecutionID(c fiber.Ctx) string {
 	return executionID
 }
 
-func (h *AgentHandler) authorizeClaimScope(c fiber.Ctx, taskID string) error {
-	if err := h.authorizeClaimTaskScope(c, taskID); err != nil {
+func (h *AgentHandler) authorizeExecutionScope(c fiber.Ctx, taskID string) error {
+	if err := h.authorizeExecutionTaskScope(c, taskID); err != nil {
 		return err
 	}
 	executionID, _ := c.Locals(agentExecutionIDContextKey).(string)
-	if executionID != "" {
-		userID, _ := c.Locals(agentUserIDContextKey).(string)
-		projectID, _ := c.Locals(agentProjectIDContextKey).(string)
-		if h.taskSvc == nil {
-			return errors.New("task service unavailable")
-		}
-		return h.taskSvc.ValidateAgentExecutionAccess(c.Context(), userID, projectID, taskID, executionID)
+	if strings.TrimSpace(executionID) == "" {
+		return errors.New("execution token is required")
 	}
-	return nil
+	userID, _ := c.Locals(agentUserIDContextKey).(string)
+	projectID, _ := c.Locals(agentProjectIDContextKey).(string)
+	if h.taskSvc == nil {
+		return errors.New("task service unavailable")
+	}
+	return h.taskSvc.ValidateAgentExecutionAccess(c.Context(), userID, projectID, taskID, executionID)
 }
 
-func (h *AgentHandler) authorizeClaimTaskScope(c fiber.Ctx, taskID string) error {
+func (h *AgentHandler) authorizeExecutionTaskScope(c fiber.Ctx, taskID string) error {
 	claimTaskID, _ := c.Locals(agentTaskIDContextKey).(string)
-	if claimTaskID != "" && claimTaskID != taskID {
+	if strings.TrimSpace(claimTaskID) == "" {
+		return errors.New("execution token is required")
+	}
+	if claimTaskID != taskID {
 		return errors.New("execution token task mismatch")
 	}
 	return nil
@@ -234,59 +240,6 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 	return Success(c, response)
 }
 
-// Upload handles POST /api/v1/agent/upload.
-func (h *AgentHandler) Upload(c fiber.Ctx) error {
-	if h.taskSvc == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
-	}
-
-	taskID := strings.TrimSpace(c.FormValue("task_id"))
-	if taskID == "" {
-		return Error(c, fiber.StatusBadRequest, "task_id is required")
-	}
-	if err := h.authorizeClaimScope(c, taskID); err != nil {
-		return Error(c, fiber.StatusForbidden, "task access denied")
-	}
-
-	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), taskID, h.authenticatedUserID(c))
-	if err != nil {
-		return Error(c, fiber.StatusForbidden, "task access denied")
-	}
-
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		return Error(c, fiber.StatusBadRequest, "file is required")
-	}
-
-	relPath := strings.TrimSpace(c.FormValue("relative_path"))
-	if relPath == "" {
-		relPath = strings.TrimSpace(c.FormValue("path"))
-	}
-	if relPath == "" {
-		relPath = fileHeader.Filename
-	}
-
-	src, err := fileHeader.Open()
-	if err != nil {
-		h.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to open uploaded file")
-		return Error(c, fiber.StatusBadRequest, "failed to read uploaded file")
-	}
-	defer src.Close()
-
-	mimeType := strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = mime.TypeByExtension(filepath.Ext(fileHeader.Filename))
-	}
-
-	taskFile, err := h.taskSvc.UploadTaskFileFromReader(c.Context(), task.ID, task.UserID, relPath, src, mimeType, fileHeader.Size)
-	if err != nil {
-		h.logger.Error().Err(err).Str("task_id", taskID).Str("path", relPath).Msg("agent file upload failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to store task file")
-	}
-
-	return Success(c, taskFile)
-}
-
 // PrepareArtifactUpload handles POST /api/v1/agent/artifacts/prepare.
 func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 	if h.taskSvc == nil {
@@ -299,7 +252,7 @@ func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
+	if err := h.authorizeExecutionScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), h.directUploadCfg, req)
@@ -335,7 +288,7 @@ func (h *AgentHandler) ReportArtifactManifest(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
+	if err := h.authorizeExecutionScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 	if err := h.taskSvc.FinalizeTaskArtifactManifest(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), req); err != nil {
@@ -508,7 +461,7 @@ type agentCompleteRequest struct {
 	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentPackContractVersion = 2
+const agentPackContractVersion = 3
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for
@@ -534,6 +487,9 @@ func (h *AgentHandler) Claim(c fiber.Ctx) error {
 	if h.taskSvc == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
 	}
+	if h.executionTokens == nil || h.localTokenTTL <= 0 {
+		return Error(c, fiber.StatusServiceUnavailable, "local execution credentials unavailable")
+	}
 
 	userID := h.authenticatedUserID(c)
 
@@ -555,6 +511,17 @@ func (h *AgentHandler) Claim(c fiber.Ctx) error {
 	if cfg == nil {
 		return c.Status(fiber.StatusNoContent).SendString("")
 	}
+	token, err := h.executionTokens.Issue(auth.ExecutionClaims{
+		UserID: userID, ProjectID: cfg.ProjectID, TaskID: cfg.TaskID, ExecutionID: cfg.ExecutionID,
+	}, time.Now().Add(h.localTokenTTL))
+	if err != nil {
+		failure := &serveragent.ExecutionResult{Success: false, Error: "local execution credential issuance failed", TerminalReason: "platform_error"}
+		if completeErr := h.taskSvc.CompleteLocalTask(c.Context(), cfg.TaskID, cfg.ExecutionID, failure); completeErr != nil && h.logger != nil {
+			h.logger.Error().Err(completeErr).Str("task_id", cfg.TaskID).Msg("failed to terminalize local task after credential issuance failure")
+		}
+		return Error(c, fiber.StatusServiceUnavailable, "local execution credentials unavailable")
+	}
+	cfg.ExecutionToken = token
 	return Success(c, cfg)
 }
 
@@ -571,30 +538,15 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimScope(c, req.TaskID); err != nil {
+	if err := h.authorizeExecutionScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	userID := h.authenticatedUserID(c)
-	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, userID)
-	if err != nil {
-		return Error(c, fiber.StatusForbidden, "task access denied")
-	}
 	structuredIntent := req.stagePresent || req.statePresent || req.titlePresent || req.descriptionPresent || req.progressPercentPresent
-	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	executionID := strings.TrimSpace(h.authenticatedExecutionID(c))
 	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
-	executionID := authenticatedExecutionID
-	if authenticatedExecutionID != "" {
-		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
-			return Error(c, fiber.StatusForbidden, "execution access denied")
-		}
-	} else if requestedExecutionID != "" {
-		if err := h.taskSvc.ValidateLocalAgentExecutionAccess(c.Context(), task, userID, requestedExecutionID); err != nil {
-			return Error(c, fiber.StatusForbidden, "execution access denied")
-		}
-		executionID = requestedExecutionID
-	} else if structuredIntent {
-		return Error(c, fiber.StatusBadRequest, "execution_id is required for structured progress")
+	if requestedExecutionID != "" && requestedExecutionID != executionID {
+		return Error(c, fiber.StatusForbidden, "execution access denied")
 	}
 
 	if structuredIntent {
@@ -644,7 +596,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Success(c, fiber.Map{"ok": true})
 	}
 
-	// Refresh the heartbeat on every legacy progress report. This is the local-
+	// Refresh the heartbeat on every unstructured progress report. This is the local-
 	// execution keep-alive: a desktop agent reports progress per turn/line, and
 	// each report resets the 5-min stuck-task reaper. Cloud tasks are also kept
 	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
@@ -687,7 +639,7 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 	if strings.TrimSpace(req.TaskID) == "" {
 		return Error(c, fiber.StatusBadRequest, "task_id is required")
 	}
-	if err := h.authorizeClaimTaskScope(c, req.TaskID); err != nil {
+	if err := h.authorizeExecutionTaskScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
@@ -700,38 +652,23 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
 
-	authenticatedExecutionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	executionID := strings.TrimSpace(h.authenticatedExecutionID(c))
 	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
-	executionID := authenticatedExecutionID
-	if authenticatedExecutionID != "" {
-		if requestedExecutionID != "" && requestedExecutionID != authenticatedExecutionID {
+	if requestedExecutionID != "" && requestedExecutionID != executionID {
+		return Error(c, fiber.StatusForbidden, "execution access denied")
+	}
+	projectID, _ := c.Locals(agentProjectIDContextKey).(string)
+	if err := h.taskSvc.ValidateAgentCompletionAccess(c.Context(), h.authenticatedUserID(c), projectID, req.TaskID, executionID); err != nil {
+		if errors.Is(err, service.ErrAgentAccessDenied) {
 			return Error(c, fiber.StatusForbidden, "execution access denied")
 		}
-		projectID, _ := c.Locals(agentProjectIDContextKey).(string)
-		if err := h.taskSvc.ValidateAgentCompletionAccess(c.Context(), h.authenticatedUserID(c), projectID, req.TaskID, authenticatedExecutionID); err != nil {
-			if errors.Is(err, service.ErrAgentAccessDenied) {
-				return Error(c, fiber.StatusForbidden, "execution access denied")
-			}
-			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", authenticatedExecutionID).Msg("validate cloud completion access")
-			return Error(c, fiber.StatusInternalServerError, "complete failed")
-		}
-	} else {
-		if requestedExecutionID == "" {
-			return Error(c, fiber.StatusBadRequest, "execution_id is required")
-		}
-		if err := h.taskSvc.ValidateLocalAgentCompletionAccess(c.Context(), task, h.authenticatedUserID(c), requestedExecutionID); err != nil {
-			if errors.Is(err, service.ErrAgentAccessDenied) {
-				return Error(c, fiber.StatusForbidden, "execution access denied")
-			}
-			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", requestedExecutionID).Msg("validate local completion access")
-			return Error(c, fiber.StatusInternalServerError, "complete failed")
-		}
-		executionID = requestedExecutionID
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("validate execution completion access")
+		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
-	if authenticatedExecutionID != "" {
-		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
-	} else {
+	if task.ExecutionTarget == model.ExecutionTargetLocalClaimed {
 		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, executionID, req.Result)
+	} else {
+		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
 	}
 	if err != nil {
 		status, message := agentCompletionErrorResponse(err)

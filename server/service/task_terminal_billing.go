@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/agent"
-	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"gorm.io/gorm"
@@ -69,15 +69,11 @@ func approvedTaskBillingTerminalReason(reason string) bool {
 }
 
 func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string) (bool, error) {
-	task, err := s.repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
 	files, err := s.repo.TaskFiles().FindAllByTaskID(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	executions := make(map[string]*model.TaskExecution)
+	filesByExecution := make(map[string][]*model.TaskFile)
 	for _, file := range files {
 		if file == nil || file.TaskID != taskID || file.State != model.TaskFileStatePublished {
 			continue
@@ -86,35 +82,24 @@ func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string)
 		if executionID == "" {
 			continue
 		}
-		execution, resolved := executions[executionID]
-		if !resolved {
-			execution, err = s.repo.TaskExecutions().FindByID(ctx, executionID)
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				executions[executionID] = nil
-				continue
-			}
-			if err != nil {
-				return false, err
-			}
-			if execution.TaskID != taskID {
-				execution = nil
-			}
-			executions[executionID] = execution
-		}
-		if execution == nil {
+		filesByExecution[executionID] = append(filesByExecution[executionID], file)
+	}
+	for executionID, executionFiles := range filesByExecution {
+		execution, findErr := s.repo.TaskExecutions().FindByID(ctx, executionID)
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
 			continue
 		}
-		contract, contractErr := resolveFrozenExecutionDeliveryContract(execution)
-		if contractErr != nil {
+		if findErr != nil {
+			return false, findErr
+		}
+		if execution.TaskID != taskID || execution.Status != model.TaskExecutionSucceeded ||
+			execution.CompletedAt == nil || execution.FinalizationStatus != model.TaskExecutionFinalizationDone ||
+			!execution.ManifestSealed || execution.ManifestStatus != model.TaskExecutionManifestPublished {
 			continue
 		}
-		spec, matched := agentpack.MatchDeliverySpec(contract, file.FilePath)
-		if !matched || normalizedMediaType(file.MimeType) != normalizedMediaType(spec.MIMEType) {
-			continue
-		}
-		if validateErr := s.validateStoredDeliveryObject(ctx, task, execution.ID, file, spec); validateErr == nil {
+		if validateErr := s.validateExecutionDelivery(ctx, taskID, execution, executionFiles); validateErr == nil {
 			return true, nil
-		} else if !errors.Is(validateErr, ErrTaskDeliveryObjectInvalid) {
+		} else if !errors.Is(validateErr, ErrTaskDeliveryObjectInvalid) && !errors.Is(validateErr, ErrTaskDeliveryContractUnavailable) {
 			return false, validateErr
 		}
 	}
@@ -184,25 +169,38 @@ func (s *TaskService) failPendingAdmittedTaskTransition(ctx context.Context, tas
 	return won, err
 }
 
-func (s *TaskService) FailRunningTaskForInfrastructure(ctx context.Context, taskID, message string) (bool, error) {
-	return s.failRunningTaskWithBilling(ctx, taskID, model.TaskBillingTerminalInfrastructureCancelled, message)
-}
-
-func (s *TaskService) failRunningTaskWithBilling(ctx context.Context, taskID, reason, message string) (bool, error) {
-	task, err := s.repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
+func (s *TaskService) FailStaleRunningTaskForInfrastructure(ctx context.Context, taskID string, staleBefore time.Time, message string) (bool, error) {
 	durableDelivery, err := s.taskHasDurableDelivery(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	won, err := s.repo.Tasks().FailRunningTask(ctx, taskID, message)
-	if err != nil || !won {
-		return won, err
-	}
+	var won bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		return s.persistTerminalBillingInTx(ctx, tx, task, &model.TaskExecution{}, reason, durableDelivery)
+		locked, lockErr := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+		if lockErr != nil {
+			return lockErr
+		}
+		if locked.Status != model.TaskStatusRunning || locked.CurrentExecutionID != nil || locked.DeletingAt != nil || !taskHeartbeatAtOrBefore(locked, staleBefore) {
+			return nil
+		}
+		won, lockErr = tx.Tasks().FailStaleRunningTask(ctx, taskID, staleBefore, message)
+		if lockErr != nil || !won {
+			return lockErr
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, locked, &model.TaskExecution{}, model.TaskBillingTerminalInfrastructureCancelled, durableDelivery)
 	})
-	return true, err
+	if err != nil {
+		return false, err
+	}
+	return won, nil
+}
+
+func taskHeartbeatAtOrBefore(task *model.Task, cutoff time.Time) bool {
+	if task == nil {
+		return false
+	}
+	if task.LastHeartbeatAt != nil {
+		return !task.LastHeartbeatAt.After(cutoff)
+	}
+	return task.StartedAt != nil && !task.StartedAt.After(cutoff)
 }

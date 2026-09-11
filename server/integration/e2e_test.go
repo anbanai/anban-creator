@@ -108,6 +108,18 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	}
 	planSvc.SetAgentProfileRegistry(profiles)
 	taskSvc.SetAgentProfileRegistry(profiles)
+	taskSvc.SetImageCapabilityResolver(service.NewImageCapabilityResolver(repo, &config.Config{
+		ModelRoutes: config.ModelRoutesConfig{ImageGeneration: config.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]config.ImageGenerationRouteConfig{
+				"standard": {
+					Provider: "openai-test", Model: "image-test", BaseURL: "https://images.invalid/v1",
+					APIKey: "test-secret", Timeout: time.Minute, BillingSKU: "image.standard",
+					Enabled: true, MinTier: string(model.TierFree),
+				},
+			},
+		}},
+	}))
 
 	wsHub := handler.NewWebSocketHub(jwtSvc)
 	authHandler := handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, wsHub, false, 3, nil)

@@ -256,6 +256,7 @@ func (r *taskExecutionRepository) FindCurrentByTaskID(ctx context.Context, taskI
 func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error) {
 	var executions []*model.TaskExecution
 	err := r.db.WithContext(ctx).
+		Where("target <> ?", model.ExecutionTargetLocalClaimed).
 		Where("(status IN ? AND updated_at <= ?) OR (status IN ? AND ((finalization_status <> '' AND finalization_status <> ?) OR cleanup_status = ?))", []string{
 			model.TaskExecutionCreated,
 			model.TaskExecutionDispatching,
@@ -263,6 +264,22 @@ func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before t
 			model.TaskExecutionRunning,
 		}, before, []string{model.TaskExecutionSucceeded, model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut}, model.TaskExecutionFinalizationDone, model.TaskExecutionCleanupPending).
 		Order("updated_at ASC").
+		Limit(limit).
+		Find(&executions).Error
+	return executions, err
+}
+
+func (r *taskExecutionRepository) FindLocalReconcileCandidates(ctx context.Context, heartbeatBefore, createdBefore time.Time, limit int) ([]*model.TaskExecution, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var executions []*model.TaskExecution
+	err := r.db.WithContext(ctx).
+		Where("target = ?", model.ExecutionTargetLocalClaimed).
+		Where("(status = ? AND started = ? AND (created_at <= ? OR (last_heartbeat_at IS NOT NULL AND last_heartbeat_at <= ?) OR (last_heartbeat_at IS NULL AND started_at IS NOT NULL AND started_at <= ?))) OR (status IN ? AND finalization_status <> '' AND finalization_status <> ?)",
+			model.TaskExecutionRunning, true, createdBefore, heartbeatBefore, heartbeatBefore,
+			[]string{model.TaskExecutionSucceeded, model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut}, model.TaskExecutionFinalizationDone).
+		Order("created_at ASC").
 		Limit(limit).
 		Find(&executions).Error
 	return executions, err

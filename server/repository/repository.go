@@ -121,6 +121,8 @@ type TaskRepository interface {
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
+	FinalizeLocalTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, artifactAction LocalTaskArtifactAction) (bool, error)
+	FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
 	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
@@ -164,9 +166,9 @@ type TaskRepository interface {
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error)
-	FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error)
+	FailStaleRunningTask(ctx context.Context, taskID string, staleBefore time.Time, errorMsg string) (bool, error)
 	FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
-	ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
+	ResetRetryableTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
@@ -175,6 +177,20 @@ type TaskRepository interface {
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }
+
+type LocalTaskArtifactAction string
+
+const (
+	LocalTaskArtifactsPublish LocalTaskArtifactAction = "publish"
+	LocalTaskArtifactsCollect LocalTaskArtifactAction = "collect"
+)
+
+type CloudTaskArtifactAction string
+
+const (
+	CloudTaskArtifactsPublish CloudTaskArtifactAction = "publish"
+	CloudTaskArtifactsCollect CloudTaskArtifactAction = "collect"
+)
 
 // TaskFileRepository provides access to the task_files table.
 type TaskFileRepository interface {
@@ -224,6 +240,7 @@ type TaskExecutionRepository interface {
 	FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
+	FindLocalReconcileCandidates(ctx context.Context, heartbeatBefore, createdBefore time.Time, limit int) ([]*model.TaskExecution, error)
 	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
 	SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	// LockActiveForProgress validates and locks the execution before progress

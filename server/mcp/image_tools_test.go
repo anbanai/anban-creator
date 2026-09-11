@@ -89,6 +89,9 @@ func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
 	for _, key := range []string{"ref_image_path", "ref_image_paths"} {
 		property := properties[key].(map[string]any)
 		description, _ := property["description"].(string)
+		if strings.Contains(strings.ToLower(description), "server-local") || strings.Contains(strings.ToLower(description), "absolute") {
+			t.Fatalf("%s description permits server-local paths: %q", key, description)
+		}
 		for _, provider := range []string{"OpenAI", "Gemini", "Volcengine", "Seedream"} {
 			if strings.Contains(description, provider) {
 				t.Fatalf("%s description is provider-specific: %q", key, description)
@@ -119,6 +122,77 @@ func TestCropImageSchemaIsAtomicAndTaskRelative(t *testing.T) {
 	anchor := properties["anchor"].(map[string]any)
 	if values, ok := anchor["enum"].([]any); !ok || !containsAnyString(values, "center") || !containsAnyString(values, "top") {
 		t.Fatalf("crop anchors = %#v", anchor["enum"])
+	}
+}
+
+func TestDownloadAndCompressImageSchemasAreExecutionScopedAndTaskRelative(t *testing.T) {
+	download := downloadImageInputSchema()
+	downloadProperties := download["properties"].(map[string]any)
+	for _, key := range []string{"project_id", "task_id", "url", "output_path"} {
+		if _, ok := downloadProperties[key]; !ok {
+			t.Fatalf("download_image schema missing %s", key)
+		}
+		if !containsAnyString(download["required"].([]any), key) {
+			t.Fatalf("download_image schema must require %s", key)
+		}
+	}
+
+	compress := compressImageInputSchema()
+	compressProperties := compress["properties"].(map[string]any)
+	for _, key := range []string{"task_id", "input_path", "output_path", "max_width"} {
+		if _, ok := compressProperties[key]; !ok {
+			t.Fatalf("compress_image schema missing %s", key)
+		}
+	}
+	for _, key := range []string{"task_id", "input_path", "output_path"} {
+		if !containsAnyString(compress["required"].([]any), key) {
+			t.Fatalf("compress_image schema must require %s", key)
+		}
+	}
+	if _, ok := compressProperties["file_path"]; ok {
+		t.Fatal("compress_image schema still exposes ambiguous server-local file_path")
+	}
+}
+
+func TestImageOperationHandlersRejectMissingRequestParametersWithoutPanicking(t *testing.T) {
+	old := svcs
+	svcs = &Services{TaskImageOperationsSvc: service.NewTaskImageOperationsService(nil, nil, nil, nil, service.TaskImageOperationsConfig{}, nil)}
+	t.Cleanup(func() { svcs = old })
+
+	handlers := []struct {
+		name    string
+		handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
+	}{
+		{name: "upload", handler: uploadImageHandler},
+		{name: "compress", handler: compressImageHandler},
+		{name: "download", handler: downloadImageHandler},
+		{name: "analyze", handler: analyzeImageHandler},
+	}
+	requests := []struct {
+		name string
+		req  *mcp.CallToolRequest
+	}{
+		{name: "nil request", req: nil},
+		{name: "nil params", req: &mcp.CallToolRequest{}},
+	}
+	for _, handler := range handlers {
+		for _, request := range requests {
+			t.Run(handler.name+"/"+request.name, func(t *testing.T) {
+				var recovered any
+				var result *mcp.CallToolResult
+				var err error
+				func() {
+					defer func() { recovered = recover() }()
+					result, err = handler.handler(context.Background(), request.req)
+				}()
+				if recovered != nil {
+					t.Fatalf("handler panicked for missing parameters: %v", recovered)
+				}
+				if err != nil || result == nil || !result.IsError {
+					t.Fatalf("handler result = %#v, err = %v; want tool error", result, err)
+				}
+			})
+		}
 	}
 }
 

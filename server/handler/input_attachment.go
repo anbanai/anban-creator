@@ -30,7 +30,6 @@ type InputAttachmentValidationOptions struct {
 	MaxBytes             int64
 	AllowedTypes         map[string]bool
 	AllowedAssetPurposes []string
-	normalizeExistingKey func(model.EntryAttachment) (model.EntryAttachment, error)
 }
 
 var allAgentAttachmentTypes = map[string]bool{
@@ -39,6 +38,12 @@ var allAgentAttachmentTypes = map[string]bool{
 	"video":    true,
 	"document": true,
 	"text":     true,
+}
+
+var taskInputAttachmentAssetPurposes = []string{
+	service.DirectUploadPurposeTaskReference,
+	service.DirectUploadPurposeAIEntryAttachment,
+	service.DirectUploadPurposeEcommercePhoto,
 }
 
 var errInputAttachmentValidation = errors.New("input attachment validation failed")
@@ -96,7 +101,7 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 			if a.URL != "" || a.Key != "" || a.UploadID != "" {
 				return nil, inputAttachmentValidationErrorf("attachment %d: asset_id cannot be combined with url, key, or upload_id", i+1)
 			}
-			asset, err := service.NewReferenceAssetService(repo, nil, nil).RequireOwned(ctx, userID, a.AssetID, options.AllowedAssetPurposes)
+			asset, err := service.NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, a.AssetID, options.AllowedAssetPurposes)
 			if err != nil {
 				if errors.Is(err, service.ErrReferenceAssetForbidden) || errors.Is(err, service.ErrReferenceAssetPurposeMismatch) || errors.Is(err, service.ErrReferenceAssetInvalidMetadata) {
 					return nil, inputAttachmentValidationErrorf("attachment %d: asset attachment is invalid: %v", i+1, err)
@@ -105,7 +110,7 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 			}
 			a = model.EntryAttachment{
 				AssetID:     asset.ID,
-				Type:        "image",
+				Type:        service.ClassifyDirectUploadFile(asset.ContentType, attachmentExt(model.EntryAttachment{FileName: asset.FileName})),
 				FileName:    asset.FileName,
 				ContentType: asset.ContentType,
 				Size:        asset.Size,
@@ -115,14 +120,7 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 				return nil, inputAttachmentValidationErrorf("attachment %d exceeds the %d MB limit", i+1, options.MaxBytes/(1024*1024))
 			}
 		} else if a.UploadID == "" && a.Key != "" {
-			if options.normalizeExistingKey == nil {
-				return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
-			}
-			normalizedExisting, err := options.normalizeExistingKey(a)
-			if err != nil {
-				return nil, inputAttachmentValidationErrorf("attachment %d: %v", i+1, err)
-			}
-			a = normalizedExisting
+			return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 		} else if a.UploadID != "" && a.Key == "" {
 			return nil, inputAttachmentValidationErrorf("attachment %d: storage attachment requires upload_id and key", i+1)
 		}
@@ -158,6 +156,9 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 				return nil, inputAttachmentValidationErrorf("attachment URLs must be internal file URLs or registered pending-upload URLs")
 			}
 		}
+		if a.AssetID == "" && a.UploadID == "" && (a.URL != "" || a.Key != "") {
+			return nil, inputAttachmentValidationErrorf("attachment %d: file attachment requires an immutable asset identity", i+1)
+		}
 		normalized[i] = a
 	}
 	for _, pending := range pendingFinalizations {
@@ -167,7 +168,15 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 		if err != nil {
 			return nil, inputAttachmentServiceError(fmt.Errorf("attachment %d: %w", pending.index+1, err))
 		}
-		normalized[pending.index].Key = verified.Key
+		attachment := normalized[pending.index]
+		normalized[pending.index] = model.EntryAttachment{
+			AssetID:     verified.AssetID,
+			Type:        service.ClassifyDirectUploadFile(verified.ContentType, attachmentExt(model.EntryAttachment{FileName: verified.FileName})),
+			FileName:    verified.FileName,
+			ContentType: verified.ContentType,
+			Size:        verified.Size,
+			Instruction: attachment.Instruction,
+		}
 	}
 	return normalized, nil
 }
@@ -198,7 +207,7 @@ func validateHandlerEntryAttachment(a *model.EntryAttachment) error {
 	if typ != "text" && a.AssetID == "" && a.URL == "" && a.Key == "" {
 		return fmt.Errorf("attachment url is required")
 	}
-	if typ == "text" && a.URL == "" && a.Text == "" && a.Key == "" {
+	if typ == "text" && a.AssetID == "" && a.URL == "" && a.Text == "" && a.Key == "" {
 		return fmt.Errorf("text attachment requires text or url")
 	}
 	limit := aiEntryMediaAttachmentMaxBytes

@@ -91,6 +91,7 @@ type DirectUploadPrepareResult struct {
 }
 
 type VerifiedDirectUpload struct {
+	AssetID     string
 	UploadID    string
 	Key         string
 	FileName    string
@@ -596,9 +597,18 @@ func finalizedUploadSessionKey(session *model.UploadSession) (string, error) {
 }
 
 func FinalizeUploadSessionURLs(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, userID, purpose string, urls []string, now time.Time, ownedURLChecks ...func(string) bool) (map[string]string, error) {
+	rewrites, _, err := FinalizeUploadSessionURLAssets(ctx, store, repo, userID, purpose, urls, now, ownedURLChecks...)
+	return rewrites, err
+}
+
+// FinalizeUploadSessionURLAssets resolves browser-upload URLs to their immutable
+// assets. Callers that freeze task inputs must persist these identities instead
+// of retaining a URL-only runtime contract.
+func FinalizeUploadSessionURLAssets(ctx context.Context, store DirectUploadFinalizationStorage, repo repository.Repository, userID, purpose string, urls []string, now time.Time, ownedURLChecks ...func(string) bool) (map[string]string, map[string]*model.Asset, error) {
 	rewrites := make(map[string]string)
+	assets := make(map[string]*model.Asset)
 	if repo == nil || len(urls) == 0 {
-		return rewrites, nil
+		return rewrites, assets, nil
 	}
 	var isOwnedURL func(string) bool
 	if len(ownedURLChecks) > 0 {
@@ -615,39 +625,40 @@ func FinalizeUploadSessionURLs(ctx context.Context, store DirectUploadFinalizati
 		}
 		sessionID := uploadSessionIDFromKey(key)
 		if sessionID == "" {
-			return nil, ErrUploadSessionInvalidURL
+			return nil, nil, ErrUploadSessionInvalidURL
 		}
 		if store == nil {
-			return nil, ErrUploadSessionUnavailable
+			return nil, nil, ErrUploadSessionUnavailable
 		}
 		session, err := repo.UploadSessions().FindByID(ctx, sessionID)
 		if err != nil {
 			if errors.Is(err, model.ErrUploadSessionNotFound) {
-				return nil, ErrUploadSessionAccessDenied
+				return nil, nil, ErrUploadSessionAccessDenied
 			}
-			return nil, fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
+			return nil, nil, fmt.Errorf("%w: find upload session: %v", ErrUploadSessionUnavailable, err)
 		}
 		if session.UserID != userID || session.Purpose != purpose {
-			return nil, ErrUploadSessionAccessDenied
+			return nil, nil, ErrUploadSessionAccessDenied
 		}
 		if key != session.StagingKey {
 			if session.Status != model.UploadSessionFinalized || session.AssetID == "" {
-				return nil, ErrUploadSessionAccessDenied
+				return nil, nil, ErrUploadSessionAccessDenied
 			}
 			asset, err := repo.Assets().FindByID(ctx, session.AssetID)
 			if err != nil || asset.StorageKey != key {
-				return nil, ErrUploadSessionAccessDenied
+				return nil, nil, ErrUploadSessionAccessDenied
 			}
 		}
 		asset, err := FinalizeUploadSession(ctx, store, repo, FinalizeUploadRequest{
 			SessionID: session.ID, UserID: userID, AllowedPurposes: []string{purpose}, Now: now,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rewrites[raw] = store.GetURL(asset.StorageKey)
+		assets[raw] = asset
 	}
-	return rewrites, nil
+	return rewrites, assets, nil
 }
 
 func ValidateUploadSessionURL(ctx context.Context, repo repository.UploadSessionRepository, userID string, allowedPurposes []string, rawURL string, now time.Time) (string, error) {
@@ -690,6 +701,7 @@ func ResolveDirectUploadSessionAttachment(ctx context.Context, store DirectUploa
 		return nil, err
 	}
 	verified.Key = asset.StorageKey
+	verified.AssetID = asset.ID
 	verified.FileName = asset.FileName
 	verified.ContentType = asset.ContentType
 	verified.Size = asset.Size

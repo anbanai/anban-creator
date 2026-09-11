@@ -31,6 +31,7 @@ type OpenAIProvider struct {
 	sizeRatio                string // ratio string for GenerateResult.Size
 	responseFormat           string // "b64_json" | "url" | "" (auto → b64_json)
 	log                      *zerolog.Logger
+	imageDownloader          func(context.Context, string) (string, error)
 	imageDownloadRetryPolicy *openAIImageDownloadRetryPolicy
 }
 
@@ -807,7 +808,11 @@ func (p *OpenAIProvider) downloadGeneratedImage(ctx context.Context, rawURL stri
 		if err := downloadCtx.Err(); err != nil {
 			return "", attempt - 1, err
 		}
-		filePath, err := wechat.DownloadFileContext(downloadCtx, rawURL)
+		downloader := wechat.DownloadPublicImageFileContext
+		if p != nil && p.imageDownloader != nil {
+			downloader = p.imageDownloader
+		}
+		filePath, err := downloader(downloadCtx, rawURL)
 		if err == nil {
 			return filePath, attempt, nil
 		}
@@ -838,6 +843,9 @@ func (p *OpenAIProvider) downloadGeneratedImage(ctx context.Context, rawURL stri
 }
 
 func isRetryableGeneratedImageDownload(err error) bool {
+	if errors.Is(err, wechat.ErrDownloadExceedsMaxSize) || errors.Is(err, wechat.ErrUnsafeDownloadURL) {
+		return false
+	}
 	var dlErr *wechat.DownloadError
 	if !errors.As(err, &dlErr) || dlErr == nil {
 		return false
@@ -1123,7 +1131,8 @@ func previewBase64(value string) string {
 // saveBase64Image 将 base64 编码的图片数据保存到临时文件，返回文件路径
 func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 	preview := previewBase64(b64data)
-	imageData, err := base64.StdEncoding.DecodeString(normalizeBase64ImageData(b64data))
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(normalizeBase64ImageData(b64data)))
+	imageData, err := io.ReadAll(io.LimitReader(decoder, maxGeneratedImageBytes+1))
 	if err != nil {
 		return "", &GenerateError{
 			Provider: p.Name(),
@@ -1131,6 +1140,15 @@ func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 			Message:  "图片数据解码失败",
 			HintMsg:  fmt.Sprintf("b64_json 预览: %s", preview),
 			Original: err,
+		}
+	}
+	if int64(len(imageData)) > maxGeneratedImageBytes {
+		return "", &GenerateError{
+			Provider: p.Name(),
+			Code:     "response_too_large",
+			Message:  "图片服务返回的数据超过大小限制",
+			HintMsg:  fmt.Sprintf("最大允许 %d MiB", maxGeneratedImageBytes>>20),
+			Original: errGeneratedImageTooLarge,
 		}
 	}
 

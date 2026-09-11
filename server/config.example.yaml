@@ -62,7 +62,7 @@ model_providers:
 
   wangcai_openai:
     protocol: "openai_compatible"
-    base_url: "http://18.141.196.64:18888/v1"
+    base_url: "${WANGCAI_OPENAI_BASE_URL}"
     api_key: "${WANGCAI_OPENAI_API_KEY}"
 
 model_routes:
@@ -123,7 +123,7 @@ model_routes:
         sort_order: 20
         provider: "wangcai_openai"
         model: "gpt-image-2-t"
-        base_url: "http://18.141.196.64:18888/v1"
+        base_url: "${WANGCAI_OPENAI_BASE_URL}"
         api_key: "${WANGCAI_OPENAI_API_KEY}"
         timeout: 8m
         enabled: true

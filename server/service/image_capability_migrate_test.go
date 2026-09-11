@@ -63,10 +63,10 @@ func TestMigrateImageCapabilitiesRenamesColumnsMapsValuesAndDropsBYOK(t *testing
 	assertCapability("tasks", "standard", "standard")
 	assertCapability("tasks", "professional", "professional")
 	assertCapability("tasks", "custom", "professional")
-	assertCapability("tasks", "unknown", "standard")
-	assertCapability("tasks", "empty", "standard")
+	assertCapability("tasks", "unknown", "retired-route")
+	assertCapability("tasks", "empty", "")
 	assertCapability("plans", "professional", "professional")
-	assertCapability("plans", "unknown", "standard")
+	assertCapability("plans", "unknown", "missing")
 
 	for table, column := range map[string]string{
 		"tasks": "project_snapshot", "projects": "ecommerce_defaults", "templates": "ecommerce",
@@ -84,8 +84,8 @@ func TestMigrateImageCapabilitiesRenamesColumnsMapsValuesAndDropsBYOK(t *testing
 	if err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
-	if second.UnknownValues != 0 {
-		t.Fatalf("second migration unknown values = %d, want 0", second.UnknownValues)
+	if second.UnknownValues != 2 {
+		t.Fatalf("second migration unknown values = %d, want the two preserved invalid values to remain visible", second.UnknownValues)
 	}
 }
 

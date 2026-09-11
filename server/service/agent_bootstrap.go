@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -100,8 +98,6 @@ var (
 	ErrAgentBootstrapConflict    = errors.New("agent bootstrap state conflict")
 	ErrAgentBootstrapUnavailable = errors.New("agent bootstrap dependency unavailable")
 )
-
-var unsafeBootstrapFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 func NewAgentBootstrapService(repo repository.Repository, tokens *auth.ExecutionTokenService, cfg AgentBootstrapConfig, logger zerolog.Logger) *AgentBootstrapService {
 	if cfg.TokenTTL <= 0 {
@@ -254,13 +250,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("%w: workload has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	effective := serveragent.EffectiveProject(project, task)
-	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
+	taskReferenceAsset, projectStyleReferenceAsset, err := resolveRuntimeReferenceAssets(ctx, s.repo, task)
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
 	}
 	var files []BootstrapFile
-	bindReferenceToGeneration := referenceAsset != nil && (strings.TrimSpace(task.ReferenceImageAssetID) != "" || model.IsMontagePlatform(task.Type))
-	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, bindReferenceToGeneration)
+	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, taskReferenceAsset != nil)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)
 	}
@@ -282,14 +277,24 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
 	}
 	attachments := task.InputAttachments.Data()
-	if referenceAsset != nil {
-		signed, err := s.signedReferenceAssetURL(ctx, referenceAsset, credentialDeadline)
+	if taskReferenceAsset != nil {
+		signed, err := s.signedReferenceAssetURL(ctx, taskReferenceAsset, credentialDeadline)
 		if err != nil {
-			return nil, fmt.Errorf("sign reference image: %w", err)
+			return nil, fmt.Errorf("sign task reference image: %w", err)
 		}
 		files = append(files, BootstrapFile{
-			Path: serveragent.ReferenceImagePath, DownloadURL: signed, Mode: 0644,
-			ExpectedSize: referenceAsset.Size, MaxBytes: 10 << 20,
+			Path: serveragent.TaskReferenceImagePath, DownloadURL: signed, Mode: 0644,
+			ExpectedSize: taskReferenceAsset.Size, MaxBytes: 10 << 20,
+		})
+	}
+	if projectStyleReferenceAsset != nil {
+		signed, err := s.signedReferenceAssetURL(ctx, projectStyleReferenceAsset, credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign project style reference image: %w", err)
+		}
+		files = append(files, BootstrapFile{
+			Path: serveragent.ProjectStyleReferenceImagePath, DownloadURL: signed, Mode: 0644,
+			ExpectedSize: projectStyleReferenceAsset.Size, MaxBytes: 10 << 20,
 		})
 	}
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
@@ -302,11 +307,6 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, montageFiles...)
-	productFiles, err := s.buildProductFiles(ctx, task, credentialDeadline)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, productFiles...)
 	if err := ValidateBootstrapFiles(files); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
@@ -320,7 +320,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType: task.Type, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID,
-		ImageRatio: task.ImageRatio, HasReferenceImage: referenceAsset != nil,
+		ImageRatio: task.ImageRatio, HasReferenceImage: taskReferenceAsset != nil,
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
 	})
@@ -433,44 +433,6 @@ func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
 	return env
 }
 
-func (s *AgentBootstrapService) buildProductFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
-	if task == nil || task.Type != model.PlatformEcommerce {
-		return nil, nil
-	}
-	photos := task.Ecommerce.Data().ProductPhotos
-	if len(photos) == 0 {
-		return nil, nil
-	}
-	files := make([]BootstrapFile, 0, len(photos)+1)
-	names := make([]string, 0, len(photos))
-	attachments := task.InputAttachments.Data()
-	for i, photo := range photos {
-		purposes := []string{DirectUploadPurposeEcommercePhoto, DirectUploadPurposeAIEntryAttachment}
-		source := bootstrapSourceForStoredValue(photo, attachments, purposes)
-		signed, err := s.signedDownloadURL(ctx, task, source, credentialDeadline)
-		if err != nil {
-			return nil, fmt.Errorf("sign product photo %d: %w", i+1, err)
-		}
-		ext := ".png"
-		if parsed, err := url.Parse(photo); err == nil {
-			candidate := strings.ToLower(path.Ext(parsed.Path))
-			switch candidate {
-			case ".png", ".jpg", ".jpeg", ".webp":
-				ext = candidate
-			}
-		}
-		name := fmt.Sprintf("product_%02d%s", i+1, ext)
-		names = append(names, name)
-		files = append(files, BootstrapFile{Path: path.Join(".anban-creator/products", name), DownloadURL: signed, Mode: 0644})
-	}
-	raw, err := json.Marshal(names)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, BootstrapFile{Path: ".anban-creator/products/index.json", Text: string(raw), Mode: 0644})
-	return files, nil
-}
-
 func (s *AgentBootstrapService) buildMontageFiles(task *model.Task) ([]BootstrapFile, error) {
 	if task == nil || !model.IsMontagePlatform(task.Type) {
 		return nil, nil
@@ -494,67 +456,21 @@ func (s *AgentBootstrapService) buildMontageFiles(task *model.Task) ([]Bootstrap
 	return files, nil
 }
 
-type bootstrapDownloadSource struct {
-	URL             string
-	AssertedKey     string
-	UploadID        string
-	AllowedPurposes []string
-}
-
-func bootstrapSourceForStoredValue(value string, attachments []model.EntryAttachment, allowedPurposes []string) bootstrapDownloadSource {
-	value = strings.TrimSpace(value)
-	for _, attachment := range attachments {
-		key := strings.TrimSpace(attachment.Key)
-		uploadID := strings.TrimSpace(attachment.UploadID)
-		if key == "" || uploadID == "" {
-			continue
-		}
-		if key == value {
-			return bootstrapDownloadSource{AssertedKey: key, UploadID: uploadID, AllowedPurposes: allowedPurposes}
-		}
-		if strings.TrimSpace(attachment.URL) == value {
-			return bootstrapDownloadSource{URL: value, AssertedKey: key, UploadID: uploadID, AllowedPurposes: allowedPurposes}
-		}
+func (s *AgentBootstrapService) signedResumeAttachmentURL(ctx context.Context, task *model.Task, rawKey string, credentialDeadline time.Time) (string, error) {
+	if task == nil || strings.TrimSpace(task.UserID) == "" || strings.TrimSpace(task.ProjectID) == "" || strings.TrimSpace(task.ID) == "" {
+		return "", fmt.Errorf("%w: task identity is required for resume attachment", ErrAgentBootstrapConflict)
 	}
-	return bootstrapDownloadSource{URL: value, AllowedPurposes: allowedPurposes}
+	key := strings.TrimPrefix(strings.TrimSpace(rawKey), "/")
+	prefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID, "resume") + "/"
+	if key == "" || path.Clean(key) != key || !strings.HasPrefix(key, prefix) {
+		return "", fmt.Errorf("%w: resume attachment is outside the current task namespace", ErrAgentBootstrapConflict)
+	}
+	return s.signedBootstrapObjectKey(ctx, key, credentialDeadline)
 }
 
-func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *model.Task, source bootstrapDownloadSource, credentialDeadline time.Time) (string, error) {
+func (s *AgentBootstrapService) signedBootstrapObjectKey(ctx context.Context, key string, credentialDeadline time.Time) (string, error) {
 	if s.cfg.Store == nil {
 		return "", fmt.Errorf("%w: storage provider is required for bootstrap downloads", ErrAgentBootstrapUnavailable)
-	}
-	if task == nil || strings.TrimSpace(task.UserID) == "" || strings.TrimSpace(task.ProjectID) == "" || strings.TrimSpace(task.ID) == "" {
-		return "", fmt.Errorf("%w: task identity is required for bootstrap download", ErrAgentBootstrapConflict)
-	}
-	rawURL := strings.TrimSpace(source.URL)
-	assertedKey := strings.TrimPrefix(strings.TrimSpace(source.AssertedKey), "/")
-	var key string
-	if rawURL != "" {
-		if !s.cfg.Store.IsOwnedURL(rawURL) {
-			return "", fmt.Errorf("%w: bootstrap download is not owned by configured storage", ErrAgentBootstrapConflict)
-		}
-		resolvedKey, ok := storage.StorageKeyFromURL(rawURL)
-		if !ok || resolvedKey == "" {
-			return "", fmt.Errorf("%w: cannot resolve bootstrap storage object key", ErrAgentBootstrapConflict)
-		}
-		key = strings.TrimPrefix(resolvedKey, "/")
-	} else {
-		if assertedKey == "" || strings.TrimSpace(source.UploadID) == "" {
-			return "", fmt.Errorf("%w: key-only bootstrap download requires upload identity", ErrAgentBootstrapConflict)
-		}
-		key = assertedKey
-	}
-	if clean := path.Clean(key); clean != key || clean == "." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("%w: bootstrap storage object key is invalid", ErrAgentBootstrapConflict)
-	}
-	if assertedKey != "" && assertedKey != key {
-		return "", fmt.Errorf("%w: bootstrap storage object key assertion mismatch", ErrAgentBootstrapConflict)
-	}
-	if err := s.authorizeBootstrapObject(ctx, task, rawURL, key, source); err != nil {
-		if errors.Is(err, ErrAgentBootstrapUnavailable) {
-			return "", err
-		}
-		return "", fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
 	signingNow := s.currentTime()
 	ttl := int(credentialDeadline.Unix()-signingNow.Unix()) - 1
@@ -577,66 +493,18 @@ func (s *AgentBootstrapService) signedDownloadURL(ctx context.Context, task *mod
 	return signed, nil
 }
 
-func (s *AgentBootstrapService) authorizeBootstrapObject(ctx context.Context, task *model.Task, rawURL, key string, source bootstrapDownloadSource) error {
-	if rawURL != "" {
-		taskPrefix := path.Join("uploads/users", task.UserID, "projects", task.ProjectID, "tasks", task.ID) + "/"
-		legacyTaskPrefix := path.Join(task.UserID, task.ID) + "/"
-		if strings.HasPrefix(key, taskPrefix) || strings.HasPrefix(key, legacyTaskPrefix) {
-			return nil
-		}
-		if inputSourceTaskID := strings.TrimSpace(task.InputSourceTaskID); inputSourceTaskID != "" {
-			inputSourceProjectID := strings.TrimSpace(task.InputSourceProjectID)
-			if inputSourceProjectID == "" {
-				inputSourceProjectID = task.ProjectID
-			}
-			sourcePrefix := path.Join("uploads/users", task.UserID, "projects", inputSourceProjectID, "tasks", inputSourceTaskID) + "/"
-			if strings.HasPrefix(key, sourcePrefix) {
-				return nil
-			}
-		}
-		if storage.IsUserOwnedKey(task.UserID, key) {
-			return nil
-		}
-	}
-	finalizedPrefix := path.Join("assets/users", task.UserID) + "/"
-	if !strings.HasPrefix(key, finalizedPrefix) || s.repo == nil {
-		return errors.New("bootstrap storage object is outside task ownership")
-	}
-	id := strings.TrimSpace(source.UploadID)
-	urlID := uploadSessionIDFromKey(key)
-	if id == "" {
-		id = urlID
-	}
-	if id == "" || (urlID != "" && urlID != id) {
-		return errors.New("bootstrap finalized asset identity mismatch")
-	}
-	session, err := s.repo.UploadSessions().FindByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("%w: finalized upload session ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
-	}
-	if session.UserID != task.UserID || session.Status != model.UploadSessionFinalized || session.AssetID != id || !directUploadPurposeAllowed(session.Purpose, source.AllowedPurposes) {
-		return errors.New("bootstrap finalized asset ownership mismatch")
-	}
-	asset, err := s.repo.Assets().FindByID(ctx, session.AssetID)
-	if err != nil {
-		return fmt.Errorf("%w: finalized asset ownership lookup: %v", ErrAgentBootstrapUnavailable, err)
-	}
-	if asset.UserID != task.UserID || asset.StorageKey != key {
-		return errors.New("bootstrap finalized asset ownership mismatch")
-	}
-	return nil
-}
-
 func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, executionID string, task *model.Task, attachments []model.EntryAttachment, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	files := make([]BootstrapFile, 0, len(attachments)+2)
 	type indexEntry struct {
 		Index       int    `json:"index"`
 		TypeIndex   int    `json:"type_index"`
 		Type        string `json:"type,omitempty"`
+		Role        string `json:"role,omitempty"`
 		FileName    string `json:"file_name,omitempty"`
 		ContentType string `json:"content_type,omitempty"`
 		Size        int64  `json:"size,omitempty"`
 		Path        string `json:"path"`
+		Instruction string `json:"instruction,omitempty"`
 	}
 	index := make([]indexEntry, 0, len(attachments))
 	typeIndexes := make(map[string]int)
@@ -656,12 +524,15 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		assetID := strings.TrimSpace(attachment.AssetID)
 		var asset *model.Asset
 		if assetID != "" {
+			if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.Key) != "" || strings.TrimSpace(attachment.UploadID) != "" {
+				return nil, fmt.Errorf("%w: attachment %q has ambiguous storage identity", ErrAgentBootstrapConflict, attachment.FileName)
+			}
 			var err error
-			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment})
+			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwnedAttachment(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeEcommercePhoto})
 			if err != nil {
 				return nil, fmt.Errorf("resolve attachment asset %q: %w", assetID, err)
 			}
-			attachment.Type = "image"
+			attachment.Type = ClassifyDirectUploadFile(asset.ContentType, strings.ToLower(filepath.Ext(asset.FileName)))
 			attachment.FileName = asset.FileName
 			attachment.ContentType = asset.ContentType
 			attachment.Size = asset.Size
@@ -691,13 +562,13 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 			}
 			file.DownloadURL = signed
 			file.ExpectedSize = asset.Size
-			file.MaxBytes = 10 << 20
-		} else if strings.TrimSpace(attachment.Key) != "" || strings.TrimSpace(attachment.URL) != "" {
-			purposes := []string{DirectUploadPurposeAIEntryAttachment}
-			if attachment.Role == model.EntryAttachmentRoleResumeFile {
-				purposes = nil
+			policy := directUploadPolicies[asset.Purpose]
+			file.MaxBytes = policy.maxSize
+			if policy.maxSizeFor != nil {
+				file.MaxBytes = policy.maxSizeFor(asset.ContentType, strings.ToLower(filepath.Ext(asset.FileName)))
 			}
-			signed, err := s.signedDownloadURL(ctx, task, bootstrapDownloadSource{URL: attachment.URL, AssertedKey: attachment.Key, UploadID: attachment.UploadID, AllowedPurposes: purposes}, credentialDeadline)
+		} else if attachment.Role == model.EntryAttachmentRoleResumeFile {
+			signed, err := s.signedResumeAttachmentURL(ctx, task, attachment.Key, credentialDeadline)
 			if err != nil {
 				return nil, fmt.Errorf("sign attachment %q: %w", attachment.FileName, err)
 			}
@@ -705,13 +576,13 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			file.Text = attachment.Text
 		} else {
-			return nil, fmt.Errorf("%w: attachment %q has no content source", ErrAgentBootstrapConflict, attachment.FileName)
+			return nil, fmt.Errorf("%w: attachment %q has no immutable asset identity", ErrAgentBootstrapConflict, attachment.FileName)
 		}
 		files = append(files, file)
 		if attachment.Role != model.EntryAttachmentRoleResumeFile {
 			globalIndex++
 			typeIndexes[attachment.Type]++
-			index = append(index, indexEntry{Index: globalIndex, TypeIndex: typeIndexes[attachment.Type], Type: attachment.Type, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel})
+			index = append(index, indexEntry{Index: globalIndex, TypeIndex: typeIndexes[attachment.Type], Type: attachment.Type, Role: attachment.Role, FileName: attachment.FileName, ContentType: attachment.ContentType, Size: attachment.Size, Path: rel, Instruction: attachment.Instruction})
 		}
 	}
 	if len(index) > 0 {
@@ -722,15 +593,6 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 		files = append(files, BootstrapFile{Path: ".anban-creator/input-attachments/index.json", Text: string(raw), Mode: 0644})
 	}
 	return files, nil
-}
-
-func bootstrapAttachmentName(index int, raw string) string {
-	name := unsafeBootstrapFilename.ReplaceAllString(filepath.Base(strings.TrimSpace(raw)), "-")
-	name = strings.Trim(name, "-.")
-	if name == "" {
-		name = "attachment"
-	}
-	return fmt.Sprintf("%02d-%s", index, name)
 }
 
 func ValidateBootstrapFiles(files []BootstrapFile) error {

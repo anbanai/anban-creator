@@ -2,6 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"mime"
@@ -17,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -24,17 +30,26 @@ import (
 const (
 	// LiveScriptPromptName is the TingWu custom prompt name used to ask for live-script analysis.
 	LiveScriptPromptName = "ANALYZE_LIVE_SCRIPT"
-	defaultAudioURLTTL   = 24 * 3600
+	// Audio URLs are credentials used by TingWu. Bound their lifetime to the
+	// maximum execution credential lifetime to limit replay after a leak.
+	defaultAudioURLTTL   = int(auth.MaximumExecutionTokenLifetime / time.Second)
+	maxAudioURLTTL       = defaultAudioURLTTL
 	defaultMinClipLength = 5
 	defaultMaxClipLength = 180
 	liveAudioKeyPrefix   = "uploads/live-audio/"
+	// The reference lifetime is aligned with the maximum execution JWT lifetime.
+	liveAnalysisReferenceLifetime = 2 * time.Hour
+	maxLiveAnalysisReferenceBytes = 4096
+	liveAnalysisReferenceVersion  = 1
 )
 
 // LiveSliceService coordinates storage, TingWu transcription, and deterministic live slicing.
 type LiveSliceService struct {
-	tingwu TingWuClient
-	store  storage.Provider
-	logger *zerolog.Logger
+	tingwu               TingWuClient
+	store                storage.Provider
+	logger               *zerolog.Logger
+	analysisReferenceKey []byte
+	now                  func() time.Time
 }
 
 // TingWuClient is the direct adapter boundary for Alibaba TingWu calls.
@@ -52,12 +67,35 @@ func NewLiveSliceService(cfg config.TingWuConfig, store storage.Provider, logger
 	return NewLiveSliceServiceWithClients(tw, store, logger), nil
 }
 
+// NewLiveSliceServiceWithSecret creates a live-slice service with the server
+// secret used to sign durable, execution-bound TingWu references.
+func NewLiveSliceServiceWithSecret(cfg config.TingWuConfig, store storage.Provider, logger *zerolog.Logger, signingSecret string) (*LiveSliceService, error) {
+	tw, err := NewAlibabaTingWuClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewLiveSliceServiceWithClientsAndSecret(tw, store, logger, signingSecret), nil
+}
+
 // NewLiveSliceServiceWithClients creates a live-slice service with injected clients for tests.
 func NewLiveSliceServiceWithClients(tw TingWuClient, store storage.Provider, logger *zerolog.Logger) *LiveSliceService {
+	return NewLiveSliceServiceWithClientsAndSecret(tw, store, logger, "")
+}
+
+// NewLiveSliceServiceWithClientsAndSecret is the injectable constructor used
+// by production and security tests. An empty secret intentionally disables
+// execution-scoped remote-task references rather than falling back to process
+// memory or a predictable key.
+func NewLiveSliceServiceWithClientsAndSecret(tw TingWuClient, store storage.Provider, logger *zerolog.Logger, signingSecret string) *LiveSliceService {
+	var referenceKey []byte
+	if strings.TrimSpace(signingSecret) != "" {
+		derived := sha256.Sum256([]byte("anban/live-analysis-reference/v1\x00" + signingSecret))
+		referenceKey = derived[:]
+	}
 	return &LiveSliceService{
-		tingwu: tw,
-		store:  store,
-		logger: logger,
+		tingwu: tw, store: store, logger: logger,
+		analysisReferenceKey: referenceKey,
+		now:                  time.Now,
 	}
 }
 
@@ -91,6 +129,9 @@ func (s *LiveSliceService) UploadLiveAudio(ctx context.Context, filePath string,
 	}
 	if expiresSeconds <= 0 {
 		expiresSeconds = defaultAudioURLTTL
+	}
+	if expiresSeconds > maxAudioURLTTL {
+		return nil, fmt.Errorf("expires_seconds exceeds the %d second execution limit", maxAudioURLTTL)
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -146,6 +187,12 @@ func audioContentType(ext string) string {
 
 // LiveAnalysisTaskRequest is the normalized MCP/service input for TingWu task creation.
 type LiveAnalysisTaskRequest struct {
+	// Execution identity is populated only by the MCP execution boundary and is
+	// never forwarded to TingWu. It binds external task IDs to one run.
+	UserID                   string `json:"-"`
+	ProjectID                string `json:"-"`
+	TaskID                   string `json:"-"`
+	ExecutionID              string `json:"-"`
 	AudioURL                 string `json:"audio_url"`
 	AudioKey                 string `json:"audio_key,omitempty"`
 	AutoChaptersEnabled      bool   `json:"auto_chapters_enabled"`
@@ -156,10 +203,21 @@ type LiveAnalysisTaskRequest struct {
 	ScriptTemplateEnable     bool   `json:"script_template_enable,omitempty"`
 }
 
+// LiveAnalysisExecutionIdentity binds a remote analysis reference to the
+// authenticated task execution that created it.
+type LiveAnalysisExecutionIdentity struct {
+	UserID      string
+	ProjectID   string
+	TaskID      string
+	ExecutionID string
+}
+
 // LiveAnalysisTaskResult is returned when a TingWu task is created.
 type LiveAnalysisTaskResult struct {
 	TaskID string `json:"task_id"`
 }
+
+var ErrLiveAnalysisTaskForbidden = errors.New("live analysis task is not authorized for this execution")
 
 // CreateLiveAnalysisTask creates a direct TingWu analysis task.
 func (s *LiveSliceService) CreateLiveAnalysisTask(ctx context.Context, req LiveAnalysisTaskRequest) (*LiveAnalysisTaskResult, error) {
@@ -168,6 +226,23 @@ func (s *LiveSliceService) CreateLiveAnalysisTask(ctx context.Context, req LiveA
 	}
 	audioKey := strings.TrimSpace(req.AudioKey)
 	audioURL := strings.TrimSpace(req.AudioURL)
+	executionScoped := strings.TrimSpace(req.ExecutionID) != ""
+	if executionScoped {
+		req.UserID, req.ProjectID, req.TaskID, req.ExecutionID = strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID)
+		if req.UserID == "" || req.ProjectID == "" || req.TaskID == "" {
+			return nil, ErrLiveAnalysisTaskForbidden
+		}
+		if len(s.analysisReferenceKey) == 0 {
+			return nil, errors.New("live analysis reference signing is not configured")
+		}
+		if audioURL != "" {
+			return nil, fmt.Errorf("execution-scoped live analysis requires an authorized audio_key")
+		}
+		prefix := liveAudioKeyPrefix + req.UserID + "/" + req.ProjectID + "/" + req.TaskID + "/"
+		if !strings.HasPrefix(audioKey, prefix) {
+			return nil, ErrLiveAnalysisTaskForbidden
+		}
+	}
 	if audioKey == "" && audioURL == "" {
 		return nil, fmt.Errorf("audio_key or audio_url is required")
 	}
@@ -202,6 +277,13 @@ func (s *LiveSliceService) CreateLiveAnalysisTask(ctx context.Context, req LiveA
 	if err != nil {
 		return nil, fmt.Errorf("create TingWu task: %w", err)
 	}
+	if executionScoped {
+		reference, signErr := s.signLiveAnalysisReference(taskID, req)
+		if signErr != nil {
+			return nil, fmt.Errorf("sign live analysis reference: %w", signErr)
+		}
+		taskID = reference
+	}
 	return &LiveAnalysisTaskResult{TaskID: taskID}, nil
 }
 
@@ -223,6 +305,122 @@ func (s *LiveSliceService) QueryLiveAnalysisTask(ctx context.Context, taskID str
 	result := NormalizeLiveAnalysisResult(raw)
 	result.Completed = completed
 	return result, nil
+}
+
+// QueryLiveAnalysisTaskForExecution only returns a TingWu result created by
+// the current execution. Missing ownership is denied rather than treated as a
+// legacy/public task, including after a server restart.
+func (s *LiveSliceService) QueryLiveAnalysisTaskForExecution(ctx context.Context, reference string, identity LiveAnalysisExecutionIdentity) (*LiveAnalysisResult, error) {
+	identity.UserID = strings.TrimSpace(identity.UserID)
+	identity.ProjectID = strings.TrimSpace(identity.ProjectID)
+	identity.TaskID = strings.TrimSpace(identity.TaskID)
+	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
+	if identity.UserID == "" || identity.ProjectID == "" || identity.TaskID == "" || identity.ExecutionID == "" {
+		return nil, ErrLiveAnalysisTaskForbidden
+	}
+	payload, ok := s.verifyLiveAnalysisReference(reference)
+	if !ok || payload.UserID != identity.UserID || payload.ProjectID != identity.ProjectID || payload.TaskID != identity.TaskID || payload.ExecutionID != identity.ExecutionID {
+		return nil, ErrLiveAnalysisTaskForbidden
+	}
+	return s.QueryLiveAnalysisTask(ctx, payload.TingWuTaskID)
+}
+
+// QueryLiveAnalysisTaskForCaller keeps the MCP boundary on one application
+// capability while preserving the explicitly authorized admin/test path. An
+// execution ID is never optional for execution-scoped callers; an empty ID is
+// only accepted for the already-authenticated admin or direct service path.
+func (s *LiveSliceService) QueryLiveAnalysisTaskForCaller(ctx context.Context, taskID string, identity LiveAnalysisExecutionIdentity) (*LiveAnalysisResult, error) {
+	if strings.TrimSpace(identity.ExecutionID) != "" {
+		return s.QueryLiveAnalysisTaskForExecution(ctx, taskID, identity)
+	}
+	return s.QueryLiveAnalysisTask(ctx, taskID)
+}
+
+type liveAnalysisReferencePayload struct {
+	Version      int    `json:"v"`
+	TingWuTaskID string `json:"t"`
+	UserID       string `json:"u"`
+	ProjectID    string `json:"p"`
+	TaskID       string `json:"k"`
+	ExecutionID  string `json:"e"`
+	ExpiresAt    int64  `json:"x"`
+}
+
+func (s *LiveSliceService) signLiveAnalysisReference(tingwuTaskID string, req LiveAnalysisTaskRequest) (string, error) {
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	issuedAt := now().UTC()
+	payload := liveAnalysisReferencePayload{
+		Version: liveAnalysisReferenceVersion, TingWuTaskID: strings.TrimSpace(tingwuTaskID),
+		UserID: strings.TrimSpace(req.UserID), ProjectID: strings.TrimSpace(req.ProjectID),
+		TaskID: strings.TrimSpace(req.TaskID), ExecutionID: strings.TrimSpace(req.ExecutionID),
+		ExpiresAt: issuedAt.Add(liveAnalysisReferenceLifetime).Unix(),
+	}
+	if !validLiveAnalysisReferenceField(payload.TingWuTaskID) || !validLiveAnalysisReferenceField(payload.UserID) || !validLiveAnalysisReferenceField(payload.ProjectID) || !validLiveAnalysisReferenceField(payload.TaskID) || !validLiveAnalysisReferenceField(payload.ExecutionID) || payload.ExpiresAt <= issuedAt.Unix() {
+		return "", errors.New("live analysis reference payload is incomplete")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	encodedBody := base64.RawURLEncoding.EncodeToString(body)
+	mac := hmac.New(sha256.New, s.analysisReferenceKey)
+	_, _ = mac.Write([]byte(encodedBody))
+	encodedMAC := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return "lta1." + encodedBody + "." + encodedMAC, nil
+}
+
+func (s *LiveSliceService) verifyLiveAnalysisReference(reference string) (liveAnalysisReferencePayload, bool) {
+	var zero liveAnalysisReferencePayload
+	reference = strings.TrimSpace(reference)
+	if len(s.analysisReferenceKey) == 0 || len(reference) == 0 || len(reference) > maxLiveAnalysisReferenceBytes {
+		return zero, false
+	}
+	parts := strings.Split(reference, ".")
+	if len(parts) != 3 || parts[0] != "lta1" || parts[1] == "" || parts[2] == "" {
+		return zero, false
+	}
+	macBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return zero, false
+	}
+	mac := hmac.New(sha256.New, s.analysisReferenceKey)
+	_, _ = mac.Write([]byte(parts[1]))
+	if !hmac.Equal(mac.Sum(nil), macBytes) {
+		return zero, false
+	}
+	body, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(body) == 0 || len(body) > maxLiveAnalysisReferenceBytes {
+		return zero, false
+	}
+	var payload liveAnalysisReferencePayload
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Version != liveAnalysisReferenceVersion {
+		return zero, false
+	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	if payload.ExpiresAt <= now().UTC().Unix() || !validLiveAnalysisReferenceField(payload.TingWuTaskID) || !validLiveAnalysisReferenceField(payload.UserID) || !validLiveAnalysisReferenceField(payload.ProjectID) || !validLiveAnalysisReferenceField(payload.TaskID) || !validLiveAnalysisReferenceField(payload.ExecutionID) {
+		return zero, false
+	}
+	return payload, true
+}
+
+func validLiveAnalysisReferenceField(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(trimmed) > 256 || trimmed != value {
+		return false
+	}
+	value = trimmed
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // LiveAnalysisResult is the stable JSON shape consumed by the skill and desktop concepts.

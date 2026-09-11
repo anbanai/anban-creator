@@ -165,8 +165,8 @@ type createTaskRequest struct {
 	// maps a module key (main_images / detail_page / cover_banner / share_image /
 	// sku_images) to its quantity; creation billing uses the ecommerce base task
 	// fee, and selected modules only guide later image/vision MCP usage.
-	// ProductPhotos are server-owned storage URLs materialized into the agent
-	// workspace by the executor.
+	// ProductPhotos are browser-upload URLs finalized into immutable task input
+	// attachments before creation.
 	ProductPhotos   []string            `json:"product_photos,omitempty"`
 	SelectedModules map[string]int      `json:"selected_modules,omitempty"`
 	TargetPlatform  string              `json:"target_platform,omitempty"`
@@ -336,41 +336,6 @@ func taskCreationReferencePurposes(source *model.Task, selection service.Referen
 	return allowed
 }
 
-func normalizeTrustedTaskAttachmentReuse(store storage.Provider, source *model.Task, attachment model.EntryAttachment) (model.EntryAttachment, error) {
-	trusted := trustedTaskCreationSource(source)
-	parsedKey, err := parseTaskScopedCreationInput(store, attachment.Key, true)
-	if err != nil {
-		return model.EntryAttachment{}, fmt.Errorf("task input storage key is invalid")
-	}
-	if source == nil || !parsedKey.taskScoped || parsedKey.identity != trusted {
-		return model.EntryAttachment{}, fmt.Errorf("task-scoped input is not authorized for this clone source")
-	}
-	attachment.Key = parsedKey.key
-	if strings.TrimSpace(attachment.URL) != "" {
-		parsedURL, err := parseTaskScopedCreationInput(store, attachment.URL, false)
-		if err != nil {
-			return model.EntryAttachment{}, fmt.Errorf("task input storage URL is invalid")
-		}
-		if parsedURL.key == "" || parsedURL.key != parsedKey.key {
-			return model.EntryAttachment{}, fmt.Errorf("attachment URL and key must identify the same storage object")
-		}
-		return attachment, nil
-	}
-	if store == nil {
-		return model.EntryAttachment{}, fmt.Errorf("storage provider is required to reuse a task-scoped attachment key")
-	}
-	ownedURL := strings.TrimSpace(store.GetURL(parsedKey.key))
-	if ownedURL == "" || !store.IsOwnedURL(ownedURL) {
-		return model.EntryAttachment{}, fmt.Errorf("storage provider returned an invalid owned URL for task-scoped attachment key")
-	}
-	parsedURL, err := parseTaskScopedCreationInput(store, ownedURL, false)
-	if err != nil || parsedURL.key != parsedKey.key {
-		return model.EntryAttachment{}, fmt.Errorf("storage provider URL does not identify the authorized attachment key")
-	}
-	attachment.URL = ownedURL
-	return attachment, nil
-}
-
 func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
 	trusted := trustedTaskCreationSource(source)
 	validate := func(raw string, keyOnly bool) (parsedTaskCreationInput, error) {
@@ -519,13 +484,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		allowedAttachmentTypes = map[string]bool{"image": true}
 	}
 	attachmentValidation := InputAttachmentValidationOptions{
-		MaxCount:     maxAgentInputAttachments,
-		AllowedTypes: allowedAttachmentTypes,
-	}
-	if source != nil {
-		attachmentValidation.normalizeExistingKey = func(attachment model.EntryAttachment) (model.EntryAttachment, error) {
-			return normalizeTrustedTaskAttachmentReuse(h.service.Storage(), source, attachment)
-		}
+		MaxCount:             maxAgentInputAttachments,
+		AllowedTypes:         allowedAttachmentTypes,
+		AllowedAssetPurposes: taskInputAttachmentAssetPurposes,
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, req.InputAttachments, attachmentValidation)
 	if err != nil {
@@ -565,11 +526,29 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		if finalizationStore == nil {
 			finalizationStore = h.store
 		}
-		rewrites, err := finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos)
+		originalProductPhotos := append([]string(nil), req.ProductPhotos...)
+		finalStore, _ := finalizationStore.(service.DirectUploadFinalizationStorage)
+		var ownedURLChecks []func(string) bool
+		if finalizationStore != nil {
+			ownedURLChecks = append(ownedURLChecks, finalizationStore.IsOwnedURL)
+		}
+		rewrites, productAssets, err := service.FinalizeUploadSessionURLAssets(c.Context(), finalStore, h.repo, userID, service.DirectUploadPurposeEcommercePhoto, originalProductPhotos, time.Now(), ownedURLChecks...)
 		if err != nil {
 			return nil, respondUploadSessionFinalizeError(c, h.logger, err)
 		}
 		rewriteFinalizedUploadURLSlice(req.ProductPhotos, rewrites)
+		for i, raw := range originalProductPhotos {
+			asset := productAssets[raw]
+			if asset == nil {
+				return nil, Error(c, fiber.StatusBadRequest, "product_photos must be immutable ecommerce uploads")
+			}
+			req.InputAttachments = append(req.InputAttachments, model.EntryAttachment{
+				AssetID: asset.ID, Type: "image", FileName: asset.FileName,
+				ContentType: asset.ContentType, Size: asset.Size,
+				Role:        model.EntryAttachmentRoleEcommerceProduct,
+				Instruction: fmt.Sprintf("电商产品参考图 %d", i+1),
+			})
+		}
 		if model.IsMontagePlatform(project.Platform) {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
@@ -1004,10 +983,8 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 
 	// Exact clones continue to use the source's frozen configuration. Re-check
 	// its image-model entitlement because the user's tier may have changed.
-	if !model.IsMontagePlatform(task.Type) {
-		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
-			return Error(c, fiber.StatusForbidden, err.Error())
-		}
+	if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
+		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 	params := service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile}
 	if req.Prompt != nil {
@@ -1023,8 +1000,9 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			pending = h.repo
 		}
 		attachments, err := validateInputAttachments(c.Context(), h.service.Storage(), pending, userID, *req.InputAttachments, InputAttachmentValidationOptions{
-			MaxCount:     maxAgentInputAttachments,
-			AllowedTypes: allAgentAttachmentTypes,
+			MaxCount:             maxAgentInputAttachments,
+			AllowedTypes:         allAgentAttachmentTypes,
+			AllowedAssetPurposes: taskInputAttachmentAssetPurposes,
 		})
 		if err != nil {
 			return respondInputAttachmentError(c, h.logger, err)
@@ -1092,22 +1070,23 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		pending = h.repo
 	}
 	validatedAttachments, err := validateInputAttachments(c.Context(), resumeStore, pending, userID, req.InputAttachments, InputAttachmentValidationOptions{
-		MaxCount:     maxTaskResumeFiles,
-		MaxBytes:     maxTaskResumeFileBytes,
-		AllowedTypes: allAgentAttachmentTypes,
+		MaxCount:             maxTaskResumeFiles,
+		MaxBytes:             maxTaskResumeFileBytes,
+		AllowedTypes:         allAgentAttachmentTypes,
+		AllowedAssetPurposes: []string{service.DirectUploadPurposeAIEntryAttachment},
 	})
 	if err != nil {
 		return respondInputAttachmentError(c, h.logger, err)
 	}
 	files := make([]service.ResumeTaskFile, 0, len(validatedAttachments))
 	for i, attachment := range validatedAttachments {
-		if attachment.UploadID == "" || attachment.Key == "" {
-			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("attachment %d requires upload_id and key", i+1))
+		if attachment.AssetID == "" {
+			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("attachment %d requires asset_id", i+1))
 		}
 		files = append(files, service.ResumeTaskFile{
+			AssetID:      attachment.AssetID,
 			OriginalName: attachment.FileName,
 			Label:        attachment.Instruction,
-			Key:          attachment.Key,
 			Type:         attachment.Type,
 			ContentType:  attachment.ContentType,
 			Size:         attachment.Size,
@@ -1129,14 +1108,18 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		switch {
 		case errors.Is(err, service.ErrTaskResumeNoInput):
 			return Error(c, fiber.StatusBadRequest, "请填写补充指令或上传补充文件")
+		case errors.Is(err, service.ErrTaskResumeCompleted):
+			return Error(c, fiber.StatusConflict, "已完成任务不可继续执行，请克隆任务创建新版本")
 		case errors.Is(err, service.ErrTaskResumeNotTerminal):
-			return Error(c, fiber.StatusConflict, "只有已完成、失败或已取消的任务可以继续执行")
+			return Error(c, fiber.StatusConflict, "只有失败或已取消的任务可以继续执行")
 		case errors.Is(err, service.ErrTaskResumeUnavailable):
 			return Error(c, fiber.StatusServiceUnavailable, "继续执行仅支持 Kubernetes NAS 模式")
 		case errors.Is(err, service.ErrTaskResumeStorageUnavailable):
 			return Error(c, fiber.StatusServiceUnavailable, "补充文件存储暂不可用，请稍后重试")
 		case errors.Is(err, service.ErrTaskResumeConflict):
 			return Error(c, fiber.StatusConflict, "任务状态已变化，请刷新后重试")
+		case errors.Is(err, service.ErrTaskResumeImageCapabilityMissing):
+			return Error(c, fiber.StatusConflict, "任务缺少冻结的图像能力，请克隆任务创建新版本")
 		default:
 			h.logger.Error().Err(err).Str("task_id", id).Msg("resume task failed")
 			return Error(c, fiber.StatusInternalServerError, "继续执行任务失败")
@@ -1294,11 +1277,9 @@ func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 			continue
 		}
 		// Re-validate the image capability against the caller's current tier.
-		if !model.IsMontagePlatform(task.Type) {
-			if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
-				results = append(results, bulkTaskResult{ID: id, Reason: "image_capability_unavailable"})
-				continue
-			}
+		if err := h.validateImageCapabilityKeyForUser(c, userID, task.ImageCapabilityKey); err != nil {
+			results = append(results, bulkTaskResult{ID: id, Reason: "image_capability_unavailable"})
+			continue
 		}
 		if _, err := h.presentCloneTaskReference(c.Context(), userID, task); err != nil {
 			results = append(results, bulkTaskResult{ID: id, Reason: "reference_unavailable"})

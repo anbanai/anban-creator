@@ -45,7 +45,7 @@ func TestCompleteLocalTaskRecordsTerminalProviderCostOnce(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	claimed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || claimed.CurrentExecutionID == nil {
 		t.Fatalf("claimed local task has no durable execution identity: task=%#v err=%v", claimed, err)
@@ -80,7 +80,7 @@ func TestCompleteLocalTaskResponseLossRetryDoesNotRepeatTerminalSideEffects(t *t
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	task, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || task.CurrentExecutionID == nil {
 		t.Fatalf("claimed task = %#v, %v", task, err)
@@ -151,7 +151,7 @@ func TestCompleteLocalTaskConcurrentIdenticalOutcomeRunsTerminalSideEffectsOnce(
 			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 			taskID := claimOneLocal(t, svc, repo, userID, projectID)
 			if success {
-				addLocalSeednoteDeliverables(t, repo, taskID)
+				addLocalSeednoteDeliverables(t, svc, repo, taskID)
 			}
 			claimed, err := repo.Tasks().FindByID(ctx, taskID)
 			if err != nil || claimed.CurrentExecutionID == nil {
@@ -241,7 +241,7 @@ func TestCompleteLocalTaskRollsBackWhenDurableExecutionIsMissing(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	claimed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || claimed.CurrentExecutionID == nil {
 		t.Fatal("missing claimed execution")
@@ -290,7 +290,7 @@ func TestCompleteLocalTaskUnpricedUsageStopsFinalizationAsUnreconciled(t *testin
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	claimed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || claimed.CurrentExecutionID == nil {
 		t.Fatalf("claimed local task has no durable execution identity: task=%#v err=%v", claimed, err)
@@ -336,7 +336,7 @@ func TestCompleteLocalTaskResumesEveryDurableTailStage(t *testing.T) {
 				projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 				taskID := claimOneLocal(t, svc, repo, userID, projectID)
 				if success {
-					addLocalSeednoteDeliverables(t, repo, taskID)
+					addLocalSeednoteDeliverables(t, svc, repo, taskID)
 				}
 				claimed, err := repo.Tasks().FindByID(ctx, taskID)
 				if err != nil || claimed.CurrentExecutionID == nil {
@@ -380,7 +380,7 @@ func TestConcurrentIdenticalLocalCompletionWaitsForDurableTail(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	claimed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || claimed.CurrentExecutionID == nil {
 		t.Fatalf("claimed task = %#v, %v", claimed, err)
@@ -420,7 +420,7 @@ func TestCompleteLocalTaskCostFailureLeavesDurableFinalizationRetryable(t *testi
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	svc.SetProviderCostService(NewProviderCostService(failingExecutionCostRepository{BillingCostRepository: baseCostRepo}, providerCostBundleWithTurbo()))
 
 	result := &agent.ExecutionResult{Success: true, CostStatus: agent.CostStatusReconciled, ModelUsage: []agent.ModelTokenUsage{{

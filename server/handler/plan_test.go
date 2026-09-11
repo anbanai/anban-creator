@@ -180,7 +180,6 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
@@ -515,6 +514,18 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	attachmentAssets := []*model.Asset{
+		{ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/users/" + userID + "/plan/product.png", FileName: "product.png", ContentType: "image/png", Size: 10, ETag: "image-etag"},
+		{ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/users/" + userID + "/plan/voice.ogg", FileName: "voice.ogg", ContentType: "application/ogg", Size: 10, ETag: "audio-etag"},
+		{ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/users/" + userID + "/plan/demo.mp4", FileName: "demo.mp4", ContentType: "video/mp4", Size: 10, ETag: "video-etag"},
+		{ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/users/" + userID + "/plan/brief.pdf", FileName: "brief.pdf", ContentType: "application/pdf", Size: 10, ETag: "document-etag"},
+		{ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/users/" + userID + "/plan/notes.csv", FileName: "notes.csv", ContentType: "application/csv", Size: 10, ETag: "text-etag"},
+	}
+	for _, asset := range attachmentAssets {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatalf("create attachment asset: %v", err)
+		}
+	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	planSvc := newHandlerPlanService(t, repo, &logger)
@@ -551,12 +562,13 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	createBody := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":[` +
-		`{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png","instruction":"  聚焦包装正面  "},` +
-		`{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},` +
-		`{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},` +
-		`{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},` +
-		`{"type":"text","url":"/api/v1/files/notes.csv","file_name":"notes.csv","content_type":"application/csv"}]}`
+	attachmentJSON := `[` +
+		`{"asset_id":"` + attachmentAssets[0].ID + `","instruction":"  聚焦包装正面  "},` +
+		`{"asset_id":"` + attachmentAssets[1].ID + `"},` +
+		`{"asset_id":"` + attachmentAssets[2].ID + `"},` +
+		`{"asset_id":"` + attachmentAssets[3].ID + `"},` +
+		`{"asset_id":"` + attachmentAssets[4].ID + `"}]`
+	createBody := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + attachmentJSON + `}`
 	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := app.Test(createReq)
@@ -632,7 +644,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
 	}
 
-	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":`+fiveTypeHandlerAttachmentsJSON+`}`))
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":`+attachmentJSON+`}`))
 	replaceReq.Header.Set("Content-Type", "application/json")
 	replaceResp, err := app.Test(replaceReq)
 	if err != nil || replaceResp.StatusCode != fiber.StatusOK {

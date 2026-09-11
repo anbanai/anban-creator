@@ -78,7 +78,7 @@ func materializeReferenceAssetBytes(ctx context.Context, workDir string, data []
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := unix.Renameat(dirFD, tmpName, dirFD, referenceImageFileName); err != nil {
+	if err := unix.Renameat(dirFD, tmpName, dirFD, taskReferenceImageFileName); err != nil {
 		return fmt.Errorf("replace reference asset: %w", err)
 	}
 	if err := unix.Fsync(dirFD); err != nil {

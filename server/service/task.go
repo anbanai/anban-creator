@@ -346,14 +346,17 @@ type CreateManualParams struct {
 	RequestedTaskType string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
-	FrozenTaskType        string
-	PreserveFrozenConfig  bool
-	Prompt                string
-	Quantity              int
-	ImageRatio            string
-	ImageCapabilityKey    string
-	SkipRefImage          *bool
-	ReferenceImageAssetID string
+	FrozenTaskType       string
+	PreserveFrozenConfig bool
+	Prompt               string
+	Quantity             int
+	ImageRatio           string
+	ImageCapabilityKey   string
+	// frozenImageCapabilitySnapshot is trusted internal clone state. New task
+	// admission freezes a fresh snapshot; clone-without-overrides preserves it.
+	frozenImageCapabilitySnapshot *model.ImageCapabilitySnapshot
+	SkipRefImage                  *bool
+	ReferenceImageAssetID         string
 	// allowProjectReferenceAsset is set only by Clone after it derives a trusted
 	// match from the persisted source task. Create and plan paths keep it false.
 	allowProjectReferenceAsset bool
@@ -575,16 +578,23 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageCapabilityKey = strings.TrimSpace(projEc.ImageCapabilityKey)
 		}
 	}
-	// Montage cover generation requires one immutable, public image capability.
-	if isMontageTask {
+	var effectiveImageCapabilitySnapshot model.ImageCapabilitySnapshot
+	if taskUsesFrozenImageCapability(taskType) {
 		if s.imageCapabilities == nil {
 			return nil, fmt.Errorf("resolve task image capability: %w", ErrImageCapabilityResolverUnavailable)
 		}
-		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, p.UserID, effectiveImageCapabilityKey)
-		if err != nil {
-			return nil, fmt.Errorf("resolve task image capability: %w", err)
+		if p.frozenImageCapabilitySnapshot != nil {
+			effectiveImageCapabilitySnapshot = *p.frozenImageCapabilitySnapshot
+			if err := s.imageCapabilities.ValidateFrozenImageCapability(ctx, p.UserID, effectiveImageCapabilitySnapshot); err != nil {
+				return nil, fmt.Errorf("validate cloned task image capability: %w", err)
+			}
+		} else {
+			effectiveImageCapabilitySnapshot, err = s.imageCapabilities.FreezeImageCapability(ctx, p.UserID, effectiveImageCapabilityKey)
+			if err != nil {
+				return nil, fmt.Errorf("resolve task image capability: %w", err)
+			}
 		}
-		effectiveImageCapabilityKey = resolved.Key
+		effectiveImageCapabilityKey = effectiveImageCapabilitySnapshot.Key
 	}
 	if isMontageTask {
 		quantity = 1
@@ -689,6 +699,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetProjectSnapshot(*p.ProjectSnapshot)
 		} else {
 			task.SetProjectSnapshot(model.SnapshotProject(project))
+		}
+		if taskUsesFrozenImageCapability(taskType) {
+			task.SetImageCapabilitySnapshot(effectiveImageCapabilitySnapshot)
 		}
 		if p.Overrides != nil {
 			task.SetOverrides(*p.Overrides)
@@ -947,20 +960,16 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		return nil, err
 	}
 	effectiveImageCapabilityKey := strings.TrimSpace(plan.ImageCapabilityKey)
-	if isMontageTask {
+	var effectiveImageCapabilitySnapshot model.ImageCapabilitySnapshot
+	if taskUsesFrozenImageCapability(taskType) {
 		if s.imageCapabilities == nil {
 			return nil, fmt.Errorf("resolve plan image capability: %w", ErrImageCapabilityResolverUnavailable)
 		}
-		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
+		resolved, err := s.imageCapabilities.FreezeImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
 		if err != nil {
 			return nil, fmt.Errorf("resolve plan image capability: %w", err)
 		}
-		effectiveImageCapabilityKey = resolved.Key
-	} else if s.imageCapabilities != nil {
-		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, plan.UserID, effectiveImageCapabilityKey)
-		if err != nil {
-			return nil, fmt.Errorf("resolve plan image capability: %w", err)
-		}
+		effectiveImageCapabilitySnapshot = resolved
 		effectiveImageCapabilityKey = resolved.Key
 	}
 	var planMontageInput *model.MontageInput
@@ -1002,6 +1011,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ExecutionProfile:         profile.ID,
 		AgentProfileSnapshot:     profileSnapshot,
 		AgentProfileFingerprint:  profileFingerprint,
+	}
+	if taskUsesFrozenImageCapability(taskType) {
+		task.SetImageCapabilitySnapshot(effectiveImageCapabilitySnapshot)
 	}
 	agentInput, err := validateAndCloneAgentInput(taskType, plan.AgentInput.Data())
 	if err != nil {
@@ -1198,7 +1210,7 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 			return fmt.Errorf("find current execution before cancellation: %w", executionErr)
 		}
 		if execution.Target == model.ExecutionTargetLocalClaimed {
-			return s.cancelLocalExecution(ctx, task, execution, userID)
+			return s.cancelLocalExecution(ctx, task, execution)
 		}
 		if s.runtimeDispatcher != nil {
 			return s.cancelCloudExecution(ctx, task, userID)

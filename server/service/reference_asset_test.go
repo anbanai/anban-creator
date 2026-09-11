@@ -478,27 +478,29 @@ func referenceAssetFixture(id, userID, purpose string) *model.Asset {
 	}
 }
 
-func TestEffectiveReferenceAssetID(t *testing.T) {
+func TestReferenceAssetIDsRemainSourceSpecific(t *testing.T) {
 	task := &model.Task{ReferenceImageAssetID: "task-asset", SkipReferenceImage: true}
 	task.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: "project-asset"})
 
-	if got := EffectiveReferenceAssetID(task); got != "task-asset" {
+	if got := taskReferenceAssetID(task); got != "task-asset" {
 		t.Fatalf("direct reference with skip = %q, want task-asset", got)
 	}
-	task.ReferenceImageAssetID = ""
-	if got := EffectiveReferenceAssetID(task); got != "" {
+	if got := projectStyleReferenceAssetID(task); got != "" {
 		t.Fatalf("inherited reference with skip = %q, want empty", got)
 	}
 	task.SkipReferenceImage = false
-	if got := EffectiveReferenceAssetID(task); got != "project-asset" {
+	if got := projectStyleReferenceAssetID(task); got != "project-asset" {
 		t.Fatalf("inherited reference = %q, want project-asset", got)
 	}
-	if got := EffectiveReferenceAssetID(nil); got != "" {
-		t.Fatalf("nil task reference = %q, want empty", got)
+	if got := taskReferenceAssetID(nil); got != "" {
+		t.Fatalf("nil direct task reference = %q, want empty", got)
+	}
+	if got := projectStyleReferenceAssetID(nil); got != "" {
+		t.Fatalf("nil project style reference = %q, want empty", got)
 	}
 }
 
-func TestResolveEffectiveReferenceAssetValidatesPurposeBySource(t *testing.T) {
+func TestResolveReferenceAssetValidatesPurposeBySource(t *testing.T) {
 	tests := []struct {
 		name       string
 		direct     bool
@@ -540,7 +542,13 @@ func TestResolveEffectiveReferenceAssetValidatesPurposeBySource(t *testing.T) {
 				task.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: assetID})
 			}
 
-			asset, err := resolveEffectiveReferenceAsset(t.Context(), repo, task)
+			var asset *model.Asset
+			var err error
+			if tt.direct {
+				asset, err = resolveTaskReferenceAsset(t.Context(), repo, task)
+			} else {
+				asset, err = resolveProjectStyleReferenceAsset(t.Context(), repo, task)
+			}
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) || asset != nil {
 					t.Fatalf("resolve asset=%#v err=%v, want %v", asset, err, tt.wantErr)

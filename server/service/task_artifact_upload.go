@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	maxTaskArtifactUploadBytes = 512 * 1024 * 1024
-	taskArtifactSHA256Header   = "X-Oss-Meta-Sha256"
+	maxTaskArtifactUploadBytes   = 512 * 1024 * 1024
+	maxTaskArtifactManifestFiles = 256
+	taskArtifactSHA256Header     = "X-Oss-Meta-Sha256"
 )
 
 var (
@@ -133,6 +134,13 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	default:
 		return nil, fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, finalKey, statErr)
 	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: load task artifact execution: %v", ErrTaskArtifactPersistence, err)
+	}
+	if execution.ManifestSealed || (execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending) {
+		return nil, fmt.Errorf("%w: %w", ErrTaskArtifactExecutionConflict, repository.ErrTaskFileManifestState)
+	}
 	uploadID := uuid.NewString()
 	stagingKey := buildTaskArtifactStagingStorageKey(task, executionID, req.SHA256, uploadID, relPath)
 	now := time.Now
@@ -220,6 +228,9 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	}
 	if s.store == nil {
 		return fmt.Errorf("%w: storage provider is not available", ErrTaskArtifactUnavailable)
+	}
+	if len(req.Files) > maxTaskArtifactManifestFiles {
+		return taskArtifactInvalidf("task artifact manifest supports at most %d files", maxTaskArtifactManifestFiles)
 	}
 	taskID = firstNonEmptyString(strings.TrimSpace(taskID), strings.TrimSpace(req.TaskID))
 	if taskID == "" {
@@ -357,7 +368,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		taskFile := &model.TaskFile{
 			TaskID:          task.ID,
 			ExecutionID:     executionID,
-			State:           model.TaskFileStatePublished,
+			State:           model.TaskFileStatePending,
 			Role:            role,
 			FileName:        filename,
 			MimeType:        contentType,
@@ -368,36 +379,13 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 			StorageProvider: s.store.Name(),
 			FilePath:        relPath,
 		}
-		if executionID != "" {
-			taskFile.State = model.TaskFileStatePending
-		}
 		files = append(files, taskFile)
 	}
-	if executionID != "" {
-		if err := s.repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, task.ID, executionID, files); err != nil {
-			if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
-				return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
-			}
-			return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
+	if err := s.repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, task.ID, executionID, files); err != nil {
+		if errors.Is(err, repository.ErrTaskFileExecutionNotCurrent) || errors.Is(err, repository.ErrTaskFileTaskNotRunning) || errors.Is(err, repository.ErrTaskFileManifestState) {
+			return fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)
 		}
-	} else {
-		if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-			authoritative, err := tx.Tasks().FindByIDForUpdate(ctx, task.ID)
-			if err != nil {
-				return err
-			}
-			if authoritative.DeletingAt != nil {
-				return ErrTaskDeleting
-			}
-			for _, file := range files {
-				if _, err := tx.TaskFiles().Upsert(ctx, file); err != nil {
-					return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+		return fmt.Errorf("%w: %v", ErrTaskArtifactPersistence, err)
 	}
 	releaseTaskArtifactFinalizationClaims(ctx, s.repo, claims)
 	claims = nil
@@ -554,10 +542,7 @@ func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *m
 	authenticatedExecutionID = strings.TrimSpace(authenticatedExecutionID)
 	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
 	if authenticatedExecutionID == "" {
-		if task.CurrentExecutionID != nil || requestedExecutionID != "" {
-			return "", fmt.Errorf("%w: execution identity requires an execution token", ErrTaskArtifactExecutionConflict)
-		}
-		return "", nil
+		return "", fmt.Errorf("%w: execution identity requires an execution token", ErrTaskArtifactExecutionConflict)
 	}
 	if requestedExecutionID == "" || requestedExecutionID != authenticatedExecutionID {
 		return "", fmt.Errorf("%w: execution identity does not match request", ErrTaskArtifactExecutionConflict)

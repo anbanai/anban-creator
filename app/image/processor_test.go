@@ -3,12 +3,37 @@ package image
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/app/config"
 	"github.com/rs/zerolog"
 )
+
+func TestProcessorResolveRawURLRejectsOversizedTempFile(t *testing.T) {
+	const maxGeneratedBytes = 25 << 20
+	file, err := os.CreateTemp(t.TempDir(), "provider-*.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := file.Name()
+	if err := file.Truncate(maxGeneratedBytes + 1); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&Processor{}).resolveRawURL(path)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("resolveRawURL error = %v, want size-limit rejection", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("provider temp file still exists after rejection: %v", statErr)
+	}
+}
 
 func newTestProcessor(apiCfg *config.ImageAPI) *Processor {
 	nopLog := zerolog.Nop()

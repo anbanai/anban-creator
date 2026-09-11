@@ -1010,8 +1010,8 @@ describe('TaskDetailPage', () => {
       file_name: 'article.html',
       mime_type: 'text/html',
       file_size: 1024,
-      is_deliverable: true,
       url: '/api/v1/files/file-1',
+      is_deliverable: true,
       created_at: '2026-07-06T03:00:00Z',
     }])
 
@@ -1045,8 +1045,8 @@ describe('TaskDetailPage', () => {
         file_name: 'reference-usage-summary.json',
         mime_type: 'application/json',
         file_size: 1024,
+        url: '',
         is_deliverable: false,
-        url: '/api/v1/files/file-summary',
         created_at: '2026-07-10T00:00:00Z',
       },
       {
@@ -1056,8 +1056,8 @@ describe('TaskDetailPage', () => {
         file_name: 'article.html',
         mime_type: 'text/html',
         file_size: 1024,
-        is_deliverable: true,
         url: '/api/v1/files/file-1',
+        is_deliverable: true,
         created_at: '2026-07-10T00:00:01Z',
       },
     ])
@@ -1068,10 +1068,8 @@ describe('TaskDetailPage', () => {
     expect(taskStatus).toBeInTheDocument()
     const filesHeading = await screen.findByText('交付文件 (1)')
     expect(filesHeading).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '过程文件 (1)' })).toBeInTheDocument()
     expect(screen.queryByText('参考素材摘要暂时无法显示')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /下载 reference-usage-summary\.json/ })).toBeDisabled()
 
     await openTaskDetails('素材')
     expect(await screen.findByText('参考素材摘要暂时无法显示')).toBeInTheDocument()
@@ -1095,8 +1093,8 @@ describe('TaskDetailPage', () => {
         file_name: 'content.md',
         mime_type: 'text/markdown',
         file_size: 128,
-        is_deliverable: true,
         url: '/content.md',
+        is_deliverable: true,
         created_at: now,
       },
       {
@@ -1108,7 +1106,8 @@ describe('TaskDetailPage', () => {
         file_name: 'failure-state.json',
         mime_type: 'application/json',
         file_size: 96,
-        url: '/failure-state.json',
+        url: '',
+        is_deliverable: false,
         created_at: now,
       },
     ]
@@ -1120,10 +1119,85 @@ describe('TaskDetailPage', () => {
     const failedHeading = await screen.findByText('失败执行文件 (1)')
     const generatedSection = generatedHeading.closest('[data-slot="card"]') as HTMLElement
     const failedSection = failedHeading.closest('[data-slot="card"]') as HTMLElement
-    expect(within(generatedSection).getByRole('button', { name: '预览 content.md' })).toBeInTheDocument()
-    expect(within(generatedSection).queryByRole('button', { name: '预览 failure-state.json' })).not.toBeInTheDocument()
-    expect(within(failedSection).getByRole('button', { name: '预览 failure-state.json' })).toBeInTheDocument()
-    expect(within(failedSection).queryByRole('button', { name: '预览 content.md' })).not.toBeInTheDocument()
+    expect(within(generatedSection).getByTitle('content.md')).toBeInTheDocument()
+    expect(within(generatedSection).queryByTitle('failure-state.json')).not.toBeInTheDocument()
+    expect(within(failedSection).getByTitle('failure-state.json')).toBeInTheDocument()
+    expect(within(failedSection).queryByTitle('content.md')).not.toBeInTheDocument()
+  })
+
+  it('distinguishes a failed continuation from its preserved historical delivery', async () => {
+    mockTask(taskWith({
+      status: 'failed',
+      error_message: 'runtime_failed',
+      result: null,
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'prior-delivery',
+      task_id: 'task-1',
+      execution_id: 'prior-successful-execution',
+      state: 'published',
+      role: 'content',
+      file_name: 'content.md',
+      mime_type: 'text/markdown',
+      file_size: 128,
+      url: '/content.md',
+      is_deliverable: true,
+      created_at: '2026-09-08T14:04:42Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('heading', { name: '续跑失败，历史交付已保留' })).toBeInTheDocument()
+    expect(screen.getByText('最新一次继续执行未完成；下方已有交付文件仍可预览和下载。')).toBeInTheDocument()
+    expect(screen.getByText('失败原因：runtime_failed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /下载交付文件/ })).toBeEnabled()
+  })
+
+  it('groups published process files below deliverables and keeps ZIP scoped to deliverables', async () => {
+    mockTask(taskWith({
+      status: 'completed',
+      result: null,
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      {
+        id: 'deliverable-1',
+        task_id: 'task-1',
+        state: 'published',
+        role: 'content',
+        file_name: 'content.md',
+        mime_type: 'text/markdown',
+        file_size: 128,
+        url: '/content.md',
+        is_deliverable: true,
+        delivery_role: 'final_markdown',
+        preview_url: '/api/v1/tasks/task-1/files/deliverable-1/preview',
+        download_url: '/api/v1/tasks/task-1/files/deliverable-1/download',
+        created_at: '2026-07-15T03:00:00Z',
+      },
+      {
+        id: 'process-1',
+        task_id: 'task-1',
+        state: 'published',
+        role: 'review',
+        file_name: 'review.json',
+        mime_type: 'application/json',
+        file_size: 96,
+        url: '',
+        is_deliverable: false,
+        preview_url: '/api/v1/tasks/task-1/files/process-1/preview',
+        created_at: '2026-07-15T03:00:01Z',
+      },
+    ])
+
+    render(<TaskDetailPage />)
+
+    const deliverables = await screen.findByRole('heading', { name: '交付文件 (1)' })
+    const processHeading = await screen.findByRole('heading', { name: '过程文件 (1)' })
+    expect(deliverables.compareDocumentPosition(processHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: '下载 review.json' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /下载交付文件/ }))
+    await waitFor(() => expect(api.tasks.downloadZipBlob).toHaveBeenCalledWith('task-1'))
   })
 
   it('places Seednote analytics after generated deliverables without requiring published state', async () => {
@@ -1140,8 +1214,8 @@ describe('TaskDetailPage', () => {
       file_name: 'content.md',
       mime_type: 'text/markdown',
       file_size: 128,
-      is_deliverable: true,
       url: '/content.md',
+      is_deliverable: true,
       created_at: '2026-07-15T03:00:00Z',
     }])
 
@@ -1260,8 +1334,8 @@ describe('TaskDetailPage', () => {
         file_name: 'article.html',
         mime_type: 'text/html',
         file_size: 1024,
-        is_deliverable: true,
         url: '/api/v1/files/file-1',
+        is_deliverable: true,
         created_at: '2026-07-06T03:00:00Z',
       },
     ])
@@ -1333,7 +1407,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('keeps Continue isolated to the prompt-only resume dialog', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'cancelled', result: null }))
 
     render(<TaskDetailPage />)
 
@@ -1344,12 +1418,13 @@ describe('TaskDetailPage', () => {
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
-  it('shows the complete terminal action group for a completed task', async () => {
+  it('shows only immutable-history actions for a completed task', async () => {
     mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
+    await screen.findByRole('button', { name: '克隆任务' })
+    expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
@@ -1799,6 +1874,36 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
     expect(within(dialog).getByText('https://mp.weixin.qq.com/test')).toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalledWith('/projects')
+  })
+
+  it('labels the project ratio as a video setting for Montage', async () => {
+    const montageProject = {
+      ...mockProjectDetail,
+      project: {
+        ...mockProjectDetail.project,
+        platform: 'montage' as const,
+        image_ratio: '9:16',
+      },
+    }
+    vi.mocked(api.projects.get).mockResolvedValue(montageProject)
+    mockTask(taskWith({
+      type: 'montage',
+      status: 'completed',
+      image_ratio: '9:16',
+      project_snapshot: {
+        project_name: montageProject.project.name,
+        platform: 'montage',
+        image_ratio: '9:16',
+      },
+      result: null,
+    }))
+
+    render(<TaskDetailPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /\u6d4b试项目/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('视频比例')).toBeInTheDocument()
+    expect(within(dialog).queryByText('图片比例')).not.toBeInTheDocument()
   })
 
   it('renders dynamic logs as markdown and keeps copyable raw text', async () => {

@@ -44,6 +44,7 @@ func TestPlatformImageRatiosMatchBusinessContracts(t *testing.T) {
 		{PlatformArticle, []string{"16:9", "4:3", "1:1"}},
 		{PlatformMoments, []string{"3:4", "1:1"}},
 		{PlatformEcommerce, []string{"1:1", "3:4", "4:3", "16:9"}},
+		{PlatformMontage, []string{"9:16", "16:9", "1:1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.platform, func(t *testing.T) {
@@ -66,5 +67,11 @@ func TestPlatformImageRatiosMatchBusinessContracts(t *testing.T) {
 	}
 	if IsBusinessImageRatioAllowed(PlatformSeednote, "2:3") {
 		t.Fatal("seednote must reject non-business ratio 2:3")
+	}
+	if IsBusinessImageRatioAllowed(PlatformMontage, "3:4") {
+		t.Fatal("montage must reject unsupported ratio 3:4")
+	}
+	if got := DefaultImageRatio(PlatformMontage); got != "9:16" {
+		t.Fatalf("montage default image ratio = %q, want 9:16", got)
 	}
 }

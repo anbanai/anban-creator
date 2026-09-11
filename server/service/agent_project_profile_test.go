@@ -79,8 +79,8 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	if got := resolved["agent_config"].(map[string]any)["audience"]; got != "snapshot" {
 		t.Fatalf("resolved_profile.agent_config.audience = %v, want frozen snapshot", got)
 	}
-	if got := resolved["reference_image_path"]; got != ".anban-creator/reference.png" {
-		t.Fatalf("reference_image_path = %v", got)
+	if got := resolved["project_style_reference_path"]; got != ".anban-creator/project-style-reference.png" {
+		t.Fatalf("project_style_reference_path = %v", got)
 	}
 	if got := resolved["image_ratio"]; got != "3:4" {
 		t.Fatalf("effective image_ratio = %v, want task value 3:4", got)
@@ -109,7 +109,7 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	}
 }
 
-func TestAgentProjectProfileUsesDefaultImageCapability(t *testing.T) {
+func TestAgentProjectProfileRejectsTaskWithoutFrozenImageCapability(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-default.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -138,12 +138,17 @@ func TestAgentProjectProfileUsesDefaultImageCapability(t *testing.T) {
 	}
 
 	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: task.ID})
+	if profile != nil || err == nil || !strings.Contains(err.Error(), "frozen image capability") {
+		t.Fatalf("Get = %#v, %v; want missing frozen capability rejection", profile, err)
+	}
+
+	profile, err = svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("project-only profile: %v", err)
 	}
 	resolved := (*profile)["resolved_profile"].(map[string]any)
 	if got := resolved["image_capability_key"]; got != "default-route" {
-		t.Fatalf("image_capability_key = %v, want configured default default-route", got)
+		t.Fatalf("project-only image_capability_key = %v, want configured default default-route", got)
 	}
 	if got, want := resolved["allowed_image_ratios"], []string{"3:4", "1:1", "4:3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("allowed_image_ratios = %#v, want %#v", got, want)

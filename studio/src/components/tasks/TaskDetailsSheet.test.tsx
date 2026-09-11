@@ -260,7 +260,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('3:2')).toBeInTheDocument()
-    expect(screen.getByText('已停用能力')).toBeInTheDocument()
+    expect(screen.getByText('专业增强')).toBeInTheDocument()
     expect(screen.queryByText('professional')).not.toBeInTheDocument()
     expect(screen.getByText('安班编辑部')).toBeInTheDocument()
     expect(screen.getByText('真诚叙事')).toBeInTheDocument()
@@ -332,7 +332,7 @@ describe('TaskDetailsSheet', () => {
     expect(within(screen.getByRole('tabpanel')).getByText('旧任务当前项目')).toBeInTheDocument()
     expect(screen.getByText('旧任务视觉风格')).toBeInTheDocument()
     expect(screen.getByText('4:3')).toBeInTheDocument()
-    expect(screen.getByText('已停用能力')).toBeInTheDocument()
+    expect(screen.getByText('配置无效（图像能力未固化）')).toBeInTheDocument()
     expect(screen.queryByText('legacy-image-capability')).not.toBeInTheDocument()
     expect(screen.getByText('旧任务作者')).toBeInTheDocument()
     expect(screen.getByText('旧任务写作风格')).toBeInTheDocument()
@@ -375,7 +375,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('旧任务覆盖写作')).toBeInTheDocument()
     expect(screen.getByText('旧任务覆盖排版')).toBeInTheDocument()
     expect(screen.getByText('5:4')).toBeInTheDocument()
-    expect(screen.getByText('已停用能力')).toBeInTheDocument()
+    expect(screen.getByText('配置无效（图像能力未固化）')).toBeInTheDocument()
     expect(screen.queryByText('empty-snapshot-image-capability')).not.toBeInTheDocument()
     expect(screen.queryByText('当前项目视觉不应覆盖')).not.toBeInTheDocument()
   })
@@ -529,6 +529,41 @@ describe('TaskConfigurationDetails', () => {
 
     expect(screen.getByText('视频比例')).toBeInTheDocument()
     expect(screen.queryByText('图片比例')).not.toBeInTheDocument()
+  })
+
+  it('does not infer a missing frozen capability from billing history', async () => {
+    const legacyTask: Task = {
+      ...articleTask,
+      image_capability_key: undefined,
+      billing_charge_details: [{
+        charge_kind: 'operation',
+        sku_id: 'image.professional',
+        credits: 900,
+      }],
+    }
+
+    render(<TaskConfigurationDetails task={legacyTask} project={project} />)
+
+    expect(await screen.findByText('配置无效（图像能力未固化）')).toBeInTheDocument()
+    expect(screen.queryByText(/专业增强/)).not.toBeInTheDocument()
+  })
+
+  it('uses only the frozen capability when billing history differs', async () => {
+    const mismatchedTask: Task = {
+      ...articleTask,
+      image_capability_key: 'standard',
+      billing_charge_details: [{
+        charge_kind: 'operation',
+        sku_id: 'image.professional',
+        credits: 900,
+      }],
+    }
+
+    render(<TaskConfigurationDetails task={mismatchedTask} project={project} />)
+
+    expect(await screen.findByText('标准图像')).toBeInTheDocument()
+    expect(screen.queryByText(/专业增强/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/实际生成按/)).not.toBeInTheDocument()
   })
 
   it('renders the frozen task profile without exposing provider or model details', () => {

@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,22 @@ func TestSaveGeneratedImageBytesReencodesJPEGWhenOutputIsPNG(t *testing.T) {
 	}
 	if _, err := png.Decode(bytes.NewReader(data)); err != nil {
 		t.Fatalf("png.Decode(output) error = %v", err)
+	}
+}
+
+func TestSaveGeneratedImageBytesRejectsOversizedDimensionsBeforePNGDecode(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, maxTaskImageDimension+1, 1))
+	var jpegBuf bytes.Buffer
+	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
+		t.Fatalf("encode oversized-dimension jpeg: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "cover.png")
+	if _, err := saveGeneratedImageBytes(outputPath, jpegBuf.Bytes()); err == nil || !strings.Contains(err.Error(), "safety limits") {
+		t.Fatalf("saveGeneratedImageBytes() error = %v, want dimension safety rejection", err)
+	}
+	if _, err := os.Stat(outputPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oversized image created output file: %v", err)
 	}
 }
 
@@ -281,6 +298,33 @@ func TestBuildProcessor_EcommerceContentRoleUsesSameAPI(t *testing.T) {
 	}
 }
 
+func TestBuildProcessorWithoutTaskCapabilityUsesBaseConfigWhenResolverIsPresent(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{
+		imageCfg: &srvconfig.ImageAPIConfig{API: &appconfig.ImageAPI{
+			Provider: "openai", Key: "test-key", Model: "gpt-image-2",
+		}},
+		capabilityResolver: NewImageCapabilityResolver(nil, &srvconfig.Config{
+			ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+				DefaultCapability: "standard",
+				Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
+					"standard": {Enabled: true, MinTier: "free"},
+				},
+			}},
+		}),
+		logger: &logger,
+	}
+	ch := &model.Project{Platform: model.ScopeArticle, UserID: "u1"}
+
+	proc, err := svc.buildProcessor(context.Background(), ch, "content", "")
+	if err != nil {
+		t.Fatalf("buildProcessor without task capability: %v", err)
+	}
+	if proc == nil {
+		t.Fatal("buildProcessor without task capability returned nil")
+	}
+}
+
 // TestBuildProcessor_EcommerceErrorsWhenNoImageAPI ensures degraded config
 // (no image API configured at all) still surfaces a clear error rather than
 // silently producing a processor with no provider.
@@ -440,5 +484,21 @@ func TestGenerateProviderImageBoundsProviderAttempt(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
 		t.Fatalf("provider attempt returned after %s, want bounded near 20ms", elapsed)
+	}
+}
+
+func TestImageServiceRejectsProviderImageURLOnPrivateHTTPHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(taskImageTinyPNG())
+	}))
+	defer server.Close()
+
+	path, err := (&ImageService{}).downloadURLToTempFile(context.Background(), server.URL+"/generated.png")
+	if path != "" {
+		_ = os.RemoveAll(filepath.Dir(path))
+	}
+	if err == nil || !strings.Contains(err.Error(), "invalid external image URL") {
+		t.Fatalf("private provider URL = path %q err %v; want URL policy rejection", path, err)
 	}
 }

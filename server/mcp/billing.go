@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/config"
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -67,27 +66,6 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 		return cfg.API.Provider, cfg.API.Model, "capability:" + billSvc.config.ModelRoutes.ImageGeneration.DefaultCapability
 	}
 	return "", "", ""
-}
-
-// resolveEcommerceImageProvider returns the provider/model the agent's
-// generate_image calls will actually use for this e-commerce task, so the agent
-// can adapt its reference-image strategy to the provider's capability rather
-// than a fixed per-module split:
-//   - openai: pass relevant product photos as reference images (≤16) for fidelity;
-//   - volcengine/seedream: pass the relevant product-photo subset supported by
-//     the configured provider limit, plus the product-bible text block. Avoid
-//     unrelated refs because Seedream's strong i2i can over-lock the scene.
-//
-// Resolution mirrors generate_image's frozen task capability.
-func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
-	if task != nil && billSvc != nil && billSvc.capabilityResolver != nil {
-		if cfg, _, err := billSvc.capabilityResolver.ResolveImageConfigForTaskKey(ctx, userID, task.ImageCapabilityKey); err == nil && cfg != nil {
-			if cfg.API != nil && cfg.API.Provider != "" {
-				return cfg.API.Provider, cfg.API.Model
-			}
-		}
-	}
-	return resolveImageModel(ctx, userID)
 }
 
 func billingError(opType string, err error) *mcp.CallToolResult {

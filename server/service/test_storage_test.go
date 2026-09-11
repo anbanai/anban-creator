@@ -16,15 +16,16 @@ import (
 )
 
 type fakeTaskStorage struct {
-	name              string
-	files             map[string][]byte
-	uploadContentType string
-	downloadURL       string
-	signedKey         string
-	signedKeys        []string
-	readKey           string
-	ownedPrefix       string
-	deletedKeys       []string
+	name                string
+	files               map[string][]byte
+	uploadContentType   string
+	uploadContentLength int64
+	downloadURL         string
+	signedKey           string
+	signedKeys          []string
+	readKey             string
+	ownedPrefix         string
+	deletedKeys         []string
 }
 
 func (f *fakeTaskStorage) Name() string {
@@ -58,6 +59,11 @@ func (f *fakeTaskStorage) UploadFile(ctx context.Context, key, filePath, content
 func (f *fakeTaskStorage) UploadURL(_ context.Context, key, contentType string, _ int) (string, error) {
 	f.uploadContentType = contentType
 	return "https://upload.example.com/" + key, nil
+}
+func (f *fakeTaskStorage) UploadURLWithContentLength(ctx context.Context, key, contentType string, contentLength int64, expirySeconds int) (string, error) {
+	f.uploadContentType = contentType
+	f.uploadContentLength = contentLength
+	return f.UploadURL(ctx, key, contentType, expirySeconds)
 }
 func (f *fakeTaskStorage) GetURL(key string) string { return "https://cdn.example.com/" + key }
 func (f *fakeTaskStorage) Read(_ context.Context, key string) ([]byte, error) {

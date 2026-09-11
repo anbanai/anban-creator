@@ -17,12 +17,14 @@ import (
 )
 
 var (
-	ErrTaskResumeNoInput            = errors.New("task resume requires prompt or files")
-	ErrTaskResumeNotTerminal        = errors.New("only completed, failed, or cancelled tasks can be resumed")
-	ErrTaskResumeUnavailable        = errors.New("task resume requires kubernetes NAS execution")
-	ErrTaskResumeStorageUnavailable = errors.New("task resume storage is unavailable")
-	ErrTaskResumeConflict           = errors.New("task resume conflict")
-	ErrTaskResumeFileTooLarge       = errors.New("task resume file exceeds size limit")
+	ErrTaskResumeNoInput                = errors.New("task resume requires prompt or files")
+	ErrTaskResumeCompleted              = errors.New("completed tasks are immutable and must be cloned")
+	ErrTaskResumeNotTerminal            = errors.New("only failed or cancelled tasks can be resumed")
+	ErrTaskResumeUnavailable            = errors.New("task resume requires kubernetes NAS execution")
+	ErrTaskResumeStorageUnavailable     = errors.New("task resume storage is unavailable")
+	ErrTaskResumeConflict               = errors.New("task resume conflict")
+	ErrTaskResumeFileTooLarge           = errors.New("task resume file exceeds size limit")
+	ErrTaskResumeImageCapabilityMissing = errors.New("task resume requires a frozen image capability")
 )
 
 const maxTaskResumeFileBytes = 25 * 1024 * 1024
@@ -36,9 +38,9 @@ type ResumeTaskParams struct {
 
 // ResumeTaskFile is one supplemental file uploaded from Studio.
 type ResumeTaskFile struct {
+	AssetID      string
 	OriginalName string
 	Label        string
-	Key          string
 	Type         string
 	ContentType  string
 	Reader       io.Reader
@@ -73,8 +75,25 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	if task.DeletingAt != nil {
 		return nil, ErrTaskResumeNotTerminal
 	}
-	if !model.IsTerminalTaskStatus(task.Status) {
+	if task.Status == model.TaskStatusCompleted {
+		return nil, ErrTaskResumeCompleted
+	}
+	if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
 		return nil, ErrTaskResumeNotTerminal
+	}
+	if taskUsesFrozenImageCapability(task.Type) {
+		if strings.TrimSpace(task.ImageCapabilityKey) == "" {
+			return nil, ErrTaskResumeImageCapabilityMissing
+		}
+		if s.imageCapabilities == nil {
+			return nil, fmt.Errorf("revalidate frozen task image capability: %w", ErrImageCapabilityResolverUnavailable)
+		}
+		if task.ImageCapabilitySnapshot.Data().Key != strings.TrimSpace(task.ImageCapabilityKey) {
+			return nil, ErrTaskResumeImageCapabilityMissing
+		}
+		if err := s.imageCapabilities.ValidateFrozenImageCapability(ctx, task.UserID, task.ImageCapabilitySnapshot.Data()); err != nil {
+			return nil, fmt.Errorf("revalidate frozen task image capability: %w", err)
+		}
 	}
 	if err := s.validateFrozenTaskProfileRuntime(task); err != nil {
 		return nil, err
@@ -88,7 +107,7 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	}
 	merged := replaceResumeInputAttachments(task.InputAttachments.Data(), resumeAttachments)
 
-	swapped, err := s.repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, merged)
+	swapped, err := s.repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, merged)
 	if err != nil {
 		s.deleteRemoteResumeAttachments(ctx, resumeAttachments)
 		return nil, fmt.Errorf("reset task for resume: %w", err)
@@ -153,8 +172,22 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 	written := make([]resumeWrittenFile, 0, len(files))
 	usedNames := map[string]int{}
 	for _, file := range files {
-		if file.Reader == nil && strings.TrimSpace(file.Key) == "" {
+		assetID := strings.TrimSpace(file.AssetID)
+		if file.Reader == nil && assetID == "" {
 			continue
+		}
+		var sourceKey string
+		if assetID != "" {
+			asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwnedAttachment(ctx, task.UserID, assetID, []string{DirectUploadPurposeAIEntryAttachment})
+			if err != nil {
+				s.deleteWrittenResumeFiles(ctx, written)
+				return nil, "", fmt.Errorf("authorize resume attachment: %w", err)
+			}
+			sourceKey = asset.StorageKey
+			file.OriginalName = asset.FileName
+			file.ContentType = asset.ContentType
+			file.Size = asset.Size
+			file.Type = ClassifyDirectUploadFile(asset.ContentType, strings.ToLower(path.Ext(asset.FileName)))
 		}
 		safeName, err := serveragent.PrepareResumeAttachmentFilename(file.OriginalName, usedNames)
 		if err != nil {
@@ -167,7 +200,7 @@ func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task,
 			return nil, "", err
 		}
 		var data []byte
-		if sourceKey := strings.TrimSpace(file.Key); sourceKey != "" {
+		if sourceKey != "" {
 			data, err = storage.ReadObject(ctx, s.store, sourceKey, maxTaskResumeFileBytes)
 			if err != nil {
 				s.deleteWrittenResumeFiles(ctx, written)

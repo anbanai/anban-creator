@@ -43,8 +43,8 @@ func TestAgentArtifactStreamUsesExecutionAuthAndStreamsBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusForbidden {
-		t.Fatalf("legacy API key stream status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("API key stream status = %d, want 401", resp.StatusCode)
 	}
 }
 

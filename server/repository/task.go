@@ -20,6 +20,7 @@ import (
 var (
 	ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
 	ErrLocalTaskExecutionCASLost     = errors.New("local task execution finalization CAS lost")
+	ErrCloudTaskExecutionCASLost     = errors.New("cloud task execution finalization CAS lost")
 )
 
 type taskRepository struct {
@@ -328,16 +329,166 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID,
 }
 
 func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	locked, err := lockActiveTaskExecutionFirst(ctx, r.db, executionID, id, activeTaskExecutionLock{
-		target: model.ExecutionTargetLocalClaimed,
-	})
+	_, _, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
 	if err != nil {
 		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
 	}
 	if !locked {
 		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
 	}
+	return r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+}
 
+// FinalizeLocalTaskWithArtifactsInTx owns the complete local terminal commit:
+// execution/task ownership, artifact visibility, terminal evidence, and the
+// caller's billing updates all remain under one transaction and lock order.
+func (r *taskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, artifactAction LocalTaskArtifactAction) (bool, error) {
+	task, execution, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
+	if err != nil {
+		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
+	}
+	if !locked {
+		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
+	}
+	switch artifactAction {
+	case LocalTaskArtifactsPublish:
+		if status != model.TaskStatusCompleted {
+			return false, fmt.Errorf("publishing local artifacts requires completed task status")
+		}
+		if err := publishLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
+			return false, err
+		}
+	case LocalTaskArtifactsCollect:
+		if status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
+			return false, fmt.Errorf("collecting local artifacts requires failed or cancelled task status")
+		}
+	default:
+		return false, fmt.Errorf("unsupported local artifact action %q", artifactAction)
+	}
+
+	won, err := r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+	if err != nil || !won {
+		return won, err
+	}
+	if artifactAction == LocalTaskArtifactsCollect {
+		execution.Status = model.TaskExecutionFailed
+		if status == model.TaskStatusCancelled {
+			execution.Status = model.TaskExecutionCancelled
+		}
+		if err := collectLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// FinalizeCloudTaskWithArtifactsInTx owns the atomic cloud terminal state:
+// current-execution authority, artifact visibility, terminal evidence, and
+// task status. The caller persists billing in the same outer transaction.
+func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) (bool, error) {
+	task, execution, err := lockCurrentArtifactExecution(r.db.WithContext(ctx), id, executionID)
+	if errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+		return false, ErrCloudTaskExecutionCASLost
+	}
+	if err != nil {
+		return false, fmt.Errorf("lock cloud task execution for finalization: %w", err)
+	}
+	expectedStatus, terminal := cloudTaskStatusForExecution(execution.Status)
+	if task.ExecutionTarget != model.ExecutionTargetCloud || execution.Target == model.ExecutionTargetLocalClaimed ||
+		strings.TrimSpace(execution.Target) == "" || !terminal || execution.CompletedAt == nil || status != expectedStatus {
+		return false, ErrCloudTaskExecutionCASLost
+	}
+
+	if task.Status != model.TaskStatusRunning {
+		if !cloudTaskTerminalStateMatches(task, execution, status, errorMsg, result, usage, costStatus, artifactAction) {
+			return false, ErrCloudTaskExecutionCASLost
+		}
+		return false, nil
+	}
+
+	switch artifactAction {
+	case CloudTaskArtifactsPublish:
+		if status != model.TaskStatusCompleted || execution.Status != model.TaskExecutionSucceeded {
+			return false, fmt.Errorf("publishing cloud artifacts requires succeeded execution and completed task status")
+		}
+		if err := publishLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
+			return false, err
+		}
+	case CloudTaskArtifactsCollect:
+		if status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
+			return false, fmt.Errorf("collecting cloud artifacts requires failed or cancelled task status")
+		}
+		if !isCollectableArtifactExecution(execution) {
+			return false, fmt.Errorf("collecting cloud artifacts requires failed, cancelled, or timed out execution")
+		}
+		if err := collectLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
+			return false, err
+		}
+	default:
+		return false, fmt.Errorf("unsupported cloud artifact action %q", artifactAction)
+	}
+
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).
+		Updates(map[string]any{
+			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected != 1 {
+		return false, ErrCloudTaskExecutionCASLost
+	}
+	return true, nil
+}
+
+func cloudTaskStatusForExecution(executionStatus string) (string, bool) {
+	switch executionStatus {
+	case model.TaskExecutionSucceeded:
+		return model.TaskStatusCompleted, true
+	case model.TaskExecutionCancelled:
+		return model.TaskStatusCancelled, true
+	case model.TaskExecutionFailed, model.TaskExecutionTimedOut:
+		return model.TaskStatusFailed, true
+	default:
+		return "", false
+	}
+}
+
+func cloudTaskTerminalStateMatches(task *model.Task, execution *model.TaskExecution, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) bool {
+	if task == nil || execution == nil || task.Status != status || task.ErrorMessage != errorMsg ||
+		task.CompletedAt == nil || task.Result == nil || !jsonValuesEqual(*task.Result, result) ||
+		!reflect.DeepEqual(task.TerminalModelUsage.Data(), usage) || task.CostStatus != costStatus {
+		return false
+	}
+	switch artifactAction {
+	case CloudTaskArtifactsPublish:
+		return execution.Status == model.TaskExecutionSucceeded && execution.ManifestStatus == model.TaskExecutionManifestPublished
+	case CloudTaskArtifactsCollect:
+		return isCollectableArtifactExecution(execution) && execution.ManifestStatus == model.TaskExecutionManifestCollected
+	default:
+		return false
+	}
+}
+
+func (r *taskRepository) lockLocalTaskExecutionForFinalization(ctx context.Context, id, executionID string) (*model.Task, *model.TaskExecution, bool, error) {
+	task, execution, err := lockCurrentArtifactExecution(r.db.WithContext(ctx), id, executionID)
+	if errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if task.Status != model.TaskStatusRunning || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
+		execution.Status != model.TaskExecutionRunning || execution.Target != model.ExecutionTargetLocalClaimed {
+		return task, execution, false, nil
+	}
+	return task, execution, true, nil
+}
+
+func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
 	now := time.Now()
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
@@ -702,12 +853,14 @@ func (r *taskRepository) SetCurrentExecution(ctx context.Context, taskID, execut
 	return result.RowsAffected > 0, nil
 }
 
-// FailRunningTask guardedly records a pre-start terminal failure. The status,
-// diagnostic message, and completion timestamp change atomically.
-func (r *taskRepository) FailRunningTask(ctx context.Context, taskID, errorMsg string) (bool, error) {
+// FailStaleRunningTask terminalizes only a legacy running task with no durable
+// execution whose latest heartbeat (or start time before the first heartbeat)
+// is still at or before the caller's cutoff.
+func (r *taskRepository) FailStaleRunningTask(ctx context.Context, taskID string, staleBefore time.Time, errorMsg string) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("id = ? AND status = ?", taskID, model.TaskStatusRunning).
+		Where("id = ? AND status = ? AND current_execution_id IS NULL AND deleting_at IS NULL", taskID, model.TaskStatusRunning).
+		Where("(last_heartbeat_at IS NOT NULL AND last_heartbeat_at <= ?) OR (last_heartbeat_at IS NULL AND started_at IS NOT NULL AND started_at <= ?)", staleBefore, staleBefore).
 		Updates(map[string]interface{}{
 			"status":        model.TaskStatusFailed,
 			"error_message": errorMsg,
@@ -755,12 +908,12 @@ func (r *taskRepository) CancelPendingTask(ctx context.Context, taskID, errorMsg
 	return result.RowsAffected > 0, nil
 }
 
-// ResetTerminalTaskForResume atomically persists supplemental inputs, moves a
-// terminal task back to pending, and routes it to the cloud executor.
-func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error) {
+// ResetRetryableTaskForResume atomically persists supplemental inputs, moves a
+// failed or cancelled task back to pending, and routes it to the cloud executor.
+func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
+		Where("id = ? AND status IN ?", taskID, []string{model.TaskStatusFailed, model.TaskStatusCancelled}).
 		Where("deleting_at IS NULL").
 		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
 		Updates(map[string]interface{}{

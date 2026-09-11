@@ -60,6 +60,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"ANBAN_ZHIPU_API_KEY":                "test-zhipu-api-key",
 		"MOONSHOT_API_KEY":                   "test-moonshot-api-key",
 		"VOLCENGINE_ARK_API_KEY":             "test-volcengine-api-key",
+		"WANGCAI_OPENAI_BASE_URL":            "https://images.example.com/v1",
 		"WANGCAI_OPENAI_API_KEY":             "test-openai-api-key",
 	} {
 		t.Setenv(name, value)

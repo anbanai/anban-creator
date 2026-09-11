@@ -9,6 +9,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"os"
@@ -23,23 +24,24 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
+	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type taskImageResolverFake struct {
-	resolved           *ResolvedImageModel
-	calls              int
-	userID             string
-	imageCapabilityKey string
-	imageType          string
-	referenceCount     int
+	resolved        *ResolvedImageModel
+	calls           int
+	userID          string
+	imageCapability model.ImageCapabilitySnapshot
+	imageType       string
+	referenceCount  int
 }
 
-func (f *taskImageResolverFake) ResolveImageModelForGeneration(_ context.Context, userID, imageCapabilityKey, imageType string, referenceCount int) (*ResolvedImageModel, error) {
+func (f *taskImageResolverFake) ResolveFrozenImageModelForGeneration(_ context.Context, userID string, imageCapability model.ImageCapabilitySnapshot, imageType string, referenceCount int) (*ResolvedImageModel, error) {
 	f.calls++
-	f.userID, f.imageCapabilityKey, f.imageType, f.referenceCount = userID, imageCapabilityKey, imageType, referenceCount
+	f.userID, f.imageCapability, f.imageType, f.referenceCount = userID, imageCapability, imageType, referenceCount
 	return f.resolved, nil
 }
 
@@ -49,10 +51,10 @@ type taskImageGeneratorFake struct {
 	analyzeCalls   int
 	uploadCalls    int
 	prompts        []string
-	aspectRatio    string
 	referencePaths []string
 	referenceData  [][]byte
 	readReferences bool
+	resolvedSize   string
 }
 
 type failingTaskImageDeleteStorage struct {
@@ -65,8 +67,8 @@ func (s *failingTaskImageDeleteStorage) Delete(context.Context, string) error { 
 func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, _, outputPath, _ string, referencePaths []string, _ string, aspectRatio string, _ *ResolvedImageModel, _ *bool) (*ImageResult, error) {
 	f.calls++
 	f.prompts = append(f.prompts, prompt)
-	f.aspectRatio = aspectRatio
 	f.referencePaths = append([]string(nil), referencePaths...)
+	f.resolvedSize = aspectRatio
 	if f.readReferences {
 		for _, referencePath := range referencePaths {
 			data, err := os.ReadFile(referencePath)
@@ -114,11 +116,13 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	task := &model.Task{
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
-		Status: model.TaskStatusRunning, ImageCapabilityKey: "preferred-image", ImageRatio: "3:4",
+		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ImageRatio: "3:4",
 		BillingCatalogID: "retail-task-image-v1", BillingSKUID: "task.seednote.effective", BillingPricingTier: string(model.TierFree),
-	}); err != nil {
+	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -141,6 +145,7 @@ func newTaskImageFixture(t *testing.T) *taskImageFixture {
 		TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 		SKUs: []serverbilling.SKUConfig{
 			{ID: "image.standard", Operation: "image.generate", Route: "image_generation.capabilities.standard", ChargePolicy: "image_operation", PriceCredits: 500, Delivery: "persisted_image"},
+			{ID: "image.professional", Operation: "image.generate", Route: "image_generation.capabilities.professional", ChargePolicy: "image_operation", PriceCredits: 900, Delivery: "persisted_image"},
 		},
 	}, Economics: serverbilling.EconomicsConfig{CreditsPerCNY: 1_000}, Policy: serverbilling.PolicySnapshot{AcceptedTask: serverbilling.AcceptedTaskPolicy{
 		ContinueWhenBalanceNegative: true, OperationChargeMayCreateDebt: true,
@@ -196,8 +201,8 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 		asset.MimeType != "image/png" || asset.FileSize != int64(len(taskImageTinyPNG())) || asset.ContentHash != hashTaskFileContent(taskImageTinyPNG()) {
 		t.Fatalf("asset = %#v", asset)
 	}
-	if f.generator.aspectRatio != "3:4" {
-		t.Fatalf("provider aspect ratio = %q, want 3:4", f.generator.aspectRatio)
+	if f.generator.resolvedSize != "3:4" {
+		t.Fatalf("provider size=%q, want request ratio", f.generator.resolvedSize)
 	}
 	var files, settlements int64
 	if err := f.db.Model(&model.TaskFile{}).Count(&files).Error; err != nil {
@@ -219,48 +224,39 @@ func TestGenerateTaskImagePersistsAndSettlesAtomically(t *testing.T) {
 	if account.PaidCredits != 500 {
 		t.Fatalf("paid credits = %d, want 500 after image charge", account.PaidCredits)
 	}
-}
-
-func TestGenerateTaskImageLegacyNonMontageTaskUsesResolverDefaultWithoutFrozenCapability(t *testing.T) {
-	f := newTaskImageFixture(t)
-	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
-	if err != nil {
+	var charges []model.BillingCharge
+	if err := f.db.Where("operation_task_id = ?", f.taskID).Find(&charges).Error; err != nil {
 		t.Fatal(err)
 	}
-	task.ImageCapabilityKey = ""
-	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
-		t.Fatalf("Generate legacy non-Montage image: %v", err)
-	}
-	if f.resolver.calls != 1 || f.resolver.imageCapabilityKey != "" {
-		t.Fatalf("resolver calls/key = %d/%q, want 1/empty default key", f.resolver.calls, f.resolver.imageCapabilityKey)
+	if len(charges) != 1 || charges[0].SKUID != "image.standard" || charges[0].PriceCredits != 500 {
+		t.Fatalf("standard image charges = %#v, want one image.standard charge at 500 credits", charges)
 	}
 }
 
-func TestGenerateTaskImageMontageTaskRequiresFrozenCapabilityBeforeResolution(t *testing.T) {
+func TestGenerateTaskImageRejectsFrozenCapabilityDriftBeforeProviderOrBilling(t *testing.T) {
 	f := newTaskImageFixture(t)
-	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task.Type = model.PlatformMontage
-	task.ImageRatio = "9:16"
-	task.ImageCapabilityKey = ""
-	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
-		t.Fatal(err)
-	}
-	req := f.request()
-	req.AspectRatio = "9:16"
+	route := testImageCapabilityRoute("image.standard")
+	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities:      map[string]serverconfig.ImageGenerationRouteConfig{"standard": route},
+	}}}
+	f.service.resolver = NewImageCapabilityResolver(f.repo, cfg)
+	route.BillingSKU = "image.professional"
+	cfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
 
-	_, err = f.service.Generate(context.Background(), req)
-	if !errors.Is(err, ErrTaskImageCapabilityMissing) {
-		t.Fatalf("Generate Montage without frozen capability error = %v, want ErrTaskImageCapabilityMissing", err)
+	_, err := f.service.Generate(context.Background(), f.request())
+	if !errors.Is(err, ErrTaskImageCapabilityConflict) {
+		t.Fatalf("Generate drift error = %v, want ErrTaskImageCapabilityConflict", err)
 	}
-	if f.resolver.calls != 0 || f.generator.calls != 0 {
-		t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
+	if f.generator.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 before frozen capability validation", f.generator.calls)
+	}
+	var files, settlements, charges int64
+	_ = f.db.Model(&model.TaskFile{}).Count(&files).Error
+	_ = f.db.Model(&model.BillingSettlementOutbox{}).Count(&settlements).Error
+	_ = f.db.Model(&model.BillingCharge{}).Count(&charges).Error
+	if files != 0 || settlements != 0 || charges != 0 {
+		t.Fatalf("drift side effects files=%d settlements=%d charges=%d, want 0/0/0", files, settlements, charges)
 	}
 }
 
@@ -290,6 +286,23 @@ func TestGenerateTaskImageRejectsMissingOrAutoAspectRatioWithoutProviderCall(t *
 		if f.resolver.calls != 0 || f.generator.calls != 0 {
 			t.Fatalf("resolver/provider calls = %d/%d, want 0/0", f.resolver.calls, f.generator.calls)
 		}
+	}
+}
+
+func TestGenerateTaskImageRejectsMissingFrozenCapabilityBeforeResolution(t *testing.T) {
+	f := newTaskImageFixture(t)
+	if err := f.db.Model(&model.Task{}).
+		Where("id = ?", f.taskID).
+		Update("image_capability_key", "").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := f.service.Generate(context.Background(), f.request())
+	if err == nil || !strings.Contains(err.Error(), "frozen image capability") {
+		t.Fatalf("Generate error = %v, want missing frozen capability rejection", err)
+	}
+	if f.resolver.calls != 0 || f.generator.calls != 0 {
+		t.Fatalf("missing frozen capability reached resolver/provider: resolver=%d provider=%d", f.resolver.calls, f.generator.calls)
 	}
 }
 
@@ -334,74 +347,447 @@ func TestGenerateTaskImageRejectsAbsoluteReferencePathBeforeProviderCall(t *test
 	}
 }
 
-func TestGenerateTaskImageUsesSystemProjectPortraitOnlyForMontage(t *testing.T) {
-	for _, tt := range []struct {
-		name        string
-		taskType    string
-		imageRatio  string
-		wantAllowed bool
+func TestGenerateTaskImageMaterializesFrozenInputAttachment(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	imageBytes := taskImageTinyPNG()
+	uploadID := uuid.NewString()
+	key := "assets/users/" + f.userID + "/" + uploadID + "/input.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.UploadSessions().Create(ctx, &model.UploadSession{
+		ID: uploadID, UserID: f.userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		StagingKey: "uploads/pending/" + f.userID + "/" + uploadID + "/input.png",
+		FileName:   "input.png", ContentType: "image/png", Size: int64(len(imageBytes)),
+		Status: model.UploadSessionFinalized, AssetID: uploadID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: uploadID, UserID: f.userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		StorageKey: key, FileName: "input.png", ContentType: "image/png",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Tasks().UpdateInputAttachments(ctx, f.taskID, []model.EntryAttachment{{
+		AssetID: uploadID, Type: "image", FileName: "input.png",
+		ContentType: "image/png", Size: int64(len(imageBytes)),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.readReferences = true
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/input-attachments/attachment_01_input.png"}
+
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatalf("Generate with task input attachment: %v", err)
+	}
+	if len(f.generator.referencePaths) != 1 || !filepath.IsAbs(f.generator.referencePaths[0]) || len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+		t.Fatalf("materialized references paths=%#v data=%d", f.generator.referencePaths, len(f.generator.referenceData))
+	}
+	if _, err := os.Stat(f.generator.referencePaths[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("materialized reference still exists after generation: %v", err)
+	}
+}
+
+func TestGenerateTaskImageRejectsFrozenInputAttachmentWithoutUniqueAssetID(t *testing.T) {
+	tests := []struct {
+		name       string
+		attachment model.EntryAttachment
 	}{
-		{name: "montage", taskType: model.PlatformMontage, imageRatio: "9:16", wantAllowed: true},
-		{name: "seednote", taskType: model.PlatformSeednote, imageRatio: "3:4", wantAllowed: false},
-	} {
+		{
+			name: "upload id fallback",
+			attachment: model.EntryAttachment{
+				Type: "image", UploadID: "asset-1", FileName: "input.png",
+				ContentType: "image/png", Size: int64(len(taskImageTinyPNG())),
+			},
+		},
+		{
+			name: "asset id with asserted key",
+			attachment: model.EntryAttachment{
+				AssetID: "asset-1", Type: "image", Key: "assets/users/user-1/asset-1/input.png", FileName: "input.png",
+				ContentType: "image/png", Size: int64(len(taskImageTinyPNG())),
+			},
+		},
+		{
+			name: "asset id with asserted url",
+			attachment: model.EntryAttachment{
+				AssetID: "asset-1", Type: "image", URL: "/api/v1/files/assets/users/user-1/asset-1/input.png", FileName: "input.png",
+				ContentType: "image/png", Size: int64(len(taskImageTinyPNG())),
+			},
+		},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newTaskImageFixture(t)
 			ctx := context.Background()
+			assetID := "asset-1"
+			key := "assets/users/" + f.userID + "/" + assetID + "/input.png"
 			imageBytes := taskImageTinyPNG()
-			assetID := uuid.NewString()
-			key := "assets/users/" + f.userID + "/" + assetID + "/portrait.png"
 			if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
 				t.Fatal(err)
 			}
 			if err := f.repo.Assets().Create(ctx, &model.Asset{
-				ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
-				StorageKey: key, FileName: "portrait.png", ContentType: "image/png",
+				ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+				StorageKey: key, FileName: "input.png", ContentType: "image/png",
 				Size: int64(len(imageBytes)), ETag: "immutable",
 			}); err != nil {
 				t.Fatal(err)
 			}
-			task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
-			if err != nil {
-				t.Fatal(err)
+			attachment := tt.attachment
+			if attachment.AssetID != "" {
+				attachment.AssetID = assetID
 			}
-			task.Type = tt.taskType
-			task.ImageRatio = tt.imageRatio
-			task.SetProjectSnapshot(model.ProjectSnapshot{Platform: tt.taskType, ReferenceImageAssetID: assetID})
-			if err := f.repo.Tasks().Update(ctx, task); err != nil {
-				t.Fatal(err)
+			if attachment.UploadID != "" {
+				attachment.UploadID = assetID
 			}
-			if tt.wantAllowed {
-				generatedPath := filepath.Join(t.TempDir(), "cover.png")
-				if err := os.WriteFile(generatedPath, taskImagePNG(9, 16), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				f.generator.result.LocalFilePath = generatedPath
-				f.generator.readReferences = true
+			if attachment.Key != "" {
+				attachment.Key = key
+			}
+			if err := f.repo.Tasks().UpdateInputAttachments(ctx, f.taskID, []model.EntryAttachment{attachment}); err != nil {
+				t.Fatal(err)
 			}
 			req := f.request()
-			req.AspectRatio = tt.imageRatio
-			req.ReferencePaths = []string{".anban-creator/reference.png"}
+			req.ReferencePaths = []string{".anban-creator/input-attachments/attachment_01_input.png"}
 
-			_, err = f.service.Generate(ctx, req)
-			if !tt.wantAllowed {
-				if err == nil || !strings.Contains(err.Error(), "project style reference") || f.generator.calls != 0 {
-					t.Fatalf("non-Montage project reference = %v, calls=%d; want rejection", err, f.generator.calls)
-				}
-				return
+			if _, err := f.service.Generate(ctx, req); err == nil || !strings.Contains(err.Error(), "unique immutable asset identity") {
+				t.Fatalf("Generate ambiguous attachment error = %v, want unique identity rejection", err)
 			}
-			if err != nil {
-				t.Fatalf("Generate with Montage project portrait: %v", err)
-			}
-			if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
-				t.Fatalf("materialized reference data = %#v", f.generator.referenceData)
-			}
-			if len(f.generator.referencePaths) != 1 {
-				t.Fatalf("materialized paths = %#v", f.generator.referencePaths)
-			}
-			if _, err := os.Stat(f.generator.referencePaths[0]); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("temporary reference still exists: %v", err)
+			if f.generator.calls != 0 {
+				t.Fatalf("provider calls = %d, want 0", f.generator.calls)
 			}
 		})
+	}
+}
+
+func TestGenerateTaskImageMaterializesCurrentResumeImageAttachment(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	imageBytes := taskImageTinyPNG()
+	key := "uploads/users/" + f.userID + "/projects/" + f.projectID + "/tasks/" + f.taskID + "/resume/20260910/attachments/resume.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Tasks().UpdateInputAttachments(ctx, f.taskID, []model.EntryAttachment{{
+		Type: "image", Role: model.EntryAttachmentRoleResumeFile, Key: key, FileName: "resume.png",
+		ContentType: "image/png", Size: int64(len(imageBytes)),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.readReferences = true
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/resume/attachments/resume.png"}
+
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatalf("Generate with resume image attachment: %v", err)
+	}
+	if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+		t.Fatalf("materialized resume reference data = %#v", f.generator.referenceData)
+	}
+}
+
+func TestGenerateTaskImageRejectsUnauthorizedResumeImageAttachments(t *testing.T) {
+	tests := []struct {
+		name                string
+		keyFor              func(*taskImageFixture) string
+		fileName            string
+		content             []byte
+		declaredContentType string
+		wantMessage         string
+	}{
+		{
+			name: "foreign task namespace",
+			keyFor: func(f *taskImageFixture) string {
+				return "uploads/users/other-user/projects/" + f.projectID + "/tasks/" + f.taskID + "/resume/20260910/attachments/resume.png"
+			},
+			fileName:    "resume.png",
+			content:     taskImageTinyPNG(),
+			wantMessage: "outside the task resume namespace",
+		},
+		{
+			name: "storage filename mismatch",
+			keyFor: func(f *taskImageFixture) string {
+				return "uploads/users/" + f.userID + "/projects/" + f.projectID + "/tasks/" + f.taskID + "/resume/20260910/attachments/other.png"
+			},
+			fileName:    "resume.png",
+			content:     taskImageTinyPNG(),
+			wantMessage: "outside the task resume namespace",
+		},
+		{
+			name: "declared image contains text",
+			keyFor: func(f *taskImageFixture) string {
+				return "uploads/users/" + f.userID + "/projects/" + f.projectID + "/tasks/" + f.taskID + "/resume/20260910/attachments/resume.png"
+			},
+			fileName:    "resume.png",
+			content:     []byte("this is not an image"),
+			wantMessage: "content is not an image",
+		},
+		{
+			name: "declared MIME differs from raster bytes",
+			keyFor: func(f *taskImageFixture) string {
+				return "uploads/users/" + f.userID + "/projects/" + f.projectID + "/tasks/" + f.taskID + "/resume/20260910/attachments/resume.png"
+			},
+			fileName:            "resume.png",
+			content:             taskImageTinyPNG(),
+			declaredContentType: "image/jpeg",
+			wantMessage:         "declared MIME",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTaskImageFixture(t)
+			ctx := context.Background()
+			key := tt.keyFor(f)
+			if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(tt.content), "image/png"); err != nil {
+				t.Fatal(err)
+			}
+			contentType := tt.declaredContentType
+			if contentType == "" {
+				contentType = "image/png"
+			}
+			if err := f.repo.Tasks().UpdateInputAttachments(ctx, f.taskID, []model.EntryAttachment{{
+				Type: "image", Role: model.EntryAttachmentRoleResumeFile, Key: key, FileName: tt.fileName,
+				ContentType: contentType, Size: int64(len(tt.content)),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			req := f.request()
+			req.ReferencePaths = []string{".anban-creator/resume/attachments/" + tt.fileName}
+
+			_, err := f.service.Generate(ctx, req)
+			if err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("Generate error = %v, want %q", err, tt.wantMessage)
+			}
+			if f.generator.calls != 0 {
+				t.Fatalf("generator calls = %d, want 0", f.generator.calls)
+			}
+		})
+	}
+}
+
+func TestGenerateTaskImageMaterializesFrozenEcommerceProduct(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	imageBytes := taskImageTinyPNG()
+	assetID := uuid.NewString()
+	key := "assets/users/" + f.userID + "/" + assetID + "/product.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeEcommercePhoto,
+		StorageKey: key, FileName: "product.png", ContentType: "image/png",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Tasks().UpdateInputAttachments(ctx, f.taskID, []model.EntryAttachment{{
+		AssetID: assetID, Type: "image", FileName: "product.png",
+		ContentType: "image/png", Size: int64(len(imageBytes)),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.readReferences = true
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/input-attachments/attachment_01_product.png"}
+
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatalf("Generate with frozen ecommerce product: %v", err)
+	}
+	if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+		t.Fatalf("materialized ecommerce reference data = %#v", f.generator.referenceData)
+	}
+}
+
+func TestGenerateTaskImageRejectsInheritedProjectStyleReference(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	assetID := uuid.NewString()
+	key := "assets/users/" + f.userID + "/" + assetID + "/style.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(taskImageTinyPNG()), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
+		StorageKey: key, FileName: "style.png", ContentType: "image/png",
+		Size: int64(len(taskImageTinyPNG())), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformSeednote, ReferenceImageAssetID: assetID})
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/project-style-reference.png"}
+
+	if _, err := f.service.Generate(ctx, req); err == nil || !strings.Contains(err.Error(), "project style reference") {
+		t.Fatalf("Generate project style reference error = %v, want prompt-only rejection", err)
+	}
+	if f.generator.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", f.generator.calls)
+	}
+}
+
+func TestGenerateTaskImageRejectsInheritedProjectStyleReferenceForMontage(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	assetID := uuid.NewString()
+	imageBytes := taskImageTinyPNG()
+	key := "assets/users/" + f.userID + "/" + assetID + "/portrait.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
+		StorageKey: key, FileName: "portrait.png", ContentType: "image/png",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Type = model.PlatformMontage
+	task.ImageRatio = "9:16"
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformMontage, ReferenceImageAssetID: assetID})
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	generatedPath := filepath.Join(t.TempDir(), "cover.png")
+	if err := os.WriteFile(generatedPath, taskImagePNG(9, 16), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.result.LocalFilePath = generatedPath
+	req := f.request()
+	req.AspectRatio = "9:16"
+	req.ReferencePaths = []string{".anban-creator/project-style-reference.png"}
+
+	if _, err := f.service.Generate(ctx, req); err == nil || !strings.Contains(err.Error(), "project style reference") {
+		t.Fatalf("Generate with Montage project style reference = %v, want prompt-only rejection", err)
+	}
+	if f.generator.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", f.generator.calls)
+	}
+}
+
+func TestGenerateTaskImageMaterializesDirectTaskReference(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	assetID := uuid.NewString()
+	imageBytes := taskImageTinyPNG()
+	key := "assets/users/" + f.userID + "/" + assetID + "/reference.png"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeTaskReference,
+		StorageKey: key, FileName: "reference.png", ContentType: "image/png",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.ReferenceImageAssetID = assetID
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.readReferences = true
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/task-reference.png"}
+
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatalf("Generate with direct task reference: %v", err)
+	}
+	if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+		t.Fatalf("reference data = %#v", f.generator.referenceData)
+	}
+}
+
+func TestGenerateTaskImagePreservesDirectJPEGReferenceMIMEForProvider(t *testing.T) {
+	f := newTaskImageFixture(t)
+	ctx := context.Background()
+	assetID := uuid.NewString()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			img.Set(x, y, color.NRGBA{G: 0xff, A: 0xff})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := encoded.Bytes()
+	key := "assets/users/" + f.userID + "/" + assetID + "/reference.jpg"
+	if _, err := f.service.tasks.Storage().Upload(ctx, key, bytes.NewReader(imageBytes), "image/jpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeTaskReference,
+		StorageKey: key, FileName: "reference.jpg", ContentType: "image/jpeg",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.ReferenceImageAssetID = assetID
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	f.generator.readReferences = true
+	req := f.request()
+	req.ReferencePaths = []string{".anban-creator/task-reference.png"}
+
+	if _, err := f.service.Generate(ctx, req); err != nil {
+		t.Fatalf("Generate with direct JPEG reference: %v", err)
+	}
+	if len(f.generator.referenceData) != 1 || !bytes.Equal(f.generator.referenceData[0], imageBytes) {
+		t.Fatalf("reference data = %#v", f.generator.referenceData)
+	}
+	if len(f.generator.referencePaths) != 1 || filepath.Ext(f.generator.referencePaths[0]) != ".jpg" {
+		t.Fatalf("provider reference path = %#v, want a .jpg suffix", f.generator.referencePaths)
+	}
+}
+
+func TestGenerateTaskImageRejectsStaleExecutionBeforeResolution(t *testing.T) {
+	f := newTaskImageFixture(t)
+	req := f.request()
+	req.ExecutionID = uuid.NewString()
+
+	if _, err := f.service.Generate(context.Background(), req); err == nil || !strings.Contains(err.Error(), "execution") {
+		t.Fatalf("Generate stale execution error = %v", err)
+	}
+	if f.resolver.calls != 0 || f.generator.calls != 0 {
+		t.Fatalf("stale execution reached resolver/provider: resolver=%d provider=%d", f.resolver.calls, f.generator.calls)
+	}
+}
+
+func TestGenerateTaskImageRejectsMissingExecutionIdentityBeforeResolution(t *testing.T) {
+	f := newTaskImageFixture(t)
+	req := f.request()
+	req.ExecutionID = ""
+
+	if _, err := f.service.Generate(context.Background(), req); err == nil || !strings.Contains(err.Error(), "execution identity") {
+		t.Fatalf("Generate missing execution identity error = %v", err)
+	}
+	if f.resolver.calls != 0 || f.generator.calls != 0 {
+		t.Fatalf("missing execution identity reached resolver/provider: resolver=%d provider=%d", f.resolver.calls, f.generator.calls)
 	}
 }
 
@@ -429,7 +815,7 @@ func TestGenerateTaskImageRejectsExactRatioMismatchBeforePersistenceOrCharge(t *
 	}
 }
 
-func TestGenerateTaskImageCenterCropsApproximateProviderRatio(t *testing.T) {
+func TestGenerateTaskImageNormalizesNearestProviderRatioBeforePersistence(t *testing.T) {
 	f := newTaskImageFixture(t)
 	nearestPath := filepath.Join(t.TempDir(), "nearest.png")
 	if err := os.WriteFile(nearestPath, taskImagePNG(8, 12), 0o644); err != nil {
@@ -438,8 +824,12 @@ func TestGenerateTaskImageCenterCropsApproximateProviderRatio(t *testing.T) {
 	f.generator.result.LocalFilePath = nearestPath
 	f.generator.result.Width, f.generator.result.Height = 8, 12
 
-	if _, err := f.service.Generate(context.Background(), f.request()); err != nil {
-		t.Fatalf("Generate approximate ratio: %v", err)
+	asset, err := f.service.Generate(context.Background(), f.request())
+	if err != nil {
+		t.Fatalf("Generate nearest provider ratio: %v", err)
+	}
+	if asset.TaskFileID == "" {
+		t.Fatalf("normalized asset = %#v", asset)
 	}
 	width, height, err := appimage.GetImageDimensions(nearestPath)
 	if err != nil {

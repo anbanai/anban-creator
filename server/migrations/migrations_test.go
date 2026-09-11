@@ -80,6 +80,32 @@ func TestDeletionAuthorityMigration(t *testing.T) {
 	}
 }
 
+func TestTaskFixedSKUBillingMigration(t *testing.T) {
+	raw, err := os.ReadFile("20260911_task_fixed_sku_billing.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table `tasks`",
+		"add column `billing_quote_id` char(36)",
+		"add column `billing_catalog_id` varchar(128)",
+		"add column `billing_sku_id` varchar(128)",
+		"add column `billing_pricing_tier` varchar(20)",
+		"add column `billing_charge_id` char(36)",
+		"add column `billing_price_credits` bigint not null default 0",
+		"add column `billing_terminal_reason` varchar(64)",
+		"add unique key `idx_tasks_billing_charge_id` (`billing_charge_id`)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("task fixed-SKU billing migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "drop column") || strings.Contains(sql, "drop table") {
+		t.Fatal("task fixed-SKU billing migration must be additive")
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {

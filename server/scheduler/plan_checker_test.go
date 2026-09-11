@@ -13,6 +13,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -79,7 +80,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 		}
 	})
 
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.Task{}, &model.Asset{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Asset{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -103,6 +104,18 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 		t.Fatalf("create profile registry: %v", err)
 	}
 	taskSvc.SetAgentProfileRegistry(profiles)
+	taskSvc.SetImageCapabilityResolver(service.NewImageCapabilityResolver(repo, &config.Config{
+		ModelRoutes: config.ModelRoutesConfig{ImageGeneration: config.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]config.ImageGenerationRouteConfig{
+				"standard": {
+					Provider: "openai-test", Model: "image-test", BaseURL: "https://images.invalid/v1",
+					APIKey: "test-secret", Timeout: time.Minute, BillingSKU: "image.standard",
+					Enabled: true, MinTier: string(model.TierFree),
+				},
+			},
+		}},
+	}))
 	taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
 	return repo, taskSvc, enqueuer, &logger
 }
@@ -413,5 +426,37 @@ func TestStuckTaskReaperSkipsDurableExecution(t *testing.T) {
 	}
 	if found.Status != model.TaskStatusRunning {
 		t.Fatalf("durable execution was reaped: status=%q error=%q", found.Status, found.ErrorMessage)
+	}
+}
+
+func TestLocalExecutionReaperOwnsStaleDesktopExecution(t *testing.T) {
+	repo, taskSvc, _, logger := setupPlanCheckerTest(t)
+	ctx := context.Background()
+	stale := time.Now().Add(-localExecutionHeartbeatTimeout - time.Minute)
+	executionID := uuid.NewString()
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformSeednote,
+		Status: model.TaskStatusRunning, ExecutionTarget: model.ExecutionTargetLocalClaimed,
+		StartedAt: &stale, LastHeartbeatAt: &stale, CurrentExecutionID: &executionID,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1,
+		Target: model.ExecutionTargetLocalClaimed, Status: model.TaskExecutionRunning,
+		Started: true, StartedAt: &stale, LastHeartbeatAt: &stale,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reapStaleLocalExecutions(ctx, taskSvc, logger)
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusFailed || found.BillingTerminalReason != model.TaskBillingTerminalExecutionTimeout {
+		t.Fatalf("stale local execution was not reaped: status=%q billing_reason=%q", found.Status, found.BillingTerminalReason)
 	}
 }

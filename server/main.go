@@ -99,6 +99,9 @@ func main() {
 
 	// 6. Auto-migrate models.
 	if mysqlDB != nil {
+		if err := requireTaskBillingSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for fixed-SKU task billing")
+		}
 		if err := requireAgentExecutionProfileSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Agent execution profiles")
 		}
@@ -544,10 +547,10 @@ func main() {
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
-		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
+		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, log)
 		agentProfileHandler = handler.NewAgentProfileHandler(repo, agentProfiles, log)
-		agentHandler.SetAdminAPIKey(cfg.BillingRuntime.AdminAPIKey)
 		agentHandler.SetExecutionTokenService(executionTokens)
+		agentHandler.SetLocalExecutionTokenTTL(cfg.Asynq.ContentGenerateTimeout + cfg.Asynq.PersistTimeout)
 		agentHandler.SetBootstrap(workloadVerifier, bootstrapSvc)
 		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
 			Storage: cfg.Storage,
@@ -624,7 +627,7 @@ func main() {
 		}
 		if cfg.TingWu.Complete() || store != nil {
 			var err error
-			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, store, log)
+			liveSliceSvc, err = service.NewLiveSliceServiceWithSecret(cfg.TingWu, store, log, cfg.Claude.ExecutionTokenSecret)
 			if err != nil {
 				log.Warn().Err(err).Msg("live-slice service unavailable")
 			} else {
@@ -640,9 +643,6 @@ func main() {
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
 			PlanSvc:                planSvc,
-			ImageSvc:               imageSvc,
-			ImageModelResolver:     imageCapabilityResolver,
-			ImageGenerator:         imageSvc,
 			ProviderCostSvc:        fixedBilling.Cost,
 			BillingCatalogSvc:      fixedBilling.Catalog,
 			GenerateImageTimeout:   cfg.MCP.ToolTimeouts.GenerateImage,
@@ -921,6 +921,30 @@ func main() {
 		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
 		os.Exit(1)
 	}
+}
+
+// requireTaskBillingSchema prevents a partially migrated database from reaching
+// repository queries that select the fixed-SKU billing snapshot. AutoMigrate is
+// still retained for fresh databases, but existing deployments must apply the
+// reviewed forward migration before the server starts serving traffic.
+func requireTaskBillingSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.Task{}) {
+		return nil
+	}
+	for _, column := range []string{
+		"BillingQuoteID",
+		"BillingCatalogID",
+		"BillingSKUID",
+		"BillingPricingTier",
+		"BillingChargeID",
+		"BillingPriceCredits",
+		"BillingTerminalReason",
+	} {
+		if !db.Migrator().HasColumn(&model.Task{}, column) {
+			return fmt.Errorf("existing database requires server/migrations/20260911_task_fixed_sku_billing.sql before startup (missing tasks.%s)", column)
+		}
+	}
+	return nil
 }
 
 func requireAgentExecutionProfileSchema(db *gorm.DB) error {

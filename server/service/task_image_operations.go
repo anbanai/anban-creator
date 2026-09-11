@@ -1,10 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	stdimage "image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	_ "golang.org/x/image/webp"
 
 	appimage "github.com/anbanai/anban-creator/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -23,7 +29,12 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-const maxAnalyzedTaskImageBytes = 10 << 20
+const (
+	maxAnalyzedTaskImageBytes        = 10 << 20
+	maxCompressedTaskImageInputBytes = 50 << 20
+	maxTaskImageDimension            = 16384
+	maxTaskImageDecodedPixels        = 40_000_000
+)
 
 var (
 	ErrTaskImageOperationOwnership        = errors.New("task does not belong to user")
@@ -45,13 +56,17 @@ type UploadTaskImageRequest struct {
 }
 
 type CompressTaskImageRequest struct {
-	UserID, TaskID, FilePath string
-	MaxWidth                 int
+	UserID, ExecutionID, TaskID, InputPath, OutputPath string
+	MaxWidth                                           int
 }
 
 type CompressTaskImageResult struct {
-	FilePath   string `json:"file_path"`
-	Compressed bool   `json:"compressed"`
+	TaskImageAsset
+	Compressed bool `json:"compressed"`
+}
+
+type DownloadTaskImageRequest struct {
+	UserID, ExecutionID, ProjectID, TaskID, URL, OutputPath string
 }
 
 type CropTaskImageRequest struct {
@@ -141,22 +156,13 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 func (s *TaskImageOperationsService) resolveUploadPath(ctx context.Context, req UploadTaskImageRequest) (string, func(), error) {
 	filePath := strings.TrimSpace(req.FilePath)
 	if filepath.IsAbs(filePath) {
-		if strings.TrimSpace(req.TaskID) != "" && strings.TrimSpace(req.ExecutionID) != "" {
-			if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
-				return "", nil, fmt.Errorf("authorize task image upload execution: %w", err)
-			}
-		}
-		return filePath, nil, nil
+		return "", nil, errors.New("file_path must be a task-relative image path from the current execution")
 	}
 	taskFile, cleanPath, err := s.findCurrentExecutionTaskImageFile(ctx, req.UserID, req.ExecutionID, req.ProjectID, req.TaskID, filePath)
 	if err != nil {
 		return "", nil, err
 	}
-	data, err := s.tasks.Storage().Read(ctx, taskFile.OSSKey)
-	if err != nil {
-		return "", nil, fmt.Errorf("read task image file: %w", err)
-	}
-	return writeTaskImageTemp(data, cleanPath)
+	return s.tasks.materializeTaskImageFile(ctx, taskFile, cleanPath, maxTaskImageReferenceBytes)
 }
 
 func (s *TaskImageOperationsService) findCurrentExecutionTaskImageFile(ctx context.Context, userID, executionID, projectID, taskID, filePath string) (*model.TaskFile, string, error) {
@@ -198,20 +204,180 @@ func (s *TaskImageOperationsService) findCurrentExecutionTaskImageFile(ctx conte
 }
 
 func (s *TaskImageOperationsService) Compress(ctx context.Context, req CompressTaskImageRequest) (*CompressTaskImageResult, error) {
-	if req.FilePath == "" {
+	if strings.TrimSpace(req.InputPath) == "" || strings.TrimSpace(req.OutputPath) == "" {
 		return nil, ErrTaskImageOperationFileRequired
 	}
-	if s == nil || s.images == nil {
-		return nil, errors.New("image service not available")
+	if s == nil || s.images == nil || s.tasks == nil || s.tasks.Repository() == nil || s.tasks.Storage() == nil {
+		return nil, errors.New("task image service not available")
 	}
-	if err := s.validateTask(ctx, req.UserID, req.TaskID, ""); err != nil {
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return nil, errors.New("task_id and current execution identity are required")
+	}
+	if req.MaxWidth < 0 || req.MaxWidth > 8192 {
+		return nil, errors.New("max_width must be between 0 and 8192")
+	}
+	inputPath, err := cleanAuthorizedTaskImagePath(req.InputPath)
+	if err != nil {
+		return nil, fmt.Errorf("input_path: %w", err)
+	}
+	outputPath, err := cleanAuthorizedTaskImagePath(req.OutputPath)
+	if err != nil {
+		return nil, fmt.Errorf("output_path: %w", err)
+	}
+	if inputPath == outputPath {
+		return nil, errors.New("output_path must differ from input_path")
+	}
+	task, err := s.tasks.GetByID(ctx, req.TaskID)
+	if err != nil || task == nil {
+		return nil, ErrTaskImageOperationTaskNotFound
+	}
+	localInput, cleanup, err := s.tasks.materializeAuthorizedTaskImageReference(
+		ctx, task, req.UserID, task.ProjectID, req.ExecutionID, inputPath, taskImageReferenceTransform, maxCompressedTaskImageInputBytes,
+	)
+	if err != nil {
 		return nil, err
 	}
-	filePath, compressed, err := s.images.CompressImage(req.FilePath, req.MaxWidth)
+	defer cleanup()
+	if _, _, err := validateTaskRasterImageFile(localInput, inputPath, maxCompressedTaskImageInputBytes); err != nil {
+		return nil, err
+	}
+	compressedPath, compressed, err := s.images.CompressImage(localInput, req.MaxWidth)
 	if err != nil {
 		return nil, fmt.Errorf("compress image: %w", err)
 	}
-	return &CompressTaskImageResult{FilePath: filePath, Compressed: compressed}, nil
+	resultPath := localInput
+	if compressed {
+		if strings.TrimSpace(compressedPath) == "" {
+			return nil, errors.New("compress image returned no output")
+		}
+		resultPath = compressedPath
+		if resultPath != localInput {
+			defer os.Remove(resultPath)
+		}
+	}
+	data, err := readBoundedTaskImageFile(resultPath, maxAnalyzedTaskImageBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read compressed image: %w", err)
+	}
+	asset, err := s.persistTaskImageBytes(ctx, req.UserID, req.ExecutionID, req.TaskID, outputPath, data)
+	if err != nil {
+		return nil, fmt.Errorf("register compressed task image: %w", err)
+	}
+	return &CompressTaskImageResult{TaskImageAsset: *asset, Compressed: compressed}, nil
+}
+
+func (s *TaskImageOperationsService) Download(ctx context.Context, req DownloadTaskImageRequest) (*TaskImageAsset, error) {
+	if s == nil || s.tasks == nil || s.tasks.Repository() == nil || s.tasks.Storage() == nil {
+		return nil, errors.New("task image service not available")
+	}
+	if strings.TrimSpace(req.ProjectID) == "" || strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return nil, errors.New("project_id, task_id, and current execution identity are required")
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		return nil, errors.New("url is required")
+	}
+	outputPath, err := cleanAuthorizedTaskImagePath(req.OutputPath)
+	if err != nil {
+		return nil, fmt.Errorf("output_path: %w", err)
+	}
+	if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+		return nil, fmt.Errorf("authorize image download execution: %w", err)
+	}
+	downloader := s.downloadAnalysisImage
+	if downloader == nil {
+		downloader = downloadTaskAnalysisImage
+	}
+	data, err := downloader(ctx, strings.TrimSpace(req.URL), maxAnalyzedTaskImageBytes)
+	if err != nil {
+		return nil, fmt.Errorf("download image: %w", err)
+	}
+	asset, err := s.persistTaskImageBytes(ctx, req.UserID, req.ExecutionID, req.TaskID, outputPath, data)
+	if err != nil {
+		return nil, fmt.Errorf("register downloaded task image: %w", err)
+	}
+	return asset, nil
+}
+
+func (s *TaskImageOperationsService) persistTaskImageBytes(ctx context.Context, userID, executionID, taskID, outputPath string, data []byte) (*TaskImageAsset, error) {
+	mimeType, _, err := validateTaskRasterImageBytes(data, outputPath)
+	if err != nil {
+		return nil, err
+	}
+	taskFile, err := s.tasks.UploadContentAddressedExecutionTaskFileFromReader(
+		ctx, taskID, userID, executionID, filepath.ToSlash(outputPath), bytes.NewReader(data), mimeType, int64(len(data)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	s.tasks.EnrichFilesWithURLs(ctx, []*model.TaskFile{taskFile})
+	asset := &TaskImageAsset{
+		TaskFileID: taskFile.ID, FilePath: taskFile.FilePath, DownloadURL: firstTaskFileURL(taskFile),
+		MimeType: taskFile.MimeType, FileSize: taskFile.FileSize, ContentHash: taskFile.ContentHash,
+	}
+	if asset.DownloadURL == "" {
+		return nil, errors.New("registered task image has no fetchable URL")
+	}
+	return asset, nil
+}
+
+func readBoundedTaskImageFile(filePath string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, storage.ErrObjectExceedsMaxSize
+	}
+	return data, nil
+}
+
+func validateTaskRasterImageFile(filePath, logicalPath string, maxBytes int64) (string, stdimage.Config, error) {
+	data, err := readBoundedTaskImageFile(filePath, maxBytes)
+	if err != nil {
+		return "", stdimage.Config{}, err
+	}
+	return validateTaskRasterImageBytes(data, logicalPath)
+}
+
+func validateTaskRasterImageBytes(data []byte, logicalPath string) (string, stdimage.Config, error) {
+	mimeType, config, err := validateRasterImageSafety(data, maxCompressedTaskImageInputBytes)
+	if err != nil {
+		return "", stdimage.Config{}, err
+	}
+	expected := normalizedImageContentType(contentTypeForUploadExt(strings.ToLower(filepath.Ext(logicalPath))))
+	if expected == "" || expected == "application/octet-stream" || expected != mimeType {
+		return "", stdimage.Config{}, fmt.Errorf("image content type %s does not match output path %q", mimeType, logicalPath)
+	}
+	return mimeType, config, nil
+}
+
+func validateRasterImageSafety(data []byte, maxBytes int64) (string, stdimage.Config, error) {
+	if len(data) == 0 {
+		return "", stdimage.Config{}, errors.New("image data is empty")
+	}
+	if maxBytes <= 0 || int64(len(data)) > maxBytes {
+		return "", stdimage.Config{}, errors.New("image exceeds the processing size limit")
+	}
+	mimeType := normalizedImageContentType(http.DetectContentType(data))
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+	default:
+		return "", stdimage.Config{}, errors.New("file is not a supported raster image")
+	}
+	config, _, err := stdimage.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return "", stdimage.Config{}, fmt.Errorf("decode image dimensions: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxTaskImageDimension || config.Height > maxTaskImageDimension ||
+		int64(config.Width)*int64(config.Height) > maxTaskImageDecodedPixels {
+		return "", stdimage.Config{}, errors.New("image dimensions exceed safety limits")
+	}
+	return mimeType, config, nil
 }
 
 func (s *TaskImageOperationsService) Crop(ctx context.Context, req CropTaskImageRequest) (*CropTaskImageResult, error) {
@@ -221,14 +387,11 @@ func (s *TaskImageOperationsService) Crop(ctx context.Context, req CropTaskImage
 	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
 		return nil, errors.New("task_id and current execution identity are required")
 	}
-	if filepath.IsAbs(req.InputPath) || filepath.IsAbs(req.OutputPath) {
-		return nil, errors.New("input_path and output_path must be task-relative")
-	}
-	inputPath, err := CleanTaskFileRelativePath(req.InputPath)
+	inputPath, err := cleanAuthorizedTaskImagePath(req.InputPath)
 	if err != nil {
 		return nil, fmt.Errorf("input_path: %w", err)
 	}
-	outputPath, err := CleanTaskFileRelativePath(req.OutputPath)
+	outputPath, err := cleanAuthorizedTaskImagePath(req.OutputPath)
 	if err != nil {
 		return nil, fmt.Errorf("output_path: %w", err)
 	}
@@ -238,75 +401,40 @@ func (s *TaskImageOperationsService) Crop(ctx context.Context, req CropTaskImage
 	if req.TargetWidth <= 0 || req.TargetHeight <= 0 || req.TargetWidth > 8192 || req.TargetHeight > 8192 {
 		return nil, errors.New("target_width and target_height must be between 1 and 8192")
 	}
-	if err := s.validateTask(ctx, req.UserID, req.TaskID, ""); err != nil {
-		return nil, err
+	task, err := s.tasks.GetByID(ctx, req.TaskID)
+	if err != nil || task == nil {
+		return nil, ErrTaskImageOperationTaskNotFound
 	}
-
-	inputFile, err := s.findCropInput(ctx, req.TaskID, req.ExecutionID, filepath.ToSlash(inputPath))
-	if err != nil {
-		return nil, err
+	if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, task.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+		return nil, fmt.Errorf("authorize image crop execution: %w", err)
 	}
-	data, err := s.tasks.Storage().Read(ctx, inputFile.OSSKey)
-	if err != nil {
-		return nil, fmt.Errorf("read input task image: %w", err)
-	}
-	localInput, cleanup, err := writeTaskImageTemp(data, inputPath)
+	localInput, cleanup, err := s.tasks.materializeAuthorizedTaskImageReference(
+		ctx, task, req.UserID, task.ProjectID, req.ExecutionID, filepath.ToSlash(inputPath), taskImageReferenceTransform, maxTaskImageReferenceBytes,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
+	if _, _, err := validateTaskRasterImageFile(localInput, inputPath, maxTaskImageReferenceBytes); err != nil {
+		return nil, err
+	}
 	localOutput := filepath.Join(filepath.Dir(localInput), "cropped"+strings.ToLower(filepath.Ext(outputPath)))
 	defer os.Remove(localOutput)
 	if err := appimage.CropToSizeWithAnchor(localInput, localOutput, req.TargetWidth, req.TargetHeight, req.Anchor); err != nil {
 		return nil, fmt.Errorf("crop image: %w", err)
 	}
-	file, err := os.Open(localOutput)
+	data, err := readBoundedTaskImageFile(localOutput, maxAnalyzedTaskImageBytes)
 	if err != nil {
-		return nil, fmt.Errorf("open cropped image: %w", err)
+		return nil, fmt.Errorf("read cropped image: %w", err)
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat cropped image: %w", err)
-	}
-	header := make([]byte, 512)
-	n, _ := file.Read(header)
-	if _, err := file.Seek(0, 0); err != nil {
-		return nil, fmt.Errorf("rewind cropped image: %w", err)
-	}
-	mimeType := http.DetectContentType(header[:n])
-	taskFile, err := s.tasks.UploadContentAddressedExecutionTaskFileFromReader(ctx, req.TaskID, req.UserID, req.ExecutionID, filepath.ToSlash(outputPath), file, mimeType, info.Size())
+	asset, err := s.persistTaskImageBytes(ctx, req.UserID, req.ExecutionID, req.TaskID, filepath.ToSlash(outputPath), data)
 	if err != nil {
 		return nil, fmt.Errorf("register cropped task image: %w", err)
 	}
-	s.tasks.EnrichFilesWithURLs(ctx, []*model.TaskFile{taskFile})
 	return &CropTaskImageResult{
-		TaskImageAsset: TaskImageAsset{
-			TaskFileID: taskFile.ID, FilePath: taskFile.FilePath, DownloadURL: firstTaskFileURL(taskFile),
-			MimeType: taskFile.MimeType, FileSize: taskFile.FileSize, ContentHash: taskFile.ContentHash,
-		},
-		Width: req.TargetWidth, Height: req.TargetHeight,
+		TaskImageAsset: *asset,
+		Width:          req.TargetWidth, Height: req.TargetHeight,
 	}, nil
-}
-
-func (s *TaskImageOperationsService) findCropInput(ctx context.Context, taskID, executionID, inputPath string) (*model.TaskFile, error) {
-	files, err := s.tasks.Repository().TaskFiles().FindByExecutionID(ctx, executionID)
-	if err != nil {
-		return nil, fmt.Errorf("find current execution task files: %w", err)
-	}
-	for _, file := range files {
-		if file != nil && file.TaskID == taskID && file.FilePath == inputPath && strings.TrimSpace(file.OSSKey) != "" {
-			return file, nil
-		}
-	}
-	file, err := s.tasks.Repository().TaskFiles().FindExisting(ctx, taskID, inputPath)
-	if err != nil {
-		return nil, fmt.Errorf("find input task image: %w", err)
-	}
-	if file == nil || strings.TrimSpace(file.OSSKey) == "" {
-		return nil, errors.New("input task image not found")
-	}
-	return file, nil
 }
 
 func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTaskImageRequest) (*AnalyzeTaskImageResult, error) {
@@ -324,6 +452,11 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 	}
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(req.TaskID) != "" {
+		if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
+			return nil, fmt.Errorf("authorize image analysis execution: %w", err)
+		}
 	}
 	analysisPath, cleanup, err := s.resolveAnalysisFilePath(ctx, req)
 	if err != nil {
@@ -348,26 +481,22 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 
 func (s *TaskImageOperationsService) resolveAnalysisFilePath(ctx context.Context, req AnalyzeTaskImageRequest) (string, func(), error) {
 	filePath := strings.TrimSpace(req.FilePath)
-	if filePath == "" || filepath.IsAbs(filePath) {
-		return filePath, nil, nil
+	if filePath == "" {
+		return "", nil, nil
 	}
-	executionID := strings.TrimSpace(req.ExecutionID)
-	if executionID == "" && strings.TrimSpace(req.TaskID) != "" {
-		task, err := s.tasks.GetByID(ctx, req.TaskID)
-		if err != nil || task == nil || task.CurrentExecutionID == nil {
-			return "", nil, errors.New("current execution identity is required for a task-relative file_path")
-		}
-		executionID = strings.TrimSpace(*task.CurrentExecutionID)
+	if _, err := cleanAuthorizedTaskImagePath(filePath); err != nil {
+		return "", nil, err
 	}
-	taskFile, cleanPath, err := s.findCurrentExecutionTaskImageFile(ctx, req.UserID, executionID, req.ProjectID, req.TaskID, filePath)
-	if err != nil {
-		return "", nil, fmt.Errorf("resolve task image file: %w", err)
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return "", nil, errors.New("task_id and current execution identity are required for a task-relative file_path")
 	}
-	data, err := storage.ReadObject(ctx, s.tasks.Storage(), taskFile.OSSKey, maxAnalyzedTaskImageBytes)
-	if err != nil {
-		return "", nil, fmt.Errorf("read task image file for analysis: %w", err)
+	task, err := s.tasks.GetByID(ctx, req.TaskID)
+	if err != nil || task == nil {
+		return "", nil, ErrTaskImageOperationTaskNotFound
 	}
-	return writeTaskImageTemp(data, cleanPath)
+	return s.tasks.materializeAuthorizedTaskImageReference(
+		ctx, task, req.UserID, req.ProjectID, req.ExecutionID, filePath, taskImageReferenceAnalysis, maxAnalyzedTaskImageBytes,
+	)
 }
 
 func (s *TaskImageOperationsService) validateTask(ctx context.Context, userID, taskID, projectID string) error {
@@ -408,20 +537,13 @@ func (s *TaskImageOperationsService) validateTask(ctx context.Context, userID, t
 
 func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, imageURL, filePath string) (string, error) {
 	if filePath != "" {
-		info, err := os.Stat(filePath)
+		data, err := readBoundedTaskImageFile(filePath, maxAnalyzedTaskImageBytes)
 		if err != nil {
 			return "", fmt.Errorf("read image file: %w", err)
 		}
-		if info.Size() > maxAnalyzedTaskImageBytes {
-			return "", errors.New("image file is too large for analysis (max 10MB)")
-		}
-		data, err := os.ReadFile(filePath)
+		mimeType, _, err := validateRasterImageSafety(data, maxAnalyzedTaskImageBytes)
 		if err != nil {
-			return "", fmt.Errorf("read image file: %w", err)
-		}
-		mimeType := http.DetectContentType(data)
-		if !strings.HasPrefix(mimeType, "image/") {
-			return "", errors.New("file is not an image")
+			return "", fmt.Errorf("validate image file: %w", err)
 		}
 		return imageDataURL(mimeType, data), nil
 	}
@@ -436,9 +558,9 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, ima
 	if err != nil {
 		return "", fmt.Errorf("download image: %w", err)
 	}
-	mimeType := http.DetectContentType(data)
-	if !strings.HasPrefix(mimeType, "image/") {
-		return "", errors.New("downloaded file is not an image")
+	mimeType, _, err := validateRasterImageSafety(data, maxAnalyzedTaskImageBytes)
+	if err != nil {
+		return "", fmt.Errorf("validate downloaded image: %w", err)
 	}
 	return imageDataURL(mimeType, data), nil
 }

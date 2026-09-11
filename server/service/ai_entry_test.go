@@ -176,7 +176,7 @@ func TestAIEntryServiceSubmitCreatesMontageTaskWithImageSettings(t *testing.T) {
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
 			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-				"standard": {Enabled: true, MinTier: "free"},
+				"standard": testImageCapabilityRoute("image.standard"),
 			},
 		}},
 	}))
@@ -232,7 +232,7 @@ func TestAIEntryServiceSubmitMontageIgnoresInferredRatioWhenRequestOmitsIt(t *te
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
 			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-				"standard": {Enabled: true, MinTier: "free"},
+				"standard": testImageCapabilityRoute("image.standard"),
 			},
 		}},
 	}))
@@ -631,8 +631,8 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if found.ImageRatio != model.DefaultImageRatio(model.PlatformArticle) {
 		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped and platform default frozen", found.ImageRatio)
 	}
-	if found.ImageCapabilityKey != "" {
-		t.Fatalf("image_capability_key = %q, want LLM model key ignored", found.ImageCapabilityKey)
+	if found.ImageCapabilityKey != "standard" {
+		t.Fatalf("image_capability_key = %q, want untrusted LLM key ignored and server default frozen", found.ImageCapabilityKey)
 	}
 }
 
@@ -653,8 +653,8 @@ func TestAIEntryServiceSubmitUsesExplicitImageParametersForEveryTask(t *testing.
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
 			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-				"standard":     {Enabled: true, MinTier: "free"},
-				"professional": {Enabled: true, MinTier: "enterprise"},
+				"standard":     testImageCapabilityRoute("image.standard"),
+				"professional": testImageCapabilityRoute("image.professional"),
 			},
 		}},
 	}))
@@ -693,8 +693,12 @@ func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testi
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
 			Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-				"standard":     {Enabled: true, MinTier: "free"},
-				"professional": {Enabled: true, MinTier: "enterprise"},
+				"standard": testImageCapabilityRoute("image.standard"),
+				"professional": func() srvconfig.ImageGenerationRouteConfig {
+					route := testImageCapabilityRoute("image.professional")
+					route.MinTier = "enterprise"
+					return route
+				}(),
 			},
 		}},
 	}))

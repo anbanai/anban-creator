@@ -182,7 +182,8 @@ func NewRouter(svc *Services) *fiber.App {
 		authPublic.Post("/qr-callback", svc.AuthHandler.QRLoginCallback)
 	}
 	// ---------------------------------------------------------------------------
-	// Agent communication endpoints (API key auth, no JWT required).
+	// Agent communication endpoints. Claim uses a user API key; all execution
+	// mutations use an execution-scoped token.
 	// Registered before the JWT-protected group to avoid prefix-matching conflicts.
 	// ---------------------------------------------------------------------------
 
@@ -192,13 +193,12 @@ func NewRouter(svc *Services) *fiber.App {
 		// Register each Agent route explicitly. A prefix group here also applies its
 		// execution-token middleware to user-facing GET routes under /agent, such
 		// as the execution-profile capability endpoint below.
-		app.Post("/api/v1/agent/upload", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Upload)
-		app.Post("/api/v1/agent/artifacts/prepare", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.PrepareArtifactUpload)
-		app.Post("/api/v1/agent/artifacts/content", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.StreamArtifactContent)
-		app.Post("/api/v1/agent/artifacts/manifest", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.ReportArtifactManifest)
-		app.Post("/api/v1/agent/progress", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Progress)
-		app.Post("/api/v1/agent/claim", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Claim)
-		app.Post("/api/v1/agent/complete", agentLimiter, svc.AgentHandler.AuthMiddleware, svc.AgentHandler.Complete)
+		app.Post("/api/v1/agent/artifacts/prepare", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.PrepareArtifactUpload)
+		app.Post("/api/v1/agent/artifacts/content", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.StreamArtifactContent)
+		app.Post("/api/v1/agent/artifacts/manifest", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.ReportArtifactManifest)
+		app.Post("/api/v1/agent/progress", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.Progress)
+		app.Post("/api/v1/agent/claim", agentLimiter, svc.AgentHandler.ClaimAuthMiddleware, svc.AgentHandler.Claim)
+		app.Post("/api/v1/agent/complete", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.Complete)
 	}
 
 	if svc.AgentPackHandler != nil {

@@ -327,13 +327,16 @@ func migrateCapabilityJSONValue(value any, defaultCapability string) (bool, int6
 }
 
 func migrateLegacyCapabilityKey(value, defaultCapability string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "standard", "standard_image", "volcengine-standard", "openai-standard":
+	normalized := strings.TrimSpace(value)
+	switch strings.ToLower(normalized) {
+	case "":
+		return "", true
+	case "standard", "standard_image", "volcengine-standard", "openai-standard":
 		return "standard", true
 	case "professional", "professional_enhance", "custom", "gpt-image-2", "openai-gpt-image", "gemini-pro":
 		return "professional", true
 	default:
-		return defaultCapability, false
+		return normalized, false
 	}
 }
 

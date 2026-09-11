@@ -79,7 +79,7 @@ func BuildUserPrompt(p UserPromptParams) string {
 	if model.IsMontagePlatform(p.TaskType) {
 		portraitReference := "Portrait reference: no system portrait selected"
 		if p.HasReferenceImage {
-			portraitReference = "Portrait reference: use the system-provided portrait at .anban-creator/reference.png"
+			portraitReference = "Portrait reference: use the system-provided portrait at " + TaskReferenceImagePath
 		}
 		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + portraitReference
 	}

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
 import type { Task, TaskFile } from '@/types'
-import ReferenceUsageSummary from './ReferenceUsageSummary'
+import ReferenceUsageSummary, { isReferenceUsageSummaryData } from './ReferenceUsageSummary'
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -14,6 +14,7 @@ vi.mock('@/lib/api', async () => {
       tasks: {
         ...actual.api.tasks,
         downloadFileBlob: vi.fn(),
+        previewFileBlob: vi.fn(),
       },
     },
   }
@@ -25,7 +26,7 @@ const validSummary = {
     attachment_index: 1,
     file_name: 'front.png',
     instruction: '保持 Logo',
-    status: 'used',
+		status: 'passed_to_generation',
     decision_summary: '正面图是产品身份和包装文字的主要证据',
     analysis_attempts: 1,
     warnings: ['包装侧面的批次号不清晰'],
@@ -69,7 +70,9 @@ const summaryTaskFile: TaskFile = {
   file_name: 'reference-usage-summary.json',
   mime_type: 'application/json',
   file_size: 1024,
-  url: '/tasks/task-1/files/file-summary',
+  url: '',
+  is_deliverable: false,
+  preview_url: '/api/v1/tasks/task-1/files/file-summary/preview',
   created_at: '2026-07-10T00:00:00.000Z',
 }
 
@@ -78,8 +81,20 @@ describe('ReferenceUsageSummary', () => {
     vi.clearAllMocks()
   })
 
+  it('accepts only the provenance-specific input status contract', () => {
+    expect(isReferenceUsageSummaryData(validSummary)).toBe(true)
+    expect(isReferenceUsageSummaryData({
+      ...validSummary,
+      inputs: [{ ...validSummary.inputs[0], status: 'analyzed_only' }],
+    })).toBe(true)
+    expect(isReferenceUsageSummaryData({
+      ...validSummary,
+      inputs: [{ ...validSummary.inputs[0], status: 'used' }],
+    })).toBe(false)
+  })
+
   it('renders validated input decisions and per-output reference usage', async () => {
-    vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(
       new Blob([JSON.stringify(validSummary)], { type: 'application/json' }),
     )
 
@@ -88,7 +103,7 @@ describe('ReferenceUsageSummary', () => {
     expect(await screen.findByText('输入素材决策')).toBeInTheDocument()
     expect(screen.getByText('参考素材使用')).toBeInTheDocument()
     expect(screen.getByText('#1 · front.png')).toBeInTheDocument()
-    expect(screen.getByText('已使用')).toBeInTheDocument()
+		expect(screen.getByText('已传入生成')).toBeInTheDocument()
     expect(screen.getByText('正面图是产品身份和包装文字的主要证据')).toBeInTheDocument()
     expect(screen.getByText('分析 1 次')).toBeInTheDocument()
     expect(screen.getByText('包装侧面的批次号不清晰')).toBeInTheDocument()
@@ -105,7 +120,8 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.queryByText('首选模型参考图上限不足')).not.toBeInTheDocument()
     expect(screen.queryByText('模型调整')).not.toBeInTheDocument()
     expect(screen.getByText('未使用侧面图，因为与正面包装版本冲突')).toBeInTheDocument()
-    expect(api.tasks.downloadFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
+    expect(api.tasks.previewFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
+    expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
 
     for (const surface of [
       screen.getByText('#1 · front.png').closest('article'),
@@ -155,7 +171,7 @@ describe('ReferenceUsageSummary', () => {
   })
 
   it('falls back to the plan snapshot when the summary artifact is malformed', async () => {
-    vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(
       new Blob([JSON.stringify({ version: '1.0', inputs: 'invalid', outputs: [] })], {
         type: 'application/json',
       }),
@@ -182,12 +198,12 @@ describe('ReferenceUsageSummary', () => {
     expect(screen.getByText('优先识别新版包装')).toBeInTheDocument()
     expect(screen.getByText('输入快照不代表 AI 实际使用结论')).toBeInTheDocument()
     await waitFor(() => {
-      expect(api.tasks.downloadFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
+      expect(api.tasks.previewFileBlob).toHaveBeenCalledWith('task-1', 'file-summary')
     })
   })
 
   it('renders the complete valid summary as a compact single-column flow', async () => {
-    vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(
       new Blob([JSON.stringify(validSummary)], { type: 'application/json' }),
     )
 
@@ -201,7 +217,7 @@ describe('ReferenceUsageSummary', () => {
     expect(container.querySelector('.xl\\:grid-cols-2')).not.toBeInTheDocument()
     expect(screen.getByText('#1 · front.png')).toBeInTheDocument()
     expect(screen.getByText('说明：保持 Logo')).toBeInTheDocument()
-    expect(screen.getByText('已使用')).toBeInTheDocument()
+		expect(screen.getByText('已传入生成')).toBeInTheDocument()
     expect(screen.getByText('正面图是产品身份和包装文字的主要证据')).toBeInTheDocument()
     expect(screen.getByText('分析 1 次')).toBeInTheDocument()
     expect(screen.getByText('包装侧面的批次号不清晰')).toBeInTheDocument()
@@ -232,7 +248,7 @@ describe('ReferenceUsageSummary', () => {
   })
 
   it('renders compact loading skeletons without a card or header', () => {
-    vi.mocked(api.tasks.downloadFileBlob).mockImplementation(
+    vi.mocked(api.tasks.previewFileBlob).mockImplementation(
       () => new Promise<Blob>(() => undefined),
     )
 
@@ -288,7 +304,7 @@ describe('ReferenceUsageSummary', () => {
   })
 
   it('renders a compact input fallback when the summary artifact is malformed', async () => {
-    vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(
       new Blob([JSON.stringify({ version: '1.0', inputs: 'invalid', outputs: [] })], {
         type: 'application/json',
       }),

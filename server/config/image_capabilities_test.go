@@ -139,6 +139,33 @@ func TestValidateImageCapabilities(t *testing.T) {
 	}
 }
 
+func TestValidateEnabledImageCapabilityRejectsPublicPlaintextBaseURL(t *testing.T) {
+	route := validCapabilityForConfigTest()
+	route.BaseURL = "http://18.141.196.64:18888/v1"
+	err := validateEnabledImageCapability("model_routes.image_generation.capabilities.standard", "standard", route)
+	if err == nil || !strings.Contains(err.Error(), "base_url must use HTTPS unless it targets loopback") {
+		t.Fatalf("validateEnabledImageCapability() error = %v, want public plaintext rejection", err)
+	}
+}
+
+func TestValidateEnabledImageCapabilityRejectsBuiltInBillingSKUMismatch(t *testing.T) {
+	for _, tt := range []struct {
+		key, billingSKU string
+	}{
+		{key: "standard", billingSKU: "image.professional"},
+		{key: "professional", billingSKU: "image.standard"},
+	} {
+		t.Run(tt.key, func(t *testing.T) {
+			route := validCapabilityForConfigTest()
+			route.BillingSKU = tt.billingSKU
+			err := validateEnabledImageCapability("model_routes.image_generation.capabilities."+tt.key, tt.key, route)
+			if err == nil || !strings.Contains(err.Error(), "billing_sku must be image."+tt.key) {
+				t.Fatalf("validateEnabledImageCapability() error = %v, want built-in billing SKU mismatch", err)
+			}
+		})
+	}
+}
+
 func TestValidateImageGenerationFeaturesRequiresQualityLevels(t *testing.T) {
 	caps := validCapabilityForConfigTest().GenerationFeatures
 	caps.QualityLevels = nil

@@ -28,7 +28,7 @@ func TestMaterializeReferenceAssetRejectsParentSymlinkWithoutTouchingTarget(t *t
 	if err == nil {
 		t.Fatal("parent symlink was accepted")
 	}
-	if _, statErr := os.Stat(filepath.Join(external, "reference.png")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(external, taskReferenceImageFileName)); !os.IsNotExist(statErr) {
 		t.Fatalf("external reference created through parent symlink: %v", statErr)
 	}
 	after, statErr := os.Stat(external)
@@ -59,8 +59,8 @@ func TestMaterializeReferenceAssetParentSwapBeforeCommitDoesNotEscape(t *testing
 		t.Fatal("parent swap was accepted")
 	}
 	for _, path := range []string{
-		filepath.Join(external, referenceImageFileName),
-		filepath.Join(held, referenceImageFileName),
+		filepath.Join(external, taskReferenceImageFileName),
+		filepath.Join(held, taskReferenceImageFileName),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 			t.Fatalf("reference escaped to %q: %v", path, statErr)
@@ -95,8 +95,8 @@ func TestMaterializeReferenceAssetWorkspaceSwapBeforeCommitDoesNotEscape(t *test
 		t.Fatal("workspace swap was accepted")
 	}
 	for _, path := range []string{
-		filepath.Join(external, appconfig.ConfigDir, referenceImageFileName),
-		filepath.Join(held, appconfig.ConfigDir, referenceImageFileName),
+		filepath.Join(external, appconfig.ConfigDir, taskReferenceImageFileName),
+		filepath.Join(held, appconfig.ConfigDir, taskReferenceImageFileName),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 			t.Fatalf("reference escaped to %q: %v", path, statErr)

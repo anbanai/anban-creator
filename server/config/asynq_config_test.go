@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anbanai/anban-creator/server/auth"
 )
 
 func TestAsynqConfigTimeoutDefaults(t *testing.T) {
@@ -106,5 +108,50 @@ func TestValidate_DockerTimeoutMustExceedContentGenerateTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be >=") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAsynqLifecycleFitsExecutionCredential(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content time.Duration
+		persist time.Duration
+		want    string
+	}{
+		{name: "negative execution", content: -time.Minute, persist: time.Minute, want: "asynq.content_generate_timeout must be positive"},
+		{name: "negative persistence", content: time.Minute, persist: -time.Minute, want: "asynq.persist_timeout must be positive"},
+		{name: "credential lifetime exceeded", content: auth.MaximumExecutionTokenLifetime, persist: time.Second, want: "must not exceed execution token lifetime"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &Config{
+				Database: DatabaseConfig{DSN: "dsn"},
+				JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
+				Claude:   validClaudeConfigForTest(),
+			}
+			cfg.applyDefaults()
+			cfg.Asynq.ContentGenerateTimeout = test.content
+			cfg.Asynq.PersistTimeout = test.persist
+			cfg.Claude.Docker.TimeoutSec = int(auth.MaximumExecutionTokenLifetime / time.Second)
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateDockerDeadlineFitsExecutionCredential(t *testing.T) {
+	cfg := &Config{
+		Database: DatabaseConfig{DSN: "dsn"},
+		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
+		Claude:   validClaudeConfigForTest(),
+	}
+	cfg.applyDefaults()
+	cfg.Claude.Docker.TimeoutSec = int(auth.MaximumExecutionTokenLifetime/time.Second) + 1
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.docker.timeout_sec must not exceed execution token lifetime") {
+		t.Fatalf("Validate() error = %v, want Docker execution token lifetime bound", err)
 	}
 }

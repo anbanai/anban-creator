@@ -19,7 +19,7 @@ func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 		"output/cover-quality.json",
 		"output/failure-diagnosis.md",
 		"$VIDEO_ASPECT_RATIO",
-		".anban-creator/reference.png",
+		".anban-creator/task-reference.png",
 		"不得向用户提问",
 		"最多 3 次",
 		"generate_image(",

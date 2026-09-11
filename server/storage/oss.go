@@ -135,16 +135,32 @@ func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType strin
 	return p.uploadURL(key, contentType, nil, expirySeconds)
 }
 
+// UploadURLWithContentLength generates a signed PUT URL whose exact
+// Content-Length is included in the canonical request.
+func (p *OSSProvider) UploadURLWithContentLength(_ context.Context, key, contentType string, contentLength int64, expirySeconds int) (string, error) {
+	if contentLength <= 0 {
+		return "", fmt.Errorf("content length must be positive")
+	}
+	return p.uploadURLWithOptions(key, contentType, nil, contentLength, expirySeconds)
+}
+
 // UploadURLWithMetadata generates a signed PUT URL that binds OSS object
 // metadata to the signature.
 func (p *OSSProvider) UploadURLWithMetadata(_ context.Context, key, contentType string, metadata map[string]string, expirySeconds int) (string, error) {
-	return p.uploadURL(key, contentType, metadata, expirySeconds)
+	return p.uploadURLWithOptions(key, contentType, metadata, 0, expirySeconds)
 }
 
 func (p *OSSProvider) uploadURL(key, contentType string, metadata map[string]string, expirySeconds int) (string, error) {
+	return p.uploadURLWithOptions(key, contentType, metadata, 0, expirySeconds)
+}
+
+func (p *OSSProvider) uploadURLWithOptions(key, contentType string, metadata map[string]string, contentLength int64, expirySeconds int) (string, error) {
 	options := []oss.Option{}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
+	}
+	if contentLength > 0 {
+		options = append(options, oss.ContentLength(contentLength))
 	}
 	for name, value := range metadata {
 		if strings.TrimSpace(name) != "" {

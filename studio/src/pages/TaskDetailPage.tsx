@@ -272,6 +272,7 @@ export default function TaskDetailPage() {
   const collectedFiles = files?.filter((file) => file.state === 'collected') ?? []
   const deliverableFiles = publishedFiles.filter((file) => file.is_deliverable === true)
   const processFiles = publishedFiles.filter((file) => file.is_deliverable !== true)
+  const hasPreservedDelivery = task?.status === 'failed' && deliverableFiles.length > 0
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -587,8 +588,9 @@ export default function TaskDetailPage() {
     )
   }
 
-  const canCancel = task.status === 'pending' || task.status === 'running'
-  const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+	const canCancel = task.status === 'pending' || task.status === 'running'
+	const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+	const canResume = task.status === 'failed' || task.status === 'cancelled'
   const failureMessage = taskFailureMessage(task)
   const currentTask = task
   const snapshot = task.project_snapshot
@@ -625,7 +627,7 @@ export default function TaskDetailPage() {
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {task?.status === 'completed' && '任务已完成'}
-        {task?.status === 'failed' && '任务失败'}
+        {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '任务失败')}
         {task?.status === 'cancelled' && '任务已取消'}
       </div>
 
@@ -709,7 +711,7 @@ export default function TaskDetailPage() {
               取消任务
             </Button>
           )}
-          {canClone && task.status !== 'failed' && (
+		  {canResume && task.status !== 'failed' && (
             <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
               <Send className="h-4 w-4" />
               继续执行
@@ -742,10 +744,19 @@ export default function TaskDetailPage() {
               <div className="flex min-w-0 items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
                 <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-foreground">{failureMessage ? '执行失败' : '任务未完成'}</h2>
-                  <p className="mt-1 break-words text-sm text-muted-foreground">
-                    {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
-                  </p>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {hasPreservedDelivery ? '续跑失败，历史交付已保留' : failureMessage ? '执行失败' : '任务未完成'}
+                  </h2>
+                  {hasPreservedDelivery ? (
+                    <>
+                      <p className="mt-1 text-sm text-muted-foreground">最新一次继续执行未完成；下方已有交付文件仍可预览和下载。</p>
+                      {failureMessage && <p className="mt-1 break-words text-xs text-muted-foreground">失败原因：{failureMessage}</p>}
+                    </>
+                  ) : (
+                    <p className="mt-1 break-words text-sm text-muted-foreground">
+                      {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
+                    </p>
+                  )}
                 </div>
               </div>
               <Button size="sm" className="shrink-0" onClick={() => setShowResumeDialog(true)}>
@@ -901,7 +912,13 @@ export default function TaskDetailPage() {
                   <h3 id="process-files-heading" className="text-xs font-medium text-muted-foreground">过程文件 ({processFiles.length})</h3>
                   <p className="mt-0.5 text-xs text-muted-foreground">保留用于预览和审计，不支持下载。</p>
                 </div>
-                <FilePreviewGallery files={processFiles} taskId={task.id} taskType={task.type} />
+                <div className="space-y-2">
+                  <FilePreviewGallery
+                    files={processFiles}
+                    taskId={task.id}
+                    taskType={task.type}
+                  />
+                </div>
               </section>
             )}
           </div>

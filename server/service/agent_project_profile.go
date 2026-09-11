@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resources"
 )
-
-const agentReferenceImageRuntimePath = ".anban-creator/reference.png"
 
 type AgentProjectProfileRequest struct {
 	UserID    string
@@ -77,6 +76,9 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	imageCapabilityKey := ""
 	if task != nil {
 		imageCapabilityKey = strings.TrimSpace(task.ImageCapabilityKey)
+		if taskUsesFrozenImageCapability(task.Type) && imageCapabilityKey == "" {
+			return nil, ErrTaskImageCapabilityMissing
+		}
 	}
 	imageCapability, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
 	if err != nil {
@@ -111,23 +113,33 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			"keywords":     agentProfileSource(usesProjectSnapshot),
 		},
 	}
-	hasReference := EffectiveReferenceAssetID(task) != ""
-	if hasReference {
-		resolvedProfile["reference_image_path"] = agentReferenceImageRuntimePath
+	hasTaskReference := taskReferenceAssetID(task) != ""
+	hasProjectStyleReference := projectStyleReferenceAssetID(task) != ""
+	if hasTaskReference {
+		resolvedProfile["task_reference_path"] = serveragent.TaskReferenceImagePath
+	}
+	if hasProjectStyleReference {
+		resolvedProfile["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
 	}
 	profile["resolved_profile"] = resolvedProfile
 
 	switch project.Platform {
 	case model.PlatformSeednote:
 		imageConfig := map[string]any{}
-		if hasReference {
-			imageConfig["reference_image_path"] = agentReferenceImageRuntimePath
+		if hasTaskReference {
+			imageConfig["task_reference_path"] = serveragent.TaskReferenceImagePath
+		}
+		if hasProjectStyleReference {
+			imageConfig["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
 		}
 		profile["image_config"] = imageConfig
 	case model.PlatformMoments:
 		imageConfig := map[string]any{"default_ratio": firstAgentProfileValue(effectiveImageRatio, "3:4")}
-		if hasReference {
-			imageConfig["reference_image_path"] = agentReferenceImageRuntimePath
+		if hasTaskReference {
+			imageConfig["task_reference_path"] = serveragent.TaskReferenceImagePath
+		}
+		if hasProjectStyleReference {
+			imageConfig["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
 		}
 		profile["image_config"] = imageConfig
 		profile["moments"] = map[string]any{
@@ -137,7 +149,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			"falsification_ban": "不伪造客户案例、成交数据、用户反馈",
 		}
 	case model.PlatformEcommerce:
-		ecommerce := map[string]any{"product_photo_dir": ".anban-creator/products"}
+		ecommerce := map[string]any{"input_attachment_index": ".anban-creator/input-attachments/index.json"}
 		if task != nil {
 			cfg := task.Ecommerce.Data()
 			ecommerce["selected_modules"] = cfg.SelectedModules

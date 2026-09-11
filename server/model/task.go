@@ -1,10 +1,56 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"gorm.io/datatypes"
 )
+
+const ImageCapabilitySnapshotSchemaVersion = 1
+
+type ImageGenerationFeaturesSnapshot struct {
+	QualityLevels      []string `json:"quality_levels,omitempty"`
+	SizePresets        []string `json:"size_presets,omitempty"`
+	DefaultSize        string   `json:"default_size,omitempty"`
+	MaxBatch           int      `json:"max_batch"`
+	MaxReferenceImages int      `json:"max_reference_images"`
+	SupportsReference  bool     `json:"supports_reference"`
+	SupportsMask       bool     `json:"supports_mask"`
+	OutputFormats      []string `json:"output_formats,omitempty"`
+	HasBackground      bool     `json:"has_background"`
+	HasCompression     bool     `json:"has_compression"`
+	Watermark          bool     `json:"watermark"`
+}
+
+// ImageCapabilitySnapshot is the immutable, credential-free generation and
+// billing route admitted for a task. Runtime credentials are resolved live,
+// while every semantic field must continue matching this snapshot.
+type ImageCapabilitySnapshot struct {
+	SchemaVersion      int                             `json:"schema_version"`
+	Key                string                          `json:"key"`
+	Provider           string                          `json:"provider"`
+	Model              string                          `json:"model"`
+	BaseURL            string                          `json:"base_url"`
+	TimeoutSeconds     int                             `json:"timeout_seconds"`
+	ResponseFormat     string                          `json:"response_format,omitempty"`
+	BillingSKU         string                          `json:"billing_sku"`
+	MinTier            string                          `json:"min_tier"`
+	GenerationFeatures ImageGenerationFeaturesSnapshot `json:"generation_features"`
+	Digest             string                          `json:"digest"`
+}
+
+func (s ImageCapabilitySnapshot) ComputedDigest() (string, error) {
+	s.Digest = ""
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
 
 // ProgressPayload mirrors the MCP update_task_progress tool schema. Persisted
 // to Task.LatestProgress at every stage transition so Studio can render the
@@ -86,18 +132,19 @@ type ProjectSnapshot struct {
 
 // Task represents a content generation task.
 type Task struct {
-	ID                    string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID                string     `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ProjectID             string     `gorm:"type:char(36);index" json:"project_id"`
-	PlanID                *string    `gorm:"type:char(36);index" json:"plan_id,omitempty"`
-	Type                  string     `gorm:"type:varchar(20);not null" json:"type"`
-	Status                string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
-	Prompt                string     `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
-	Title                 string     `gorm:"type:varchar(200)" json:"title,omitempty"`
-	ImageRatio            string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
-	ImageCapabilityKey    string     `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
-	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
-	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
+	ID                      string                                      `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID                  string                                      `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
+	ProjectID               string                                      `gorm:"type:char(36);index" json:"project_id"`
+	PlanID                  *string                                     `gorm:"type:char(36);index" json:"plan_id,omitempty"`
+	Type                    string                                      `gorm:"type:varchar(20);not null" json:"type"`
+	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
+	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
+	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
+	ImageRatio              string                                      `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
+	ImageCapabilityKey      string                                      `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
+	ImageCapabilitySnapshot datatypes.JSONType[ImageCapabilitySnapshot] `gorm:"type:json" json:"-"`
+	ReferenceImageAssetID   string                                      `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage          *AssetView                                  `gorm:"-" json:"reference_image,omitempty"`
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
 	// may reuse. It is internal ownership provenance, not a client-controlled field.
 	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
@@ -233,6 +280,10 @@ func (t *Task) SetOverrides(o StyleOverrides) {
 // SetProjectSnapshot stores a frozen project/account snapshot.
 func (t *Task) SetProjectSnapshot(s ProjectSnapshot) {
 	t.ProjectSnapshot = datatypes.NewJSONType(s)
+}
+
+func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {
+	t.ImageCapabilitySnapshot = datatypes.NewJSONType(snapshot)
 }
 
 // SnapshotProject builds the runtime snapshot for a task from the current

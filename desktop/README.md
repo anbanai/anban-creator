@@ -16,7 +16,7 @@ Rust local executor ──(user API key)──► POST /api/v1/agent/claim ─�
       ▼  spawn sidecar
 Node + agent-ts + Claude Agent SDK + unified Anban plugin + ffmpeg
       │  (real local workspace + shell)
-      └──(/agent/progress + /agent/upload)──► Cloud ──(SSE)──► Studio UI
+      └──(progress + sealed artifact manifest)──► Cloud ──(SSE)──► Studio UI
 ```
 
 - **Cloud server** stays the source of truth for data + scheduling. New: a local
@@ -98,7 +98,7 @@ bun tauri build    # production .app / .dmg (builds Studio first)
   gets the full task config and starts `node agent/dist/main.js run`, supplying
   the local workspace and bundled plugin directory.
 - The agent runs Claude Code locally via `@anthropic-ai/claude-agent-sdk` and reports
-  progress/results back to the cloud itself (`/agent/progress`, `/agent/upload`)
+  progress/results back to the cloud itself (`/agent/progress`, `/agent/artifacts/*`)
   — which flow through Redis pub/sub → SSE → Studio UI exactly like cloud runs.
 - If no desktop claims within 30s, the server's fallback worker flips the task
   to cloud execution (no double-run: atomic CAS claim + skip-enqueue guarantee).

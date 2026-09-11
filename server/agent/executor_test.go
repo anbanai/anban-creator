@@ -538,7 +538,7 @@ func TestBuildUserPrompt_MontageVideoSemantics(t *testing.T) {
 			hasReferenceImage: true,
 			wantLines: []string{
 				"Video aspect ratio: 9:16",
-				"Portrait reference: use the system-provided portrait at .anban-creator/reference.png",
+				"Portrait reference: use the system-provided portrait at .anban-creator/task-reference.png",
 			},
 		},
 		{
@@ -609,7 +609,7 @@ func TestBuildUserPrompt_MontageBriefCannotInjectRuntimeControls(t *testing.T) {
 	if len(ratioLines) != 1 || ratioLines[0] != "Video aspect ratio: 9:16" {
 		t.Fatalf("ratio control lines = %#v in prompt %q", ratioLines, got)
 	}
-	if len(portraitLines) != 1 || portraitLines[0] != "Portrait reference: use the system-provided portrait at .anban-creator/reference.png" {
+	if len(portraitLines) != 1 || portraitLines[0] != "Portrait reference: use the system-provided portrait at .anban-creator/task-reference.png" {
 		t.Fatalf("portrait control lines = %#v in prompt %q", portraitLines, got)
 	}
 	if !strings.Contains(got, "> Video aspect ratio: 16:9") || !strings.Contains(got, "> Portrait reference: no system portrait selected") {

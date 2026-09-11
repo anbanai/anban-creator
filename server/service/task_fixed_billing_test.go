@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -21,12 +21,33 @@ func newFixedTaskBillingFixture(t *testing.T, paid, debt int64) (*TaskService, *
 	f := newBillingWalletFixture(t, paid, 0, debt)
 	enqueuer := &mockEnqueuer{}
 	logger := zerolog.New(io.Discard)
-	store := &fakeTaskStorage{files: map[string][]byte{}}
-	svc := newTestTaskService(f.repo, enqueuer, store, &logger, "", nil, nil)
+	svc := newTestTaskService(f.repo, enqueuer, nil, &logger, "", nil, nil)
 	svc.SetBillingCatalogService(f.catalog)
 	svc.SetBillingWalletService(f.wallet)
 	svc.SetNASResumeEnabled(true)
 	return svc, f, enqueuer
+}
+
+func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *fakeTaskStorage, task *model.Task, executionID string) {
+	t.Helper()
+	for _, spec := range []struct {
+		path, mimeType, role string
+	}{
+		{path: "output/04-article-final.md", mimeType: "text/markdown", role: model.FileRoleFinalMarkdown},
+		{path: "output/05-article.html", mimeType: "text/html", role: model.FileRoleHTML},
+		{path: "output/final-review.md", mimeType: "text/markdown", role: model.FileRoleReview},
+	} {
+		body := []byte("validated delivery: " + spec.path)
+		objectKey := buildTaskMCPArtifactStoragePrefix(task, executionID) + spec.path
+		store.files[objectKey] = body
+		if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+			TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: spec.role,
+			FileName: filepath.Base(spec.path), FilePath: spec.path, MimeType: spec.mimeType,
+			FileSize: int64(len(body)), OSSKey: objectKey, StorageProvider: store.Name(),
+		}); err != nil {
+			t.Fatalf("create durable published delivery %s: %v", spec.path, err)
+		}
+	}
 }
 
 func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
@@ -269,16 +290,20 @@ func seedHistoricalManagedLocalExecution(t *testing.T, f *billingWalletFixture, 
 	execution := &profiledExecution
 	execution.ID = uuid.NewString()
 	execution.TaskID = task.ID
-	execution.Attempt = 1
+	attempt, err := f.repo.TaskExecutions().NextAttempt(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("allocate historical local attempt: %v", err)
+	}
+	execution.Attempt = attempt
 	execution.Target = model.ExecutionTargetLocalClaimed
 	execution.Status = model.TaskExecutionRunning
 	execution.Started = true
 	execution.StartedAt = &now
 	execution.RuntimeProfile = "local"
-	execution.AgentPackID = "article"
-	execution.AgentPackVersion = "test"
-	execution.AgentPackDigest = strings.Repeat("a", 64)
-	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"draft","path":"output/partial.md","mime_type":"text/markdown"}]`)
+	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+		t.Fatalf("freeze historical local execution Pack: %v", err)
+	}
+	execution.RuntimeProfile = "local"
 	if err := f.repo.TaskExecutions().Create(ctx, execution); err != nil {
 		t.Fatalf("create historical local execution: %v", err)
 	}
@@ -369,6 +394,8 @@ func TestConcurrentIdenticalLocalFailureEnqueuesOneBillingSettlement(t *testing.
 func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	store := &fakeTaskStorage{files: make(map[string][]byte)}
+	svc.store = store
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
@@ -377,21 +404,21 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 		t.Fatalf("CreateManual: %v", err)
 	}
 	task := tasks[0]
+	now := time.Now()
+	priorExecution := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: model.ExecutionTargetCloud,
+		Status: model.TaskExecutionSucceeded, Started: true, StartedAt: &now, CompletedAt: &now,
+		ManifestStatus: model.TaskExecutionManifestPublished, ManifestSealed: true,
+		FinalizationStatus: model.TaskExecutionFinalizationDone,
+	}
+	if err := applyAgentPackIdentity(priorExecution, task.Type); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.TaskExecutions().Create(ctx, priorExecution); err != nil {
+		t.Fatal(err)
+	}
+	addDurableArticleDelivery(t, f.repo, store, task, priorExecution.ID)
 	seedHistoricalManagedLocalExecution(t, f, task)
-	content := "partial data"
-	key := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + "output/partial.md"
-	uploaded, err := svc.store.Upload(ctx, key, strings.NewReader(content), "text/markdown")
-	if err != nil {
-		t.Fatalf("upload durable partial output: %v", err)
-	}
-	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
-		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: *task.CurrentExecutionID,
-		State: model.TaskFileStatePublished, Role: model.FileRoleDraft,
-		FileName: "partial.md", FilePath: "output/partial.md", MimeType: "text/markdown",
-		FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL, StorageProvider: svc.store.Name(),
-	}); err != nil {
-		t.Fatalf("create durable partial output: %v", err)
-	}
 	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, &agent.ExecutionResult{
 		Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
 	}); err != nil {
@@ -402,5 +429,39 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	}
 	if account := f.account(t, billingWalletUserID); account.PaidCredits != 500 {
 		t.Fatalf("paid credits=%d, want original charge retained", account.PaidCredits)
+	}
+}
+
+func TestLocalTaskTerminalBillingReversesForPublishedFileWithoutSuccessfulExecution(t *testing.T) {
+	ctx := context.Background()
+	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	store := &fakeTaskStorage{files: make(map[string][]byte)}
+	svc.store = store
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	task := tasks[0]
+	seedHistoricalManagedLocalExecution(t, f, task)
+	body := []byte("# Uncommitted delivery\n")
+	objectKey := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + "output/04-article-final.md"
+	store.files[objectKey] = body
+	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: task.ID, ExecutionID: *task.CurrentExecutionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown,
+		FileName: "04-article-final.md", FilePath: "output/04-article-final.md", MimeType: "text/markdown",
+		FileSize: int64(len(body)), OSSKey: objectKey, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, &agent.ExecutionResult{
+		Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
+	}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+	if _, err := f.repo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", *task.BillingChargeID); err != nil {
+		t.Fatalf("incomplete execution did not enqueue reversal: %v", err)
 	}
 }

@@ -154,18 +154,6 @@ func buildTaskStorageKey(userID, taskID, relPath string) string {
 	return fmt.Sprintf("%s/%s/%s", userID, taskID, filepath.ToSlash(relPath))
 }
 
-// UploadTaskFileFromReader uploads one task output file and persists its metadata.
-// If the same path already exists with identical content, the existing record is
-// returned. If the path exists with new content, the storage object and DB row
-// are overwritten so resumed tasks can refresh their deliverables.
-func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
-	task, err := s.ValidateAgentTaskAccess(ctx, taskID, userID)
-	if err != nil {
-		return nil, err
-	}
-	return s.uploadTaskFileFromReader(ctx, task, taskID, userID, "", relPath, reader, mimeType, fileSize, nil, taskFileUploadOptions{})
-}
-
 // UploadExecutionTaskFileFromReader persists an MCP-produced artifact as part
 // of the current cloud attempt. It remains pending until the durable execution
 // finalizer publishes the complete attempt artifact set.

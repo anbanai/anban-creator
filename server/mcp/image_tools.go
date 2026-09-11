@@ -31,47 +31,40 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload an absolute server-local file path or a task-relative file_path owned by the current task execution to WeChat CDN or configured storage. Agent client working-directory paths are not server-local paths. Returns upload metadata.",
+		Description: "Upload a task-relative image file owned by the current task execution to WeChat CDN or configured storage. Returns upload metadata.",
 		InputSchema: map[string]any{
-			"type": "object",
+			"type":                 "object",
+			"additionalProperties": false,
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
-				"file_path":  map[string]any{"type": "string", "description": "Absolute server-local path or task-relative path returned by an image tool"},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID required when file_path is task-relative"},
+				"file_path":  map[string]any{"type": "string", "description": "Task-relative path returned by an image tool for the current execution"},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID that owns the image"},
 			},
-			"required": []any{"project_id", "file_path"},
+			"required": []any{"project_id", "task_id", "file_path"},
 		},
 	}, uploadImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "compress_image",
-		Description: "Compress an absolute server-local image file (resize and re-encode). The path is not the agent client's current working directory. Returns the server-local path to the compressed file. No credit deduction; task_id only associates and authorizes the operation.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"file_path": map[string]any{"type": "string", "description": "Server-local file path of the image to compress"},
-				"max_width": map[string]any{"type": "integer", "description": "Maximum width in pixels (0 = use server default)", "default": 0},
-				"task_id":   map[string]any{"type": "string", "description": "Optional task ID used to associate and authorize the operation"},
-			},
-			"required": []any{"file_path"},
-		},
+		Description: "Compress one authorized task-relative image for the current execution and register the result as a durable task file. No server-local path is accepted or returned.",
+		InputSchema: compressImageInputSchema(),
 	}, compressImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "download_image",
-		Description: "Download one image URL to a server-local file and return its file_path.",
+		Description: "Download one public HTTPS raster image with bounded network access and register it as a durable task-relative file for the current execution.",
 		InputSchema: downloadImageInputSchema(),
 	}, downloadImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_image",
-		Description: "Analyze an HTTPS image URL, an absolute server-local image file, or a task-relative file owned by the current task execution with the configured image-understanding model route. Returns the AI analysis and usage; file_path analysis is limited to 10MB.",
+		Description: "Analyze an HTTPS image URL or an authorized task-relative image with the configured image-understanding model route. Task-relative paths may identify a current/published task image, a frozen task input image, or the task reference path. Returns the AI analysis and usage; file_path analysis is limited to 10MB.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines model route context)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
-				"file_path":  map[string]any{"type": "string", "description": "Absolute server-local path, or a task-relative path registered to the current execution when task_id is provided; limited to 10MB"},
+				"file_path":  map[string]any{"type": "string", "description": "Authorized task-relative image path; task_id is required; limited to 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task ID to associate the image-understanding credit charge with"},
 			},
@@ -235,6 +228,9 @@ func categorizeImageGenFailure(err error, refPath string) string {
 }
 
 func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("upload_image request parameters are required"), nil
+	}
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
@@ -250,6 +246,9 @@ func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 }
 
 func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("compress_image request parameters are required"), nil
+	}
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
@@ -259,8 +258,8 @@ func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		maxWidth = int(v)
 	}
 	result, err := svcs.TaskImageOperationsSvc.Compress(ctx, service.CompressTaskImageRequest{
-		UserID: getUserID(ctx), TaskID: stringArg(args, "task_id"),
-		FilePath: stringArg(args, "file_path"), MaxWidth: maxWidth,
+		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), TaskID: stringArg(args, "task_id"),
+		InputPath: stringArg(args, "input_path"), OutputPath: stringArg(args, "output_path"), MaxWidth: maxWidth,
 	})
 	if err != nil {
 		return errorResult(err.Error()), nil
@@ -305,8 +304,8 @@ func generateImageInputSchema() map[string]any {
 			"image_type":      map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Semantic asset role"},
 			"output_path":     map[string]any{"type": "string", "description": "Task-relative output path, such as output/cover.png"},
 			"aspect_ratio":    map[string]any{"type": "string", "description": "Concrete business aspect ratio such as 3:4, 16:9, or 1:1; auto and pixel sizes are not accepted"},
-			"ref_image_path":  map[string]any{"type": "string", "description": "Optional single task or server-local reference image path"},
-			"ref_image_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional ordered reference image paths"},
+			"ref_image_path":  map[string]any{"type": "string", "description": "Optional single authorized task-relative reference image path"},
+			"ref_image_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional ordered authorized task-relative reference image paths"},
 			"watermark":       map[string]any{"type": "boolean", "description": "Whether the generated image should include a watermark", "default": false},
 		},
 		"required": []any{"project_id", "task_id", "prompt", "output_path", "aspect_ratio"},
@@ -332,34 +331,51 @@ func cropImageInputSchema() map[string]any {
 	}
 }
 
+func compressImageInputSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"task_id":    map[string]any{"type": "string", "description": "Task that owns the input and output images"},
+			"input_path": map[string]any{"type": "string", "description": "Authorized task-relative input image path"},
+			"output_path": map[string]any{
+				"type": "string", "description": "Distinct task-relative output image path with the same image format as the input",
+			},
+			"max_width": map[string]any{"type": "integer", "minimum": 0, "maximum": 8192, "description": "Maximum width in pixels (0 = server default)", "default": 0},
+		},
+		"required": []any{"task_id", "input_path", "output_path"},
+	}
+}
+
 func downloadImageInputSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
-			"project_id": map[string]any{"type": "string", "description": "Project ID used to resolve image download settings"},
-			"url":        map[string]any{"type": "string", "description": "Image URL to download"},
+			"project_id": map[string]any{"type": "string", "description": "Project that owns the task"},
+			"task_id":    map[string]any{"type": "string", "description": "Task that will own the downloaded image"},
+			"url":        map[string]any{"type": "string", "description": "Public HTTPS raster image URL"},
+			"output_path": map[string]any{
+				"type": "string", "description": "Task-relative output path whose extension matches the downloaded image format",
+			},
 		},
-		"required": []any{"project_id", "url"},
+		"required": []any{"project_id", "task_id", "url", "output_path"},
 	}
 }
 
 func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.ImageSvc == nil {
+	if req == nil || req.Params == nil {
+		return errorResult("download_image request parameters are required"), nil
+	}
+	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	url, _ := args["url"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	if url == "" {
-		return errorResult("url is required"), nil
-	}
-
-	result, err := svcs.ImageSvc.DownloadImage(ctx, projectID, url)
+	result, err := svcs.TaskImageOperationsSvc.Download(ctx, service.DownloadTaskImageRequest{
+		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx),
+		ProjectID: stringArg(args, "project_id"), TaskID: stringArg(args, "task_id"),
+		URL: stringArg(args, "url"), OutputPath: stringArg(args, "output_path"),
+	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("download image: %v", err)), nil
 	}
@@ -368,6 +384,9 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("analyze_image request parameters are required"), nil
+	}
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image understanding service not available"), nil
 	}

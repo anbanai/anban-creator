@@ -112,9 +112,9 @@ func (s *TaskService) finalizePendingDispatchFailure(task *model.Task, dispatchE
 }
 
 func (s *TaskService) preparePendingExecution(ctx context.Context, task *model.Task) (*model.Asset, pendingExecutionPreparation, error) {
-	referenceAsset, err := resolveEffectiveReferenceAsset(ctx, s.repo, task)
+	taskReferenceAsset, _, err := resolveRuntimeReferenceAssets(ctx, s.repo, task)
 	if err == nil {
-		return referenceAsset, pendingExecutionReady, nil
+		return taskReferenceAsset, pendingExecutionReady, nil
 	}
 	wrapped := fmt.Errorf("resolve reference asset: %w", err)
 	persistCtx, cancel := context.WithTimeout(context.Background(), s.persistTimeout)

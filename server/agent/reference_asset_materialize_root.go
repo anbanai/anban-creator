@@ -77,7 +77,7 @@ func materializeReferenceAssetWithRoot(ctx context.Context, workDir string, data
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := dir.Rename(tmpName, referenceImageFileName); err != nil {
+	if err := dir.Rename(tmpName, taskReferenceImageFileName); err != nil {
 		return fmt.Errorf("replace reference asset: %w", err)
 	}
 	return nil

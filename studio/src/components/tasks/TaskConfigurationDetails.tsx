@@ -81,6 +81,12 @@ function formatTokenCount(value: string | undefined): string | undefined {
   return BigInt(value).toLocaleString()
 }
 
+function knownImageCapabilityName(key: string): string | undefined {
+  if (key === 'standard') return '标准图像'
+  if (key === 'professional') return '专业增强'
+  return undefined
+}
+
 function AgentProfileDetails({ task }: { task: Task }) {
   const snapshot = task.agent_profile_snapshot
   if (!snapshot) return null
@@ -113,11 +119,11 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
     : task.overrides?.visual_style || project?.visual_style || '—'
   const imageRatio = task.image_ratio
     || (hasSnapshot ? snapshot?.image_ratio || '—' : project?.image_ratio || '—')
-  const imageCapabilityKey = task.image_capability_key
-    || (hasSnapshot
-      ? snapshot?.ecommerce_defaults?.image_capability_key || '—'
-      : project?.ecommerce_defaults?.image_capability_key || '—')
+  const imageCapabilityKey = task.image_capability_key?.trim().toLowerCase() ?? ''
   const imageCapability = imageCapabilities.find((option) => option.key === imageCapabilityKey)
+  const imageCapabilityFallback = imageCapabilityKey === ''
+    ? '配置无效（图像能力未固化）'
+    : knownImageCapabilityName(imageCapabilityKey) || '已停用能力'
   const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
   const ratioLabel = platform === 'montage' ? '视频比例' : '图片比例'
 
@@ -138,7 +144,9 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
           <Detail label={ratioLabel} value={imageRatio} />
           <div className="flex min-w-0 flex-col gap-1">
             <dt className="text-xs text-muted-foreground">图像能力</dt>
-            <dd className="break-words text-sm text-foreground"><ImageCapabilityDisplay option={imageCapability} fallback={imageCapabilityKey === '—' || imageCapabilityKey === '' ? '标准图像' : '已停用能力'} /></dd>
+            <dd className="flex min-w-0 flex-col gap-1 break-words text-sm text-foreground">
+              <ImageCapabilityDisplay option={imageCapability} fallback={imageCapabilityFallback} />
+            </dd>
           </div>
         </dl>
       </section>

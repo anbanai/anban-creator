@@ -248,6 +248,20 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 			manifest: strings.Replace(validFixtureManifest, "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", "delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text", 1),
 			want:     "invalid MIME type",
 		},
+		{
+			name: "exact delivery overlaps glob",
+			manifest: strings.Replace(validFixtureManifest,
+				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown",
+				"delivery:\n  - role: documents\n    path: output/*.md\n    mime_type: text/markdown\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown", 1),
+			want: "overlapping delivery paths",
+		},
+		{
+			name: "delivery globs overlap",
+			manifest: strings.Replace(validFixtureManifest,
+				"delivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown",
+				"delivery:\n  - role: images\n    path: output/image_*.png\n    mime_type: image/png\n  - role: first-image\n    path: output/*_01.png\n    mime_type: image/png", 1),
+			want: "overlapping delivery paths",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -257,6 +271,16 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadCatalogRejectsDuplicateArtifactPaths(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest,
+		"artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true",
+		"artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true\n  - role: duplicate\n    path: output/final.md\n    mime_type: text/markdown\n    required: true", 1)
+	root := writePackFixture(t, manifest)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "duplicate artifact path") {
+		t.Fatalf("LoadCatalog error = %v, want duplicate artifact path", err)
 	}
 }
 

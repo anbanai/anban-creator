@@ -49,6 +49,131 @@ func parseExecutorMeta(raw []byte) (model.ExecutorMeta, error) {
 // elapses when no desktop is online.
 const LocalClaimWindow = 30 * time.Second
 
+// ReapStaleLocalExecutions owns recovery for desktop executions. Local attempts
+// have no provider workload and must never be inspected by RuntimeReconciler.
+// The hard deadline is the same configured execution timeout used by the local
+// runner; heartbeatTimeout detects a disappeared desktop before that deadline.
+func (s *TaskService) ReapStaleLocalExecutions(ctx context.Context, now time.Time, heartbeatTimeout time.Duration, limit int) (int, error) {
+	if s == nil || s.repo == nil {
+		return 0, errors.New("task service repository is not configured")
+	}
+	if heartbeatTimeout <= 0 {
+		return 0, errors.New("local execution heartbeat timeout must be positive")
+	}
+	activeDeadline := s.executionTimeout
+	if activeDeadline <= 0 {
+		activeDeadline = 60 * time.Minute
+	}
+	heartbeatBefore := now.Add(-heartbeatTimeout)
+	createdBefore := now.Add(-activeDeadline)
+	candidates, err := s.repo.TaskExecutions().FindLocalReconcileCandidates(ctx, heartbeatBefore, createdBefore, limit)
+	if err != nil {
+		return 0, fmt.Errorf("find local execution reconcile candidates: %w", err)
+	}
+	reaped := 0
+	var reconcileErr error
+	for _, execution := range candidates {
+		if execution == nil {
+			continue
+		}
+		if isTerminalExecution(execution.Status) {
+			if err := s.ResumeExecutionFinalization(ctx, execution.ID); err != nil && !errors.Is(err, ErrStaleTaskExecution) {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("resume local execution %s finalization: %w", execution.ID, err))
+			}
+			continue
+		}
+		won, err := s.reapStaleLocalExecution(ctx, execution.ID, heartbeatBefore, createdBefore)
+		if err != nil {
+			reconcileErr = errors.Join(reconcileErr, fmt.Errorf("reap local execution %s: %w", execution.ID, err))
+			continue
+		}
+		if won {
+			reaped++
+		}
+	}
+	return reaped, reconcileErr
+}
+
+func (s *TaskService) reapStaleLocalExecution(ctx context.Context, executionID string, heartbeatBefore, createdBefore time.Time) (bool, error) {
+	const message = "local execution timed out after its heartbeat or active deadline expired"
+	result := normalizeTerminalExecutionResult(nil)
+	result.Error = message
+	result.TerminalReason = model.TaskBillingTerminalExecutionTimeout
+	result.RemoteArtifacts = true
+	taskResult, executionResult, err := marshalLocalCompletionEvidence(result)
+	if err != nil {
+		return false, err
+	}
+
+	durableDelivery := false
+	if candidate, findErr := s.repo.TaskExecutions().FindByID(ctx, executionID); findErr == nil {
+		durableDelivery, err = s.taskHasDurableDelivery(ctx, candidate.TaskID)
+		if err != nil {
+			return false, fmt.Errorf("inspect durable local task delivery: %w", err)
+		}
+	} else {
+		return false, findErr
+	}
+
+	var task *model.Task
+	var execution *model.TaskExecution
+	won := false
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		var lockErr error
+		execution, lockErr = tx.TaskExecutions().FindByIDForUpdate(ctx, executionID)
+		if errors.Is(lockErr, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if lockErr != nil {
+			return lockErr
+		}
+		task, lockErr = tx.Tasks().FindByIDForUpdate(ctx, execution.TaskID)
+		if errors.Is(lockErr, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if lockErr != nil {
+			return lockErr
+		}
+		if task.Status != model.TaskStatusRunning || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
+			task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID ||
+			execution.Target != model.ExecutionTargetLocalClaimed || execution.Status != model.TaskExecutionRunning ||
+			!localExecutionExpired(execution, heartbeatBefore, createdBefore) {
+			return nil
+		}
+		won, lockErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed,
+			message, taskResult, executionResult, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsCollect)
+		if lockErr != nil || !won {
+			return lockErr
+		}
+		billingExecution := &model.TaskExecution{ID: execution.ID, Status: model.TaskExecutionTimedOut, TerminalReason: model.TaskBillingTerminalExecutionTimeout}
+		return s.persistTerminalBillingInTx(ctx, tx, task, billingExecution, model.TaskBillingTerminalExecutionTimeout, durableDelivery)
+	})
+	if err != nil || !won {
+		return false, err
+	}
+	task.Status = model.TaskStatusFailed
+	task.ErrorMessage = message
+	execution.Status = model.TaskExecutionFailed
+	execution.TerminalReason = message
+	execution.Result = []byte(executionResult)
+	execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+	execution.CleanupStatus = model.TaskExecutionCleanupDone
+	if err := s.finalizeLocalTaskFromExecution(ctx, task, execution); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func localExecutionExpired(execution *model.TaskExecution, heartbeatBefore, createdBefore time.Time) bool {
+	if execution == nil || !execution.CreatedAt.After(createdBefore) {
+		return execution != nil
+	}
+	if execution.LastHeartbeatAt != nil {
+		return !execution.LastHeartbeatAt.After(heartbeatBefore)
+	}
+	return execution.StartedAt != nil && !execution.StartedAt.After(heartbeatBefore)
+}
+
 // LocalExecutionConfig is the full task config returned to a desktop local
 // executor on a successful claim. The desktop builds the anban run argv
 // from this (matching the managed bootstrap defaults) and supplies
@@ -72,6 +197,8 @@ type LocalExecutionConfig struct {
 	ArticleWithCover         bool   `json:"article_with_cover"`
 	ArticleWithContentImages bool   `json:"article_with_content_images"`
 	ProjectID                string `json:"project_id"`
+	ExecutionToken           string `json:"execution_token"`
+	ArtifactUploadMode       string `json:"artifact_upload_mode"`
 }
 
 // ClaimLocalTask atomically claims the oldest pending local-target task owned
@@ -83,8 +210,8 @@ type LocalExecutionConfig struct {
 //
 // On a successful claim the task is already status=running +
 // execution_target=local_claimed, so cloud Asynq will never pick it up. The
-// claiming desktop then spawns anban, which reports progress and completion
-// back through the existing /api/v1/agent/progress + /agent/upload endpoints.
+// claiming desktop then spawns anban, which reports progress and a sealed
+// execution-scoped artifact manifest before completion.
 func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo string) (*LocalExecutionConfig, error) {
 	info, err := parseExecutorMeta([]byte(executorInfo))
 	if err != nil {
@@ -102,6 +229,9 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 		claimed, err := tx.Tasks().ClaimNextLocalTask(ctx, userID, canonical)
 		if err != nil || claimed == nil {
 			task = claimed
+			return err
+		}
+		if err := s.validateFrozenTaskImageCapability(ctx, claimed); err != nil {
 			return err
 		}
 		if hasManagedAgentProfile(claimed) {
@@ -177,6 +307,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task, execution *mod
 		ArticleWithCover:         task.ArticleWithCover == nil || *task.ArticleWithCover,
 		ArticleWithContentImages: task.ArticleWithContentImages == nil || *task.ArticleWithContentImages,
 		ProjectID:                task.ProjectID,
+		ArtifactUploadMode:       "stream",
 	}
 	if execution != nil {
 		config.ExecutionID = execution.ID
@@ -238,8 +369,8 @@ func (s *TaskService) ReclaimExpiredLocalTasks(ctx context.Context) (int, error)
 //
 // Key difference from cloud: a local task's WorkDir lives on the desktop, so
 // the server cannot host-side upload files or extract the article draft. The
-// desktop agent uploads its output files via /agent/upload and publishes via the
-// MCP publish tool itself. Therefore this path does NOT perform server-side
+// desktop agent uploads its output files through the execution-scoped artifact
+// protocol and may publish through the MCP tool itself. Therefore this path does NOT perform server-side
 // auto-publish / hold-for-approval (a cloud-WorkDir-only fallback); if the agent
 // did not publish and the project requires publishing, it logs a warning for the
 // operator instead of silently skipping.
@@ -259,7 +390,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	if task.ExecutionTarget != model.ExecutionTargetLocalClaimed || executionID == "" || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
 		return ErrStaleTaskExecution
 	}
-	outcome, err := s.localCompletionOutcome(ctx, task, result)
+	outcome, err := s.localCompletionOutcome(ctx, task, executionID, result)
 	if err != nil {
 		return err
 	}
@@ -291,7 +422,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsPublish)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}
@@ -323,7 +454,7 @@ type localCompletionOutcome struct {
 	artifactValidation *agent.ArtifactValidation
 }
 
-func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Task, submitted *agent.ExecutionResult) (*localCompletionOutcome, error) {
+func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Task, executionID string, submitted *agent.ExecutionResult) (*localCompletionOutcome, error) {
 	result, err := cloneTerminalExecutionResult(submitted)
 	if err != nil {
 		return nil, err
@@ -351,7 +482,17 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 	if agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		return failure(model.TaskBillingTerminalPlatformError, agent.NestedAgentDelegationError), nil
 	}
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("local complete: find execution: %w", err)
+	}
+	if execution.TaskID != task.ID || execution.Target != model.ExecutionTargetLocalClaimed {
+		return nil, ErrStaleTaskExecution
+	}
+	if !execution.ManifestSealed {
+		return failure(model.TaskBillingTerminalPlatformError, "artifact manifest is not sealed"), nil
+	}
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if err != nil {
 		return nil, fmt.Errorf("local complete: list task files: %w", err)
 	}
@@ -360,6 +501,15 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 		validation = validateMontageCompletionArtifacts(files)
 	}
 	if !validation.Valid {
+		outcome := failure(model.TaskBillingTerminalPlatformError, validation.Error())
+		outcome.artifactValidation = &validation
+		return outcome, nil
+	}
+	if deliveryErr := s.validateExecutionDelivery(ctx, task.ID, execution, files); deliveryErr != nil {
+		if !errors.Is(deliveryErr, ErrTaskDeliveryObjectInvalid) && !errors.Is(deliveryErr, ErrTaskDeliveryContractUnavailable) {
+			return nil, deliveryErr
+		}
+		validation = agent.ArtifactValidation{Reason: "delivery validation failed: " + deliveryErr.Error()}
 		outcome := failure(model.TaskBillingTerminalPlatformError, validation.Error())
 		outcome.artifactValidation = &validation
 		return outcome, nil
@@ -471,7 +621,7 @@ func (s *TaskService) confirmLocalCompletionAfterCASLoss(ctx context.Context, ta
 	return s.confirmLocalCompletionRetry(ctx, task, executionID, outcome)
 }
 
-func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution, userID string) error {
+func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
 	if task == nil || execution == nil || task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
 		return ErrStaleTaskExecution
 	}
@@ -487,26 +637,13 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 	}
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		locked, err := tx.Tasks().FindByID(ctx, task.ID)
-		if err != nil {
-			return err
-		}
-		if userID != "" && locked.UserID != userID {
-			return fmt.Errorf("task not found")
-		}
-		if locked.CurrentExecutionID == nil || *locked.CurrentExecutionID != execution.ID {
-			return ErrStaleTaskExecution
-		}
-		current, err := tx.TaskExecutions().FindByID(ctx, execution.ID)
-		if err != nil {
-			return err
-		}
-		if current.Target != model.ExecutionTargetLocalClaimed {
-			return fmt.Errorf("local cancellation requires local_claimed execution")
-		}
-		swapped, err = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消", resultJSON, executionResultJSON, nil, "")
-		if err != nil || !swapped {
-			return err
+		var finalizeErr error
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(
+			ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消",
+			resultJSON, executionResultJSON, nil, "", repository.LocalTaskArtifactsCollect,
+		)
+		if finalizeErr != nil || !swapped {
+			return finalizeErr
 		}
 		return tx.Tasks().UpdateBillingTerminalReason(ctx, task.ID, model.TaskBillingTerminalUserCancelled)
 	})
@@ -552,7 +689,7 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsCollect)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}

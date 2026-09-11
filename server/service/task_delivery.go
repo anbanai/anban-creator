@@ -32,12 +32,8 @@ var ErrNoDownloadableDeliveryFiles = errors.New("no downloadable delivery files 
 var ErrTaskDeliveryContractUnavailable = errors.New("task delivery contract is unavailable")
 var ErrTaskDeliveryObjectInvalid = errors.New("task delivery object is invalid")
 
-const (
-	maxTaskDeliveryImageBytes     int64 = 25 << 20
-	maxTaskDeliveryJSONBytes      int64 = 8 << 20
-	maxTaskDeliveryImageDimension       = 16384
-	maxTaskDeliveryImagePixels    int64 = 40_000_000
-)
+const maxTaskDeliveryImageBytes int64 = 25 << 20
+const maxTaskDeliveryJSONBytes int64 = 8 << 20
 
 func normalizedMediaType(value string) string {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
@@ -206,8 +202,8 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 	if err != nil || actualMIME != expectedMIME || deliveryImageFormatMIME(format) != expectedMIME {
 		return fmt.Errorf("%w: %s does not contain a decodable %s image", ErrTaskDeliveryObjectInvalid, file.FilePath, expectedMIME)
 	}
-	if config.Width <= 0 || config.Height <= 0 || config.Width > maxTaskDeliveryImageDimension || config.Height > maxTaskDeliveryImageDimension ||
-		int64(config.Width)*int64(config.Height) > maxTaskDeliveryImagePixels {
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxTaskImageDimension || config.Height > maxTaskImageDimension ||
+		int64(config.Width)*int64(config.Height) > maxTaskImageDecodedPixels {
 		return fmt.Errorf("%w: %s image dimensions %dx%d exceed safety limits", ErrTaskDeliveryObjectInvalid, file.FilePath, config.Width, config.Height)
 	}
 	if file.ContentHash != "" {

@@ -66,7 +66,7 @@ func TestTaskDeleteSurfacesWorkspaceIdentityMismatch(t *testing.T) {
 }
 
 func TestTaskDeleteAbortsWhileRuntimePreparationIsInFlight(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	ctx := context.Background()
 	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionDispatching, model.ExecutionTransition{}); err != nil || !won {

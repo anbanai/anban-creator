@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,6 +58,37 @@ func listRegisteredTools(t *testing.T, register func(*mcp.Server)) []*mcp.Tool {
 	return result.Tools
 }
 
+func TestUploadImageSchemaRequiresTaskOwnershipAndRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+	for _, tool := range listRegisteredTools(t, registerImageTools) {
+		if tool.Name != "upload_image" {
+			continue
+		}
+		schema, ok := tool.InputSchema.(map[string]any)
+		if !ok {
+			t.Fatalf("upload_image schema = %T, want map", tool.InputSchema)
+		}
+		if additional, ok := schema["additionalProperties"].(bool); !ok || additional {
+			t.Fatalf("upload_image additionalProperties = %#v, want false", schema["additionalProperties"])
+		}
+		required, _ := schema["required"].([]any)
+		for _, field := range []string{"project_id", "task_id", "file_path"} {
+			found := false
+			for _, value := range required {
+				if value == field {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("upload_image required = %#v, missing %q", required, field)
+			}
+		}
+		return
+	}
+	t.Fatal("upload_image tool not found")
+}
+
 func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectService, repository.Repository, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "account_info_test.db")
@@ -71,6 +103,7 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 	logger := zerolog.Nop()
 	projectSvc := service.NewProjectService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, nil, nil, &logger, "", nil, nil)
+	taskSvc.SetImageCapabilityResolver(accountInfoImageCapabilityResolver())
 	planSvc := service.NewPlanService(repo, &logger)
 	profileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), srvconfig.MontageConfig{}, accountInfoImageCapabilityResolver())
 
@@ -96,6 +129,8 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectS
 func accountInfoImageCapabilityResolver() *service.ImageCapabilityResolver {
 	capability := func(sizes ...string) srvconfig.ImageGenerationRouteConfig {
 		return srvconfig.ImageGenerationRouteConfig{
+			Provider: "openai-test", Model: "image-test", BaseURL: "https://images.invalid/v1",
+			APIKey: "test-secret", Timeout: time.Minute, BillingSKU: "image.standard",
 			Enabled: true, MinTier: "free",
 			GenerationFeatures: srvconfig.ImageGenerationFeatures{SizePresets: sizes},
 		}
@@ -148,16 +183,24 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 	userID := uuid.NewString()
 	project := createAccountInfoProject(t, repo, userID, "")
 	task := createAccountInfoTask(t, repo, userID, project.ID, "")
+	// File listing uses the execution's frozen delivery contract. Move this
+	// fixture into a running execution state before attaching its files.
+	if err := repo.Tasks().UpdateStatus(context.Background(), task.ID, model.TaskStatusRunning); err != nil {
+		t.Fatal(err)
+	}
 	executionID := uuid.NewString()
 	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
-		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionSucceeded,
-		AgentPackID: "seednote", AgentPackVersion: "test", AgentPackDigest: strings.Repeat("a", 64),
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionRunning,
+		AgentPackID: "seednote", AgentPackVersion: "1.0.1", AgentPackDigest: strings.Repeat("f", 64),
 		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if ok, err := repo.Tasks().SetCurrentExecution(context.Background(), task.ID, executionID); err != nil || !ok {
+		t.Fatalf("set current execution = %v, %v", ok, err)
+	}
 	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "running", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/pending.md", FileName: "pending.md"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "old", State: model.TaskFileStateSuperseded, Role: model.FileRoleOther, FilePath: "output/old.md", FileName: "old.md"},
@@ -259,10 +302,21 @@ func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, pro
 	if visualStyle != "" {
 		task.SetOverrides(model.StyleOverrides{VisualStyle: visualStyle})
 	}
+	freezeAccountInfoTaskImageCapability(t, task, "")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	return task
+}
+
+func freezeAccountInfoTaskImageCapability(t *testing.T, task *model.Task, key string) {
+	t.Helper()
+	snapshot, err := accountInfoImageCapabilityResolver().FreezeImageCapability(context.Background(), task.UserID, key)
+	if err != nil {
+		t.Fatalf("freeze task image capability: %v", err)
+	}
+	task.ImageCapabilityKey = snapshot.Key
+	task.SetImageCapabilitySnapshot(snapshot)
 }
 
 func taskToolRequest(t *testing.T, taskID string) *mcp.CallToolRequest {
@@ -459,8 +513,8 @@ func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T
 		t.Fatalf("visual_style_source = %v, want snapshot", got)
 	}
 	imgCfg := info["image_config"].(map[string]any)
-	if got := imgCfg["reference_image_path"]; got != ".anban-creator/reference.png" {
-		t.Fatalf("reference_image_path = %v, want runtime path", got)
+	if got := imgCfg["project_style_reference_path"]; got != ".anban-creator/project-style-reference.png" {
+		t.Fatalf("project_style_reference_path = %v, want runtime path", got)
 	}
 }
 
@@ -486,12 +540,12 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 		t.Fatalf("profile leaked reference storage identity: %s", raw)
 	}
 	profile := info["resolved_profile"].(map[string]any)
-	if got := profile["reference_image_path"]; got != ".anban-creator/reference.png" {
-		t.Fatalf("reference_image_path = %v", got)
+	if got := profile["task_reference_path"]; got != ".anban-creator/task-reference.png" {
+		t.Fatalf("task_reference_path = %v", got)
 	}
 	imageConfig := info["image_config"].(map[string]any)
-	if got := imageConfig["reference_image_path"]; got != ".anban-creator/reference.png" {
-		t.Fatalf("image_config.reference_image_path = %v", got)
+	if got := imageConfig["task_reference_path"]; got != ".anban-creator/task-reference.png" {
+		t.Fatalf("image_config.task_reference_path = %v", got)
 	}
 
 	task.ReferenceImageAssetID = ""
@@ -503,7 +557,7 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 	if errMsg != "" {
 		t.Fatal(errMsg)
 	}
-	if _, ok := info["resolved_profile"].(map[string]any)["reference_image_path"]; ok {
+	if _, ok := info["resolved_profile"].(map[string]any)["project_style_reference_path"]; ok {
 		t.Fatal("skip_reference_image exposed inherited runtime path")
 	}
 
@@ -515,7 +569,7 @@ func TestBuildAccountInfoReferenceAssetOnlyExposesRuntimePath(t *testing.T) {
 	if errMsg != "" {
 		t.Fatal(errMsg)
 	}
-	if got := info["resolved_profile"].(map[string]any)["reference_image_path"]; got != ".anban-creator/reference.png" {
+	if got := info["resolved_profile"].(map[string]any)["project_style_reference_path"]; got != ".anban-creator/project-style-reference.png" {
 		t.Fatalf("inherited reference path = %v", got)
 	}
 }
@@ -548,6 +602,7 @@ func TestBuildAccountInfo_MomentsProfileIncludesDeliveryContract(t *testing.T) {
 		Status:    model.TaskStatusPending,
 	}
 	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	freezeAccountInfoTaskImageCapability(t, task, "")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create moments task: %v", err)
 	}
@@ -822,6 +877,7 @@ func TestBuildAccountInfo_TaskAuthorOverridesProject(t *testing.T) {
 		Status:    model.TaskStatusPending,
 	}
 	task.SetOverrides(model.StyleOverrides{Author: "任务作者"})
+	freezeAccountInfoTaskImageCapability(t, task, "")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -868,6 +924,7 @@ func TestBuildAccountInfo_AuthorFallbackToProject(t *testing.T) {
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusPending,
 	}
+	freezeAccountInfoTaskImageCapability(t, task, "")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -933,6 +990,7 @@ func TestAgentProjectProfileDoesNotExposeImageRouteMetadata(t *testing.T) {
 		ImageCapabilityKey: "preferred-key",
 	}
 	task.SetProjectSnapshot(model.SnapshotProject(project))
+	freezeAccountInfoTaskImageCapability(t, task, "preferred-key")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -994,6 +1052,7 @@ func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(
 		BrandBrief:      "年轻化茶品牌",
 	})
 	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	freezeAccountInfoTaskImageCapability(t, task, "openai-gpt-image")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1078,6 +1137,7 @@ func TestBuildAccountInfo_MontageProjectReturnsMontageBlock(t *testing.T) {
 		},
 	})
 	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	freezeAccountInfoTaskImageCapability(t, task, "")
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

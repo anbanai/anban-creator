@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -54,6 +55,12 @@ func bulkTestApp(t *testing.T, userID string) (app *fiber.App, repo repository.R
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
 	h := NewTaskHandler(taskSvc, &logger)
+	setHandlerImageCapabilities(taskSvc, h, repo, config.ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]config.ImageGenerationRouteConfig{
+			"standard": handlerTestImageCapabilityRoute("image.standard", model.TierFree),
+		},
+	})
 
 	app = fiber.New()
 	app.Post("/tasks/bulk-cancel", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkCancel(c) })
@@ -68,7 +75,7 @@ func bulkTestApp(t *testing.T, userID string) (app *fiber.App, repo repository.R
 func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, status string) string {
 	t.Helper()
 	id := uuid.New().String()
-	if err := repo.Tasks().Create(context.Background(), &model.Task{
+	task := &model.Task{
 		ID:               id,
 		UserID:           userID,
 		ProjectID:        projectID,
@@ -76,7 +83,9 @@ func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, s
 		Status:           status,
 		ExecutionTarget:  model.ExecutionTargetCloud,
 		ExecutionProfile: "balanced",
-	}); err != nil {
+	}
+	freezeHandlerTaskImageCapability(t, task, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("seed task (%s): %v", status, err)
 	}
 	return id

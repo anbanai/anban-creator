@@ -10,6 +10,7 @@ import type { BootstrapResponse } from "./bootstrap.js";
 import type { ArtifactManifestFile, ArtifactPrepareResponse, Reporter } from "./reporter.js";
 
 const SNAPSHOT_ATTEMPTS = 3;
+const MAX_ARTIFACT_MANIFEST_FILES = 256;
 const SKIPPED_DIRECTORIES = new Set([
   ".anban-creator", ".anban-runtime-home", ".claude", ".git",
   "node_modules", "dist", "build", ".cache", ".vite",
@@ -94,6 +95,7 @@ async function scanDirectory(root: string, directory: string, artifacts: Workspa
     if (info.isDirectory()) { await scanDirectory(root, path, artifacts, signal); continue; }
     if (!info.isFile()) continue;
     artifacts.push({ localPath: path, relativePath: relative(root, path).replaceAll("\\", "/"), filename: basename(path) });
+    if (artifacts.length > MAX_ARTIFACT_MANIFEST_FILES) throw new Error(`artifact manifest supports at most ${MAX_ARTIFACT_MANIFEST_FILES} files`);
   }
 }
 

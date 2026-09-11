@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -110,10 +111,17 @@ func TestSignURL_DownloadURLErrorFallsBack(t *testing.T) {
 		ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/",
 		signErr:     io.ErrUnexpectedEOF,
 	}
-	in := "https://bucket.oss-cn-x.aliyuncs.com/uploads/references/u/abc.jpg"
-	log := zerolog.Nop()
+	in := "https://bucket.oss-cn-x.aliyuncs.com/uploads/references/u/abc.jpg?Signature=old&Expires=1"
+	var logOutput bytes.Buffer
+	log := zerolog.New(&logOutput)
 	if got := SignURL(context.Background(), store, &log, in, 0); got != in {
 		t.Fatalf("on DownloadURL error should fall back to original URL, got %q", got)
+	}
+	if strings.Contains(logOutput.String(), "Signature=") || strings.Contains(logOutput.String(), "OSSAccessKeyId=") {
+		t.Fatalf("signed URL query leaked in service log: %s", logOutput.String())
+	}
+	if !strings.Contains(logOutput.String(), `"url":"https://bucket.oss-cn-x.aliyuncs.com/uploads/references/u/abc.jpg?REDACTED"`) {
+		t.Fatalf("service log did not retain a redacted URL path: %s", logOutput.String())
 	}
 }
 

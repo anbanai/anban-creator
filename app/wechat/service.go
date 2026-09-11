@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/netip"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -22,8 +26,9 @@ import (
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/freepublish"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
-	"resty.dev/v3"
 )
+
+const maxDownloadedFileBytes int64 = 25 << 20
 
 // Service 微信服务
 type Service struct {
@@ -305,23 +310,71 @@ func (s *Service) UploadMaterialWithRetry(filePath string, maxRetries int) (*Upl
 	return nil, lastErr
 }
 
-// DownloadFile 下载文件到临时目录
-func DownloadFile(url string) (string, error) {
-	return DownloadFileContext(context.Background(), url)
+// DownloadPublicImageFile downloads an image only from a public HTTPS URL.
+func DownloadPublicImageFile(url string) (string, error) {
+	return DownloadPublicImageFileContext(context.Background(), url)
 }
 
-// DownloadFileContext 下载文件到临时目录，并支持取消请求。
-func DownloadFileContext(ctx context.Context, url string) (string, error) {
+// DownloadPublicImageFileContext prevents generated-image URLs from reaching
+// loopback, private, link-local, or other special-use networks.
+func DownloadPublicImageFileContext(ctx context.Context, url string) (string, error) {
+	if err := validatePublicImageURL(url); err != nil {
+		return "", &DownloadError{URL: url, Original: err}
+	}
+	return downloadFileContextWithClient(ctx, url, maxDownloadedFileBytes, publicImageHTTPClient)
+}
+
+func downloadFileContextWithClient(ctx context.Context, url string, maxBytes int64, client *http.Client) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if maxBytes <= 0 {
+		return "", fmt.Errorf("download file: invalid maximum size %d", maxBytes)
+	}
 
-	client := resty.New().
-		SetTimeout(60*time.Second).
-		SetHeader("User-Agent", "Mozilla/5.0 (compatible; AnbanCreator/1.0; +https://anbanai.com)").
-		SetHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8").
-		SetHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	defer client.Close()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", &DownloadError{URL: url, Original: err}
+	}
+	request.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AnbanCreator/1.0; +https://anbanai.com)")
+	request.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	start := time.Now()
+	resp, err := client.Do(request)
+	elapsed := time.Since(start)
+	if err != nil {
+		return "", &DownloadError{URL: url, Elapsed: elapsed, Original: err}
+	}
+	defer resp.Body.Close()
+
+	downloadError := func(original error) *DownloadError {
+		return &DownloadError{
+			URL:           url,
+			ContentType:   resp.Header.Get("Content-Type"),
+			ContentLength: resp.Header.Get("Content-Length"),
+			Server:        resp.Header.Get("Server"),
+			CFRay:         resp.Header.Get("Cf-Ray"),
+			Location:      resp.Header.Get("Location"),
+			Elapsed:       elapsed,
+			Original:      original,
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 81))
+		downloadErr := downloadError(nil)
+		downloadErr.StatusCode = resp.StatusCode
+		downloadErr.BodyPreview = truncateDownloadBodyPreview(preview, 80)
+		return "", downloadErr
+	}
+
+	expectedSize := int64(-1)
+	if parsed, parseErr := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64); parseErr == nil && parsed >= 0 {
+		expectedSize = parsed
+		if expectedSize > maxBytes {
+			return "", downloadError(fmt.Errorf("%w: declared %d bytes, limit is %d", ErrDownloadExceedsMaxSize, expectedSize, maxBytes))
+		}
+	}
 
 	// 创建临时文件
 	// 从 URL 路径中提取扩展名，排除查询参数
@@ -336,61 +389,115 @@ func DownloadFileContext(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("close temp file: %w", err)
-	}
-
-	start := time.Now()
-	resp, err := client.R().
-		SetContext(ctx).
-		SetResponseSaveFileName(tmpPath).
-		Get(url)
-	elapsed := time.Since(start)
-	if err != nil {
-		os.Remove(tmpPath)
-		return "", &DownloadError{
-			URL:      url,
-			Elapsed:  elapsed,
-			Original: err,
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.Remove(tmpPath)
 		}
-	}
+	}()
 
-	if resp.StatusCode() != http.StatusOK {
-		os.Remove(tmpPath)
-		return "", &DownloadError{
-			URL:           url,
-			StatusCode:    resp.StatusCode(),
-			ContentType:   resp.Header().Get("Content-Type"),
-			ContentLength: resp.Header().Get("Content-Length"),
-			Server:        resp.Header().Get("Server"),
-			CFRay:         resp.Header().Get("Cf-Ray"),
-			Location:      resp.Header().Get("Location"),
-			BodyPreview:   truncateDownloadBodyPreview(resp.Bytes(), 80),
-			Elapsed:       elapsed,
-		}
+	written, copyErr := io.Copy(tmpFile, io.LimitReader(resp.Body, maxBytes+1))
+	closeErr := tmpFile.Close()
+	if written > maxBytes {
+		return "", downloadError(fmt.Errorf("%w: limit is %d bytes", ErrDownloadExceedsMaxSize, maxBytes))
 	}
-	if expectedSize, err := strconv.ParseInt(resp.Header().Get("Content-Length"), 10, 64); err == nil && expectedSize >= 0 {
-		info, err := os.Stat(tmpPath)
-		if err != nil || info.Size() != expectedSize {
-			os.Remove(tmpPath)
-			if err == nil {
-				err = fmt.Errorf("downloaded file size %d does not match content length %d", info.Size(), expectedSize)
-			}
-			return "", &DownloadError{
-				URL:           url,
-				ContentType:   resp.Header().Get("Content-Type"),
-				ContentLength: resp.Header().Get("Content-Length"),
-				Server:        resp.Header().Get("Server"),
-				CFRay:         resp.Header().Get("Cf-Ray"),
-				Location:      resp.Header().Get("Location"),
-				Elapsed:       elapsed,
-				Original:      err,
-			}
-		}
+	if expectedSize >= 0 && written != expectedSize {
+		return "", downloadError(fmt.Errorf("downloaded file size %d does not match content length %d", written, expectedSize))
 	}
-
+	if copyErr != nil {
+		return "", downloadError(copyErr)
+	}
+	if closeErr != nil {
+		return "", downloadError(closeErr)
+	}
+	keep = true
 	return tmpPath, nil
+}
+
+var publicImageHTTPClient = &http.Client{
+	Timeout: 60 * time.Second,
+	Transport: &http.Transport{
+		DialContext: publicImageDialContext,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return fmt.Errorf("%w: too many redirects", ErrUnsafeDownloadURL)
+		}
+		if req == nil || req.URL == nil {
+			return fmt.Errorf("%w: redirect URL is missing", ErrUnsafeDownloadURL)
+		}
+		return validatePublicImageURL(req.URL.String())
+	},
+}
+
+func validatePublicImageURL(rawURL string) error {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("%w: generated image URL must be public HTTPS without credentials", ErrUnsafeDownloadURL)
+	}
+	if ip := net.ParseIP(parsed.Hostname()); ip != nil && !isPublicImageIP(ip) {
+		return fmt.Errorf("%w: generated image host is not public", ErrUnsafeDownloadURL)
+	}
+	return nil
+}
+
+func publicImageDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid generated image address", ErrUnsafeDownloadURL)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve generated image host: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("generated image host did not resolve")
+	}
+	for _, resolved := range ips {
+		if !isPublicImageIP(resolved.IP) {
+			return nil, fmt.Errorf("%w: generated image host resolves to a non-public address", ErrUnsafeDownloadURL)
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+}
+
+func isPublicImageIP(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsMulticast() || addr.IsUnspecified() {
+		return false
+	}
+	for _, prefix := range publicImageSpecialUsePrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+var publicImageSpecialUsePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("5f00::/16"),
 }
 
 func truncateDownloadBodyPreview(body []byte, max int) string {

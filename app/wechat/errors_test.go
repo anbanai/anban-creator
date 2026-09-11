@@ -3,6 +3,10 @@ package wechat
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +15,24 @@ import (
 	"testing"
 	"time"
 )
+
+func TestWechatPackageDoesNotExposeGenericURLDownloader(t *testing.T) {
+	parsed, err := parser.ParseFile(token.NewFileSet(), "service.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse service.go: %v", err)
+	}
+	forbidden := map[string]bool{
+		"DownloadFile":                 true,
+		"DownloadFileContext":          true,
+		"downloadFileContextWithLimit": true,
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if ok && forbidden[function.Name.Name] {
+			t.Errorf("generic downloader %s remains available", function.Name.Name)
+		}
+	}
+}
 
 func TestParseWechatError(t *testing.T) {
 	tests := []struct {
@@ -77,7 +99,7 @@ func TestIsRetryable(t *testing.T) {
 	}
 }
 
-func TestDownloadFileUsesBrowserCompatibleHeaders(t *testing.T) {
+func TestDownloadEngineUsesBrowserCompatibleHeaders(t *testing.T) {
 	const pngHeader = "\x89PNG\r\n\x1a\n"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.UserAgent(), "Go-http-client") {
@@ -93,9 +115,9 @@ func TestDownloadFileUsesBrowserCompatibleHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	path, err := DownloadFile(srv.URL + "/generated.png")
+	path, err := downloadFileContextWithClient(context.Background(), srv.URL+"/generated.png", maxDownloadedFileBytes, srv.Client())
 	if err != nil {
-		t.Fatalf("DownloadFile: %v", err)
+		t.Fatalf("downloadFileContextWithClient: %v", err)
 	}
 	defer os.Remove(path)
 
@@ -108,7 +130,7 @@ func TestDownloadFileUsesBrowserCompatibleHeaders(t *testing.T) {
 	}
 }
 
-func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
+func TestDownloadEngineReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Server", "cloudflare")
@@ -119,7 +141,7 @@ func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := DownloadFile(srv.URL + "/generated.png")
+	_, err := downloadFileContextWithClient(context.Background(), srv.URL+"/generated.png", maxDownloadedFileBytes, srv.Client())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -138,7 +160,7 @@ func TestDownloadFileReturnsDiagnosticsOnHTTPFailure(t *testing.T) {
 	}
 }
 
-func TestDownloadFileContextHonorsCancellation(t *testing.T) {
+func TestDownloadEngineHonorsCancellation(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -155,7 +177,7 @@ func TestDownloadFileContextHonorsCancellation(t *testing.T) {
 	}
 	resultCh := make(chan result, 1)
 	go func() {
-		path, err := DownloadFileContext(ctx, srv.URL+"/generated.png")
+		path, err := downloadFileContextWithClient(ctx, srv.URL+"/generated.png", maxDownloadedFileBytes, srv.Client())
 		resultCh <- result{path: path, err: err}
 	}()
 
@@ -169,14 +191,14 @@ func TestDownloadFileContextHonorsCancellation(t *testing.T) {
 	case result := <-resultCh:
 		defer os.Remove(result.path)
 		if !errors.Is(result.err, context.Canceled) {
-			t.Fatalf("DownloadFileContext error = %v, want context.Canceled", result.err)
+			t.Fatalf("download error = %v, want context.Canceled", result.err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("DownloadFileContext did not return after cancellation")
+		t.Fatal("download did not return after cancellation")
 	}
 }
 
-func TestDownloadFileRemainsSingleAttempt(t *testing.T) {
+func TestDownloadEngineRemainsSingleAttempt(t *testing.T) {
 	var requests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -184,17 +206,17 @@ func TestDownloadFileRemainsSingleAttempt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	path, err := DownloadFile(srv.URL + "/generated.png")
+	path, err := downloadFileContextWithClient(context.Background(), srv.URL+"/generated.png", maxDownloadedFileBytes, srv.Client())
 	defer os.Remove(path)
 	if err == nil {
-		t.Fatal("DownloadFile error = nil, want error")
+		t.Fatal("download error = nil, want error")
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("request count = %d, want 1", got)
 	}
 }
 
-func TestDownloadFileContextRemovesPartialFile(t *testing.T) {
+func TestDownloadEngineRemovesPartialFile(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "64")
@@ -202,10 +224,10 @@ func TestDownloadFileContextRemovesPartialFile(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	path, err := DownloadFileContext(context.Background(), srv.URL+"/generated.png")
+	path, err := downloadFileContextWithClient(context.Background(), srv.URL+"/generated.png", maxDownloadedFileBytes, srv.Client())
 	defer os.Remove(path)
 	if err == nil {
-		t.Fatal("DownloadFileContext error = nil, want error")
+		t.Fatal("download error = nil, want error")
 	}
 	var dlErr *DownloadError
 	if !errors.As(err, &dlErr) {
@@ -226,5 +248,57 @@ func TestDownloadFileContextRemovesPartialFile(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("temp directory entries = %d, want 0", len(entries))
+	}
+}
+
+func TestDownloadEngineRejectsOversizedStreamAndRemovesPartialFile(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("12345678"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte("9"))
+	}))
+	defer srv.Close()
+
+	path, err := downloadFileContextWithClient(context.Background(), srv.URL+"/generated.png", 8, srv.Client())
+	defer os.Remove(path)
+	if !errors.Is(err, ErrDownloadExceedsMaxSize) {
+		t.Fatalf("download error = %v, want ErrDownloadExceedsMaxSize", err)
+	}
+	entries, readErr := os.ReadDir(os.Getenv("TMPDIR"))
+	if readErr != nil {
+		t.Fatalf("read temp directory: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temp directory entries = %d, want 0", len(entries))
+	}
+}
+
+func TestDownloadPublicImageFileContextRejectsUnsafeURLs(t *testing.T) {
+	tests := []string{
+		"http://images.example.com/generated.png",
+		"https://127.0.0.1/generated.png",
+		"https://[::1]/generated.png",
+		"https://user:password@images.example.com/generated.png",
+	}
+	for _, rawURL := range tests {
+		t.Run(rawURL, func(t *testing.T) {
+			path, err := DownloadPublicImageFileContext(context.Background(), rawURL)
+			defer os.Remove(path)
+			if !errors.Is(err, ErrUnsafeDownloadURL) {
+				t.Fatalf("DownloadPublicImageFileContext(%q) error = %v, want ErrUnsafeDownloadURL", rawURL, err)
+			}
+		})
+	}
+}
+
+func TestPublicImageIPRejectsSpecialUseIPv6Ranges(t *testing.T) {
+	for _, raw := range []string{"3fff::1", "5f00::1"} {
+		if isPublicImageIP(net.ParseIP(raw)) {
+			t.Fatalf("isPublicImageIP(%q) = true, want false for special-use range", raw)
+		}
 	}
 }

@@ -43,7 +43,7 @@ type TaskImageAsset struct {
 }
 
 type TaskImageModelResolver interface {
-	ResolveImageModelForGeneration(context.Context, string, string, string, int) (*ResolvedImageModel, error)
+	ResolveFrozenImageModelForGeneration(context.Context, string, model.ImageCapabilitySnapshot, string, int) (*ResolvedImageModel, error)
 }
 
 type TaskImageGenerator interface {
@@ -147,11 +147,15 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if err := s.tasks.ValidateAgentExecutionAccess(ctx, req.UserID, req.ProjectID, req.TaskID, req.ExecutionID); err != nil {
 		return nil, fmt.Errorf("authorize image generation execution: %w", err)
 	}
-	if model.IsMontagePlatform(task.Type) && strings.TrimSpace(task.ImageCapabilityKey) == "" {
+	if strings.TrimSpace(task.ImageCapabilityKey) == "" {
 		return nil, ErrTaskImageCapabilityMissing
 	}
 
-	resolved, err := s.resolver.ResolveImageModelForGeneration(ctx, req.UserID, task.ImageCapabilityKey, req.ImageType, len(req.ReferencePaths))
+	snapshot := task.ImageCapabilitySnapshot.Data()
+	if snapshot.Key != strings.TrimSpace(task.ImageCapabilityKey) {
+		return nil, ErrTaskImageCapabilityInvalid
+	}
+	resolved, err := s.resolver.ResolveFrozenImageModelForGeneration(ctx, req.UserID, snapshot, req.ImageType, len(req.ReferencePaths))
 	if err != nil {
 		return nil, fmt.Errorf("image model unavailable: %w", err)
 	}
@@ -159,23 +163,11 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		return nil, errors.New("image model unavailable: resolver returned no descriptor")
 	}
 	var pricing *ResolvedSKUPrice
-	// Preset selections carry their internal billing SKU through the resolver.
-	// Resolve by that immutable identity so adding or renaming public capability
-	// labels cannot silently charge the default image route.
-	if resolved.BillingSKU != "" {
-		tier := model.Tier(task.BillingPricingTier)
-		if task.BillingPricingTier == "" {
-			pricing, err = s.catalog.ResolvePriceBySKUIDForUser(ctx, req.UserID, task.BillingCatalogID, resolved.BillingSKU)
-		} else {
-			pricing, err = s.catalog.ResolvePriceBySKUID(ctx, task.BillingCatalogID, resolved.BillingSKU, tier)
-		}
-	} else if task.BillingPricingTier != "" {
-		pricing, err = s.catalog.ResolvePriceForTier(ctx, task.BillingCatalogID, "image.generate", "image_generation.capabilities."+resolved.Key, model.Tier(task.BillingPricingTier))
+	tier := model.Tier(task.BillingPricingTier)
+	if task.BillingPricingTier == "" {
+		pricing, err = s.catalog.ResolvePriceBySKUIDForUser(ctx, req.UserID, task.BillingCatalogID, snapshot.BillingSKU)
 	} else {
-		// Tasks admitted before tier pricing did not persist a pricing tier. Their
-		// immutable flat catalog remains authoritative; the user tier only labels
-		// the frozen-price evidence for the operation.
-		pricing, err = s.catalog.ResolvePrice(ctx, req.UserID, task.BillingCatalogID, "image.generate", "image_generation.capabilities."+resolved.Key)
+		pricing, err = s.catalog.ResolvePriceBySKUID(ctx, task.BillingCatalogID, snapshot.BillingSKU, tier)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve fixed image SKU: %w", err)
@@ -438,12 +430,11 @@ func (s *TaskImageService) resolveReadablePaths(ctx context.Context, task *model
 	if len(paths) == 0 {
 		return nil, nil, nil
 	}
-	allowProjectStyleReference := model.IsMontagePlatform(task.Type)
 	result := make([]string, 0, len(paths))
 	cleanups := make([]func(), 0)
 	for _, path := range paths {
 		resolved, cleanup, err := s.tasks.materializeAuthorizedTaskImageReference(
-			ctx, task, req.UserID, req.ProjectID, req.ExecutionID, path, allowProjectStyleReference, maxTaskImageReferenceBytes,
+			ctx, task, req.UserID, req.ProjectID, req.ExecutionID, path, taskImageReferenceGeneration, maxTaskImageReferenceBytes,
 		)
 		if err != nil {
 			for _, cleanup := range cleanups {

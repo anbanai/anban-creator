@@ -90,6 +90,13 @@ type MetadataUploadURLProvider interface {
 	UploadURLWithMetadata(ctx context.Context, key, contentType string, metadata map[string]string, expirySeconds int) (string, error)
 }
 
+// ContentLengthUploadURLProvider signs direct uploads whose exact byte length
+// must be part of the OSS request signature. This prevents a caller holding a
+// valid URL from replacing the declared object with an arbitrarily large body.
+type ContentLengthUploadURLProvider interface {
+	UploadURLWithContentLength(ctx context.Context, key, contentType string, contentLength int64, expirySeconds int) (string, error)
+}
+
 // ReadObject requires an explicitly bounded reader. Security-sensitive callers
 // must not fall back to Provider.Read because some remote implementations buffer
 // the entire object before returning.

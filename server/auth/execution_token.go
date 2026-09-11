@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	executionTokenIssuer     = "anban-server"
-	executionTokenAudience   = "anban-agent-execution"
-	minimumExecutionSecret   = 32
-	maximumExecutionLifetime = time.Hour
+	executionTokenIssuer   = "anban-server"
+	executionTokenAudience = "anban-agent-execution"
+	minimumExecutionSecret = 32
+	// MaximumExecutionTokenLifetime bounds the blast radius of a leaked
+	// execution-scoped credential while allowing execution and finalization.
+	MaximumExecutionTokenLifetime = 2 * time.Hour
 )
 
 // ExecutionClaims bind an agent credential to one durable execution attempt.
@@ -61,7 +63,7 @@ func (s *ExecutionTokenService) IssueAt(identity ExecutionClaims, issuedAt, expi
 	if !expiresAt.After(issuedAt) {
 		return "", errors.New("execution token expiry must be in the future")
 	}
-	if expiresAt.Sub(issuedAt) > maximumExecutionLifetime {
+	if expiresAt.Sub(issuedAt) > MaximumExecutionTokenLifetime {
 		return "", errors.New("execution token lifetime exceeds maximum")
 	}
 	identity.RegisteredClaims = jwt.RegisteredClaims{
@@ -99,7 +101,7 @@ func (s *ExecutionTokenService) Validate(raw string) (*ExecutionClaims, error) {
 	if claims.IssuedAt == nil || claims.NotBefore == nil || strings.TrimSpace(claims.ID) == "" {
 		return nil, errors.New("execution token registered identity is incomplete")
 	}
-	if claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time) > maximumExecutionLifetime {
+	if claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time) > MaximumExecutionTokenLifetime {
 		return nil, errors.New("execution token lifetime exceeds maximum")
 	}
 	return claims, nil

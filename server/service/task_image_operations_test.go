@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net"
@@ -33,6 +34,7 @@ type fakeTaskImageOperationsImage struct {
 	readUpload   bool
 	uploadErr    error
 	compressPath string
+	compressData []byte
 }
 
 func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, filePath string) (*UploadImageResult, error) {
@@ -52,7 +54,14 @@ func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, file
 
 func (f *fakeTaskImageOperationsImage) CompressImage(filePath string, _ int) (string, bool, error) {
 	f.compressPath = filePath
-	return filePath + ".compressed", true, nil
+	if f.compressData != nil {
+		outputPath := filePath + ".compressed.png"
+		if err := os.WriteFile(outputPath, f.compressData, 0o600); err != nil {
+			return "", false, err
+		}
+		return outputPath, true, nil
+	}
+	return "", false, nil
 }
 
 type fakeTaskImageUnderstandingClient struct {
@@ -83,10 +92,18 @@ type recordingCropStorage struct {
 	mu             sync.Mutex
 	uploadKeys     []string
 	deletedKeys    []string
+	readKeys       []string
 	blockFirst     bool
 	firstStarted   chan struct{}
 	releaseFirst   chan struct{}
 	firstBlockOnce sync.Once
+}
+
+func (s *recordingCropStorage) Read(ctx context.Context, key string) ([]byte, error) {
+	s.mu.Lock()
+	s.readKeys = append(s.readKeys, key)
+	s.mu.Unlock()
+	return s.Provider.Read(ctx, key)
 }
 
 func (s *recordingCropStorage) ReadObject(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
@@ -133,6 +150,12 @@ func (s *recordingCropStorage) outputDeletedKeys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deletedKeys...)
+}
+
+func (s *recordingCropStorage) objectReadKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.readKeys...)
 }
 
 func (s *recordingCropStorage) isCropOutput(key string) bool {
@@ -252,6 +275,21 @@ func findCropOutputFile(t *testing.T, repo repository.Repository, executionID st
 	return nil
 }
 
+func findTaskImageOperationOutputFile(t *testing.T, repo repository.Repository, executionID, outputPath string) *model.TaskFile {
+	t.Helper()
+	files, err := repo.TaskFiles().FindByExecutionID(context.Background(), executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.FilePath == outputPath {
+			return file
+		}
+	}
+	t.Fatalf("task image operation output %q was not persisted", outputPath)
+	return nil
+}
+
 func cropRequest(f *taskImageOperationsCropFixture, inputPath string) CropTaskImageRequest {
 	return CropTaskImageRequest{
 		UserID: f.userID, TaskID: f.task.ID, ExecutionID: f.executionID,
@@ -327,6 +365,251 @@ func TestTaskImageOperationsAnalyzeMaterializesCurrentExecutionTaskFile(t *testi
 	}
 }
 
+func TestTaskImageOperationsDownloadPersistsBoundedExternalImageForCurrentExecution(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	downloadCalls := 0
+	f.service.downloadAnalysisImage = func(_ context.Context, rawURL string, maxBytes int64) ([]byte, error) {
+		downloadCalls++
+		if rawURL != "https://images.example/source.png" || maxBytes != maxAnalyzedTaskImageBytes {
+			t.Fatalf("download args = %q/%d", rawURL, maxBytes)
+		}
+		return taskImageTinyPNG(), nil
+	}
+
+	result, err := f.service.Download(context.Background(), DownloadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		URL: "https://images.example/source.png", OutputPath: "output/downloaded.png",
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if downloadCalls != 1 || result.FilePath != "output/downloaded.png" || result.TaskFileID == "" || result.DownloadURL == "" {
+		t.Fatalf("download result=%#v calls=%d", result, downloadCalls)
+	}
+	persisted := findTaskImageOperationOutputFile(t, f.repo, f.executionID, result.FilePath)
+	if persisted.State != model.TaskFileStatePending || persisted.MimeType != "image/png" || persisted.ContentHash == "" {
+		t.Fatalf("persisted download = %#v", persisted)
+	}
+}
+
+func TestTaskImageOperationsDownloadRejectsStaleExecutionBeforeNetworkAccess(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	downloadCalls := 0
+	f.service.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
+		downloadCalls++
+		return taskImageTinyPNG(), nil
+	}
+
+	_, err := f.service.Download(context.Background(), DownloadTaskImageRequest{
+		UserID: f.userID, ExecutionID: uuid.NewString(), ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		URL: "https://images.example/source.png", OutputPath: "output/downloaded.png",
+	})
+	if err == nil || downloadCalls != 0 {
+		t.Fatalf("Download stale execution = %v, network calls=%d; want authorization rejection", err, downloadCalls)
+	}
+}
+
+func TestTaskImageOperationsCompressMaterializesAndPersistsTaskRelativeImage(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	images := &fakeTaskImageOperationsImage{}
+	f.service.images = images
+
+	result, err := f.service.Compress(context.Background(), CompressTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.task.ID,
+		InputPath: "output/source-a.png", OutputPath: "output/compressed.png", MaxWidth: 1024,
+	})
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	if !filepath.IsAbs(images.compressPath) {
+		t.Fatalf("compress provider path = %q, want materialized temporary path", images.compressPath)
+	}
+	if _, err := os.Stat(images.compressPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("materialized compress path still exists: %v", err)
+	}
+	if result.FilePath != "output/compressed.png" || result.TaskFileID == "" || result.DownloadURL == "" {
+		t.Fatalf("compress result = %#v", result)
+	}
+	findTaskImageOperationOutputFile(t, f.repo, f.executionID, result.FilePath)
+}
+
+func TestTaskImageOperationsCompressRejectsHostPathBeforeDelegation(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	images := &fakeTaskImageOperationsImage{}
+	f.service.images = images
+	hostPath := filepath.Join(t.TempDir(), "host-secret.png")
+	if err := os.WriteFile(hostPath, taskImageTinyPNG(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := f.service.Compress(context.Background(), CompressTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.task.ID,
+		InputPath: hostPath, OutputPath: "output/compressed.png",
+	})
+	if err == nil || !strings.Contains(err.Error(), "task-relative") || images.compressPath != "" {
+		t.Fatalf("Compress host path = %v, delegated path=%q; want task-relative rejection", err, images.compressPath)
+	}
+}
+
+func TestTaskImageOperationsCompressAcceptsLargeAuthorizedInputAndPersistsBoundedOutput(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	large := append(append([]byte(nil), taskImageTinyPNG()...), make([]byte, maxAnalyzedTaskImageBytes)...)
+	const inputPath = ".anban-creator/input-attachments/attachment_01_large.png"
+	const inputKey = "fixtures/large-authorized-input.png"
+	if _, err := f.store.Upload(context.Background(), inputKey, bytes.NewReader(large), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	assetID := uuid.NewString()
+	if err := f.repo.Assets().Create(context.Background(), &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		StorageKey: inputKey, FileName: "large.png", ContentType: "image/png",
+		Size: int64(len(large)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.task.SetInputAttachments([]model.EntryAttachment{{
+		FileName: "large.png", ContentType: "image/png", Size: int64(len(large)), AssetID: assetID,
+	}})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	images := &fakeTaskImageOperationsImage{compressData: taskImageTinyPNG()}
+	f.service.images = images
+
+	result, err := f.service.Compress(context.Background(), CompressTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, TaskID: f.task.ID,
+		InputPath: inputPath, OutputPath: "output/compressed-large.png", MaxWidth: 1024,
+	})
+	if err != nil {
+		t.Fatalf("Compress large authorized input: %v", err)
+	}
+	if !result.Compressed || result.FileSize != int64(len(taskImageTinyPNG())) {
+		t.Fatalf("compress result = %#v", result)
+	}
+}
+
+func TestTaskImageOperationsCropRejectsStaleExecutionBeforeReadingPublishedInput(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	files, err := f.repo.TaskFiles().FindByExecutionID(context.Background(), f.executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		file.State = model.TaskFileStatePublished
+		if _, err := f.repo.TaskFiles().Upsert(context.Background(), file); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readsBefore := len(f.store.objectReadKeys())
+	req := cropRequest(f, "output/source-a.png")
+	req.ExecutionID = uuid.NewString()
+	_, err = f.service.Crop(context.Background(), req)
+	if err == nil {
+		t.Fatal("Crop accepted a stale execution")
+	}
+	if readsAfter := len(f.store.objectReadKeys()); readsAfter != readsBefore {
+		t.Fatalf("Crop stale execution performed storage reads: before=%d after=%d", readsBefore, readsAfter)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeRejectsAbsoluteHostPath(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+	hostPath := filepath.Join(t.TempDir(), "host-secret.png")
+	if err := os.WriteFile(hostPath, taskImageTinyPNG(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := f.service.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: hostPath, Prompt: "inspect",
+	})
+	if err == nil || !strings.Contains(err.Error(), "task-relative") || understanding.calls != 0 {
+		t.Fatalf("Analyze absolute path = %v, calls=%d; want rejection before delegation", err, understanding.calls)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeMaterializesInheritedProjectStyleReference(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	ctx := context.Background()
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+	assetID := uuid.NewString()
+	imageBytes := taskImageTinyPNG()
+	key := "assets/users/" + f.userID + "/" + assetID + "/style.png"
+	if _, err := f.store.Upload(ctx, key, bytes.NewReader(imageBytes), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
+		StorageKey: key, FileName: "style.png", ContentType: "image/png",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformSeednote, ReferenceImageAssetID: assetID})
+	if err := f.repo.Tasks().Update(ctx, f.task); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := f.service.Analyze(ctx, AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: ".anban-creator/project-style-reference.png", Prompt: "extract visual style only",
+	})
+	if err != nil {
+		t.Fatalf("Analyze project style reference: %v", err)
+	}
+	if result.Analysis != "analysis" || understanding.calls != 1 || !strings.HasPrefix(understanding.source, "data:image/png;base64,") {
+		t.Fatalf("result=%#v calls=%d source=%q", result, understanding.calls, understanding.source)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeAcceptsJPEGAtCanonicalProjectStylePath(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	ctx := context.Background()
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+	assetID := uuid.NewString()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			img.Set(x, y, color.NRGBA{R: 0xff, A: 0xff})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := encoded.Bytes()
+	key := "assets/users/" + f.userID + "/" + assetID + "/style.jpg"
+	if _, err := f.store.Upload(ctx, key, bytes.NewReader(imageBytes), "image/jpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.Assets().Create(ctx, &model.Asset{
+		ID: assetID, UserID: f.userID, Purpose: DirectUploadPurposeProjectReference,
+		StorageKey: key, FileName: "style.jpg", ContentType: "image/jpeg",
+		Size: int64(len(imageBytes)), ETag: "immutable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformSeednote, ReferenceImageAssetID: assetID})
+	if err := f.repo.Tasks().Update(ctx, f.task); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := f.service.Analyze(ctx, AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: ".anban-creator/project-style-reference.png", Prompt: "extract visual style only",
+	})
+	if err != nil {
+		t.Fatalf("Analyze JPEG project style reference: %v", err)
+	}
+	if result.Analysis != "analysis" || understanding.calls != 1 || !strings.HasPrefix(understanding.source, "data:image/jpeg;base64,") {
+		t.Fatalf("result=%#v calls=%d source=%q", result, understanding.calls, understanding.source)
+	}
+}
+
 func TestTaskImageOperationsAnalyzeRejectsStaleExecution(t *testing.T) {
 	f := newTaskImageOperationsCropFixture(t)
 	understanding := &fakeTaskImageUnderstandingClient{}
@@ -338,6 +621,25 @@ func TestTaskImageOperationsAnalyzeRejectsStaleExecution(t *testing.T) {
 	})
 	if err == nil || understanding.calls != 0 {
 		t.Fatalf("Analyze stale execution = %v, understanding_calls=%d; want rejection", err, understanding.calls)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeRemoteURLRejectsStaleExecutionBeforeNetworkAccess(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	f.service.understanding = understanding
+	downloadCalls := 0
+	f.service.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
+		downloadCalls++
+		return taskImageTinyPNG(), nil
+	}
+
+	_, err := f.service.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: uuid.NewString(), ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		ImageURL: "https://images.example/source.png", Prompt: "inspect",
+	})
+	if err == nil || downloadCalls != 0 || understanding.calls != 0 {
+		t.Fatalf("Analyze stale remote execution = %v, network_calls=%d understanding_calls=%d; want authorization rejection", err, downloadCalls, understanding.calls)
 	}
 }
 
@@ -509,7 +811,7 @@ func (f *fakeTaskImageOperationsCost) RecordMediaUnreconciled(_ context.Context,
 	return &model.BillingProviderCostEvent{}, f.recordErr
 }
 
-func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) {
+func TestTaskImageOperationsRejectHostRuntimePathsAndRecordRemoteAnalysisCost(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -517,9 +819,11 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 	userID := "task-image-operations-user"
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	taskID := "task-image-operations-task"
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
+	executionID := startTaskArtifactExecution(t, repo, task)
 	workspace := t.TempDir()
 	imagePath := filepath.Join(workspace, taskID, "output", "image.png")
 	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
@@ -536,19 +840,16 @@ func TestTaskImageOperationsKeepRuntimePathsAndRecordAnalysisCost(t *testing.T) 
 		UnderstandingProvider: "provider", UnderstandingModel: "model",
 	}, &logger)
 
-	if _, err := svc.Upload(ctx, UploadTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: imagePath}); err != nil {
-		t.Fatalf("Upload: %v", err)
+	if _, err := svc.Upload(ctx, UploadTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: imagePath}); err == nil || !strings.Contains(err.Error(), "task-relative") {
+		t.Fatalf("Upload host path error = %v, want task-relative rejection", err)
 	}
-	if images.uploadPath != imagePath {
-		t.Fatalf("upload path = %q, want explicit server-local path %q", images.uploadPath, imagePath)
+	if images.uploadPath != "" {
+		t.Fatalf("rejected host path reached upload provider: %q", images.uploadPath)
 	}
-	if _, err := svc.Compress(ctx, CompressTaskImageRequest{UserID: userID, TaskID: taskID, FilePath: "output/image.png"}); err != nil {
-		t.Fatalf("Compress: %v", err)
+	svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
+		return taskImageTinyPNG(), nil
 	}
-	if images.compressPath != "output/image.png" {
-		t.Fatalf("compress path = %q, want runtime-relative path", images.compressPath)
-	}
-	result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, TaskID: taskID, FilePath: imagePath, Prompt: "inspect"})
+	result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ExecutionID: executionID, ProjectID: projectID, TaskID: taskID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
@@ -646,9 +947,10 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 		downloaded []byte
 		want       string
 	}{
-		{name: "local non-image", filePath: localText, want: "file is not an image"},
-		{name: "local oversized", filePath: localLarge, want: "too large"},
-		{name: "remote non-image", imageURL: "https://example.com/text", downloaded: []byte("plain text"), want: "downloaded file is not an image"},
+		{name: "local non-image", filePath: localText, want: "task-relative"},
+		{name: "local oversized", filePath: localLarge, want: "task-relative"},
+		{name: "remote non-image", imageURL: "https://example.com/text", downloaded: []byte("plain text"), want: "supported raster image"},
+		{name: "remote unsupported bitmap", imageURL: "https://example.com/image.bmp", downloaded: append([]byte("BM"), make([]byte, 510)...), want: "supported raster image"},
 		{name: "remote oversized", imageURL: "https://example.com/large.png", downloaded: make([]byte, maxAnalyzedTaskImageBytes+1), want: "exceeds max size"},
 	}
 	for _, tt := range tests {
@@ -710,11 +1012,6 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 	userID := "task-image-cost-user"
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
-	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR")
-	path := filepath.Join(t.TempDir(), "image.png")
-	if err := os.WriteFile(path, png, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	tests := []struct {
 		name             string
 		understanding    *fakeTaskImageUnderstandingClient
@@ -733,7 +1030,10 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cost := &fakeTaskImageOperationsCost{recordErr: tt.costErr}
 			svc := NewTaskImageOperationsService(tasks, nil, tt.understanding, cost, TaskImageOperationsConfig{UnderstandingProvider: "provider", UnderstandingModel: "model"}, &logger)
-			result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, FilePath: path, Prompt: "inspect"})
+			svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) {
+				return taskImageTinyPNG(), nil
+			}
+			result, err := svc.Analyze(ctx, AnalyzeTaskImageRequest{UserID: userID, ProjectID: projectID, ImageURL: "https://example.com/image.png", Prompt: "inspect"})
 			if tt.wantAnalyzeError {
 				if err == nil || result != nil {
 					t.Fatalf("Analyze = %#v, %v; want analysis error", result, err)

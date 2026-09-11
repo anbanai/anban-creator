@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -37,7 +37,7 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
-	store := &fakeTaskStorage{files: map[string][]byte{}}
+	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
 	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	profiles, err := NewAgentProfileRegistry(testAgentProfiles())
 	if err != nil {
@@ -52,13 +52,20 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	if err != nil {
 		t.Fatal(err)
 	}
-	userID, projectID := uuid.NewString(), uuid.NewString()
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
 	if err := repo.Projects().Create(context.Background(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Cloud completion", Status: model.ProjectStatusActive,
+		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		Name: "Cloud completion", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
+		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +82,9 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	execution.ID, execution.TaskID, execution.Attempt = uuid.NewString(), task.ID, 1
 	execution.Target, execution.Status, execution.Started = "docker", executionStatus, started
 	execution.RuntimeProfile, execution.RuntimeImage = "article", "registry/content@sha256:test"
-	execution.AgentPackID = "article"
-	execution.AgentPackVersion = "test"
-	execution.AgentPackDigest = strings.Repeat("a", 64)
-	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown"}]`)
-	execution.AgentPackRequiredArtifactContract = datatypes.JSON(`[{"role":"content","path":"output/content.md","mime_type":"text/markdown","required":true}]`)
+	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+		t.Fatal(err)
+	}
 	if withArtifact {
 		execution.ManifestStatus = model.TaskExecutionManifestPending
 	}
@@ -91,18 +96,26 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	}
 	task.CurrentExecutionID = &execution.ID
 	if withArtifact {
-		content := []byte("artifact")
-		key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + "output/content.md"
-		uploaded, err := store.Upload(context.Background(), key, strings.NewReader(string(content)), "text/markdown")
+		required, err := resolveFrozenExecutionRequiredArtifactContract(execution)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{{
-			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
-			Role: "content", FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown",
-			FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL, StorageProvider: store.Name(),
-		}}); err != nil {
+		files := make([]*model.TaskFile, 0, len(required))
+		for _, spec := range required {
+			body := []byte(spec.Path)
+			key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + spec.Path
+			store.files[key] = body
+			files = append(files, &model.TaskFile{
+				ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
+				Role: spec.Role, FilePath: spec.Path, FileName: filepath.Base(spec.Path),
+				MimeType: spec.MIMEType, FileSize: int64(len(body)), OSSKey: key, OSSURL: store.GetURL(key), StorageProvider: store.Name(),
+			})
+		}
+		if err := repo.TaskFiles().BatchCreate(context.Background(), files); err != nil {
 			t.Fatal(err)
+		}
+		if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(context.Background(), task.ID, execution.ID, nil); err != nil {
+			t.Fatalf("seal cloud execution manifest: %v", err)
 		}
 	}
 	return svc, repo, db, task, execution
@@ -112,6 +125,30 @@ type replaySafeEnqueuer struct {
 	calls    int
 	accepted int
 	seen     map[string]struct{}
+}
+
+type failingCloudCoreRepository struct {
+	repository.Repository
+	err error
+}
+
+type failingCloudCoreTaskRepository struct {
+	repository.TaskRepository
+	err error
+}
+
+func (r *failingCloudCoreRepository) Tasks() repository.TaskRepository {
+	return &failingCloudCoreTaskRepository{TaskRepository: r.Repository.Tasks(), err: r.err}
+}
+
+func (r *failingCloudCoreRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		return fn(&failingCloudCoreRepository{Repository: tx, err: r.err})
+	})
+}
+
+func (r *failingCloudCoreTaskRepository) UpdateBillingTerminalReason(context.Context, string, string) error {
+	return r.err
 }
 
 func (e *replaySafeEnqueuer) Enqueue(string, []byte) error { return nil }
@@ -150,8 +187,62 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 1 {
+	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 3 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
+	}
+}
+
+func TestCompleteCloudExecutionRollsBackArtifactsEvidenceAndTaskWhenBillingPersistenceFails(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	wantErr := errors.New("terminal billing unavailable")
+	svc.repo = &failingCloudCoreRepository{Repository: repo, err: wantErr}
+	result := &agent.ExecutionResult{
+		Success: true, RemoteArtifacts: true,
+		ModelUsage: []agent.ModelTokenUsage{{Provider: "provider", Model: "model", InputTokens: 11}},
+		CostStatus: agent.CostStatusReconciled,
+	}
+
+	err := svc.CompleteCloudExecution(context.Background(), execution.ID, result)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("CompleteCloudExecution error = %v, want billing root cause", err)
+	}
+	persistedTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedExecution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := repo.TaskFiles().FindByExecutionID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedTask.Status != model.TaskStatusRunning || persistedTask.Result != nil ||
+		persistedTask.CompletedAt != nil || persistedTask.BillingTerminalReason != "" ||
+		persistedTask.WorkflowStatus != nil || len(persistedTask.TerminalModelUsage.Data()) != 0 ||
+		persistedTask.CostStatus != "" {
+		t.Fatalf("failed core transaction leaked task state: %#v", persistedTask)
+	}
+	if persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationTerminal ||
+		persistedExecution.ManifestStatus != model.TaskExecutionManifestPending {
+		t.Fatalf("failed core transaction leaked execution state: %#v", persistedExecution)
+	}
+	for _, file := range files {
+		if file.State != model.TaskFileStatePending {
+			t.Fatalf("failed core transaction exposed artifact %#v", file)
+		}
+	}
+
+	svc.repo = repo
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatalf("resume after atomic rollback: %v", err)
+	}
+	persistedTask, _ = repo.Tasks().FindByID(context.Background(), task.ID)
+	persistedExecution, _ = repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if persistedTask.Status != model.TaskStatusCompleted || persistedTask.BillingTerminalReason != model.TaskBillingTerminalCompleted ||
+		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || persistedExecution.ManifestStatus != model.TaskExecutionManifestPublished {
+		t.Fatalf("resumed completion = task:%#v execution:%#v", persistedTask, persistedExecution)
 	}
 }
 
@@ -297,8 +388,8 @@ func TestCompleteCloudExecutionFencesEvidenceWhenAttemptBecomesStale(t *testing.
 	}
 
 	var switched bool
-	svc.finalizationAfterAdvance = func(stage string) error {
-		if stage != model.TaskExecutionFinalizationArtifacts || switched {
+	svc.finalizationAfterStage = func(stage string) error {
+		if stage != model.TaskExecutionFinalizationTerminal || switched {
 			return nil
 		}
 		switched = true
@@ -329,8 +420,8 @@ func TestCompleteCloudExecutionFencesEvidenceWhenAttemptBecomesStale(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if foundExecution.FinalizationStatus != model.TaskExecutionFinalizationArtifacts {
-		t.Fatalf("stale execution finalization advanced to %q, want %q", foundExecution.FinalizationStatus, model.TaskExecutionFinalizationArtifacts)
+	if foundExecution.FinalizationStatus != model.TaskExecutionFinalizationTerminal {
+		t.Fatalf("stale execution finalization advanced to %q, want %q", foundExecution.FinalizationStatus, model.TaskExecutionFinalizationTerminal)
 	}
 }
 
@@ -465,7 +556,7 @@ func TestCompleteCloudExecutionConcurrentDuplicate(t *testing.T) {
 	}
 	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 1 {
+	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 3 {
 		t.Fatalf("finalization=%s files=%d", found.FinalizationStatus, len(files))
 	}
 }
@@ -477,8 +568,6 @@ func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
 		model.TaskExecutionFinalizationResult,
 		model.TaskExecutionFinalizationWorkflow,
 		model.TaskExecutionFinalizationDraftDelivery,
-		model.TaskExecutionFinalizationTask,
-		model.TaskExecutionFinalizationSettlement,
 		model.TaskExecutionFinalizationSlot,
 		model.TaskExecutionFinalizationDispatch,
 		model.TaskExecutionFinalizationNotification,
@@ -535,6 +624,43 @@ func TestCompleteCloudExecutionResumesEveryDurableStage(t *testing.T) {
 				t.Fatalf("task=%s finalization=%s", foundTask.Status, foundExecution.FinalizationStatus)
 			}
 		})
+	}
+}
+
+func TestCompleteCloudExecutionResumesAfterCoreCommitBeforeStageMarker(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	injected := false
+	svc.finalizationAfterStage = func(stage string) error {
+		if stage == model.TaskExecutionFinalizationArtifacts && !injected {
+			injected = true
+			return errors.New("crash before core stage marker")
+		}
+		return nil
+	}
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err == nil {
+		t.Fatal("expected injected failure after core commit")
+	}
+	persistedTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+	persistedExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	files, _ := repo.TaskFiles().FindByExecutionID(context.Background(), execution.ID)
+	if persistedTask.Status != model.TaskStatusCompleted || persistedTask.BillingTerminalReason != model.TaskBillingTerminalCompleted ||
+		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationTerminal || persistedExecution.ManifestStatus != model.TaskExecutionManifestPublished {
+		t.Fatalf("core commit state = task:%#v execution:%#v", persistedTask, persistedExecution)
+	}
+	for _, file := range files {
+		if file.State != model.TaskFileStatePublished {
+			t.Fatalf("core commit did not publish artifact %#v", file)
+		}
+	}
+
+	svc.finalizationAfterStage = nil
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatalf("idempotent core resume: %v", err)
+	}
+	persistedExecution, _ = repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone {
+		t.Fatalf("resumed finalization = %q, want done", persistedExecution.FinalizationStatus)
 	}
 }
 
@@ -786,7 +912,7 @@ func TestCancelCloudRecoversAndPersistsPreparedIdentityBeforeDelete(t *testing.T
 }
 
 func TestCancelCloudChecksActiveDispatchBarrierBeforePreparedLookup(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	ctx := context.Background()
 	if won, err := repo.TaskExecutions().Transition(ctx, execution.ID,
 		[]string{model.TaskExecutionStarting}, model.TaskExecutionDispatching, model.ExecutionTransition{}); err != nil || !won {
@@ -870,7 +996,7 @@ func TestCancelCloudRejectsCleanupDispatcherTargetMismatch(t *testing.T) {
 
 func TestReconcileExecutionFailureAlwaysTerminalizesCurrentExecution(t *testing.T) {
 	t.Run("pre-start failure does not create a replacement", func(t *testing.T) {
-		svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+		svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 		dispatcher := &dispatchTestDispatcher{}
 		svc.SetRuntimeDispatcher(dispatcher)
 		if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
@@ -906,7 +1032,7 @@ func TestReconcileExecutionFailureAlwaysTerminalizesCurrentExecution(t *testing.
 }
 
 func TestReconcilePreStartFailureKeepsOriginalExecution(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
@@ -929,7 +1055,7 @@ func TestReconcilePreStartFailureKeepsOriginalExecution(t *testing.T) {
 }
 
 func TestReconcilePreStartFailureDoesNotResetProviderIdentity(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	ctx := context.Background()
 	oldIdentity := model.RuntimeIdentity{
 		Scope:      "anban",
@@ -958,7 +1084,7 @@ func TestReconcilePreStartFailureDoesNotResetProviderIdentity(t *testing.T) {
 }
 
 func TestReconcilePreStartFailureDoesNotResumeAfterTransientFailure(t *testing.T) {
-	svc, repo, _, task, execution := setupCloudCompletionTestWithDB(t, true, false)
+	svc, repo, _, task, execution := setupCloudCompletionTestWithDB(t, false, false)
 	dispatcher := &dispatchTestDispatcher{err: errors.New("temporary Kubernetes API failure")}
 	svc.SetRuntimeDispatcher(dispatcher)
 	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "image_pull_failed", nil); err != nil {
@@ -977,7 +1103,7 @@ func TestReconcilePreStartFailureDoesNotResumeAfterTransientFailure(t *testing.T
 }
 
 func TestConcurrentPreStartReconcileDoesNotCreateReplacement(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
 	var wg sync.WaitGroup
@@ -1010,7 +1136,7 @@ func TestConcurrentPreStartReconcileDoesNotCreateReplacement(t *testing.T) {
 }
 
 func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
-	svc, repo, task, execution := setupCloudCompletionTest(t, true, false)
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	dispatcher := &dispatchTestDispatcher{}
 	svc.SetRuntimeDispatcher(dispatcher)
 	if won, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,

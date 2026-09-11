@@ -22,7 +22,11 @@ func TestFinalizeLocalTaskMySQLLocksExecutionBeforeTask(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("execution-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "target"}).
+			AddRow("execution-1", "task-1", model.TaskExecutionRunning, model.ExecutionTargetLocalClaimed))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "execution_target", "current_execution_id"}).
+			AddRow("task-1", model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, "execution-1"))
 	mock.ExpectExec("UPDATE `tasks` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE `task_executions` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -52,7 +56,11 @@ func TestFinalizeLocalTaskMySQLTaskGuardMissRollsBackAsCASLost(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("execution-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "target"}).
+			AddRow("execution-1", "task-1", model.TaskExecutionRunning, model.ExecutionTargetLocalClaimed))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "execution_target", "current_execution_id"}).
+			AddRow("task-1", model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, "execution-1"))
 	mock.ExpectExec("UPDATE `tasks` SET").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
 
@@ -103,7 +111,11 @@ func TestFinalizeLocalTaskMySQLExecutionCASLossRollsBackTaskUpdate(t *testing.T)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `task_executions` .*FOR UPDATE").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("execution-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "target"}).
+			AddRow("execution-1", "task-1", model.TaskExecutionRunning, model.ExecutionTargetLocalClaimed))
+	mock.ExpectQuery("SELECT .* FROM `tasks` .*FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "execution_target", "current_execution_id"}).
+			AddRow("task-1", model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, "execution-1"))
 	mock.ExpectExec("UPDATE `tasks` SET").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE `task_executions` SET").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()

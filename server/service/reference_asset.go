@@ -64,32 +64,34 @@ func NewReferenceAssetService(repo repository.Repository, store storage.Provider
 	return &ReferenceAssetService{repo: repo, store: store, now: now}
 }
 
-// EffectiveReferenceAssetID applies the immutable runtime precedence. A direct
-// task asset always wins, including when inherited references are skipped.
-func EffectiveReferenceAssetID(task *model.Task) string {
-	id, _ := effectiveReferenceAssetSelection(task)
-	return id
-}
-
-func effectiveReferenceAssetSelection(task *model.Task) (string, []string) {
+func taskReferenceAssetID(task *model.Task) string {
 	if task == nil {
-		return "", nil
+		return ""
 	}
-	if id := strings.TrimSpace(task.ReferenceImageAssetID); id != "" {
-		return id, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
-	}
-	if task.SkipReferenceImage {
-		return "", nil
-	}
-	id := strings.TrimSpace(task.ProjectSnapshot.Data().ReferenceImageAssetID)
-	if id == "" {
-		return "", nil
-	}
-	return id, []string{DirectUploadPurposeProjectReference}
+	return strings.TrimSpace(task.ReferenceImageAssetID)
 }
 
-func resolveEffectiveReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
-	id, allowed := effectiveReferenceAssetSelection(task)
+func projectStyleReferenceAssetID(task *model.Task) string {
+	if task == nil || task.SkipReferenceImage {
+		return ""
+	}
+	return strings.TrimSpace(task.ProjectSnapshot.Data().ReferenceImageAssetID)
+}
+
+func resolveTaskReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
+	return resolveOwnedReferenceAsset(ctx, repo, task, taskReferenceAssetID(task), []string{
+		DirectUploadPurposeTaskReference,
+		DirectUploadPurposeAIEntryAttachment,
+	}, "task reference")
+}
+
+func resolveProjectStyleReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
+	return resolveOwnedReferenceAsset(ctx, repo, task, projectStyleReferenceAssetID(task), []string{
+		DirectUploadPurposeProjectReference,
+	}, "project style reference")
+}
+
+func resolveOwnedReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task, id string, allowed []string, role string) (*model.Asset, error) {
 	if id == "" {
 		return nil, nil
 	}
@@ -98,9 +100,21 @@ func resolveEffectiveReferenceAsset(ctx context.Context, repo repository.Reposit
 	}
 	asset, err := NewReferenceAssetService(repo, nil, nil).RequireOwned(ctx, task.UserID, id, allowed)
 	if err != nil {
-		return nil, fmt.Errorf("resolve effective reference asset: %w", err)
+		return nil, fmt.Errorf("resolve %s asset: %w", role, err)
 	}
 	return asset, nil
+}
+
+func resolveRuntimeReferenceAssets(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, *model.Asset, error) {
+	taskAsset, err := resolveTaskReferenceAsset(ctx, repo, task)
+	if err != nil {
+		return nil, nil, err
+	}
+	projectStyleAsset, err := resolveProjectStyleReferenceAsset(ctx, repo, task)
+	if err != nil {
+		return nil, nil, err
+	}
+	return taskAsset, projectStyleAsset, nil
 }
 
 func (s *ReferenceAssetService) ResolveSelection(ctx context.Context, userID string, in ReferenceImageSelection, allowed []string) (string, error) {
@@ -136,7 +150,7 @@ func (s *ReferenceAssetService) ResolveSelection(ctx context.Context, userID str
 	if strings.TrimSpace(session.StagingKey) == "" {
 		return "", ErrReferenceAssetInvalidMetadata
 	}
-	if err := validateReferenceImageFileMetadata(session.FileName, session.ContentType, session.Size); err != nil {
+	if err := validateReferenceImageFileMetadata(session.Purpose, session.FileName, session.ContentType, session.Size); err != nil {
 		return "", err
 	}
 
@@ -157,6 +171,14 @@ func (s *ReferenceAssetService) ResolveSelection(ctx context.Context, userID str
 }
 
 func (s *ReferenceAssetService) RequireOwned(ctx context.Context, userID, assetID string, allowed []string) (*model.Asset, error) {
+	return s.requireOwned(ctx, userID, assetID, allowed, validateOwnedReferenceAsset)
+}
+
+func (s *ReferenceAssetService) RequireOwnedAttachment(ctx context.Context, userID, assetID string, allowed []string) (*model.Asset, error) {
+	return s.requireOwned(ctx, userID, assetID, allowed, validateOwnedAttachmentAsset)
+}
+
+func (s *ReferenceAssetService) requireOwned(ctx context.Context, userID, assetID string, allowed []string, validate func(*model.Asset, string, []string) error) (*model.Asset, error) {
 	if s == nil || s.repo == nil {
 		return nil, ErrReferenceAssetUnavailable
 	}
@@ -172,7 +194,7 @@ func (s *ReferenceAssetService) RequireOwned(ctx context.Context, userID, assetI
 		}
 		return nil, fmt.Errorf("%w: find asset: %w", ErrReferenceAssetUnavailable, err)
 	}
-	if err := validateOwnedReferenceAsset(asset, userID, allowed); err != nil {
+	if err := validate(asset, userID, allowed); err != nil {
 		return nil, err
 	}
 	return asset, nil
@@ -204,6 +226,16 @@ func (s *ReferenceAssetService) Present(ctx context.Context, userID, assetID str
 }
 
 func validateOwnedReferenceAsset(asset *model.Asset, userID string, allowed []string) error {
+	if err := validateOwnedAttachmentAsset(asset, userID, allowed); err != nil {
+		return err
+	}
+	if ClassifyDirectUploadFile(asset.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(asset.FileName)))) != "image" {
+		return ErrReferenceAssetInvalidMetadata
+	}
+	return nil
+}
+
+func validateOwnedAttachmentAsset(asset *model.Asset, userID string, allowed []string) error {
 	if asset == nil || asset.UserID != userID {
 		return ErrReferenceAssetForbidden
 	}
@@ -213,12 +245,32 @@ func validateOwnedReferenceAsset(asset *model.Asset, userID string, allowed []st
 	if strings.TrimSpace(asset.StorageKey) == "" || strings.TrimSpace(asset.ETag) == "" {
 		return ErrReferenceAssetInvalidMetadata
 	}
-	return validateReferenceImageFileMetadata(asset.FileName, asset.ContentType, asset.Size)
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(asset.FileName)))
+	policy, ok := directUploadPolicies[asset.Purpose]
+	if !ok || !policy.validate(asset.ContentType, ext) {
+		return ErrReferenceAssetInvalidMetadata
+	}
+	maxSize := policy.maxSize
+	if policy.maxSizeFor != nil {
+		maxSize = policy.maxSizeFor(asset.ContentType, ext)
+	}
+	if asset.Size <= 0 || maxSize <= 0 || asset.Size > maxSize {
+		return ErrReferenceAssetInvalidMetadata
+	}
+	return nil
 }
 
-func validateReferenceImageFileMetadata(fileName, contentType string, size int64) error {
+func validateReferenceImageFileMetadata(purpose, fileName, contentType string, size int64) error {
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
-	if size <= 0 || size > maxUploadImageBytes || !isDirectUploadImage(contentType, ext) {
+	policy, ok := directUploadPolicies[purpose]
+	if !ok || !isDirectUploadImage(contentType, ext) || !policy.validate(contentType, ext) {
+		return ErrReferenceAssetInvalidMetadata
+	}
+	maxSize := policy.maxSize
+	if policy.maxSizeFor != nil {
+		maxSize = policy.maxSizeFor(contentType, ext)
+	}
+	if size <= 0 || maxSize <= 0 || size > maxSize {
 		return ErrReferenceAssetInvalidMetadata
 	}
 	return nil

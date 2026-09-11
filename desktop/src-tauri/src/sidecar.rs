@@ -52,8 +52,7 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
 
 /// Spawn the bundled TypeScript Agent for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
-/// progress + results back to the cloud itself (using --api-key/--server-url,
-/// which the SDK surfaces as ANBAN_API_KEY/ANBAN_API_URL); we only observe.
+/// progress + results back to the cloud using its execution-scoped credential.
 ///
 /// If `env.cancel` fires while the agent is running we kill the subprocess so a
 /// stopped executor doesn't leave Claude Code running (and burning quota) in the
@@ -67,7 +66,6 @@ pub async fn run_agent(
     env: &SidecarEnv,
     workspace_root: &Path,
     server_url: &str,
-    api_key: &str,
     cfg: &LocalExecutionConfig,
 ) -> std::io::Result<()> {
     let task_workspace = workspace_root.join(&cfg.task_id);
@@ -75,7 +73,7 @@ pub async fn run_agent(
 
     let mut cmd = Command::new(&env.node_bin);
     cmd.arg(agent_entry);
-    for arg in agent_args(server_url, api_key, &task_workspace, cfg) {
+    for arg in agent_args(server_url, &task_workspace, cfg) {
         cmd.arg(arg);
     }
 
@@ -87,6 +85,7 @@ pub async fn run_agent(
     };
     cmd.env("PATH", &extended_path);
     cmd.env("CLAUDE_PLUGIN_ROOT", &env.plugin_dir);
+    cmd.env("ANBAN_EXECUTION_TOKEN", &cfg.execution_token);
     if !env.anthropic_api_key.is_empty() {
         cmd.env("ANTHROPIC_API_KEY", &env.anthropic_api_key);
     }
@@ -157,18 +156,13 @@ pub async fn run_agent(
     Ok(())
 }
 
-fn agent_args(
-    server_url: &str,
-    api_key: &str,
-    task_workspace: &Path,
-    cfg: &LocalExecutionConfig,
-) -> Vec<String> {
+fn agent_args(server_url: &str, task_workspace: &Path, cfg: &LocalExecutionConfig) -> Vec<String> {
     let mut args = vec![
         "run".to_string(),
         "--server-url".to_string(),
         server_url.to_string(),
-        "--api-key".to_string(),
-        api_key.to_string(),
+        "--artifact-upload-mode".to_string(),
+        cfg.artifact_upload_mode.clone(),
         "--task-id".to_string(),
         cfg.task_id.clone(),
         "--execution-id".to_string(),
@@ -218,7 +212,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_args_include_article_image_switches() {
+    fn agent_args_include_execution_identity_without_credentials() {
         let cfg = LocalExecutionConfig {
             task_id: "task-1".to_string(),
             execution_id: "execution-local-1".to_string(),
@@ -237,14 +231,11 @@ mod tests {
             article_with_cover: false,
             article_with_content_images: true,
             project_id: "project-1".to_string(),
+            execution_token: "execution-token".to_string(),
+            artifact_upload_mode: "stream".to_string(),
         };
 
-        let args = agent_args(
-            "https://api.example.com",
-            "key",
-            Path::new("/tmp/task-1"),
-            &cfg,
-        );
+        let args = agent_args("https://api.example.com", Path::new("/tmp/task-1"), &cfg);
 
         assert_eq!(args.first().map(String::as_str), Some("run"));
         assert!(args
@@ -259,6 +250,8 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--runtime-profile", "article"]));
+        assert!(!args.iter().any(|arg| arg == "--execution-token"));
+        assert!(!args.iter().any(|arg| arg == "execution-token"));
         assert!(args.iter().any(|arg| arg == "--article-with-cover=false"));
         assert!(args
             .iter()

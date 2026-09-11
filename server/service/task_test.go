@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -96,11 +97,29 @@ func newTestTaskService(
 		ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
 			Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-				"standard": {Enabled: true, MinTier: string(model.TierFree)},
+				"standard": testImageCapabilityRoute("image.standard"),
 			},
 		}},
 	}))
 	return svc
+}
+
+func testImageCapabilityRoute(sku string) serverconfig.ImageGenerationRouteConfig {
+	return serverconfig.ImageGenerationRouteConfig{
+		Provider: "openai-test", Model: "image-test", BaseURL: "https://images.invalid/v1", APIKey: "test-secret",
+		Timeout: time.Minute, MinTier: string(model.TierFree), BillingSKU: sku, Enabled: true,
+		GenerationFeatures: serverconfig.ImageGenerationFeatures{MaxBatch: 1, MaxReferenceImages: 4, SupportsReference: true},
+	}
+}
+
+func freezeTestTaskImageCapability(t *testing.T, task *model.Task, key string, route serverconfig.ImageGenerationRouteConfig) {
+	t.Helper()
+	snapshot, err := imageCapabilitySnapshot(key, route)
+	if err != nil {
+		t.Fatalf("freeze test task image capability: %v", err)
+	}
+	task.ImageCapabilityKey = snapshot.Key
+	task.SetImageCapabilitySnapshot(snapshot)
 }
 
 func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Repository) {
@@ -196,6 +215,9 @@ func freezeTestTaskProfile(t *testing.T, task *model.Task) {
 	task.ExecutionProfile = profile.ID
 	task.AgentProfileSnapshot = snapshot
 	task.AgentProfileFingerprint = fingerprint
+	if task.Type != model.TaskTypeViralAnalysis && task.ImageCapabilityKey == "" {
+		task.ImageCapabilityKey = "standard"
+	}
 }
 
 func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testing.T) {
@@ -272,8 +294,13 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
+			"standard": testImageCapabilityRoute("image.standard"),
+			"professional": func() serverconfig.ImageGenerationRouteConfig {
+				route := testImageCapabilityRoute("image.professional")
+				route.MinTier = string(model.TierEnterprise)
+				route.GenerationFeatures.SizePresets = []string{"1:1"}
+				return route
+			}(),
 		},
 	}}}
 	setter, ok := any(svc).(interface {
@@ -309,8 +336,13 @@ func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfGenerationSpecs(
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
-			"standard":     {Enabled: true, MinTier: "free", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
-			"professional": {Enabled: true, MinTier: "enterprise", GenerationFeatures: serverconfig.ImageGenerationFeatures{SizePresets: []string{"1:1"}}},
+			"standard": testImageCapabilityRoute("image.standard"),
+			"professional": func() serverconfig.ImageGenerationRouteConfig {
+				route := testImageCapabilityRoute("image.professional")
+				route.MinTier = string(model.TierEnterprise)
+				route.GenerationFeatures.SizePresets = []string{"1:1"}
+				return route
+			}(),
 		},
 	}}}
 	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
@@ -659,7 +691,7 @@ func TestTaskService_FinalizeTitleRejectsDuplicateWithinProject(t *testing.T) {
 		UserID:    userID,
 		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusCompleted,
+		Status:    model.TaskStatusRunning,
 		Title:     "新手咖啡豆怎么选",
 		CreatedAt: time.Now().Add(-1 * time.Hour),
 	}
@@ -1081,13 +1113,14 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	src := &model.Task{ExecutionProfile: "effective",
-		ID:         uuid.New().String(),
-		UserID:     userID,
-		ProjectID:  projectID,
-		Type:       model.PlatformArticle,
-		Status:     model.TaskStatusCompleted,
-		Prompt:     "finished topic",
-		ImageRatio: "16:9",
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          projectID,
+		Type:               model.PlatformArticle,
+		Status:             model.TaskStatusCompleted,
+		Prompt:             "finished topic",
+		ImageRatio:         "16:9",
+		ImageCapabilityKey: "standard",
 	}
 	src.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "original input", FileName: "brief.txt"},
@@ -1095,6 +1128,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/feedback.pdf", FileName: "feedback.pdf"},
 	})
 	src.SetAgentInput(map[string]any{})
+	freezeTestTaskImageCapability(t, src, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatalf("create source task: %v", err)
 	}
@@ -1155,12 +1189,13 @@ func TestCloneConvertsDirectReferenceToPrependedAttachment(t *testing.T) {
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
 		{Type: "document", Text: "brief", FileName: "brief.md"},
 		{Type: "text", Text: "notes", FileName: "notes.txt"},
 	})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1196,12 +1231,13 @@ func TestCloneDoesNotDuplicateDirectReferenceAttachment(t *testing.T) {
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
 		{AssetID: asset.ID, Type: "document", FileName: "forged.pdf", ContentType: "application/pdf", Size: 1},
 		{Type: "text", Text: "notes", FileName: "notes.txt"},
 	})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1225,9 +1261,10 @@ func TestCloneKeepsProjectSnapshotReferenceOutOfAttachments(t *testing.T) {
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective"}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ImageCapabilityKey: "standard"}
 	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformArticle, ReferenceImageAssetID: asset.ID})
 	source.SetInputAttachments([]model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1253,10 +1290,11 @@ func TestCloneExcludesDirectReferenceDuplicatedFromProjectSnapshot(t *testing.T)
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformArticle, ReferenceImageAssetID: asset.ID})
 	source.SetInputAttachments([]model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1282,13 +1320,14 @@ func TestCloneMovesDuplicateReferenceAttachmentToFront(t *testing.T) {
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
 		{Type: "document", Text: "brief", FileName: "brief.pdf"},
 		{AssetID: asset.ID, Type: "document", FileName: "forged.pdf", ContentType: "application/pdf", Size: 1, Instruction: "use as style"},
 		{Type: "text", Text: "notes", FileName: "notes.txt"},
 	})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1314,13 +1353,14 @@ func TestCloneRemovesAllDuplicateReferenceAttachmentsPreservingFirstInstruction(
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
 	source.SetInputAttachments([]model.EntryAttachment{
 		{AssetID: asset.ID, Type: "document", Instruction: "first instruction", FileName: "forged-a.pdf"},
 		{Type: "text", FileName: "brief.txt"},
 		{AssetID: asset.ID, Type: "image", Instruction: "second instruction", FileName: "forged-b.png"},
 		{Type: "document", FileName: "last.pdf"},
 	})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1342,7 +1382,8 @@ func TestCloneAcceptsHistoricalAIEntryReferenceAsset(t *testing.T) {
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1425,8 +1466,9 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		Status: model.TaskStatusCompleted, Prompt: "historical", ExecutionProfile: current.ID,
-		AgentProfileSnapshot: historical, AgentProfileFingerprint: historicalFingerprint,
+		AgentProfileSnapshot: historical, AgentProfileFingerprint: historicalFingerprint, ImageCapabilityKey: "standard",
 	}
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -1442,6 +1484,15 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 
 func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(nil, &serverconfig.Config{
+		ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
+			DefaultCapability: "standard",
+			Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
+				"standard":   testImageCapabilityRoute("image.standard"),
+				"gemini-pro": testImageCapabilityRoute("image.gemini-pro"),
+			},
+		}},
+	}))
 	ctx := context.Background()
 	userID := uuid.NewString()
 	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
@@ -1766,9 +1817,11 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 		Type:                 model.PlatformArticle,
 		Status:               model.TaskStatusCompleted,
 		Prompt:               "clone lineage",
+		ImageCapabilityKey:   "standard",
 		InputSourceTaskID:    "root-task-id",
 		InputSourceProjectID: "root-project-id",
 	}
+	freezeTestTaskImageCapability(t, src, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatal(err)
 	}
@@ -1801,8 +1854,10 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 		Type:                 model.PlatformArticle,
 		Status:               model.TaskStatusCompleted,
 		Prompt:               "partial clone lineage",
+		ImageCapabilityKey:   "standard",
 		InputSourceProjectID: "stale-project-id",
 	}
+	freezeTestTaskImageCapability(t, src, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatal(err)
 	}
@@ -1829,12 +1884,13 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	src := &model.Task{ExecutionProfile: "effective",
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformMontage,
-		Status:    model.TaskStatusCompleted,
-		Prompt:    "source prompt",
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ProjectID:          projectID,
+		Type:               model.PlatformMontage,
+		Status:             model.TaskStatusCompleted,
+		Prompt:             "source prompt",
+		ImageCapabilityKey: "standard",
 	}
 	src.SetMontageInput(model.MontageInput{
 		Brief:       "保留克隆输入",
@@ -1843,6 +1899,7 @@ func TestTaskServiceClonePreservesMontageInput(t *testing.T) {
 			DurationSeconds: 20,
 		},
 	})
+	freezeTestTaskImageCapability(t, src, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, src); err != nil {
 		t.Fatalf("create source task: %v", err)
 	}
@@ -1889,7 +1946,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		UserID:         userID,
 		ProjectID:      projectID,
 		Type:           model.PlatformArticle,
-		Status:         model.TaskStatusCompleted,
+		Status:         model.TaskStatusFailed,
 		Prompt:         "finished topic",
 		Progress:       100,
 		Result:         &resultJSON,
@@ -1898,6 +1955,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		WorkflowStatus: &workflowStatus,
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1958,6 +2016,48 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	}
 }
 
+func TestTaskServiceResumeRejectsCompletedTaskWithoutMutation(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &mockEnqueuer{}
+	store := &resumeTestStorage{files: map[string][]byte{}}
+	svc := newTestTaskService(repo, enqueuer, store, &logger, "", nil, nil)
+	svc.SetNASResumeEnabled(true)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	completedAt := time.Now().Add(-time.Minute)
+	result := `{"success":true}`
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, Progress: 100, Result: &result, CompletedAt: &completedAt,
+	}
+	freezeTestTaskProfile(t, task)
+	task.SetInputAttachments([]model.EntryAttachment{{Role: "brief", Text: "keep"}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
+		Prompt: "change completed delivery",
+		Files:  []ResumeTaskFile{{OriginalName: "new.txt", Reader: strings.NewReader("new")}},
+	})
+	if resumed != nil || !errors.Is(err, ErrTaskResumeCompleted) {
+		t.Fatalf("Resume completed task = %#v, %v; want nil/ErrTaskResumeCompleted", resumed, err)
+	}
+	if len(enqueuer.enqueued) != 0 || len(store.files) != 0 {
+		t.Fatalf("completed resume side effects: enqueued=%v files=%v", enqueuer.enqueued, store.files)
+	}
+	found, findErr := repo.Tasks().FindByID(ctx, task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if found.Status != model.TaskStatusCompleted || found.Progress != 100 || found.Result == nil || *found.Result != result || found.CompletedAt == nil || len(found.InputAttachments.Data()) != 1 || found.InputAttachments.Data()[0].Text != "keep" {
+		t.Fatalf("completed task mutated: %#v", found)
+	}
+}
+
 func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -1969,6 +2069,7 @@ func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID,
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2006,8 +2107,9 @@ func TestTaskServiceResumeRejectsDeletedFrozenProviderBeforeMutation(t *testing.
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, ExecutionProfile: profile.ID,
-		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
+		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, ImageCapabilityKey: "standard",
 	}
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2066,6 +2168,7 @@ func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 		CostStatus:         agent.CostStatusReconciled,
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2114,10 +2217,11 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 		UserID:    userID,
 		ProjectID: projectID,
 		Type:      model.PlatformArticle,
-		Status:    model.TaskStatusCompleted,
+		Status:    model.TaskStatusFailed,
 		Prompt:    "finished remotely",
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "keep me", FileName: "brief.txt"},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old resume", FileName: "latest.md"},
@@ -2193,6 +2297,7 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 		Status:    model.TaskStatusFailed,
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2240,6 +2345,7 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2279,8 +2385,9 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	task.SetInputAttachments([]model.EntryAttachment{
 		{Role: "brief", Text: "keep"},
 		{Role: model.EntryAttachmentRoleResumeLatest, Text: "old latest"},
@@ -2319,6 +2426,7 @@ func TestTaskService_DeletePreventsConcurrentResumeFromRestoringAuthority(t *tes
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2361,6 +2469,7 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2404,6 +2513,7 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -2574,7 +2684,7 @@ func TestTaskService_ResumeRejectsNoInputAndNonTerminal(t *testing.T) {
 	}
 }
 
-func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T) {
+func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.T) {
 	_, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2595,19 +2705,19 @@ func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T
 		t.Fatalf("create task: %v", err)
 	}
 
-	first, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, nil)
+	first, err := repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, nil)
 	if err != nil {
-		t.Fatalf("first ResetTerminalTaskForResume: %v", err)
+		t.Fatalf("first ResetRetryableTaskForResume: %v", err)
 	}
 	if !first {
-		t.Fatal("first ResetTerminalTaskForResume = false, want true")
+		t.Fatal("first ResetRetryableTaskForResume = false, want true")
 	}
-	second, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID, nil)
+	second, err := repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, nil)
 	if err != nil {
-		t.Fatalf("second ResetTerminalTaskForResume: %v", err)
+		t.Fatalf("second ResetRetryableTaskForResume: %v", err)
 	}
 	if second {
-		t.Fatal("second ResetTerminalTaskForResume = true, want false after status changed")
+		t.Fatal("second ResetRetryableTaskForResume = true, want false after status changed")
 	}
 	found, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
@@ -2634,6 +2744,7 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 		Status:    model.TaskStatusFailed,
 	}
 	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -3078,10 +3189,6 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("persist completed task file: %v", err)
 	}
-	if _, err := svc.UploadTaskFileFromReader(ctx, foreign.ID, otherUserID, "output/secret.md", strings.NewReader("secret"), "text/markdown", 6); err != nil {
-		t.Fatalf("upload foreign task file: %v", err)
-	}
-
 	buf, zipName, err := svc.DownloadTasksZip(ctx, userID, []string{completed.ID, emptyCompleted.ID, pending.ID, foreign.ID})
 	if err != nil {
 		t.Fatalf("DownloadTasksZip: %v", err)
@@ -3168,6 +3275,12 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+	}); err != nil {
+		t.Fatalf("create task execution: %v", err)
+	}
 
 	files := []struct {
 		path    string
@@ -3181,8 +3294,18 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 		{"output/review.json", `{"overall_score":91,"readiness":"ready","strengths":["清晰"],"risks":[],"next_actions":["发布"]}`, "application/json", 92, false},
 	}
 	for _, file := range files {
-		if _, err := svc.UploadTaskFileFromReader(ctx, task.ID, userID, file.path, strings.NewReader(file.body), file.mime, file.size); err != nil {
+		key := "tests/tasks/" + task.ID + "/" + file.path
+		uploaded, err := store.Upload(ctx, key, strings.NewReader(file.body), file.mime)
+		if err != nil {
 			t.Fatalf("upload %s: %v", file.path, err)
+		}
+		if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID,
+			State: model.TaskFileStatePublished, FilePath: file.path, FileName: filepath.Base(file.path),
+			MimeType: file.mime, FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL,
+			StorageProvider: store.Name(),
+		}); err != nil {
+			t.Fatalf("persist %s: %v", file.path, err)
 		}
 	}
 

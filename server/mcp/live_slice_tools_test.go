@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/service"
@@ -125,6 +129,31 @@ func TestUploadLiveAudioHandlerErrorContainsCapabilityStateOnly(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("upload error contains workflow directive %q: %q", forbidden, text)
 		}
+	}
+}
+
+func TestUploadLiveAudioHandlerRejectsUserScopedCredential(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil)}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"file_path":"/etc/passwd"}`)}}
+	var result *mcp.CallToolResult
+	verifier := func(context.Context, string, *http.Request) (*mcpauth.TokenInfo, error) {
+		return &mcpauth.TokenInfo{UserID: "user-1", Scopes: []string{"mcp"}, Expiration: time.Now().Add(time.Hour)}, nil
+	}
+	wrapped := mcpauth.RequireBearerToken(verifier, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result, _ = uploadLiveAudioHandler(r.Context(), req)
+		w.WriteHeader(http.StatusOK)
+	}))
+	httpReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
+	httpReq.Header.Set("Authorization", "Bearer user-api-key")
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, httpReq)
+	if result == nil || !result.IsError {
+		t.Fatalf("user-scoped upload result = %#v, want MCP error", result)
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "requires an admin credential") {
+		t.Fatalf("unexpected user-scoped upload error: %q", text)
 	}
 }
 

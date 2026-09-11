@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -43,6 +44,132 @@ type executionResultOverrideRepository struct {
 	repository.Repository
 	executionID string
 	result      []byte
+}
+
+type failingLocalCancellationRepository struct {
+	repository.Repository
+	err                        error
+	finalizeWithArtifactsCalls atomic.Int32
+}
+
+type failingLocalCancellationTxRepository struct {
+	repository.Repository
+	tasks repository.TaskRepository
+}
+
+type failingLocalCancellationTaskRepository struct {
+	repository.TaskRepository
+	err                        error
+	finalizeWithArtifactsCalls *atomic.Int32
+}
+
+func (r *failingLocalCancellationRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		tasks := &failingLocalCancellationTaskRepository{
+			TaskRepository:             tx.Tasks(),
+			err:                        r.err,
+			finalizeWithArtifactsCalls: &r.finalizeWithArtifactsCalls,
+		}
+		return fn(&failingLocalCancellationTxRepository{Repository: tx, tasks: tasks})
+	})
+}
+
+func (r *failingLocalCancellationTxRepository) Tasks() repository.TaskRepository {
+	return r.tasks
+}
+
+func (r *failingLocalCancellationTaskRepository) FinalizeLocalTaskWithArtifactsInTx(
+	ctx context.Context,
+	id, executionID, status, errorMsg, taskResult, executionResult string,
+	usage []model.ModelTokenUsage,
+	costStatus string,
+	artifactAction repository.LocalTaskArtifactAction,
+) (bool, error) {
+	r.finalizeWithArtifactsCalls.Add(1)
+	return r.TaskRepository.FinalizeLocalTaskWithArtifactsInTx(
+		ctx, id, executionID, status, errorMsg, taskResult, executionResult,
+		usage, costStatus, artifactAction,
+	)
+}
+
+func (r *failingLocalCancellationTaskRepository) UpdateBillingTerminalReason(context.Context, string, string) error {
+	return r.err
+}
+
+func seedLocalExecutionForReaper(t *testing.T, repo repository.Repository, heartbeat time.Time) (*model.Task, *model.TaskExecution) {
+	t.Helper()
+	ctx := context.Background()
+	executionID := uuid.NewString()
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformSeednote,
+		Status: model.TaskStatusRunning, ExecutionTarget: model.ExecutionTargetLocalClaimed,
+		CurrentExecutionID: &executionID, StartedAt: &heartbeat, LastHeartbeatAt: &heartbeat,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create local reaper task: %v", err)
+	}
+	execution := &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1,
+		Target: model.ExecutionTargetLocalClaimed, Status: model.TaskExecutionRunning,
+		Started: true, StartedAt: &heartbeat, LastHeartbeatAt: &heartbeat, CreatedAt: heartbeat,
+		ManifestStatus: model.TaskExecutionManifestPending,
+	}
+	if err := repo.TaskExecutions().Create(ctx, execution); err != nil {
+		t.Fatalf("create local reaper execution: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
+		Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md",
+	}); err != nil {
+		t.Fatalf("create local reaper artifact: %v", err)
+	}
+	return task, execution
+}
+
+func TestReapStaleLocalExecutionsFinalizesArtifactsAndBillingReason(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetExecutionTimeouts(time.Hour, time.Minute)
+	now := time.Now().UTC()
+	task, execution := seedLocalExecutionForReaper(t, repo, now.Add(-10*time.Minute))
+
+	reaped, err := svc.ReapStaleLocalExecutions(context.Background(), now, 5*time.Minute, 10)
+	if err != nil || reaped != 1 {
+		t.Fatalf("ReapStaleLocalExecutions = %d, %v; want 1, nil", reaped, err)
+	}
+	storedTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+	storedExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	files, _ := repo.TaskFiles().FindByExecutionID(context.Background(), execution.ID)
+	if storedTask.Status != model.TaskStatusFailed || storedTask.BillingTerminalReason != model.TaskBillingTerminalExecutionTimeout || storedTask.CompletedAt == nil {
+		t.Fatalf("reaped task = %#v", storedTask)
+	}
+	if storedExecution.Status != model.TaskExecutionFailed || storedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || storedExecution.CleanupStatus != model.TaskExecutionCleanupDone || storedExecution.CompletedAt == nil {
+		t.Fatalf("reaped execution = %#v", storedExecution)
+	}
+	if len(files) != 1 || files[0].State != model.TaskFileStateCollected || storedExecution.ManifestStatus != model.TaskExecutionManifestCollected {
+		t.Fatalf("reaped artifacts = %#v, manifest=%q", files, storedExecution.ManifestStatus)
+	}
+}
+
+func TestReapStaleLocalExecutionsRevalidatesHeartbeatUnderLock(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	svc.SetExecutionTimeouts(time.Hour, time.Minute)
+	now := time.Now().UTC()
+	task, execution := seedLocalExecutionForReaper(t, repo, now.Add(-10*time.Minute))
+	wrapper := &beforeTerminalTaskTxRepository{Repository: repo}
+	wrapper.before = func() error {
+		return repo.TaskExecutions().UpdateHeartbeat(context.Background(), execution.ID, now)
+	}
+	svc.repo = wrapper
+
+	reaped, err := svc.ReapStaleLocalExecutions(context.Background(), now, 5*time.Minute, 10)
+	if err != nil || reaped != 0 {
+		t.Fatalf("ReapStaleLocalExecutions after heartbeat = %d, %v; want 0, nil", reaped, err)
+	}
+	storedTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+	storedExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if storedTask.Status != model.TaskStatusRunning || storedExecution.Status != model.TaskExecutionRunning {
+		t.Fatalf("fresh local execution was reaped: task=%q execution=%q", storedTask.Status, storedExecution.Status)
+	}
 }
 
 func (r *executionResultOverrideRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
@@ -140,6 +267,12 @@ func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskInTx(ctx context.Co
 	return r.finalizeLocalTask(ctx, true, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
 }
 
+func (r *localCompletionRaceTaskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, artifactAction repository.LocalTaskArtifactAction) (bool, error) {
+	return r.finalizeLocalTaskCall(func() (bool, error) {
+		return r.TaskRepository.FinalizeLocalTaskWithArtifactsInTx(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus, artifactAction)
+	}, usage)
+}
+
 func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Context, inTx bool, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
 	finalize := func() (bool, error) {
 		if inTx {
@@ -147,6 +280,10 @@ func (r *localCompletionRaceTaskRepository) finalizeLocalTask(ctx context.Contex
 		}
 		return r.TaskRepository.FinalizeLocalTask(ctx, id, executionID, status, errorMsg, taskResult, usage, costStatus)
 	}
+	return r.finalizeLocalTaskCall(finalize, usage)
+}
+
+func (r *localCompletionRaceTaskRepository) finalizeLocalTaskCall(finalize func() (bool, error), usage []model.ModelTokenUsage) (bool, error) {
 	switch r.race.finalizeCalls.Add(1) {
 	case 1:
 		if len(usage) > 0 {
@@ -206,7 +343,13 @@ func newLocalSeedTask(t *testing.T, repo repository.Repository, userID, projectI
 		HasContentImage:    true,
 		ExecutionTarget:    model.ExecutionTargetLocal,
 		LocalClaimDeadline: deadline,
+		ImageCapabilityKey: "standard",
 	}
+	imageSnapshot, err := imageCapabilitySnapshot("standard", testImageCapabilityRoute("image.standard"))
+	if err != nil {
+		t.Fatalf("freeze local seed image capability: %v", err)
+	}
+	task.SetImageCapabilitySnapshot(imageSnapshot)
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create seed task: %v", err)
 	}
@@ -224,12 +367,43 @@ func newLocalMontageTask(t *testing.T, repo repository.Repository, userID, proje
 		Prompt:             "做一条品牌短片",
 		ExecutionTarget:    model.ExecutionTargetLocal,
 		LocalClaimDeadline: deadline,
+		ImageCapabilityKey: "standard",
 	}
+	imageSnapshot, err := imageCapabilitySnapshot("standard", testImageCapabilityRoute("image.standard"))
+	if err != nil {
+		t.Fatalf("freeze local montage image capability: %v", err)
+	}
+	task.SetImageCapabilitySnapshot(imageSnapshot)
 	task.SetMontageInput(model.MontageInput{Brief: "做一条品牌短片"})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create montage task: %v", err)
 	}
 	return task
+}
+
+func TestClaimLocalTaskRejectsMissingFrozenImageCapabilityAndRollsBackClaim(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	deadline := time.Now().Add(LocalClaimWindow)
+	task := newLocalSeedTask(t, repo, userID, projectID, &deadline)
+	task.ImageCapabilityKey = ""
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := svc.ClaimLocalTask(ctx, userID, `{}`)
+	if err == nil || !strings.Contains(err.Error(), "frozen image capability") {
+		t.Fatalf("ClaimLocalTask = %#v, %v; want missing frozen capability rejection", cfg, err)
+	}
+	stored, findErr := repo.Tasks().FindByID(ctx, task.ID)
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if stored.Status != model.TaskStatusPending || stored.ExecutionTarget != model.ExecutionTargetLocal || stored.CurrentExecutionID != nil {
+		t.Fatalf("rejected claim mutated task: %#v", stored)
+	}
 }
 
 // TestClaimLocalTaskAllowsLegacyUnprofiledTask preserves completion support for
@@ -527,8 +701,17 @@ func claimOneLocal(t *testing.T, svc *TaskService, repo repository.Repository, u
 	return task.ID
 }
 
-func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, taskID string) {
+func addLocalSeednoteDeliverables(t *testing.T, svc *TaskService, repo repository.Repository, taskID string) {
 	t.Helper()
+	store, ok := svc.store.(*fakeTaskStorage)
+	if !ok || store == nil {
+		store = &fakeTaskStorage{name: "oss", files: map[string][]byte{}}
+		svc.store = store
+	}
+	task, err := repo.Tasks().FindByID(context.Background(), taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load current local execution: task=%#v err=%v", task, err)
+	}
 	var files []*model.TaskFile
 	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
 		role := model.FileRoleOther
@@ -538,12 +721,116 @@ func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, task
 		case "image_01.png":
 			role = model.FileRoleImage
 		}
+		data := []byte("fixture")
+		if strings.EqualFold(filepath.Ext(name), ".png") {
+			data = taskImageTinyPNG()
+		}
+		relPath := "output/" + name
+		key := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + relPath
+		store.files[key] = data
+		ext := strings.ToLower(filepath.Ext(name))
+		mimeType := mimeTypes[ext]
+		if mimeType == "" {
+			mimeType = contentTypeForUploadExt(ext)
+		}
 		files = append(files, &model.TaskFile{
-			TaskID: taskID, Role: role, FileName: name, FilePath: "output/seednote/title/" + name,
+			TaskID: taskID, ExecutionID: *task.CurrentExecutionID, State: model.TaskFileStatePending,
+			Role: role, FileName: name, FilePath: relPath, MimeType: mimeType, FileSize: int64(len(data)),
+			OSSKey: key, OSSURL: store.GetURL(key), StorageProvider: store.Name(),
 		})
 	}
 	if err := repo.TaskFiles().BatchCreate(context.Background(), files); err != nil {
 		t.Fatalf("create task files: %v", err)
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(context.Background(), taskID, *task.CurrentExecutionID, nil); err != nil {
+		t.Fatalf("seal task file manifest: %v", err)
+	}
+}
+
+func addPendingLocalArtifact(t *testing.T, repo repository.Repository, taskID, executionID string) {
+	t.Helper()
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(
+		context.Background(), taskID, executionID, []*model.TaskFile{{
+			TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePending,
+			Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+		}},
+	); err != nil {
+		t.Fatalf("seal pending local artifact manifest: %v", err)
+	}
+}
+
+func TestCancelLocalExecutionAtomicallyCollectsPendingArtifacts(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+	addPendingLocalArtifact(t, repo, taskID, executionID)
+
+	if err := svc.CancelForUser(ctx, userID, taskID); err != nil {
+		t.Fatalf("CancelForUser: %v", err)
+	}
+
+	persistedTask, _ := repo.Tasks().FindByID(ctx, taskID)
+	persistedExecution, _ := repo.TaskExecutions().FindByID(ctx, executionID)
+	files, _ := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if persistedTask.Status != model.TaskStatusCancelled || persistedTask.CompletedAt == nil ||
+		persistedTask.BillingTerminalReason != model.TaskBillingTerminalUserCancelled {
+		t.Fatalf("cancelled task = %#v", persistedTask)
+	}
+	if persistedExecution.Status != model.TaskExecutionCancelled ||
+		persistedExecution.ManifestStatus != model.TaskExecutionManifestCollected ||
+		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone ||
+		persistedExecution.CleanupStatus != model.TaskExecutionCleanupDone {
+		t.Fatalf("cancelled execution = %#v", persistedExecution)
+	}
+	if len(files) != 1 || files[0].State != model.TaskFileStateCollected {
+		t.Fatalf("cancelled execution files = %#v, want one collected artifact", files)
+	}
+}
+
+func TestCancelLocalExecutionRollsBackArtifactsAndTerminalStateWhenBillingPersistenceFails(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil || task.CurrentExecutionID == nil {
+		t.Fatalf("load claimed task: task=%#v err=%v", task, err)
+	}
+	executionID := *task.CurrentExecutionID
+	addPendingLocalArtifact(t, repo, taskID, executionID)
+	wantErr := errors.New("billing terminal reason unavailable")
+	failingRepo := &failingLocalCancellationRepository{Repository: repo, err: wantErr}
+	svc.repo = failingRepo
+
+	if err := svc.CancelForUser(ctx, userID, taskID); !errors.Is(err, wantErr) {
+		t.Fatalf("CancelForUser error = %v, want billing persistence root cause", err)
+	}
+	if got := failingRepo.finalizeWithArtifactsCalls.Load(); got != 1 {
+		t.Fatalf("artifact-aware finalization calls = %d, want 1", got)
+	}
+
+	persistedTask, _ := repo.Tasks().FindByID(ctx, taskID)
+	persistedExecution, _ := repo.TaskExecutions().FindByID(ctx, executionID)
+	files, _ := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if persistedTask.Status != model.TaskStatusRunning || persistedTask.Result != nil ||
+		persistedTask.CompletedAt != nil || persistedTask.BillingTerminalReason != "" {
+		t.Fatalf("failed cancellation left partial task state: %#v", persistedTask)
+	}
+	if persistedExecution.Status != model.TaskExecutionRunning ||
+		persistedExecution.ManifestStatus != model.TaskExecutionManifestPending ||
+		persistedExecution.CompletedAt != nil {
+		t.Fatalf("failed cancellation left partial execution state: %#v", persistedExecution)
+	}
+	if len(files) != 1 || files[0].State != model.TaskFileStatePending {
+		t.Fatalf("failed cancellation left partial artifact state: %#v", files)
 	}
 }
 
@@ -579,7 +866,7 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 
 	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
@@ -603,7 +890,7 @@ func TestCompleteLocalTask_ExplicitCurrentExecutionSucceeds(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	task, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || task.CurrentExecutionID == nil {
 		t.Fatalf("load claimed task: task=%v err=%v", task, err)
@@ -674,7 +961,7 @@ func TestCompleteLocalTask_ExecutionCASLossWithInconsistentTerminalStateConflict
 			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 			taskID := claimOneLocal(t, svc, repo, userID, projectID)
 			if success {
-				addLocalSeednoteDeliverables(t, repo, taskID)
+				addLocalSeednoteDeliverables(t, svc, repo, taskID)
 			}
 			task, err := repo.Tasks().FindByID(ctx, taskID)
 			if err != nil || task.CurrentExecutionID == nil {
@@ -781,7 +1068,7 @@ func TestCompleteLocalTask_NestedAgentOnlyFails(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 
 	if err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
@@ -896,7 +1183,7 @@ func TestCompleteLocalTask_AcknowledgesSameTerminalDuplicateAndRejectsConflict(t
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	task, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || task.CurrentExecutionID == nil {
 		t.Fatalf("load current execution: task=%#v err=%v", task, err)
@@ -930,7 +1217,7 @@ func TestCompleteLocalTaskStoresFullExecutionEvidenceAndPublicTaskResult(t *test
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
-	addLocalSeednoteDeliverables(t, repo, taskID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
 	claimed, err := repo.Tasks().FindByID(ctx, taskID)
 	if err != nil || claimed.CurrentExecutionID == nil {
 		t.Fatalf("claimed task = %#v, %v", claimed, err)
@@ -1041,7 +1328,7 @@ func TestCompleteLocalTaskAcceptsSameOriginalResultAfterServerNormalization(t *t
 			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 			taskID := claimOneLocal(t, svc, repo, userID, projectID)
 			if test.addArtifacts {
-				addLocalSeednoteDeliverables(t, repo, taskID)
+				addLocalSeednoteDeliverables(t, svc, repo, taskID)
 			}
 			task, err := repo.Tasks().FindByID(ctx, taskID)
 			if err != nil || task.CurrentExecutionID == nil {
@@ -1068,7 +1355,7 @@ func TestCompleteLocalTaskConcurrentIdenticalOutcomeAcknowledgesBothCallers(t *t
 				projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
 				taskID := claimOneLocal(t, svc, baseRepo, userID, projectID)
 				if success {
-					addLocalSeednoteDeliverables(t, baseRepo, taskID)
+					addLocalSeednoteDeliverables(t, svc, baseRepo, taskID)
 				}
 				claimed, err := baseRepo.Tasks().FindByID(ctx, taskID)
 				if err != nil || claimed.CurrentExecutionID == nil {
@@ -1114,7 +1401,7 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 			projectID := createTestProject(t, baseRepo, userID, model.PlatformSeednote)
 			taskID := claimOneLocal(t, svc, baseRepo, userID, projectID)
 			if success {
-				addLocalSeednoteDeliverables(t, baseRepo, taskID)
+				addLocalSeednoteDeliverables(t, svc, baseRepo, taskID)
 			}
 
 			raceRepo := newLocalCompletionRaceRepository(baseRepo)
@@ -1208,7 +1495,7 @@ func TestCompleteLocalTaskConcurrentWithAgentRecordersLeavesLegalTerminalState(t
 			userID := uuid.NewString()
 			projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 			taskID := claimOneLocal(t, svc, repo, userID, projectID)
-			addLocalSeednoteDeliverables(t, repo, taskID)
+			addLocalSeednoteDeliverables(t, svc, repo, taskID)
 			task, err := repo.Tasks().FindByID(ctx, taskID)
 			if err != nil || task.CurrentExecutionID == nil {
 				t.Fatalf("load claimed task: task=%#v err=%v", task, err)

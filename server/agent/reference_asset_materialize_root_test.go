@@ -16,7 +16,7 @@ func TestReferenceAssetRootRejectsWorkspaceSymlink(t *testing.T) {
 	if err := materializeReferenceAssetWithRoot(t.Context(), workDir, []byte("image")); err == nil {
 		t.Fatal("Root materializer accepted a workspace symlink")
 	}
-	if _, err := os.Stat(filepath.Join(external, referenceImageDirName, referenceImageFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(external, referenceImageDirName, taskReferenceImageFileName)); !os.IsNotExist(err) {
 		t.Fatalf("external reference created through workspace symlink: %v", err)
 	}
 }
@@ -42,8 +42,8 @@ func TestReferenceAssetRootCommitRejectsWorkspaceSwapWithoutEscaping(t *testing.
 		t.Fatal("Root materializer accepted a swapped workspace")
 	}
 	for _, path := range []string{
-		filepath.Join(external, referenceImageDirName, referenceImageFileName),
-		filepath.Join(held, referenceImageDirName, referenceImageFileName),
+		filepath.Join(external, referenceImageDirName, taskReferenceImageFileName),
+		filepath.Join(held, referenceImageDirName, taskReferenceImageFileName),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 			t.Fatalf("reference escaped to %q: %v", path, statErr)
@@ -72,8 +72,8 @@ func TestReferenceAssetRootCommitRejectsParentSwapWithoutEscaping(t *testing.T) 
 		t.Fatal("Root materializer accepted a swapped parent")
 	}
 	for _, path := range []string{
-		filepath.Join(external, referenceImageFileName),
-		filepath.Join(held, referenceImageFileName),
+		filepath.Join(external, taskReferenceImageFileName),
+		filepath.Join(held, taskReferenceImageFileName),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 			t.Fatalf("reference escaped to %q: %v", path, statErr)
@@ -95,7 +95,7 @@ func TestReferenceAssetRootCommitRejectsExistingParentSymlink(t *testing.T) {
 	if err := materializeReferenceAssetWithRoot(t.Context(), workDir, []byte("image")); err == nil {
 		t.Fatal("Root materializer accepted an existing parent symlink")
 	}
-	if _, err := os.Stat(filepath.Join(external, referenceImageFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(external, taskReferenceImageFileName)); !os.IsNotExist(err) {
 		t.Fatalf("external reference created through parent symlink: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestReferenceAssetRootCommitAtomicallyReplacesTargetSymlink(t *testing.T) {
 	if err := os.WriteFile(external, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(dir, referenceImageFileName)
+	dest := filepath.Join(dir, taskReferenceImageFileName)
 	if err := os.Symlink(external, dest); err != nil {
 		t.Fatal(err)
 	}

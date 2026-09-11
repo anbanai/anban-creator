@@ -111,6 +111,32 @@ func TestMCPHandlerInvalidToken(t *testing.T) {
 	}
 }
 
+func TestMCPHandlerAuthenticationLogsNeverContainTokenMaterial(t *testing.T) {
+	const secret = "secret-credential-material-that-must-not-be-logged"
+	var buf bytes.Buffer
+	log := zerolog.New(&buf)
+	handler := NewMCPHandler(nil, "different-static-key", &log)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+secret)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	output := buf.String()
+	for _, forbidden := range []string{secret, secret[:8], "auth_token_preview", "token_hash_prefix"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("authentication log contains token material %q: %s", forbidden, output)
+		}
+	}
+	if !strings.Contains(output, `"authorization_present":true`) || !strings.Contains(output, `"bearer_format":true`) {
+		t.Fatalf("authentication log lacks non-secret diagnostics: %s", output)
+	}
+}
+
 func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	const (
 		userID      = "user-1"
@@ -136,14 +162,23 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 
 	for _, tt := range []struct {
 		name      string
+		toolName  string
 		arguments string
 	}{
-		{name: "other task same user", arguments: `{"project_id":"project-1","task_id":"task-2"}`},
-		{name: "other project", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
-		{name: "other execution", arguments: `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-2"}`},
+		{name: "other task same user", toolName: "get_task", arguments: `{"project_id":"project-1","task_id":"task-2"}`},
+		{name: "other project", toolName: "get_task", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
+		{name: "other execution", toolName: "get_task", arguments: `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-2"}`},
+		{name: "missing task scope", toolName: "get_task", arguments: `{}`},
+		{name: "missing project scope", toolName: "get_project", arguments: `{}`},
+		{name: "profile must bind task snapshot", toolName: "get_project_profile", arguments: `{"project_id":"project-1"}`},
+		{name: "prepare upload must bind project", toolName: "prepare_file_upload", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
+		{name: "prepare upload must name task", toolName: "prepare_file_upload", arguments: `{"project_id":"project-1"}`},
+		{name: "user-wide task enumeration is denied", toolName: "list_tasks", arguments: `{"project_id":"project-1"}`},
+		{name: "user-wide project enumeration is denied", toolName: "list_projects", arguments: `{}`},
+		{name: "unregistered tool is denied", toolName: "scope_probe", arguments: `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-1"}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := callMCPToolForScopeTest(handler, token, sessionID, "get_task", tt.arguments)
+			rec := callMCPToolForScopeTest(handler, token, sessionID, tt.toolName, tt.arguments)
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 			}
@@ -158,10 +193,10 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 		t.Fatalf("scope mismatch reached current-execution authorizer %d times", authorizer.calls)
 	}
 
-	// A correctly scoped request passes the central guard and reaches MCP
-	// dispatch. The deliberately unknown tool avoids coupling this auth test to
-	// business services while still exercising a real HTTP tools/call request.
-	rec := callMCPToolForScopeTest(handler, token, sessionID, "scope_probe", `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-1"}`)
+	// A correctly scoped, task-bound request passes the central guard and reaches
+	// MCP dispatch. The service is intentionally absent, so the tool returns an
+	// MCP-level error while the HTTP request still proves authorization passed.
+	rec := callMCPToolForScopeTest(handler, token, sessionID, "get_project_profile", `{"project_id":"project-1","task_id":"task-1"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid scope did not reach MCP dispatch: %d: %s", rec.Code, rec.Body.String())
 	}
@@ -184,7 +219,7 @@ func TestMCPHandlerExecutionTokenRejectsSupersededExecution(t *testing.T) {
 	authorizer := &executionAuthorizerStub{err: errors.New("not current")}
 	handler := NewMCPHandler(nil, "admin-key", nil, WithExecutionAuthentication(tokens, authorizer))
 	sessionID := initializeMCPExecutionSession(t, handler, token)
-	rec := callMCPToolForScopeTest(handler, token, sessionID, "scope_probe", `{"project_id":"project-1","task_id":"task-1"}`)
+	rec := callMCPToolForScopeTest(handler, token, sessionID, "get_project_profile", `{"project_id":"project-1","task_id":"task-1"}`)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -475,7 +510,7 @@ func assertFilePathSchemaLocality(t *testing.T, toolName string, node any) {
 				}
 				desc, _ := prop["description"].(string)
 				lower := strings.ToLower(desc)
-				if !strings.Contains(lower, "server-local") && !strings.Contains(lower, "agent/client-local") && !strings.Contains(lower, "client-local") {
+				if !strings.Contains(lower, "server-local") && !strings.Contains(lower, "agent/client-local") && !strings.Contains(lower, "client-local") && !strings.Contains(lower, "task-relative") {
 					t.Fatalf("%s file_path description must declare locality, got %q", toolName, desc)
 				}
 			}
@@ -539,5 +574,29 @@ func TestMCPLoggingMiddlewareRedactsSignedURLQueries(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("redacted log missing %q: %s", want, output)
 		}
+	}
+}
+
+func TestMCPLoggingMiddlewareRedactsMalformedURLQueries(t *testing.T) {
+	var buf bytes.Buffer
+	log := zerolog.New(&buf)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := mcpLoggingMiddleware(inner, &log)
+
+	// The malformed percent escape makes url.Parse fail; credentials must still
+	// not be copied into the request log.
+	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_live_analysis_task","arguments":{"audio_url":"https://signed.example.com/audio.mp3?bad=%zz&Signature=secret#fragment"}},"id":1}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	output := buf.String()
+	if strings.Contains(output, "Signature=secret") || strings.Contains(output, "%zz") {
+		t.Fatalf("malformed signed URL query leaked in log output: %s", output)
+	}
+	if !strings.Contains(output, `\"audio_url\":\"https://signed.example.com/audio.mp3?REDACTED#fragment\"`) {
+		t.Fatalf("malformed URL log missing redaction: %s", output)
 	}
 }

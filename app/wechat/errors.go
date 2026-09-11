@@ -1,11 +1,15 @@
 package wechat
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"time"
 )
+
+var ErrDownloadExceedsMaxSize = errors.New("download exceeds maximum size")
+var ErrUnsafeDownloadURL = errors.New("unsafe download URL")
 
 var errCodeRegexp = regexp.MustCompile(`errcode=(-?\d+)`)
 

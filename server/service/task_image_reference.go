@@ -1,16 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	stdimage "image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"mime"
-	"net/http"
 	"path"
 	"path/filepath"
 	"strings"
@@ -18,20 +12,23 @@ import (
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"
-	_ "golang.org/x/image/webp"
 )
 
+const maxTaskImageReferenceBytes int64 = 10 << 20
+
+type taskImageReferenceUse uint8
+
 const (
-	maxTaskImageReferenceBytes     int64 = 10 << 20
-	maxTaskImageReferenceDimension       = 16384
-	maxTaskImageReferencePixels    int64 = 40_000_000
+	taskImageReferenceGeneration taskImageReferenceUse = iota
+	taskImageReferenceAnalysis
+	taskImageReferenceTransform
 )
 
 func (s *TaskService) materializeAuthorizedTaskImageReference(
 	ctx context.Context,
 	task *model.Task,
 	userID, projectID, executionID, logicalPath string,
-	allowProjectStyleReference bool,
+	use taskImageReferenceUse,
 	maxBytes int64,
 ) (string, func(), error) {
 	if s == nil || s.repo == nil || s.store == nil {
@@ -48,8 +45,14 @@ func (s *TaskService) materializeAuthorizedTaskImageReference(
 	if err != nil {
 		return "", nil, err
 	}
-	if cleanPath == serveragent.ReferenceImagePath {
-		return s.materializeTaskReferenceAsset(ctx, task, allowProjectStyleReference, maxBytes)
+	if cleanPath == serveragent.TaskReferenceImagePath {
+		return s.materializeTaskReferenceAsset(ctx, task, maxBytes)
+	}
+	if cleanPath == serveragent.ProjectStyleReferenceImagePath {
+		if use != taskImageReferenceAnalysis {
+			return "", nil, errors.New("project style reference is prompt-only and cannot be passed to image generation or transforms")
+		}
+		return s.materializeProjectStyleReferenceAsset(ctx, task, maxBytes)
 	}
 	if attachment, ok := frozenImageAttachmentForPath(task.InputAttachments.Data(), cleanPath); ok {
 		return s.materializeFrozenImageAttachment(ctx, task, attachment, cleanPath, maxBytes)
@@ -132,11 +135,8 @@ func frozenImageAttachmentForPath(attachments []model.EntryAttachment, logicalPa
 
 func (s *TaskService) materializeFrozenImageAttachment(ctx context.Context, task *model.Task, attachment model.EntryAttachment, logicalPath string, maxBytes int64) (string, func(), error) {
 	assetID := strings.TrimSpace(attachment.AssetID)
-	if assetID == "" {
-		assetID = strings.TrimSpace(attachment.UploadID)
-	}
-	if assetID == "" {
-		return "", nil, fmt.Errorf("image attachment %q has no immutable asset identity", logicalPath)
+	if assetID == "" || strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.Key) != "" || strings.TrimSpace(attachment.UploadID) != "" {
+		return "", nil, fmt.Errorf("image attachment %q must have one unique immutable asset identity", logicalPath)
 	}
 	asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{
 		DirectUploadPurposeTaskReference,
@@ -146,30 +146,32 @@ func (s *TaskService) materializeFrozenImageAttachment(ctx context.Context, task
 	if err != nil {
 		return "", nil, fmt.Errorf("authorize image attachment %q: %w", logicalPath, err)
 	}
-	if assertedKey := strings.TrimSpace(attachment.Key); assertedKey != "" && assertedKey != asset.StorageKey {
-		return "", nil, fmt.Errorf("image attachment %q storage identity does not match its immutable asset", logicalPath)
-	}
 	return s.materializeAuthorizedImageObject(ctx, asset.StorageKey, asset.ContentType, asset.Size, logicalPath, maxBytes)
 }
 
-func (s *TaskService) materializeTaskReferenceAsset(ctx context.Context, task *model.Task, allowProjectStyleReference bool, maxBytes int64) (string, func(), error) {
+func (s *TaskService) materializeTaskReferenceAsset(ctx context.Context, task *model.Task, maxBytes int64) (string, func(), error) {
 	assetID := strings.TrimSpace(task.ReferenceImageAssetID)
 	allowed := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
-	if assetID == "" && !task.SkipReferenceImage {
-		assetID = strings.TrimSpace(task.ProjectSnapshot.Data().ReferenceImageAssetID)
-		allowed = []string{DirectUploadPurposeProjectReference}
-		if assetID != "" && !allowProjectStyleReference {
-			return "", nil, errors.New("project style reference is prompt-only and cannot be passed to image generation")
-		}
-	}
 	if assetID == "" {
-		return "", nil, errors.New("task has no authorized reference image")
+		return "", nil, errors.New("task has no direct task reference image")
 	}
 	asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, allowed)
 	if err != nil {
 		return "", nil, fmt.Errorf("authorize task reference image: %w", err)
 	}
-	return s.materializeAuthorizedImageObject(ctx, asset.StorageKey, asset.ContentType, asset.Size, serveragent.ReferenceImagePath, maxBytes)
+	return s.materializeAuthorizedImageObject(ctx, asset.StorageKey, asset.ContentType, asset.Size, serveragent.TaskReferenceImagePath, maxBytes)
+}
+
+func (s *TaskService) materializeProjectStyleReferenceAsset(ctx context.Context, task *model.Task, maxBytes int64) (string, func(), error) {
+	assetID := projectStyleReferenceAssetID(task)
+	if assetID == "" {
+		return "", nil, errors.New("task has no project style reference image")
+	}
+	asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeProjectReference})
+	if err != nil {
+		return "", nil, fmt.Errorf("authorize project style reference image: %w", err)
+	}
+	return s.materializeAuthorizedImageObject(ctx, asset.StorageKey, asset.ContentType, asset.Size, serveragent.ProjectStyleReferenceImagePath, maxBytes)
 }
 
 func (s *TaskService) currentExecutionImageFile(ctx context.Context, taskID, executionID, logicalPath string) (*model.TaskFile, error) {
@@ -212,14 +214,36 @@ func (s *TaskService) materializeAuthorizedImageObject(ctx context.Context, key,
 	if int64(len(data)) != expectedSize {
 		return "", nil, fmt.Errorf("authorized image %q size mismatch: read %d bytes, expected %d", logicalPath, len(data), expectedSize)
 	}
-	detected, _, err := validateTaskRasterImageBytes(data, logicalPath)
+	detected, _, err := validateRasterImageSafety(data, maxBytes)
 	if err != nil {
 		return "", nil, fmt.Errorf("authorized image %q content is not an image: %w", logicalPath, err)
 	}
 	if detected != contentType {
 		return "", nil, fmt.Errorf("authorized image %q declared MIME %q does not match raster MIME %q", logicalPath, contentType, detected)
 	}
-	return writeTaskImageTemp(data, logicalPath)
+	// Canonical runtime paths intentionally use stable names (for example,
+	// task-reference.png) regardless of the user's original upload format.
+	// Give downstream providers a physical suffix matching the actual bytes so
+	// multipart/MIME inference cannot reinterpret a JPEG as PNG.
+	return writeTaskImageTemp(data, logicalImagePathForMIME(logicalPath, detected))
+}
+
+func logicalImagePathForMIME(logicalPath, mimeType string) string {
+	ext := ""
+	switch normalizedImageContentType(mimeType) {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	case "image/gif":
+		ext = ".gif"
+	case "image/webp":
+		ext = ".webp"
+	}
+	if ext == "" {
+		return logicalPath
+	}
+	return strings.TrimSuffix(logicalPath, filepath.Ext(logicalPath)) + ext
 }
 
 func normalizedImageContentType(value string) string {
@@ -228,24 +252,4 @@ func normalizedImageContentType(value string) string {
 		return strings.ToLower(strings.TrimSpace(mediaType))
 	}
 	return strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
-}
-
-func validateTaskRasterImageBytes(data []byte, logicalPath string) (string, stdimage.Config, error) {
-	detected := normalizedImageContentType(http.DetectContentType(data))
-	config, format, err := stdimage.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return "", stdimage.Config{}, fmt.Errorf("decode %s: %w", logicalPath, err)
-	}
-	formatMIME := normalizedImageContentType("image/" + format)
-	if format == "jpeg" {
-		formatMIME = "image/jpeg"
-	}
-	if detected != formatMIME {
-		return "", stdimage.Config{}, fmt.Errorf("%s raster MIME %q does not match decoded format %q", logicalPath, detected, formatMIME)
-	}
-	if config.Width <= 0 || config.Height <= 0 || config.Width > maxTaskImageReferenceDimension || config.Height > maxTaskImageReferenceDimension ||
-		int64(config.Width)*int64(config.Height) > maxTaskImageReferencePixels {
-		return "", stdimage.Config{}, fmt.Errorf("%s dimensions %dx%d exceed safety limits", logicalPath, config.Width, config.Height)
-	}
-	return detected, config, nil
 }

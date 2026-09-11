@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -152,6 +153,11 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		result.Success, result.Error = false, agent.NestedAgentDelegationError
 		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		failureReason = "nested_agent_delegation"
+	}
+	if result.Success && !execution.ManifestSealed {
+		result.Success, result.Error = false, "artifact manifest is not sealed"
+		result.TerminalReason = model.TaskBillingTerminalPlatformError
+		failureReason = "deliverable_validation_failed"
 	}
 	if result.Success {
 		files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
@@ -328,16 +334,10 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 	switch stage {
 	case model.TaskExecutionFinalizationTerminal:
 		return model.TaskExecutionFinalizationArtifacts, func(ctx context.Context) error {
-			if execution.Status == model.TaskExecutionSucceeded {
-				return s.repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, execution.ID)
-			}
-			return s.repo.TaskFiles().CollectCurrentExecution(ctx, task.ID, execution.ID)
+			return s.finalizeCloudExecutionCore(ctx, task, execution, result)
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
-			if err := s.updateExecutionResultForExecution(ctx, task.ID, execution.ID, result); err != nil {
-				return err
-			}
 			return s.recordTerminalProviderCost(ctx, task, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
@@ -352,14 +352,6 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			return s.finalizeCloudDraftDelivery(ctx, task, execution, result)
 		}, nil
 	case model.TaskExecutionFinalizationDraftDelivery:
-		return model.TaskExecutionFinalizationTask, func(ctx context.Context) error {
-			return s.finalizeExecutionTaskStatus(ctx, task, execution, result)
-		}, nil
-	case model.TaskExecutionFinalizationTask:
-		return model.TaskExecutionFinalizationSettlement, func(ctx context.Context) error {
-			return s.settleCloudExecution(ctx, task, execution)
-		}, nil
-	case model.TaskExecutionFinalizationSettlement:
 		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
 			return s.syncCloudSlot(ctx, task)
 		}, nil
@@ -382,6 +374,50 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 	}
 }
 
+func (s *TaskService) finalizeCloudExecutionCore(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
+	if task == nil || execution == nil || result == nil {
+		return ErrTaskCompletionConflict
+	}
+	resultJSON, err := marshalExecutionEvidence(result)
+	if err != nil {
+		return err
+	}
+	target, errMsg := taskTerminalFromExecution(execution, result)
+	reason := terminalBillingReason(execution, result)
+	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("inspect durable task delivery: %w", err)
+	}
+	artifactAction := repository.CloudTaskArtifactsCollect
+	if execution.Status == model.TaskExecutionSucceeded {
+		artifactAction = repository.CloudTaskArtifactsPublish
+	}
+
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		_, finalizeErr := tx.Tasks().FinalizeCloudTaskWithArtifactsInTx(
+			ctx, task.ID, execution.ID, target, errMsg, resultJSON,
+			result.ModelUsage, result.CostStatus, artifactAction,
+		)
+		if errors.Is(finalizeErr, repository.ErrCloudTaskExecutionCASLost) {
+			return ErrStaleTaskExecution
+		}
+		if finalizeErr != nil {
+			return fmt.Errorf("finalize cloud task core: %w", finalizeErr)
+		}
+		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
+	})
+	if err != nil {
+		return err
+	}
+	task.Status = target
+	task.ErrorMessage = errMsg
+	task.Result = &resultJSON
+	task.TerminalModelUsage = datatypes.NewJSONType(result.ModelUsage)
+	task.CostStatus = result.CostStatus
+	task.BillingTerminalReason = reason
+	return nil
+}
+
 func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error {
 	if task == nil || task.ProjectID == "" {
 		return nil
@@ -393,10 +429,6 @@ func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error
 			return fmt.Errorf("reconcile cloud concurrency slot: %w", err)
 		}
 	}
-	return nil
-}
-
-func (s *TaskService) settleCloudExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) error {
 	return nil
 }
 
@@ -537,33 +569,6 @@ func (s *TaskService) advanceExecutionFinalization(ctx context.Context, id, toke
 	return nil
 }
 
-func (s *TaskService) finalizeExecutionTaskStatus(ctx context.Context, task *model.Task, execution *model.TaskExecution, result *agent.ExecutionResult) error {
-	target, errMsg := taskTerminalFromExecution(execution, result)
-	reason := terminalBillingReason(execution, result)
-	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
-	if err != nil {
-		return fmt.Errorf("inspect durable task delivery: %w", err)
-	}
-	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		won, finalizeErr := tx.Tasks().FinalizeTaskForExecution(ctx, task.ID, execution.ID, target, errMsg)
-		if finalizeErr != nil {
-			return fmt.Errorf("finalize task status: %w", finalizeErr)
-		}
-		if !won {
-			latest, findErr := tx.Tasks().FindByID(ctx, task.ID)
-			if findErr != nil || latest.CurrentExecutionID == nil || *latest.CurrentExecutionID != execution.ID || latest.Status != target {
-				return ErrStaleTaskExecution
-			}
-		}
-		return s.persistTerminalBillingInTx(ctx, tx, task, execution, reason, durableDelivery)
-	})
-	if err != nil {
-		return err
-	}
-	task.Status = target
-	return nil
-}
-
 func taskTerminalFromExecution(execution *model.TaskExecution, result *agent.ExecutionResult) (string, string) {
 	errMsg := execution.TerminalReason
 	if result != nil && strings.TrimSpace(result.Error) != "" {
@@ -621,7 +626,12 @@ func (s *TaskService) cancelCloudExecution(ctx context.Context, task *model.Task
 	encoded, _ := json.Marshal(&agent.ExecutionResult{Success: false, Error: "用户取消", RemoteArtifacts: true})
 	var execution *model.TaskExecution
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
-		lockedTask, err := txRepo.Tasks().FindByID(ctx, task.ID)
+		var err error
+		execution, err = txRepo.TaskExecutions().FindByIDForUpdate(ctx, executionID)
+		if err != nil {
+			return err
+		}
+		lockedTask, err := txRepo.Tasks().FindByIDForUpdate(ctx, task.ID)
 		if err != nil {
 			return err
 		}
@@ -630,10 +640,6 @@ func (s *TaskService) cancelCloudExecution(ctx context.Context, task *model.Task
 		}
 		if lockedTask.CurrentExecutionID == nil || *lockedTask.CurrentExecutionID != executionID {
 			return ErrStaleTaskExecution
-		}
-		execution, err = txRepo.TaskExecutions().FindByID(ctx, executionID)
-		if err != nil {
-			return err
 		}
 		if !isTerminalExecution(execution.Status) {
 			won, err := txRepo.TaskExecutions().Transition(ctx, execution.ID,
@@ -653,21 +659,14 @@ func (s *TaskService) cancelCloudExecution(ctx context.Context, task *model.Task
 		} else if execution.Status != model.TaskExecutionCancelled {
 			return fmt.Errorf("task is not in a cancellable state")
 		}
-		if lockedTask.Status != model.TaskStatusCancelled {
-			won, err := txRepo.Tasks().CompareAndSwapStatus(ctx, task.ID, model.TaskStatusRunning, model.TaskStatusCancelled)
-			if err != nil {
-				return err
-			}
-			if !won {
-				return fmt.Errorf("task is not in a cancellable state")
-			}
+		if lockedTask.Status != model.TaskStatusRunning && lockedTask.Status != model.TaskStatusCancelled {
+			return fmt.Errorf("task is not in a cancellable state")
 		}
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("cancel cloud task: %w", err)
 	}
-	task.Status = model.TaskStatusCancelled
 	if err := s.finalizeTaskFromExecution(ctx, task, execution); err != nil {
 		return err
 	}

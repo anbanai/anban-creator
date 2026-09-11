@@ -27,6 +27,23 @@ func TestExecutionTokenIssueAndValidate(t *testing.T) {
 	}
 }
 
+func TestExecutionTokenAcceptsDefaultLocalExecutionLifecycle(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	svc, err := NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.now = func() time.Time { return now }
+	identity := ExecutionClaims{UserID: "u1", ProjectID: "p1", TaskID: "t1", ExecutionID: "e1"}
+	token, err := svc.Issue(identity, now.Add(70*time.Minute))
+	if err != nil {
+		t.Fatalf("issue default local lifecycle token: %v", err)
+	}
+	if _, err := svc.Validate(token); err != nil {
+		t.Fatalf("validate default local lifecycle token: %v", err)
+	}
+}
+
 func TestExecutionTokenRejectsWeakSecretAndWrongAlgorithm(t *testing.T) {
 	if _, err := NewExecutionTokenService(""); err == nil {
 		t.Fatal("empty secret accepted")
@@ -74,10 +91,10 @@ func TestExecutionTokenRejectsLifetimeBeyondMaximum(t *testing.T) {
 	svc, _ := NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	svc.now = func() time.Time { return now }
 	identity := ExecutionClaims{UserID: "u1", ProjectID: "p1", TaskID: "t1", ExecutionID: "e1"}
-	if _, err := svc.Issue(identity, now.Add(2*time.Hour)); err == nil {
+	if _, err := svc.Issue(identity, now.Add(MaximumExecutionTokenLifetime+time.Second)); err == nil {
 		t.Fatal("issued overlong execution token")
 	}
-	identity.RegisteredClaims = jwt.RegisteredClaims{Issuer: executionTokenIssuer, Subject: "e1", Audience: jwt.ClaimStrings{executionTokenAudience}, IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(2 * time.Hour)), ID: "j1"}
+	identity.RegisteredClaims = jwt.RegisteredClaims{Issuer: executionTokenIssuer, Subject: "e1", Audience: jwt.ClaimStrings{executionTokenAudience}, IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(MaximumExecutionTokenLifetime + time.Second)), ID: "j1"}
 	raw, err := jwt.NewWithClaims(jwt.SigningMethodHS256, identity).SignedString(svc.secret)
 	if err != nil {
 		t.Fatal(err)

@@ -225,6 +225,15 @@ func (p *GeminiProvider) saveInlineData(data *genai.Blob) (string, error) {
 			Message:  "图片数据为空",
 		}
 	}
+	if int64(len(data.Data)) > maxGeneratedImageBytes {
+		return "", &GenerateError{
+			Provider: p.Name(),
+			Code:     "response_too_large",
+			Message:  "图片服务返回的数据超过大小限制",
+			HintMsg:  fmt.Sprintf("最大允许 %d MiB", maxGeneratedImageBytes>>20),
+			Original: errGeneratedImageTooLarge,
+		}
+	}
 
 	// 确定文件扩展名
 	ext := ".png" // 默认 PNG

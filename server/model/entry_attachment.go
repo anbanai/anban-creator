@@ -18,8 +18,9 @@ type EntryAttachment struct {
 }
 
 const (
-	EntryAttachmentRoleResumeLatest = "resume_latest"
-	EntryAttachmentRoleResumeFile   = "resume_file"
+	EntryAttachmentRoleResumeLatest     = "resume_latest"
+	EntryAttachmentRoleResumeFile       = "resume_file"
+	EntryAttachmentRoleEcommerceProduct = "ecommerce_product"
 )
 
 func IsResumeEntryAttachment(a EntryAttachment) bool {

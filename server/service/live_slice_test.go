@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -164,6 +165,122 @@ func TestCreateLiveAnalysisTaskReportsOwnedAudioURLSignFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "resolve audio URL") || !strings.Contains(err.Error(), "sign failed") {
 		t.Fatalf("CreateLiveAnalysisTask error = %v", err)
+	}
+}
+
+func TestCreateLiveAnalysisTaskExecutionRejectsExternalURL(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	svc := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, strings.Repeat("s", 32))
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1",
+		AudioURL: "https://attacker.example/audio.mp3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "authorized audio_key") {
+		t.Fatalf("CreateLiveAnalysisTask error = %v, want execution external URL rejection", err)
+	}
+	if tw.createReq.AudioURL != "" {
+		t.Fatalf("TingWu was called for rejected URL: %#v", tw.createReq)
+	}
+}
+
+func TestCreateLiveAnalysisTaskExecutionRejectsCrossTaskAudioKey(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	svc := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, strings.Repeat("s", 32))
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1",
+		AudioKey: "uploads/live-audio/user-1/project-1/other-task/file.mp3",
+	})
+	if !errors.Is(err, ErrLiveAnalysisTaskForbidden) {
+		t.Fatalf("CreateLiveAnalysisTask error = %v, want execution ownership rejection", err)
+	}
+	if tw.createReq.AudioURL != "" {
+		t.Fatalf("TingWu was called for cross-task key: %#v", tw.createReq)
+	}
+}
+
+func TestQueryLiveAnalysisTaskForExecutionEnforcesOwner(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{
+		completed: true,
+		task:      &TingWuTaskInfo{Status: "COMPLETED", Transcription: &TingWuTranscriptionResult{}},
+	}
+	svc := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, strings.Repeat("s", 32))
+	created, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1",
+		AudioKey: "uploads/live-audio/user-1/project-1/task-1/file.mp3",
+	})
+	if err != nil {
+		t.Fatalf("CreateLiveAnalysisTask: %v", err)
+	}
+	identity := LiveAnalysisExecutionIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1"}
+	crossIdentity := identity
+	crossIdentity.ExecutionID = "exec-2"
+	if _, err := svc.QueryLiveAnalysisTaskForExecution(context.Background(), created.TaskID, crossIdentity); !errors.Is(err, ErrLiveAnalysisTaskForbidden) {
+		t.Fatalf("cross-execution query error = %v, want forbidden", err)
+	}
+	if _, err := svc.QueryLiveAnalysisTaskForExecution(context.Background(), "unknown-task", identity); !errors.Is(err, ErrLiveAnalysisTaskForbidden) {
+		t.Fatalf("unbound query error = %v, want forbidden", err)
+	}
+	result, err := svc.QueryLiveAnalysisTaskForExecution(context.Background(), created.TaskID, identity)
+	if err != nil {
+		t.Fatalf("owner query: %v", err)
+	}
+	if result.Status != "COMPLETED" || !result.Completed {
+		t.Fatalf("owner query result = %#v", result)
+	}
+}
+
+func TestLiveAnalysisReferenceSurvivesRestartAndRejectsForgeryAndExpiry(t *testing.T) {
+	secret := strings.Repeat("r", 32)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	tw := &fakeLiveSliceTingWu{
+		completed: true,
+		task:      &TingWuTaskInfo{Status: "COMPLETED", Transcription: &TingWuTranscriptionResult{}},
+	}
+	svc := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, secret)
+	svc.now = func() time.Time { return now }
+	identity := LiveAnalysisExecutionIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1"}
+	created, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID,
+		AudioKey: "uploads/live-audio/user-1/project-1/task-1/file.mp3",
+	})
+	if err != nil {
+		t.Fatalf("CreateLiveAnalysisTask: %v", err)
+	}
+	if strings.HasPrefix(created.TaskID, "tw-") {
+		t.Fatalf("execution task ID must be opaque, got %q", created.TaskID)
+	}
+
+	// A fresh service instance with the same server secret can validate the
+	// reference without any in-memory owner state.
+	restarted := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, secret)
+	restarted.now = func() time.Time { return now.Add(time.Minute) }
+	if result, err := restarted.QueryLiveAnalysisTaskForExecution(context.Background(), created.TaskID, identity); err != nil || result.Status != "COMPLETED" {
+		t.Fatalf("restart query = %#v, %v", result, err)
+	}
+
+	forged := created.TaskID[:len(created.TaskID)-1] + "A"
+	if _, err := restarted.QueryLiveAnalysisTaskForExecution(context.Background(), forged, identity); !errors.Is(err, ErrLiveAnalysisTaskForbidden) {
+		t.Fatalf("forged reference error = %v, want forbidden", err)
+	}
+	expired := NewLiveSliceServiceWithClientsAndSecret(tw, &fakeLiveStorage{name: "oss"}, nil, secret)
+	expired.now = func() time.Time { return now.Add(liveAnalysisReferenceLifetime + time.Second) }
+	if _, err := expired.QueryLiveAnalysisTaskForExecution(context.Background(), created.TaskID, identity); !errors.Is(err, ErrLiveAnalysisTaskForbidden) {
+		t.Fatalf("expired reference error = %v, want forbidden", err)
+	}
+}
+
+func TestCreateLiveAnalysisTaskExecutionRequiresReferenceSecret(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	svc := NewLiveSliceServiceWithClients(tw, &fakeLiveStorage{name: "oss"}, nil)
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "exec-1",
+		AudioKey: "uploads/live-audio/user-1/project-1/task-1/file.mp3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reference signing is not configured") {
+		t.Fatalf("CreateLiveAnalysisTask error = %v, want missing signing secret rejection", err)
+	}
+	if tw.createReq.AudioURL != "" {
+		t.Fatalf("TingWu was called without a signing secret: %#v", tw.createReq)
 	}
 }
 

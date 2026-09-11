@@ -128,7 +128,7 @@ export interface ReferenceUsageSummaryData {
     file_name?: string
     url?: string
     instruction?: string
-    status: 'used' | 'excluded' | 'analysis_failed'
+    status: 'analyzed_only' | 'passed_to_generation' | 'analysis_failed'
     decision_summary: string
     analysis_attempts: number
     warnings?: string[]

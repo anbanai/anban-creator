@@ -9,8 +9,6 @@ import (
 	stdimage "image"
 	_ "image/jpeg"
 	"image/png"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,12 +59,6 @@ type UploadImageResult struct {
 	WechatURL string `json:"wechat_url,omitempty"`
 }
 
-// DownloadImageResult is the response for a server-local image download.
-type DownloadImageResult struct {
-	FilePath string `json:"file_path,omitempty"`
-	URL      string `json:"url,omitempty"`
-}
-
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
@@ -103,12 +95,14 @@ func (s *ImageService) SetProviderCostService(svc *ProviderCostService) {
 	}
 }
 
+const maxProviderImageBytes int64 = 25 << 20
+
 // resolveToLocalFile downloads a remote URL or decodes a data URL to a temp file.
-func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
+func (s *ImageService) resolveToLocalFile(ctx context.Context, rawURL string) (string, error) {
 	if strings.HasPrefix(rawURL, "data:") {
 		return s.dataURLToTempFile(rawURL)
 	}
-	return s.downloadURLToTempFile(rawURL)
+	return s.downloadURLToTempFile(ctx, rawURL)
 }
 
 // buildImageResult maps the provider's raw result onto the MCP-facing
@@ -217,17 +211,20 @@ func isGeneratedImageSavePathError(err error) bool {
 }
 
 func saveGeneratedImageBytes(outputPath string, data []byte) (string, error) {
+	outputMIME, _, err := validateRasterImageSafety(data, maxProviderImageBytes)
+	if err != nil {
+		return "", fmt.Errorf("validate generated image: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 
-	outputMIME := http.DetectContentType(data)
 	if strings.EqualFold(filepath.Ext(outputPath), ".png") && outputMIME != "image/png" {
 		img, _, err := stdimage.Decode(bytes.NewReader(data))
 		if err != nil {
 			return "", fmt.Errorf("decode image for png output: %w", err)
 		}
-		var pngBuf bytes.Buffer
+		pngBuf := boundedImageBuffer{maxBytes: maxProviderImageBytes}
 		if err := png.Encode(&pngBuf, img); err != nil {
 			return "", fmt.Errorf("encode png output: %w", err)
 		}
@@ -241,11 +238,23 @@ func saveGeneratedImageBytes(outputPath string, data []byte) (string, error) {
 	return outputMIME, nil
 }
 
+type boundedImageBuffer struct {
+	bytes.Buffer
+	maxBytes int64
+}
+
+func (b *boundedImageBuffer) Write(p []byte) (int, error) {
+	if int64(b.Len())+int64(len(p)) > b.maxBytes {
+		return 0, storage.ErrObjectExceedsMaxSize
+	}
+	return b.Buffer.Write(p)
+}
+
 // buildProcessor creates a new image.Processor for the given project and image type.
 // imageCapabilityKey routes through the server-owned capability catalog.
 func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageCapabilityKey string) (*image.Processor, error) {
 	effectiveCfg := s.imageCfg
-	if s.capabilityResolver != nil {
+	if s.capabilityResolver != nil && strings.TrimSpace(imageCapabilityKey) != "" {
 		resolved, source, err := s.capabilityResolver.ResolveImageConfigForTaskKey(ctx, ch.UserID, imageCapabilityKey)
 		if err != nil {
 			return nil, err
@@ -427,7 +436,7 @@ func (s *ImageService) GenerateImage(
 
 	// If outputPath provided, download and save the image there.
 	if outputPath != "" {
-		localPath, dlErr := s.resolveToLocalFile(rawResult.URL)
+		localPath, dlErr := s.resolveToLocalFile(ctx, rawResult.URL)
 		if dlErr != nil {
 			return nil, fmt.Errorf("download generated image: %w", dlErr)
 		}
@@ -594,34 +603,6 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 	return compressor.CompressImage(filePath)
 }
 
-// DownloadImage downloads an image from a URL to a server-local temporary file.
-func (s *ImageService) DownloadImage(ctx context.Context, projectID, url string) (*DownloadImageResult, error) {
-	ch, err := s.repo.Projects().FindByID(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("find project: %w", err)
-	}
-	processor, err := s.buildProcessor(ctx, ch, "content", "")
-	if err != nil {
-		return nil, err
-	}
-
-	tmpDir, err := os.MkdirTemp("", "abw-dl-")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	outputPath := filepath.Join(tmpDir, "downloaded.png")
-
-	result, err := processor.DownloadOnly(url, outputPath)
-	if err != nil {
-		return nil, fmt.Errorf("download image: %w", err)
-	}
-
-	return &DownloadImageResult{
-		FilePath: result.FilePath,
-		URL:      url,
-	}, nil
-}
-
 // dataURLToTempFile decodes a data URL and writes the content to a temp file.
 func (s *ImageService) dataURLToTempFile(dataURL string) (string, error) {
 	if !strings.HasPrefix(dataURL, "data:") {
@@ -634,14 +615,27 @@ func (s *ImageService) dataURLToTempFile(dataURL string) (string, error) {
 	if !strings.HasSuffix(parts[0], ";base64") {
 		return "", fmt.Errorf("only base64 data URLs are supported")
 	}
+	maxEncodedSize := ((maxProviderImageBytes + 2) / 3) * 4
+	if int64(len(parts[1])) > maxEncodedSize {
+		return "", errors.New("provider image exceeds max size")
+	}
 	data, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
 		return "", fmt.Errorf("decode base64: %w", err)
+	}
+	if int64(len(data)) > maxProviderImageBytes {
+		return "", errors.New("provider image exceeds max size")
 	}
 	tmpDir, err := os.MkdirTemp("", "abw-upload-")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
 	ext := ".png"
 	if strings.Contains(parts[0], "jpeg") || strings.Contains(parts[0], "jpg") {
 		ext = ".jpg"
@@ -651,39 +645,33 @@ func (s *ImageService) dataURLToTempFile(dataURL string) (string, error) {
 		ext = ".gif"
 	}
 	localPath := filepath.Join(tmpDir, "upload"+ext)
-	if err := os.WriteFile(localPath, data, 0644); err != nil {
+	if err := os.WriteFile(localPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write temp file: %w", err)
 	}
+	cleanupOnError = false
 	return localPath, nil
 }
 
 // downloadURLToTempFile downloads a remote URL to a temp file.
-func (s *ImageService) downloadURLToTempFile(url string) (string, error) {
+func (s *ImageService) downloadURLToTempFile(ctx context.Context, url string) (string, error) {
+	data, err := downloadTaskAnalysisImage(ctx, url, maxProviderImageBytes)
+	if err != nil {
+		return "", err
+	}
 	tmpDir, err := os.MkdirTemp("", "abw-upload-")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
 	localPath := filepath.Join(tmpDir, "downloaded.png")
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("download image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download image: HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(localPath)
-	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if err := os.WriteFile(localPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write temp file: %w", err)
 	}
-
+	cleanupOnError = false
 	return localPath, nil
 }

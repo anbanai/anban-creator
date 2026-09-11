@@ -49,6 +49,8 @@ pub struct LocalExecutionConfig {
     /// anti-double-consume `about:` invariant depends on it).
     #[serde(default)]
     pub project_id: String,
+    pub execution_token: String,
+    pub artifact_upload_mode: String,
 }
 
 fn default_true() -> bool {
@@ -73,7 +75,7 @@ struct ClaimBody<'a> {
     executor_info: ExecutorInfo<'a>,
 }
 
-const AGENT_PACK_CONTRACT_VERSION: u8 = 2;
+const AGENT_PACK_CONTRACT_VERSION: u8 = 3;
 
 fn claim_body() -> ClaimBody<'static> {
     ClaimBody {
@@ -106,7 +108,7 @@ mod contract_tests {
     #[test]
     fn claim_body_uses_execution_identity_contract_version() {
         let body = claim_body();
-        assert_eq!(body.agent_pack_contract_version, 2);
+        assert_eq!(body.agent_pack_contract_version, 3);
     }
 }
 
@@ -179,14 +181,13 @@ fn failure_complete_payload<'a>(
 async fn complete_failed_task(
     client: &reqwest::Client,
     api_base: &str,
-    api_key: &str,
     task: &LocalExecutionConfig,
     error: &str,
 ) -> Result<(), String> {
     let url = format!("{}/agent/complete", api_base.trim_end_matches('/'));
     let resp = client
         .post(&url)
-        .bearer_auth(api_key)
+        .bearer_auth(&task.execution_token)
         .json(&failure_complete_payload(
             &task.task_id,
             &task.execution_id,
@@ -341,16 +342,9 @@ pub async fn run_loop(
                 let server_url = derive_server_url(&snapshot.api_base);
                 let workspace = std::path::PathBuf::from(&snapshot.workspace_root);
                 let agent_entry = res.agent_entry.clone().unwrap_or_default();
-                if let Err(e) = sidecar::run_agent(
-                    &app,
-                    &agent_entry,
-                    &env,
-                    &workspace,
-                    &server_url,
-                    &snapshot.api_key,
-                    &task_cfg,
-                )
-                .await
+                if let Err(e) =
+                    sidecar::run_agent(&app, &agent_entry, &env, &workspace, &server_url, &task_cfg)
+                        .await
                 {
                     let error = e.to_string();
                     let _ = app.emit(
@@ -369,14 +363,8 @@ pub async fn run_loop(
                         Some(error.clone()),
                     )
                     .await;
-                    if let Err(complete_err) = complete_failed_task(
-                        &client,
-                        &snapshot.api_base,
-                        &snapshot.api_key,
-                        &task_cfg,
-                        &error,
-                    )
-                    .await
+                    if let Err(complete_err) =
+                        complete_failed_task(&client, &snapshot.api_base, &task_cfg, &error).await
                     {
                         let _ = app.emit(
                             "local-run://event",
@@ -464,6 +452,8 @@ mod tests {
             article_with_cover: true,
             article_with_content_images: true,
             project_id: "project-1".to_string(),
+            execution_token: "execution-token".to_string(),
+            artifact_upload_mode: "stream".to_string(),
         }
     }
 
@@ -508,10 +498,21 @@ mod tests {
                         .and_then(|value| value.parse::<usize>().ok())
                         .expect("content length");
                     if bytes.len() >= header_end + 4 + content_length {
+                        let authorization = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.split_once(':')
+                                    .filter(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                                    .map(|(_, value)| value.trim().to_string())
+                            })
+                            .expect("authorization header");
                         let body = bytes[header_end + 4..header_end + 4 + content_length].to_vec();
                         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.expect("write response");
-                        return serde_json::from_slice::<serde_json::Value>(&body)
-                            .expect("decode request body");
+                        return (
+                            authorization,
+                            serde_json::from_slice::<serde_json::Value>(&body)
+                                .expect("decode request body"),
+                        );
                     }
                 }
             }
@@ -523,13 +524,13 @@ mod tests {
         complete_failed_task(
             &client,
             &format!("http://{address}"),
-            "api-key",
             &config,
             "spawn failed",
         )
         .await
         .expect("complete failed task");
-        let body = server.await.expect("mock server task");
+        let (authorization, body) = server.await.expect("mock server task");
+        assert_eq!(authorization, "Bearer execution-token");
         assert_eq!(body["task_id"], config.task_id);
         assert_eq!(body["execution_id"], config.execution_id);
         assert_eq!(body["result"]["error"], "spawn failed");

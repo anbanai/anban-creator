@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/agentpack"
+	"github.com/anbanai/anban-creator/server/auth"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -1261,6 +1263,8 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 	}
 	if strings.TrimSpace(route.BaseURL) == "" {
 		errs = append(errs, path+".base_url is required")
+	} else if err := validateImageCapabilityBaseURL(route.BaseURL); err != nil {
+		errs = append(errs, path+".base_url "+err.Error())
 	}
 	if strings.TrimSpace(route.APIKey) == "" {
 		errs = append(errs, path+".api_key is required")
@@ -1278,6 +1282,8 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 	}
 	if strings.TrimSpace(route.BillingSKU) == "" {
 		errs = append(errs, path+".billing_sku is required")
+	} else if (key == "standard" || key == "professional") && route.BillingSKU != "image."+key {
+		errs = append(errs, path+".billing_sku must be image."+key)
 	}
 	if route.QualityRank <= 0 {
 		errs = append(errs, path+".quality_rank must be positive")
@@ -1289,6 +1295,26 @@ func validateEnabledImageCapability(path, key string, route ImageGenerationRoute
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func validateImageCapabilityBaseURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("must be an absolute HTTP(S) URL without credentials")
+	}
+	if parsed.Scheme == "http" && !isLoopbackConfigHost(parsed.Hostname()) {
+		return fmt.Errorf("must use HTTPS unless it targets loopback")
+	}
+	return nil
+}
+
+func isLoopbackConfigHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func supportsSemanticTaskAspectRatioProvider(provider string) bool {
@@ -1650,6 +1676,19 @@ func (c *Config) Validate() error {
 	if len(c.Claude.ExecutionTokenSecret) < 32 {
 		errs = append(errs, "claude.execution_token_secret must be at least 32 bytes")
 	}
+	if c.Asynq.ContentGenerateTimeout <= 0 {
+		errs = append(errs, "asynq.content_generate_timeout must be positive")
+	}
+	if c.Asynq.PersistTimeout <= 0 {
+		errs = append(errs, "asynq.persist_timeout must be positive")
+	}
+	if c.Asynq.ContentGenerateTimeout > 0 && c.Asynq.PersistTimeout > 0 &&
+		(c.Asynq.PersistTimeout > auth.MaximumExecutionTokenLifetime ||
+			c.Asynq.ContentGenerateTimeout > auth.MaximumExecutionTokenLifetime-c.Asynq.PersistTimeout) {
+		errs = append(errs, fmt.Sprintf(
+			"asynq.content_generate_timeout plus asynq.persist_timeout must not exceed execution token lifetime %s",
+			auth.MaximumExecutionTokenLifetime))
+	}
 
 	// When using the Docker executor, the container timeout must be at least as
 	// long as content_generate_timeout, otherwise the container is killed before
@@ -1666,6 +1705,10 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Docker.TimeoutSec <= 0 {
 			errs = append(errs, "claude.docker.timeout_sec must be positive")
+		} else if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second > auth.MaximumExecutionTokenLifetime {
+			errs = append(errs, fmt.Sprintf(
+				"claude.docker.timeout_sec must not exceed execution token lifetime %s",
+				auth.MaximumExecutionTokenLifetime))
 		} else if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
 			errs = append(errs, fmt.Sprintf(
 				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
@@ -1714,6 +1757,10 @@ func (c *Config) Validate() error {
 		}
 		if c.Claude.Kubernetes.ActiveDeadlineSeconds <= 0 {
 			errs = append(errs, "claude.kubernetes.active_deadline_seconds must be positive")
+		} else if time.Duration(c.Claude.Kubernetes.ActiveDeadlineSeconds)*time.Second > auth.MaximumExecutionTokenLifetime {
+			errs = append(errs, fmt.Sprintf(
+				"claude.kubernetes.active_deadline_seconds must not exceed execution token lifetime %s",
+				auth.MaximumExecutionTokenLifetime))
 		}
 		if c.Claude.Kubernetes.HeartbeatTimeoutSeconds < 60 || c.Claude.Kubernetes.HeartbeatTimeoutSeconds >= c.Claude.Kubernetes.ActiveDeadlineSeconds {
 			errs = append(errs, "claude.kubernetes.heartbeat_timeout_seconds must be at least 60 and less than active_deadline_seconds")

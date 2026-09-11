@@ -32,6 +32,18 @@ func TestValidateInputAttachmentsRequiresUploadIDForGenericExistingKey(t *testin
 	}
 }
 
+func TestValidateInputAttachmentsRejectsFileURLWithoutImmutableAssetIdentity(t *testing.T) {
+	_, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
+		Type:        "image",
+		URL:         "/api/v1/files/uploads/users/user-1/projects/project-1/tasks/task-1/inputs/source.png",
+		FileName:    "source.png",
+		ContentType: "image/png",
+	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: allAgentAttachmentTypes})
+	if err == nil || !strings.Contains(err.Error(), "immutable asset identity") {
+		t.Fatalf("error = %v, want immutable asset identity rejection", err)
+	}
+}
+
 func TestValidateInputAttachmentsAcceptsOwnedAssetAndPreservesOrder(t *testing.T) {
 	repo := uploadRepositoryFromSessions(t)
 	ownedReference := &model.Asset{
@@ -194,8 +206,11 @@ func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	if got[0].ContentType != "image/png" {
 		t.Fatalf("content type = %q", got[0].ContentType)
 	}
-	if got[0].Size != 2048 || got[0].UploadID != "upload-1" || got[0].Key != "assets/users/user-1/upload-1/repository-product.png" {
-		t.Fatalf("repository storage metadata not persisted: %#v", got[0])
+	if got[0].Size != 2048 || got[0].AssetID != "upload-1" {
+		t.Fatalf("immutable asset identity not persisted: %#v", got[0])
+	}
+	if got[0].UploadID != "" || got[0].Key != "" || got[0].URL != "" {
+		t.Fatalf("mutable upload identity remained after finalization: %#v", got[0])
 	}
 	if got[0].Instruction != "保持包装和 Logo" {
 		t.Fatalf("instruction = %q", got[0].Instruction)
@@ -227,13 +242,23 @@ func TestValidateInputAttachmentsDoesNotFinalizeBeforeWholeCollectionValidates(t
 
 func TestValidateInputAttachmentsAcceptsInstructionAt1000CodePoints(t *testing.T) {
 	instruction := strings.Repeat("图", 1000)
-	got, err := validateInputAttachments(context.Background(), nil, nil, "user-1", []model.EntryAttachment{{
-		Type:        "image",
-		URL:         "/api/v1/files/product.png",
-		FileName:    "product.png",
-		ContentType: "image/png",
+	repo := uploadRepositoryFromSessions(t)
+	asset := &model.Asset{
+		ID: "instruction-boundary", UserID: "user-1", Purpose: service.DirectUploadPurposeTaskReference,
+		StorageKey: "assets/users/user-1/instruction-boundary/product.png", FileName: "product.png",
+		ContentType: "image/png", Size: 10, ETag: "instruction-etag",
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	got, err := validateInputAttachments(context.Background(), nil, repo, "user-1", []model.EntryAttachment{{
+		AssetID:     asset.ID,
 		Instruction: instruction,
-	}}, InputAttachmentValidationOptions{MaxCount: 16, AllowedTypes: map[string]bool{"image": true}})
+	}}, InputAttachmentValidationOptions{
+		MaxCount:             16,
+		AllowedTypes:         map[string]bool{"image": true},
+		AllowedAssetPurposes: []string{service.DirectUploadPurposeTaskReference},
+	})
 
 	if err != nil {
 		t.Fatalf("validate attachments: %v", err)
@@ -406,11 +431,3 @@ func handlerAttachmentRouteRejectionCases(foreignUploadID, foreignKey string) []
 		{name: "foreign tenant upload", attachments: string(foreignJSON)},
 	}
 }
-
-const fiveTypeHandlerAttachmentsJSON = `[
-	{"type":"image","url":"/api/v1/files/product.png","file_name":"product.png","content_type":"image/png"},
-	{"type":"audio","url":"/api/v1/files/voice.ogg","file_name":"voice.ogg","content_type":"application/ogg"},
-	{"type":"video","url":"/api/v1/files/demo.mp4","file_name":"demo.mp4","content_type":"video/mp4"},
-	{"type":"document","url":"/api/v1/files/brief.pdf","file_name":"brief.pdf","content_type":"application/pdf"},
-	{"type":"text","url":"/api/v1/files/notes.csv","file_name":"notes.csv","content_type":"application/csv"}
-]`

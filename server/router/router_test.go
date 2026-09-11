@@ -214,6 +214,21 @@ func TestLegacyFileUploadRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestLegacyAgentUploadRouteIsNotRegistered(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:       &config.Config{},
+		Logger:       &logger,
+		AgentHandler: handler.NewAgentHandler(nil, nil, &logger),
+	})
+
+	for _, route := range app.GetRoutes() {
+		if route.Method == "POST" && route.Path == "/api/v1/agent/upload" {
+			t.Fatalf("legacy executionless agent upload route is still registered: %+v", route)
+		}
+	}
+}
+
 func TestWechatPublicationRoutesReplaceLegacyTaskPublicationRoutes(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	app := NewRouter(&Services{
@@ -518,7 +533,7 @@ func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
-	agentHandler := handler.NewAgentHandler(nil, nil, nil, "", &logger)
+	agentHandler := handler.NewAgentHandler(nil, nil, &logger)
 	executionTokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)

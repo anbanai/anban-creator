@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/model"
 )
 
@@ -364,6 +365,13 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 				cfg.Claude.Kubernetes.ActiveDeadlineSeconds = -1
 			},
 			wantErr: "claude.kubernetes.active_deadline_seconds must be positive",
+		},
+		{
+			name: "active deadline exceeds execution credential",
+			mutate: func(cfg *Config) {
+				cfg.Claude.Kubernetes.ActiveDeadlineSeconds = int64(auth.MaximumExecutionTokenLifetime/time.Second) + 1
+			},
+			wantErr: "claude.kubernetes.active_deadline_seconds must not exceed execution token lifetime",
 		},
 		{
 			name: "job TTL",
