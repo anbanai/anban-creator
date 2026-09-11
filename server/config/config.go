@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1302,19 +1301,7 @@ func validateImageCapabilityBaseURL(raw string) error {
 	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("must be an absolute HTTP(S) URL without credentials")
 	}
-	if parsed.Scheme == "http" && !isLoopbackConfigHost(parsed.Hostname()) {
-		return fmt.Errorf("must use HTTPS unless it targets loopback")
-	}
 	return nil
-}
-
-func isLoopbackConfigHost(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func supportsSemanticTaskAspectRatioProvider(provider string) bool {
