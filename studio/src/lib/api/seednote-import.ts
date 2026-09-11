@@ -7,7 +7,7 @@ export const seednoteImportApi = {
   getBatch: (projectId: string, batchId: string) => unwrap<SeednoteImportSummary>(http.get(`/projects/${projectId}/seednote-analytics/imports/${batchId}`)),
   resolve: (projectId: string, batchId: string, actions: Array<{ row_id: string; action: string; post_id?: string }>) => unwrap<SeednoteImportSummary>(http.post(`/projects/${projectId}/seednote-analytics/imports/${batchId}/resolve`, { actions })),
   overview: (projectId: string, params?: { from?: string; to?: string }) => unwrap<SeednoteImportOverview>(http.get(`/projects/${projectId}/seednote-analytics/overview`, { params })),
-  posts: (projectId: string, search?: string) => unwrap<{ items: Array<{ id: string; title: string; first_published_at?: string | null }>; total: number }>(http.get(`/projects/${projectId}/seednote-analytics/posts`, { params: { search } })),
+  posts: (projectId: string, search?: string, params?: { offset?: number; limit?: number }) => unwrap<{ items: Array<{ id: string; title: string; first_published_at?: string | null }>; total: number }>(http.get(`/projects/${projectId}/seednote-analytics/posts`, { params: { search, ...params } })),
   post: (projectId: string, postId: string, params?: { from?: string; to?: string }) => unwrap<{ post: { id: string; title: string; first_published_at?: string | null }; versions: SeednoteMetricVersion[] }>(http.get(`/projects/${projectId}/seednote-analytics/posts/${postId}`, { params })),
   file: (projectId: string, batchId: string) => unwrap<{ url: string; expires_at: string }>(http.get(`/projects/${projectId}/seednote-analytics/imports/${batchId}/file`)),
 }

@@ -41,7 +41,7 @@ describe('SeednoteDataPage import flow', () => {
     vi.clearAllMocks()
     vi.mocked(api.projects.list).mockResolvedValue(projects as never)
     vi.mocked(api.seednoteImport.listBatches).mockResolvedValue({ items: [], total: 0 })
-    vi.mocked(api.seednoteImport.overview).mockResolvedValue({ dates: [], series: [], posts: [] })
+    vi.mocked(api.seednoteImport.overview).mockResolvedValue({ dates: [], series: [], posts: [], post_summaries: [] })
     vi.mocked(api.seednoteImport.posts).mockResolvedValue({
       items: [
         { id: 'post-1', title: '夏日穿搭', first_published_at: '2026-09-01T08:00:00+08:00' },
@@ -66,36 +66,88 @@ describe('SeednoteDataPage import flow', () => {
 
     const accountSelect = await screen.findByRole('combobox', { name: '小红书账号' })
     expect(accountSelect).toHaveValue('')
-    expect(screen.getByText('请先选择小红书账号')).toBeInTheDocument()
+    expect(screen.getByText('请选择账号后查看数据看板')).toBeInTheDocument()
     expect(api.seednoteImport.listBatches).not.toHaveBeenCalled()
     expect(api.seednoteImport.overview).not.toHaveBeenCalled()
     expect(api.seednoteImport.posts).not.toHaveBeenCalled()
+  })
+
+  it('opens on the dashboard with period shortcuts and multiple metric toggles', async () => {
+    vi.mocked(api.seednoteImport.overview).mockResolvedValue({
+      dates: ['2026-09-01'],
+      series: [{ date: '2026-09-01', exposure_count: 100, view_count: 80, like_count: 12, comment_count: 4, collect_count: 9, follower_gain_count: 2, share_count: 1, barrage_count: 0 }],
+      posts: [],
+      post_summaries: [],
+    } as never)
+    render(<SeednoteDataPage />)
+
+    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+
+    expect(await screen.findByText('数据看板')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '本周' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '本月' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '近 7 天' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '近 30 天' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '自定义' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '评论' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收藏' })).toBeInTheDocument()
+    expect(screen.queryByText('优先匹配帖子')).not.toBeInTheDocument()
   })
 
   it('shows the selected file for review and waits for an explicit parse action', async () => {
     render(<SeednoteDataPage />)
 
     fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.click(await screen.findByRole('button', { name: '导入数据' }))
     const file = new File(['xlsx'], '日报.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     fireEvent.change(screen.getByLabelText('导入数据文件'), { target: { files: [file] } })
 
     expect(screen.getByText('日报.xlsx')).toBeInTheDocument()
     expect(uploadToOSS).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '确认导入' }))
-
-    expect(screen.getByRole('dialog', { name: '确认这次导入' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '导入数据' })).toBeInTheDocument()
     expect(uploadToOSS).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '开始解析' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
     await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(1))
   })
 
-  it('lets the user choose posts before selecting a file', async () => {
+  it('surfaces invalid import rows instead of showing a false completion state', async () => {
+    vi.mocked(api.seednoteImport.import).mockResolvedValue({
+      batch: {
+        id: 'batch-invalid', project_id: 'account-1', file_name: '日报.xlsx', file_size: 4,
+        received_at: '2026-09-08T08:00:00+08:00', data_as_of_at: '2026-09-08T23:59:00+08:00',
+        timezone: 'Asia/Shanghai', status: 'needs_review', total_rows: 2, resolved_rows: 1,
+        review_rows: 0, invalid_rows: 1,
+      },
+      rows: [],
+    })
+    vi.mocked(api.seednoteImport.getBatch).mockResolvedValue({
+      batch: {
+        id: 'batch-invalid', project_id: 'account-1', file_name: '日报.xlsx', file_size: 4,
+        received_at: '2026-09-08T08:00:00+08:00', data_as_of_at: '2026-09-08T23:59:00+08:00',
+        timezone: 'Asia/Shanghai', status: 'needs_review', total_rows: 2, resolved_rows: 1,
+        review_rows: 0, invalid_rows: 1,
+      },
+      rows: [{ id: 'row-invalid', source_row: 4, title: '无法解析', match_status: 'invalid', parse_error: '缺少曝光字段' }],
+    })
+    render(<SeednoteDataPage />)
+
+    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.click(await screen.findByRole('button', { name: '导入数据' }))
+    const file = new File(['xlsx'], '日报.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    fireEvent.change(screen.getByLabelText('导入数据文件'), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+
+    expect(await screen.findByText('导入存在无法解析的行')).toBeInTheDocument()
+    expect(screen.queryByText('导入完成')).not.toBeInTheDocument()
+  })
+
+  it('does not ask the user to choose priority posts before importing', async () => {
     render(<SeednoteDataPage />)
 
     fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
 
-    expect(await screen.findByText('优先匹配帖子')).toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: '夏日穿搭' })).toBeEnabled()
-    expect(screen.getByRole('checkbox', { name: '秋日妆容' })).toBeEnabled()
+    expect(await screen.findByText('数据看板')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: '夏日穿搭' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: '秋日妆容' })).not.toBeInTheDocument()
   })
 })

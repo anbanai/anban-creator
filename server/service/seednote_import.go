@@ -188,9 +188,26 @@ type SeednoteResolveAction struct {
 }
 
 type SeednoteImportOverview struct {
-	Dates  []string                `json:"dates"`
-	Series []SeednoteOverviewPoint `json:"series"`
-	Posts  []*model.SeednotePost   `json:"posts"`
+	Dates         []string                `json:"dates"`
+	Series        []SeednoteOverviewPoint `json:"series"`
+	Posts         []*model.SeednotePost   `json:"posts"`
+	PostSummaries []SeednotePostSummary   `json:"post_summaries"`
+}
+
+type SeednotePostSummary struct {
+	ID                string     `json:"id"`
+	Title             string     `json:"title"`
+	FirstPublishedAt  *time.Time `json:"first_published_at,omitempty"`
+	ExposureCount     int64      `json:"exposure_count"`
+	ViewCount         int64      `json:"view_count"`
+	CoverClickRate    float64    `json:"cover_click_rate"`
+	LikeCount         int64      `json:"like_count"`
+	CommentCount      int64      `json:"comment_count"`
+	CollectCount      int64      `json:"collect_count"`
+	FollowerGainCount int64      `json:"follower_gain_count"`
+	ShareCount        int64      `json:"share_count"`
+	AvgWatchDuration  float64    `json:"avg_watch_duration"`
+	BarrageCount      int64      `json:"barrage_count"`
 }
 type SeednoteOverviewPoint struct {
 	Date              string   `json:"date"`
@@ -420,7 +437,16 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 			point.AvgWatchDuration = &value
 		}
 	}
-	posts, _, _ := s.repo.SeednotePosts().ListByProject(ctx, projectID, "", 0, 100)
+	posts, totalPosts, postsErr := s.repo.SeednotePosts().ListByProject(ctx, projectID, "", 0, 100)
+	if postsErr != nil {
+		return nil, postsErr
+	}
+	if totalPosts > int64(len(posts)) {
+		posts, _, postsErr = s.repo.SeednotePosts().ListByProject(ctx, projectID, "", 0, int(totalPosts))
+		if postsErr != nil {
+			return nil, postsErr
+		}
+	}
 	// The overview's post list is used as a ranking in Studio. Rank by the
 	// selected range's exposure total, with newest posts as a stable tie-break.
 	sort.SliceStable(posts, func(i, j int) bool {
@@ -429,7 +455,7 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 		}
 		return posts[i].CreatedAt.After(posts[j].CreatedAt)
 	})
-	result := &SeednoteImportOverview{Dates: make([]string, 0, len(byDate)), Series: make([]SeednoteOverviewPoint, 0, len(byDate)), Posts: posts}
+	result := &SeednoteImportOverview{Dates: make([]string, 0, len(byDate)), Series: make([]SeednoteOverviewPoint, 0, len(byDate)), Posts: posts, PostSummaries: aggregateSeednotePostSummaries(posts, versions)}
 	for date, point := range byDate {
 		result.Dates = append(result.Dates, date)
 		result.Series = append(result.Series, *point)
@@ -437,6 +463,80 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 	sort.Slice(result.Series, func(i, j int) bool { return result.Series[i].Date < result.Series[j].Date })
 	sort.Strings(result.Dates)
 	return result, nil
+}
+
+type postSummaryAccumulator struct {
+	SeednotePostSummary
+	createdAt     time.Time
+	hasData       bool
+	rateSum       float64
+	rateCount     int
+	durationSum   float64
+	durationCount int
+}
+
+func aggregateSeednotePostSummaries(posts []*model.SeednotePost, versions []*model.SeednoteMetricVersion) []SeednotePostSummary {
+	latest := map[string]*model.SeednoteMetricVersion{}
+	for _, version := range versions {
+		key := version.PostID + "|" + version.DataAsOfAt.Format("2006-01-02")
+		if current := latest[key]; current == nil || version.ImportedAt.After(current.ImportedAt) {
+			latest[key] = version
+		}
+	}
+	byPost := make(map[string]*postSummaryAccumulator, len(posts))
+	for _, post := range posts {
+		byPost[post.ID] = &postSummaryAccumulator{SeednotePostSummary: SeednotePostSummary{ID: post.ID, Title: post.Title, FirstPublishedAt: post.FirstPublishedAt}, createdAt: post.CreatedAt}
+	}
+	for _, version := range latest {
+		item := byPost[version.PostID]
+		if item == nil {
+			continue
+		}
+		item.hasData = true
+		addInt64Value(&item.ExposureCount, version.ExposureCount)
+		addInt64Value(&item.ViewCount, version.ViewCount)
+		addInt64Value(&item.LikeCount, version.LikeCount)
+		addInt64Value(&item.CommentCount, version.CommentCount)
+		addInt64Value(&item.CollectCount, version.CollectCount)
+		addInt64Value(&item.FollowerGainCount, version.FollowerGainCount)
+		addInt64Value(&item.ShareCount, version.ShareCount)
+		addInt64Value(&item.BarrageCount, version.BarrageCount)
+		if version.CoverClickRate != nil {
+			item.rateSum += *version.CoverClickRate
+			item.rateCount++
+		}
+		if version.AvgWatchDuration != nil {
+			item.durationSum += *version.AvgWatchDuration
+			item.durationCount++
+		}
+	}
+	result := make([]SeednotePostSummary, 0, len(posts))
+	for _, post := range posts {
+		item := byPost[post.ID]
+		if !item.hasData {
+			continue
+		}
+		if item.rateCount > 0 {
+			item.CoverClickRate = item.rateSum / float64(item.rateCount)
+		}
+		if item.durationCount > 0 {
+			item.AvgWatchDuration = item.durationSum / float64(item.durationCount)
+		}
+		result = append(result, item.SeednotePostSummary)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].ExposureCount != result[j].ExposureCount {
+			return result[i].ExposureCount > result[j].ExposureCount
+		}
+		return byPost[result[i].ID].createdAt.After(byPost[result[j].ID].createdAt)
+	})
+	return result
+}
+
+func addInt64Value(target *int64, value *int64) {
+	if value != nil {
+		*target += *value
+	}
 }
 func addInt64(target *int64, value *int64) {
 	if value != nil {
