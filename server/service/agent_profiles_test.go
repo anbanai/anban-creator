@@ -46,7 +46,7 @@ func configuredAgentProfile(provider, description, endpoint, token, modelID, can
 
 func testProfileConfig() map[string]srvconfig.ClaudeExecutionProfileConfig {
 	return map[string]srvconfig.ClaudeExecutionProfileConfig{
-		"effective": configuredAgentProfile("deepseek", "low cost", "https://api.deepseek.test/anthropic", "deepseek-secret", "deepseek-v4-flash", "deepseek-v4-flash"),
+		"effective": configuredAgentProfile("deepseek", "low cost", "https://api.deepseek.test/anthropic", "deepseek-secret", "deepseek-flash", "deepseek-flash"),
 		"balanced":  configuredAgentProfile("zhipu", "balanced", "https://open.bigmodel.test/api/anthropic", "zhipu-secret", "glm-5.2", "glm-5.2"),
 		"quality":   configuredAgentProfile("moonshot", "maximum", "https://api.moonshot.test/anthropic", "moonshot-secret", "kimi-k3[1m]", "kimi-k3"),
 	}
@@ -54,7 +54,7 @@ func testProfileConfig() map[string]srvconfig.ClaudeExecutionProfileConfig {
 
 func testAgentProfiles() []AgentExecutionProfile {
 	return []AgentExecutionProfile{
-		testExecutionProfile("effective", configuredAgentProfile("deepseek", "", "https://api.deepseek.example/anthropic", "deepseek-secret", "deepseek-v4-flash", "deepseek-v4-flash"), model.TierFree),
+		testExecutionProfile("effective", configuredAgentProfile("deepseek", "", "https://api.deepseek.example/anthropic", "deepseek-secret", "deepseek-flash", "deepseek-flash"), model.TierFree),
 		testExecutionProfile("balanced", configuredAgentProfile("volcengine_ark", "", "https://ark.example/anthropic", "doubao-secret", "doubao-seed-evolving", "doubao-seed-evolving"), model.TierPro),
 		testExecutionProfile("quality", configuredAgentProfile("moonshot", "", "https://api.moonshot.example/anthropic", "moonshot-secret", "kimi-k3[1m]", "kimi-k3"), model.TierEnterprise),
 	}
@@ -71,10 +71,10 @@ func testExecutionProfile(id string, configured srvconfig.ClaudeExecutionProfile
 
 func testCostCatalog() billing.CostCatalog {
 	return billing.CostCatalog{Models: map[string]billing.ModelCostConfig{
-		"deepseek/deepseek-v4-flash": {PricingType: "token"},
-		"zhipu/glm-5.2":              {PricingType: "token"},
-		"moonshot/kimi-k3":           {PricingType: "token"},
-		"moonshot/kimi-k2.7-code":    {PricingType: "token"},
+		"deepseek/deepseek-flash": {PricingType: "token"},
+		"zhipu/glm-5.2":           {PricingType: "token"},
+		"moonshot/kimi-k3":        {PricingType: "token"},
+		"moonshot/kimi-k2.7-code": {PricingType: "token"},
 	}}
 }
 
@@ -85,7 +85,7 @@ func TestAgentProfileRegistryUsesExactProductsAndTierAccess(t *testing.T) {
 	}
 
 	capabilities := registry.CapabilitiesForTier(model.TierFree)
-	if len(capabilities) != 3 || capabilities[0].ID != "effective" || capabilities[0].DisplayName != "性价比" || !capabilities[0].Available || capabilities[0].ModelName != "deepseek-v4-flash" {
+	if len(capabilities) != 3 || capabilities[0].ID != "effective" || capabilities[0].DisplayName != "性价比" || !capabilities[0].Available || capabilities[0].ModelName != "deepseek-flash" {
 		t.Fatalf("effective capability = %#v", capabilities)
 	}
 	if capabilities[1].ID != "balanced" || capabilities[1].Available || capabilities[1].UnavailableReason != "requires_pro" {

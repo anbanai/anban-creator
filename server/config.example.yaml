@@ -237,11 +237,11 @@ claude:
       envs:
         ANTHROPIC_BASE_URL: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
         ANTHROPIC_AUTH_TOKEN: "${ANBAN_DEEPSEEK_API_KEY}"
-        ANTHROPIC_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_MODEL: "deepseek-flash"
         ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro"
-        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-flash"
         ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash"
         CLAUDE_CODE_EFFORT_LEVEL: "medium"
         CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "false"
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
@@ -255,7 +255,7 @@ claude:
         CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
         CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         ENABLE_TOOL_SEARCH: "true"
-        CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
+        CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-flash"
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
       provider: "zhipu"

@@ -49,7 +49,7 @@ func TestAgentProfilesUseCompleteClaudeEnvs(t *testing.T) {
 			}
 
 			effective := configured.Claude.ExecutionProfiles["effective"]
-			if effective.Provider != "deepseek" || effective.Envs[model.ClaudeEnvModel] != "deepseek-v4-flash" || effective.Envs[model.ClaudeEnvAuthToken] != "${ANBAN_DEEPSEEK_API_KEY}" {
+			if effective.Provider != "deepseek" || effective.Envs[model.ClaudeEnvModel] != "deepseek-flash" || effective.Envs[model.ClaudeEnvAuthToken] != "${ANBAN_DEEPSEEK_API_KEY}" {
 				t.Fatalf("effective profile = %#v", effective)
 			}
 			balanced := configured.Claude.ExecutionProfiles["balanced"]

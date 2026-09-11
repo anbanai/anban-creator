@@ -132,7 +132,7 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
           { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
@@ -385,7 +385,7 @@ describe('TasksPage bulk clone execution profile', () => {
 
     expect(within(dialog).getByText('执行配置')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: /^性价比，全部用户/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(dialog).queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('deepseek-flash')).not.toBeInTheDocument()
     expect(within(dialog).getByText('预计总计 4,800 积分')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认克隆' }))

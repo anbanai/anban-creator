@@ -338,19 +338,19 @@ montage:
 claude:
   execution_profiles:
     effective:
-      description: "Runtime smoke DeepSeek V4 Flash"
+      description: "Runtime smoke DeepSeek Flash"
       provider: "deepseek"
       envs:
         ANTHROPIC_BASE_URL: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL}"
         ANTHROPIC_AUTH_TOKEN: "${ANBAN_DEEPSEEK_API_KEY}"
-        ANTHROPIC_MODEL: "deepseek-v4-flash"
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash"
-        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4-flash"
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
+        ANTHROPIC_MODEL: "deepseek-flash"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-flash"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-flash"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-flash"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash"
         CLAUDE_CODE_EFFORT_LEVEL: "low"
       model_usage_aliases:
-        deepseek-v4-flash: "deepseek-v4-flash"
+        deepseek-flash: "deepseek-flash"
   executor: docker
   runtime_images:
     article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
@@ -496,7 +496,7 @@ runtime_smoke_main() {
   trap 'exit 130' INT TERM
 
   write_server_config
-  printf 'runtime smoke profile: provider=deepseek model=deepseek-v4-flash\n'
+  printf 'runtime smoke profile: provider=deepseek model=deepseek-flash\n'
   write_compose_config
   chmod 0755 "$SMOKE_DIR"
   chmod 0644 "$CONFIG_FILE" "$COMPOSE_FILE"

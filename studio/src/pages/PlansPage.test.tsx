@@ -85,7 +85,7 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: {
         ...actual.api.agentProfiles,
         list: vi.fn().mockResolvedValue([
-          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
           { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
           { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
@@ -251,7 +251,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('blocks plan updates when the stored execution profile is no longer available', async () => {
     vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
-      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-flash', description: '适合日常创作', min_tier: 'free', available: true },
+      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
       { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
       { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
     ])

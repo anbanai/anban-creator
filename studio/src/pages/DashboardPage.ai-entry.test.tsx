@@ -101,7 +101,7 @@ const {
         id: 'effective',
         display_name: '性价比',
         provider: 'deepseek',
-        model_name: 'deepseek-v4-flash',
+        model_name: 'deepseek-flash',
         description: '适合日常创作和批量任务',
         min_tier: 'free',
         available: true,
@@ -330,7 +330,7 @@ describe('DashboardPage AI entry', () => {
     expect(projectControl.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
     expect(screen.queryByText('执行配置')).not.toBeInTheDocument()
-    expect(screen.queryByText('deepseek-v4-flash')).not.toBeInTheDocument()
+    expect(screen.queryByText('deepseek-flash')).not.toBeInTheDocument()
 
     const parameters = await openParameters(composer!)
     fireEvent.click(within(parameters).getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
