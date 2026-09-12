@@ -1,10 +1,10 @@
 import { pathToFileURL } from "node:url";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
 import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
-import { CompletionReportError, exitCodeForError } from "./errors.js";
+import { CompletionReportError, ExecutionIdentityError, exitCodeForError } from "./errors.js";
 import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
@@ -90,11 +90,13 @@ export async function runJob(
     let data: ResolvedBootstrapResponse | undefined;
     try {
       data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
+      assertManagedIdentity(data, config);
       await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
       await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
     } catch (error) {
       const identity: BootstrapIdentity | undefined = data ?? (error instanceof BootstrapResponseError ? error.identity : undefined);
       if (identity) {
+        if (error instanceof ExecutionIdentityError) await writeFailureState(config.workspace, error);
         const reporter = dependencies.createReporter(config, identity);
         const completionAbort = abortAfter(finalizationTimeouts().completion);
         try {
@@ -154,7 +156,7 @@ export async function runJob(
       completionAbort.abort();
     }
     stdout.write(`${JSON.stringify(result)}\n`);
-    if (completionError) throw new CompletionReportError(completionError);
+    if (completionError) throw new CompletionReportError(completionError, result);
     return result;
   } finally {
     stopHeartbeat?.();
@@ -169,6 +171,17 @@ function failure(workspace: string, error: unknown): ExecutionResult {
     work_dir: workspace,
     terminal_reason: "platform_error",
   };
+}
+
+export function assertManagedIdentity(data: Pick<BootstrapResponse, "execution_id" | "task_id" | "project_id">, config: Pick<JobConfig, "executionID">): void {
+  if (!data.execution_id?.trim() || data.execution_id !== config.executionID || !data.task_id?.trim() || !data.project_id?.trim()) {
+    throw new ExecutionIdentityError();
+  }
+}
+
+async function writeFailureState(workspace: string, error: ExecutionIdentityError): Promise<void> {
+  await mkdir(`${workspace}/output`, { recursive: true });
+  await writeFile(`${workspace}/output/failure-state.json`, JSON.stringify({ version: "1.0", status: "recoverable_failure", stage: error.resumeFrom, error_code: error.code, message: error.message, resume_from: error.resumeFrom }) + "\n");
 }
 
 function startHeartbeat(reporter: HeartbeatReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void {
