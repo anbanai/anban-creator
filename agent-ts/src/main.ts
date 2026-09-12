@@ -17,6 +17,8 @@ const ARTIFACT_TIMEOUT_MS = 120_000;
 const COMPLETION_TIMEOUT_MS = 20_000;
 const MAX_ARTIFACT_TIMEOUT_MS = 300_000;
 const MAX_COMPLETION_TIMEOUT_MS = 60_000;
+const WORKFLOW_FAILURE_MESSAGE = "任务执行未完成，已有产物已保留。";
+const EXECUTION_IDENTITY_FAILURE_MESSAGE = "执行环境未建立，暂时无法生成或结算图片。";
 
 type HeartbeatReporter = Pick<Reporter, "heartbeat">;
 type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete" | "submitCompletionMetadata">;
@@ -185,16 +187,17 @@ async function applyFailureState(workspace: string, result: ExecutionResult): Pr
     const stage = typeof value.stage === "string" && /^[a-z0-9_]{1,64}$/.test(value.stage) ? value.stage : undefined;
     const resumeFrom = typeof value.resume_from === "string" && /^[a-z0-9_]{1,64}$/.test(value.resume_from) ? value.resume_from : undefined;
     if (value.version !== "1.0" || value.status !== "recoverable_failure" || !code || !stage || !resumeFrom) return result;
-    const message = typeof value.message === "string" && value.message.trim()
-      ? value.message.trim().replace(/\s+/g, " ").slice(0, 1024)
-      : undefined;
-    if (!message) return result;
+    if (typeof value.message !== "string" || !value.message.trim()) return result;
+    const trustedIdentityFailure = result.success === false && result.terminal_reason === "platform_error" && result.root_error_code === "execution_identity_unavailable";
+    if (trustedIdentityFailure && code !== "execution_identity_unavailable") return result;
     return {
       ...result,
       success: false,
-      error: message,
-      terminal_reason: "platform_error",
-      root_error_code: code,
+      error: trustedIdentityFailure ? EXECUTION_IDENTITY_FAILURE_MESSAGE : WORKFLOW_FAILURE_MESSAGE,
+      terminal_reason: trustedIdentityFailure ? "platform_error" : (result.success ? "workflow_error" : result.terminal_reason ?? "workflow_error"),
+      ...(trustedIdentityFailure
+        ? { root_error_code: "execution_identity_unavailable" }
+        : { workflow_error_code: code }),
       failure_stage: stage,
       resume_from: resumeFrom,
     };

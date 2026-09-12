@@ -269,6 +269,7 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 		projectID, _ := info.Extra["project_id"].(string)
 		taskID, _ := info.Extra["task_id"].(string)
 		executionID, _ := info.Extra["execution_id"].(string)
+		executionContext := withMCPExecutionIdentity(r.Context(), info.UserID, projectID, taskID, executionID)
 		toolCallFound := false
 		for _, request := range requests {
 			if request.Method != "tools/call" {
@@ -281,14 +282,18 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 			}
 		}
 		if !toolCallFound {
-			next.ServeHTTP(w, r)
+			// The SDK derives stateful tool-handler contexts from the initialize
+			// request. Seed the immutable execution identity before that session
+			// context is detached; each later tool call is still independently
+			// checked below against its request token and current-execution state.
+			next.ServeHTTP(w, r.WithContext(executionContext))
 			return
 		}
 		if authorizer == nil || authorizer.ValidateAgentExecutionAccess(r.Context(), info.UserID, projectID, taskID, executionID) != nil {
 			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withMCPExecutionIdentity(r.Context(), info.UserID, projectID, taskID, executionID)))
+		next.ServeHTTP(w, r.WithContext(executionContext))
 	})
 }
 

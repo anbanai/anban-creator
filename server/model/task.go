@@ -237,6 +237,7 @@ const (
 	TaskBillingTerminalUserCancelled           = "user_cancelled"
 	TaskBillingTerminalPlatformError           = "platform_error"
 	TaskBillingTerminalProviderError           = "provider_error"
+	TaskBillingTerminalWorkflowError           = "workflow_error"
 	TaskBillingTerminalExecutionTimeout        = "execution_timeout"
 	TaskBillingTerminalInfrastructureCancelled = "infrastructure_cancelled"
 	TaskBillingTerminalPlanPaused              = "plan_paused"

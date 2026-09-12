@@ -15,7 +15,59 @@ import (
 	"github.com/rs/zerolog"
 
 	serverauth "github.com/anbanai/anban-creator/server/auth"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
 )
+
+type fixedSKUImageServiceSpy struct {
+	generateCalls int
+	request       service.GenerateTaskImageRequest
+}
+
+func (s *fixedSKUImageServiceSpy) Generate(_ context.Context, request service.GenerateTaskImageRequest) (*service.TaskImageAsset, error) {
+	s.generateCalls++
+	s.request = request
+	return &service.TaskImageAsset{FilePath: request.OutputPath, DownloadURL: "https://cdn.example/cover.png", MimeType: "image/png"}, nil
+}
+
+type fixedSKUImageOperationsSpy struct {
+	uploadCalls  int
+	analyzeCalls int
+}
+
+func (s *fixedSKUImageOperationsSpy) Upload(context.Context, service.UploadTaskImageRequest) (*service.UploadImageResult, error) {
+	s.uploadCalls++
+	return &service.UploadImageResult{URL: "https://cdn.example/cover.png"}, nil
+}
+func (*fixedSKUImageOperationsSpy) Compress(context.Context, service.CompressTaskImageRequest) (*service.CompressTaskImageResult, error) {
+	panic("unexpected Compress call")
+}
+func (*fixedSKUImageOperationsSpy) Crop(context.Context, service.CropTaskImageRequest) (*service.CropTaskImageResult, error) {
+	panic("unexpected Crop call")
+}
+func (*fixedSKUImageOperationsSpy) Download(context.Context, service.DownloadTaskImageRequest) (*service.TaskImageAsset, error) {
+	panic("unexpected Download call")
+}
+func (s *fixedSKUImageOperationsSpy) Analyze(context.Context, service.AnalyzeTaskImageRequest) (*service.AnalyzeTaskImageResult, error) {
+	s.analyzeCalls++
+	return &service.AnalyzeTaskImageResult{Analysis: "ok"}, nil
+}
+
+type fixedSKUContentMetadataSpy struct{ submitCalls int }
+
+func (s *fixedSKUContentMetadataSpy) Submit(_ context.Context, input service.ContentMetadataInput) (*model.ContentMetadataReport, error) {
+	s.submitCalls++
+	return &model.ContentMetadataReport{ID: "metadata-1", TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataSucceeded}, nil
+}
+func (*fixedSKUContentMetadataSpy) RecomputeTags(context.Context, string, string, string) (*model.ContentMetadataReport, error) {
+	panic("unexpected RecomputeTags call")
+}
+func (*fixedSKUContentMetadataSpy) RecomputeFeedback(context.Context, string, string, string) (*model.ContentMetadataReport, error) {
+	panic("unexpected RecomputeFeedback call")
+}
+func (*fixedSKUContentMetadataSpy) FindAuthorized(context.Context, string, string, string) (*model.ContentMetadataReport, error) {
+	panic("unexpected FindAuthorized call")
+}
 
 type executionAuthorizerStub struct {
 	wantUserID      string
@@ -256,6 +308,54 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	}
 	if authorizer.calls != 1 {
 		t.Fatalf("current-execution authorizer calls = %d, want 1", authorizer.calls)
+	}
+}
+
+func TestMCPHandlerCurrentExecutionTokenReachesEachFixedSKUServiceExactlyOnce(t *testing.T) {
+	const (
+		userID      = "user-1"
+		projectID   = "project-1"
+		taskID      = "task-1"
+		executionID = "execution-1"
+	)
+	tokens, err := serverauth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := tokens.Issue(serverauth.ExecutionClaims{
+		UserID: userID, ProjectID: projectID, TaskID: taskID, ExecutionID: executionID,
+	}, time.Now().Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageService := &fixedSKUImageServiceSpy{}
+	imageOperations := &fixedSKUImageOperationsSpy{}
+	metadata := &fixedSKUContentMetadataSpy{}
+	old := svcs
+	svcs = &Services{TaskImageSvc: imageService, TaskImageOperationsSvc: imageOperations, ContentMetadataSvc: metadata}
+	t.Cleanup(func() { svcs = old })
+	authorizer := &executionAuthorizerStub{
+		wantUserID: userID, wantProjectID: projectID, wantTaskID: taskID, wantExecutionID: executionID,
+	}
+	handler := NewMCPHandler(nil, "admin-key", nil, WithExecutionAuthentication(tokens, authorizer))
+	sessionID := initializeMCPExecutionSession(t, handler, token)
+
+	for _, tt := range []struct{ name, arguments string }{
+		{name: "generate_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"cover","output_path":"output/cover.png","aspect_ratio":"16:9"}`},
+		{name: "upload_image", arguments: `{"project_id":"project-1","task_id":"task-1","file_path":"output/cover.png"}`},
+		{name: "analyze_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"review","file_path":"output/cover.png"}`},
+		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","execution_id":"execution-1","metadata":"{}"}`},
+	} {
+		rec := callMCPToolForScopeTest(handler, token, sessionID, tt.name, tt.arguments)
+		if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"isError":true`) {
+			t.Fatalf("%s failed: status=%d body=%s", tt.name, rec.Code, rec.Body.String())
+		}
+	}
+	if imageService.generateCalls != 1 || imageOperations.uploadCalls != 1 || imageOperations.analyzeCalls != 1 || metadata.submitCalls != 1 {
+		t.Fatalf("service calls: generate=%d upload=%d analyze=%d metadata=%d", imageService.generateCalls, imageOperations.uploadCalls, imageOperations.analyzeCalls, metadata.submitCalls)
+	}
+	if imageService.request.UserID != userID || imageService.request.ProjectID != projectID || imageService.request.TaskID != taskID || imageService.request.ExecutionID != executionID {
+		t.Fatalf("generate identity = %#v", imageService.request)
 	}
 }
 

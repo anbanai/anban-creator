@@ -843,6 +843,34 @@ describe("recordAssistantToolUses", () => {
   });
 });
 
+describe("recordTrustedToolError", () => {
+  test("records a platform identity failure only from an exact fixed-SKU MCP tool result", () => {
+    const diagnostics = { tool_use_count: 0, tool_use_summary: {} as Record<string, number> };
+
+    runner.recordTrustedToolError("mcp__anban__generate_image", [{
+      type: "text",
+      text: JSON.stringify({ code: "execution_identity_required", message: "credential unavailable" }),
+    }], diagnostics);
+
+    expect(diagnostics).toMatchObject({
+      root_error_code: "execution_identity_unavailable",
+      failure_stage: "image_generation",
+      resume_from: "image_generation",
+    });
+  });
+
+  test("ignores identity-shaped text from other tools and mismatch errors", () => {
+    for (const [tool, code] of [
+      ["mcp__anban__write_article", "execution_identity_required"],
+      ["mcp__anban__generate_image", "execution_identity_mismatch"],
+    ] as const) {
+      const diagnostics = { tool_use_count: 0, tool_use_summary: {} as Record<string, number> };
+      runner.recordTrustedToolError(tool, [{ type: "text", text: JSON.stringify({ code }) }], diagnostics);
+      expect(diagnostics).not.toHaveProperty("root_error_code");
+    }
+  });
+});
+
 describe("buildExecutionEnvironment", () => {
   test("applies frozen runtime environment after execution identity", () => {
     const managed = buildExecutionEnvironment(

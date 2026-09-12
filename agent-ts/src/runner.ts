@@ -151,6 +151,7 @@ const MANAGED_ALLOWED_TOOLS = [
   "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite",
   "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*",
 ];
+const EXECUTION_IDENTITY_TOOLS = new Set(["generate_image", "upload_image", "analyze_image", "submit_completion_metadata"]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
 export interface ToolUseDiagnostics {
@@ -159,6 +160,9 @@ export interface ToolUseDiagnostics {
   tool_error_count?: number;
   last_tool_error_tool?: string;
   last_tool_error?: string;
+  root_error_code?: string;
+  failure_stage?: string;
+  resume_from?: string;
 }
 export type RunnerReporter = Pick<Reporter, "progress" | "stageProgress">;
 
@@ -191,7 +195,17 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
         initValidated = true;
       }
       if (consumed.terminal) {
-        if (!consumed.terminal.success) {
+        if (toolUseDiagnostics.root_error_code === "execution_identity_unavailable") {
+          consumed.terminal = {
+            ...consumed.terminal,
+            success: false,
+            error: "执行环境未建立，暂时无法生成或结算图片。",
+            terminal_reason: "platform_error",
+            root_error_code: toolUseDiagnostics.root_error_code,
+            failure_stage: toolUseDiagnostics.failure_stage,
+            resume_from: toolUseDiagnostics.resume_from,
+          };
+        } else if (!consumed.terminal.success) {
           consumed.terminal.terminal_reason = "provider_error";
           if (!consumed.terminal.error) consumed.terminal.error = terminalFailureMessage(consumed.terminal, toolUseDiagnostics);
         }
@@ -203,6 +217,9 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
       }
     }
   } catch (error) {
+    if (toolUseDiagnostics.root_error_code === "execution_identity_unavailable") {
+      return trustedExecutionIdentityFailure(cwd, logText, toolUseDiagnostics);
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : "agent execution failed",
@@ -214,7 +231,26 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
       ...toolUseDiagnostics,
     };
   }
+  if (toolUseDiagnostics.root_error_code === "execution_identity_unavailable") {
+    return trustedExecutionIdentityFailure(cwd, logText, toolUseDiagnostics);
+  }
   return { success: false, error: "managed agent stream ended without a result message", terminal_reason: "provider_error", work_dir: cwd, log_text: logText, cost_status: "unreconciled", cost_diagnostics: [{ code: "missing_terminal_model_usage" }], ...toolUseDiagnostics };
+}
+
+function trustedExecutionIdentityFailure(cwd: string, logText: string, diagnostics: ToolUseDiagnostics): ExecutionResult {
+  return {
+    success: false,
+    error: "执行环境未建立，暂时无法生成或结算图片。",
+    terminal_reason: "platform_error",
+    root_error_code: "execution_identity_unavailable",
+    failure_stage: diagnostics.failure_stage,
+    resume_from: diagnostics.resume_from,
+    work_dir: cwd,
+    log_text: logText,
+    cost_status: "unreconciled",
+    cost_diagnostics: [{ code: "missing_terminal_model_usage" }],
+    ...diagnostics,
+  };
 }
 
 export function buildQueryOptions(
@@ -582,7 +618,11 @@ async function handleToolResults(message: { message: { content?: unknown } }, to
     if (block.is_error) {
       diagnostics.tool_error_count = (diagnostics.tool_error_count ?? 0) + 1;
       diagnostics.last_tool_error_tool = call.name;
-      diagnostics.last_tool_error = compactToolResult(block.content);
+      if (!recordTrustedToolError(call.name, block.content, diagnostics)) {
+        diagnostics.last_tool_error = compactToolResult(block.content);
+      } else {
+        delete diagnostics.last_tool_error;
+      }
       continue;
     }
     if (toolBaseName(call.name) !== "generate_image") continue;
@@ -595,6 +635,36 @@ async function handleToolResults(message: { message: { content?: unknown } }, to
       throw new RuntimeArtifactMaterializationError(`materialize ${JSON.stringify(payloads[0].file_path)}: ${error instanceof Error ? error.message : "unknown error"}`, { cause: error });
     }
   }
+}
+
+export function recordTrustedToolError(toolName: string, content: unknown, diagnostics: ToolUseDiagnostics): boolean {
+  const baseName = toolBaseName(toolName);
+  if (!EXECUTION_IDENTITY_TOOLS.has(baseName)) return false;
+  if (structuredToolErrorCode(content) !== "execution_identity_required") return false;
+  const stage = baseName === "submit_completion_metadata" ? "finalize" : "image_generation";
+  diagnostics.root_error_code = "execution_identity_unavailable";
+  diagnostics.failure_stage = stage;
+  diagnostics.resume_from = stage;
+  return true;
+}
+
+function structuredToolErrorCode(content: unknown): string | undefined {
+  const candidates = typeof content === "string"
+    ? [content]
+    : Array.isArray(content)
+      ? content.flatMap((item) => typeof item === "string" ? [item] : typeof item?.text === "string" ? [item.text] : [])
+      : [];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && (parsed as Record<string, unknown>).code === "execution_identity_required") {
+        return "execution_identity_required";
+      }
+    } catch {
+      // Only exact structured server errors are trusted platform evidence.
+    }
+  }
+  return undefined;
 }
 
 function terminalFailureMessage(result: ExecutionResult, diagnostics: ToolUseDiagnostics): string {

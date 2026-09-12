@@ -301,7 +301,7 @@ describe("runJob finalization", () => {
     }
   });
 
-  test("promotes a valid failure state into the terminal result", async () => {
+  test("classifies a workspace failure state as a non-refundable workflow error with a fixed public message", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "anban-managed-failure-state-"));
     const harness = runJobHarness();
     try {
@@ -311,7 +311,7 @@ describe("runJob finalization", () => {
         status: "recoverable_failure",
         stage: "image_generation",
         error_code: "execution_identity_unavailable",
-        message: "执行环境未建立，暂时无法生成或结算图片",
+        message: "provider token: super-secret-value",
         resume_from: "image_generation",
       }));
       harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
@@ -320,8 +320,9 @@ describe("runJob finalization", () => {
 
       expect(result).toMatchObject({
         success: false,
-        error: "执行环境未建立，暂时无法生成或结算图片",
-        root_error_code: "execution_identity_unavailable",
+        error: "任务执行未完成，已有产物已保留。",
+        terminal_reason: "workflow_error",
+        workflow_error_code: "execution_identity_unavailable",
         failure_stage: "image_generation",
         resume_from: "image_generation",
       });
@@ -331,7 +332,7 @@ describe("runJob finalization", () => {
     }
   });
 
-  test("uses exit code three when identity failure completion cannot be delivered", async () => {
+  test("does not assign trusted exit code three from a workspace failure state", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "anban-managed-failure-state-"));
     const harness = runJobHarness();
     try {
@@ -345,6 +346,34 @@ describe("runJob finalization", () => {
         resume_from: "image_generation",
       }));
       harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+      harness.complete = async () => { throw new Error("server unavailable"); };
+
+      try {
+        await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+        throw new Error("runJob unexpectedly succeeded");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CompletionReportError);
+        expect(exitCodeForError(error)).toBe(2);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("uses exit code three for a runner-observed identity failure when completion cannot be delivered", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-trusted-identity-failure-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      harness.dependencies.runClaude = async () => ({
+        success: false,
+        error: "执行环境未建立，暂时无法生成或结算图片。",
+        terminal_reason: "platform_error",
+        root_error_code: "execution_identity_unavailable",
+        failure_stage: "image_generation",
+        resume_from: "image_generation",
+        work_dir: workspace,
+      });
       harness.complete = async () => { throw new Error("server unavailable"); };
 
       try {

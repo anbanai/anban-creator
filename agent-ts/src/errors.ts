@@ -8,7 +8,7 @@ export class CompletionReportError extends Error {
 
 export function exitCodeForError(error: unknown): number {
   if (!(error instanceof CompletionReportError)) return 1;
-  const root = error.rootError as { success?: unknown; root_error_code?: unknown } | undefined;
-  if (root?.success === false && root.root_error_code === "execution_identity_unavailable") return 3;
+  const root = error.rootError as { success?: unknown; terminal_reason?: unknown; root_error_code?: unknown } | undefined;
+  if (root?.success === false && root.terminal_reason === "platform_error" && root.root_error_code === "execution_identity_unavailable") return 3;
   return 2;
 }

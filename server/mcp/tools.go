@@ -10,12 +10,32 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
 type TaskVideoAnalyzer interface {
 	Analyze(context.Context, service.AnalyzeTaskVideoRequest) (*service.AnalyzeTaskVideoResult, error)
+}
+
+type TaskImageGenerator interface {
+	Generate(context.Context, service.GenerateTaskImageRequest) (*service.TaskImageAsset, error)
+}
+
+type TaskImageOperations interface {
+	Upload(context.Context, service.UploadTaskImageRequest) (*service.UploadImageResult, error)
+	Compress(context.Context, service.CompressTaskImageRequest) (*service.CompressTaskImageResult, error)
+	Crop(context.Context, service.CropTaskImageRequest) (*service.CropTaskImageResult, error)
+	Download(context.Context, service.DownloadTaskImageRequest) (*service.TaskImageAsset, error)
+	Analyze(context.Context, service.AnalyzeTaskImageRequest) (*service.AnalyzeTaskImageResult, error)
+}
+
+type ContentMetadataManager interface {
+	Submit(context.Context, service.ContentMetadataInput) (*model.ContentMetadataReport, error)
+	RecomputeTags(context.Context, string, string, string) (*model.ContentMetadataReport, error)
+	RecomputeFeedback(context.Context, string, string, string) (*model.ContentMetadataReport, error)
+	FindAuthorized(context.Context, string, string, string) (*model.ContentMetadataReport, error)
 }
 
 // Services holds the service instances needed by MCP tools.
@@ -35,13 +55,13 @@ type Services struct {
 	MediaPipelineSvc       *service.MediaPipelineService
 	TopicPoolSvc           *service.TopicPoolService
 	AgentFeedbackSvc       *service.AgentFeedbackService
-	ContentMetadataSvc     *service.ContentMetadataService
+	ContentMetadataSvc     ContentMetadataManager
 	AgentProjectProfileSvc *service.AgentProjectProfileService
 	ArticleScoreSvc        *service.ArticleScoreService
 	SeednoteExportSvc      *service.SeednoteExportService
 	ResourceCatalogSvc     *service.ResourceCatalogService
-	TaskImageSvc           *service.TaskImageService
-	TaskImageOperationsSvc *service.TaskImageOperationsService
+	TaskImageSvc           TaskImageGenerator
+	TaskImageOperationsSvc TaskImageOperations
 	TaskVideoOperationsSvc TaskVideoAnalyzer
 }
 

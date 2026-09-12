@@ -294,19 +294,20 @@ type CostDiagnostic struct {
 
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
-	Success         bool   `json:"success"`
-	Error           string `json:"error,omitempty"`
-	RootErrorCode   string `json:"root_error_code,omitempty"`
-	FailureStage    string `json:"failure_stage,omitempty"`
-	ResumeFrom      string `json:"resume_from,omitempty"`
-	ResultSubtype   string `json:"result_subtype,omitempty"`
-	TerminalReason  string `json:"terminal_reason,omitempty"`
-	WorkDir         string `json:"work_dir,omitempty"`
-	RemoteArtifacts bool   `json:"remote_artifacts,omitempty"`
-	LogText         string `json:"log_text,omitempty"`
-	NumTurns        int    `json:"num_turns,omitempty"`
-	SessionID       string `json:"session_id,omitempty"`
-	DurationMs      int    `json:"duration_ms,omitempty"`
+	Success           bool   `json:"success"`
+	Error             string `json:"error,omitempty"`
+	RootErrorCode     string `json:"root_error_code,omitempty"`
+	WorkflowErrorCode string `json:"workflow_error_code,omitempty"`
+	FailureStage      string `json:"failure_stage,omitempty"`
+	ResumeFrom        string `json:"resume_from,omitempty"`
+	ResultSubtype     string `json:"result_subtype,omitempty"`
+	TerminalReason    string `json:"terminal_reason,omitempty"`
+	WorkDir           string `json:"work_dir,omitempty"`
+	RemoteArtifacts   bool   `json:"remote_artifacts,omitempty"`
+	LogText           string `json:"log_text,omitempty"`
+	NumTurns          int    `json:"num_turns,omitempty"`
+	SessionID         string `json:"session_id,omitempty"`
+	DurationMs        int    `json:"duration_ms,omitempty"`
 
 	DurationAPIMs   int               `json:"duration_api_ms,omitempty"`
 	ModelUsage      []ModelTokenUsage `json:"model_usage,omitempty"`

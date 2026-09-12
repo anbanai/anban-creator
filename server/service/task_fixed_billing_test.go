@@ -241,6 +241,7 @@ func TestShouldReverseTaskChargeUsesExplicitReasonAndDurableDelivery(t *testing.
 		{reason: model.TaskBillingTerminalProviderError, want: true},
 		{reason: model.TaskBillingTerminalExecutionTimeout, want: true},
 		{reason: model.TaskBillingTerminalInfrastructureCancelled, want: true},
+		{reason: model.TaskBillingTerminalWorkflowError, want: false},
 		{reason: model.TaskBillingTerminalUserCancelled, want: false},
 		{reason: model.TaskBillingTerminalCompleted, want: false},
 		{reason: "execution failed: provider_error", want: false},
@@ -262,6 +263,7 @@ func TestTaskTerminalBillingReasonIsIdenticalForLocalAndCloudEvidence(t *testing
 	}{
 		{name: "success", execution: model.TaskExecution{Status: model.TaskExecutionSucceeded}, want: model.TaskBillingTerminalCompleted},
 		{name: "provider", execution: model.TaskExecution{Status: model.TaskExecutionFailed}, result: &agent.ExecutionResult{TerminalReason: model.TaskBillingTerminalProviderError}, want: model.TaskBillingTerminalProviderError},
+		{name: "workflow", execution: model.TaskExecution{Status: model.TaskExecutionFailed}, result: &agent.ExecutionResult{TerminalReason: model.TaskBillingTerminalWorkflowError}, want: model.TaskBillingTerminalWorkflowError},
 		{name: "timeout", execution: model.TaskExecution{Status: model.TaskExecutionTimedOut}, want: model.TaskBillingTerminalExecutionTimeout},
 		{name: "infrastructure cancellation", execution: model.TaskExecution{Status: model.TaskExecutionCancelled}, want: model.TaskBillingTerminalInfrastructureCancelled},
 		{name: "user cancellation", execution: model.TaskExecution{Status: model.TaskExecutionCancelled, TerminalReason: model.TaskBillingTerminalUserCancelled}, want: model.TaskBillingTerminalUserCancelled},

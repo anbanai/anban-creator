@@ -59,6 +59,7 @@ func approvedTaskBillingTerminalReason(reason string) bool {
 	switch strings.TrimSpace(reason) {
 	case model.TaskBillingTerminalPlatformError,
 		model.TaskBillingTerminalProviderError,
+		model.TaskBillingTerminalWorkflowError,
 		model.TaskBillingTerminalExecutionTimeout,
 		model.TaskBillingTerminalInfrastructureCancelled,
 		model.TaskBillingTerminalPlanPaused:
