@@ -240,6 +240,12 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "agent bootstrap failed")
 		}
 	}
+	if response == nil || strings.TrimSpace(response.ExecutionID) == "" || strings.TrimSpace(response.ExecutionID) != strings.TrimSpace(req.ExecutionID) {
+		if h.logger != nil {
+			h.logger.Error().Str("execution_id", strings.TrimSpace(req.ExecutionID)).Msg("agent bootstrap returned an invalid execution identity")
+		}
+		return Error(c, fiber.StatusConflict, "agent bootstrap identity conflict")
+	}
 	return Success(c, response)
 }
 
