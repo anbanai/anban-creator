@@ -212,7 +212,7 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 		return Error(c, fiber.StatusServiceUnavailable, "agent bootstrap unavailable")
 	}
 	if strings.TrimSpace(c.Get("X-Anban-Agent-Contract-Version")) != fmt.Sprintf("%d", agentRuntimeContractVersion) {
-		return Error(c, fiber.StatusUpgradeRequired, "agent runtime contract upgrade required")
+		return ErrorWithCode(c, fiber.StatusUpgradeRequired, "agent_runtime_upgrade_required", "agent runtime contract upgrade required")
 	}
 	var req agentBootstrapRequest
 	if err := c.Bind().Body(&req); err != nil || strings.TrimSpace(req.ExecutionID) == "" {

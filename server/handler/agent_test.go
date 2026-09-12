@@ -149,6 +149,15 @@ func TestAgentBootstrapRequiresRuntimeContractHeader(t *testing.T) {
 	if resp.StatusCode != fiber.StatusUpgradeRequired {
 		t.Fatalf("missing runtime contract header status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
 	}
+	var body struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ErrorCode != "agent_runtime_upgrade_required" {
+		t.Fatalf("error_code = %q", body.ErrorCode)
+	}
 }
 
 func TestAgentExecutionAuthRejectsAPIKeysAndConflictingCredentials(t *testing.T) {

@@ -8,9 +8,10 @@ import (
 
 // Response is the standard JSON envelope for all API responses.
 type Response struct {
-	Code int         `json:"code"`
-	Msg  string      `json:"msg"`
-	Data interface{} `json:"data,omitempty"`
+	Code      int         `json:"code"`
+	Msg       string      `json:"msg"`
+	ErrorCode string      `json:"error_code,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
 }
 
 // Success returns a JSON response with code 0 and the given data.
@@ -21,6 +22,10 @@ func Success(c fiber.Ctx, data interface{}) error {
 // Error returns a JSON error response with the given HTTP status and message.
 func Error(c fiber.Ctx, status int, msg string) error {
 	return c.Status(status).JSON(Response{Code: status * 100, Msg: msg})
+}
+
+func ErrorWithCode(c fiber.Ctx, status int, code, msg string) error {
+	return c.Status(status).JSON(Response{Code: status * 100, Msg: msg, ErrorCode: code})
 }
 
 // Errorf returns a JSON error response with a formatted message.
