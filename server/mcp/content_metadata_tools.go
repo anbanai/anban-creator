@@ -28,12 +28,18 @@ func recomputeSchema() map[string]any {
 }
 
 func contentMetadataSubmitHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("submit_completion_metadata request parameters are required"), nil
+	}
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	executionID, _ := args["execution_id"].(string)
 	metadata, _ := args["metadata"].(string)
 	if taskID == "" || executionID == "" || metadata == "" {
 		return errorResult("task_id, execution_id and metadata are required"), nil
+	}
+	if failure := requireMCPExecutionIdentity(ctx, "submit_completion_metadata", "", taskID, executionID); failure != nil {
+		return failure, nil
 	}
 	if svcs.ContentMetadataSvc == nil {
 		return errorResult("content metadata service not available"), nil

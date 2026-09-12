@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
 	serverauth "github.com/anbanai/anban-creator/server/auth"
@@ -135,6 +136,29 @@ func TestMCPHandlerAuthenticationLogsNeverContainTokenMaterial(t *testing.T) {
 	if !strings.Contains(output, `"authorization_present":true`) || !strings.Contains(output, `"bearer_format":true`) {
 		t.Fatalf("authentication log lacks non-secret diagnostics: %s", output)
 	}
+}
+
+func TestRequireMCPExecutionIdentity(t *testing.T) {
+	if got := requireMCPExecutionIdentity(context.Background(), "generate_image", "project-1", "task-1", ""); got == nil || !strings.Contains(toolResultText(got), "execution_identity_required") {
+		t.Fatalf("missing scope result = %#v", got)
+	}
+	ctx := withMCPExecutionIdentity(context.Background(), "user-1", "project-1", "task-1", "exec-1")
+	if got := requireMCPExecutionIdentity(ctx, "generate_image", "project-1", "task-1", ""); got != nil {
+		t.Fatalf("valid scope rejected: %#v", got)
+	}
+	if got := requireMCPExecutionIdentity(ctx, "generate_image", "project-2", "task-1", ""); got == nil || !strings.Contains(toolResultText(got), "execution_identity_mismatch") {
+		t.Fatalf("mismatch result = %#v", got)
+	}
+}
+
+func toolResultText(result *mcp.CallToolResult) string {
+	if result == nil || len(result.Content) == 0 {
+		return ""
+	}
+	if content, ok := result.Content[0].(*mcp.TextContent); ok {
+		return content.Text
+	}
+	return ""
 }
 
 func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {

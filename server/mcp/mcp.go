@@ -570,6 +570,22 @@ func getExecutionID(ctx context.Context) string {
 	return strings.TrimSpace(executionID)
 }
 
+// requireMCPExecutionIdentity prevents fixed-SKU operations from falling back
+// to API-key or static-key authentication. The execution scope is installed by
+// executionScopeMiddleware after the JWT has been authorized for the task.
+func requireMCPExecutionIdentity(ctx context.Context, operation, projectID, taskID, executionID string) *mcp.CallToolResult {
+	identity, ok := getMCPExecutionIdentity(ctx)
+	if !ok || identity.ProjectID == "" || identity.TaskID == "" || identity.ExecutionID == "" {
+		return errorResult(fmt.Sprintf(`{"code":"execution_identity_required","message":"%s requires an execution-scoped credential"}`, operation))
+	}
+	if (projectID != "" && strings.TrimSpace(projectID) != identity.ProjectID) ||
+		(taskID != "" && strings.TrimSpace(taskID) != identity.TaskID) ||
+		(executionID != "" && strings.TrimSpace(executionID) != identity.ExecutionID) {
+		return errorResult(fmt.Sprintf(`{"code":"execution_identity_mismatch","message":"%s is bound to the current task execution"}`, operation))
+	}
+	return nil
+}
+
 // textResult creates a CallToolResult with JSON text content.
 func textResult(data any) (*mcp.CallToolResult, error) {
 	b, err := json.Marshal(data)

@@ -77,6 +77,10 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if req == nil || req.Params == nil {
 		return errorResult("generate_image request parameters are required"), nil
 	}
+	args := parseArgs(req.Params.Arguments)
+	if failure := requireMCPExecutionIdentity(ctx, "generate_image", stringArg(args, "project_id"), stringArg(args, "task_id"), ""); failure != nil {
+		return failure, nil
+	}
 	if svcs == nil || svcs.TaskImageSvc == nil {
 		return errorResult("task image service not available"), nil
 	}
@@ -90,7 +94,6 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	stopHeartbeat := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "generate_image", longTextHeartbeatInterval)
 	defer stopHeartbeat()
 
-	args := parseArgs(req.Params.Arguments)
 	referencePaths := parseStringArray(args, "ref_image_paths")
 	if len(referencePaths) == 0 {
 		if referencePath := stringArg(args, "ref_image_path"); strings.TrimSpace(referencePath) != "" {
@@ -231,10 +234,13 @@ func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	if req == nil || req.Params == nil {
 		return errorResult("upload_image request parameters are required"), nil
 	}
+	args := parseArgs(req.Params.Arguments)
+	if failure := requireMCPExecutionIdentity(ctx, "upload_image", stringArg(args, "project_id"), stringArg(args, "task_id"), ""); failure != nil {
+		return failure, nil
+	}
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image service not available"), nil
 	}
-	args := parseArgs(req.Params.Arguments)
 	result, err := svcs.TaskImageOperationsSvc.Upload(ctx, service.UploadTaskImageRequest{
 		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), ProjectID: stringArg(args, "project_id"),
 		TaskID: stringArg(args, "task_id"), FilePath: stringArg(args, "file_path"),
@@ -387,10 +393,13 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	if req == nil || req.Params == nil {
 		return errorResult("analyze_image request parameters are required"), nil
 	}
+	args := parseArgs(req.Params.Arguments)
+	if failure := requireMCPExecutionIdentity(ctx, "analyze_image", stringArg(args, "project_id"), stringArg(args, "task_id"), ""); failure != nil {
+		return failure, nil
+	}
 	if svcs == nil || svcs.TaskImageOperationsSvc == nil {
 		return errorResult("image understanding service not available"), nil
 	}
-	args := parseArgs(req.Params.Arguments)
 	result, err := svcs.TaskImageOperationsSvc.Analyze(ctx, service.AnalyzeTaskImageRequest{
 		UserID: getUserID(ctx), ExecutionID: getExecutionID(ctx), ProjectID: stringArg(args, "project_id"), TaskID: stringArg(args, "task_id"),
 		ImageURL: stringArg(args, "image_url"), FilePath: stringArg(args, "file_path"), Prompt: stringArg(args, "prompt"),
