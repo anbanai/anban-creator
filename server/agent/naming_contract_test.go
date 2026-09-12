@@ -271,7 +271,7 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 		t.Fatalf("%s author name = %q, want %q", path, plugin.Author.Name, "anbanai")
 	}
 	for _, got := range []string{plugin.Homepage, plugin.Repository} {
-		if !strings.Contains(got, "github.com/anbanai/harness") {
+		if !strings.Contains(got, "github.com/anbanai/creator-harness") {
 			t.Fatalf("%s plugin URL = %q, want canonical plugin repository", path, got)
 		}
 	}

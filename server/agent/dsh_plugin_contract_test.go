@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.23"
+	dshPluginVersion     = "4.1.24"
 	dshPluginReleaseDate = "2026-09-12"
 )
 
@@ -512,9 +512,9 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		`"@anban/dsh-plugin@4.1.14"`,
 		`"/tmp/anban-dsh-plugin-4.1.14.tgz"`,
 		`"file:/tmp/anban-dsh-plugin-4.1.14.tgz"`,
-		`"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz"`,
-		`"git+https://github.com/anbanai/harness.git#v4.1.14"`,
-		`"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567"`,
+		`"https://github.com/anbanai/anban-creator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz"`,
+		`"git+https://github.com/anbanai/creator-harness.git#v4.1.14"`,
+		`"git+https://github.com/anbanai/creator-harness.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
 			t.Errorf("approved add %q findings = %v", allowed, findings)
@@ -535,11 +535,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		`"@anban/dsh-plugin@01.2.3"`,
 		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
 		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.15.tgz"`,
-		`"git+https://github.com/anbanai/harness.git#main"`,
-		`"git+https://github.com/anbanai/harness.git#HEAD"`,
-		`"git+https://github.com/anbanai/harness.git#v01.2.3"`,
-		`"git+https://github.com/anbanai/harness.git"`,
+		`"https://github.com/anbanai/anban-creator/releases/download/v4.1.14/anban-dsh-plugin-4.1.15.tgz"`,
+		`"git+https://github.com/anbanai/creator-harness.git#main"`,
+		`"git+https://github.com/anbanai/creator-harness.git#HEAD"`,
+		`"git+https://github.com/anbanai/creator-harness.git#v01.2.3"`,
+		`"git+https://github.com/anbanai/creator-harness.git"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(forbidden)); len(findings) == 0 {
 			t.Errorf("source-directory add %q was accepted", forbidden)
@@ -548,11 +548,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, source := range []string{
 		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
-		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#main\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-harness.git#main\"\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"file:/tmp/legacy-plugin\"\n```",
 		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
 		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
-		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#main\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-harness.git#main\"\n```",
 		"```bash\nONE=1 TWO=2 wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/legacy-plugin\"\n```",
 		"```bash\nLABEL=\"two words\" dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/arbitrary-plugin-4.1.12.tgz\"\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add\n```",
@@ -565,11 +565,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, source := range []string{
 		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
-		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/anbanai/anban-creator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz\"\n```",
 		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
 		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
-		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
 		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.14.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
@@ -585,8 +585,8 @@ var dshShellFencePattern = regexp.MustCompile("(?s)```(?:bash|sh|shell)\\n(.*?)`
 var dshShellAssignmentPattern = regexp.MustCompile(`^([A-Z_][A-Z0-9_]*)=["']([^"']*)["']$`)
 var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
 var dshLocalTarballAddPattern = regexp.MustCompile(`(^|[/\\])anban-dsh-plugin-(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
-var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/anbanai/anbancreator/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
-var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/harness\.git#(.+)$`)
+var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/anbanai/anban-creator/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
+var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/creator-harness\.git#(.+)$`)
 var dshGitTagPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
 var dshGitCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 

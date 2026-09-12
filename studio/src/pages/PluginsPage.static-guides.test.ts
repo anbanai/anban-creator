@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 describe('agent-readable plugin guides', () => {
   it.each(['claude', 'codex'])('ships a public /%s installation page', (client) => {
     const html = readFileSync(resolve(process.cwd(), `public/${client}/index.html`), 'utf8')
-    expect(html).toContain('https://github.com/anbanai/harness.git')
+    expect(html).toContain('https://github.com/anbanai/creator-harness.git')
     expect(html).toContain('ANBAN_API_KEY')
     expect(html).toContain('https://creator.anbanai.com/settings#api-key-settings')
     expect(html).toContain('Do not include the API key')

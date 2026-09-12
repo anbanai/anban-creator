@@ -1,6 +1,6 @@
 [submodule "harness"]
 	path = harness
-	url = https://github.com/anbanai/harness.git
+	url = https://github.com/anbanai/creator-harness.git
 	branch = main
 	syncPush = true
 	syncRemote = origin

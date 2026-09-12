@@ -1,6 +1,6 @@
 # Anban 智能创作助手 Windows 自动安装脚本
 # 使用方法：在 PowerShell 中运行
-# Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/anbanai/anbancreator/main/scripts/install.ps1'))
+# Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/anbanai/anban-creator/main/scripts/install.ps1'))
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "   Anban 智能创作助手 安装向导" -ForegroundColor Cyan
@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 # 下载
 Write-Host "正在下载..." -ForegroundColor Green
-$downloadUrl = "https://github.com/anbanai/anbancreator/releases/latest/download/writer-windows-amd64.exe"
+$downloadUrl = "https://github.com/anbanai/anban-creator/releases/latest/download/writer-windows-amd64.exe"
 $outputFile = "$installDir\writer.exe"
 
 try {

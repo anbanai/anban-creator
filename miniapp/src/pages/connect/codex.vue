@@ -116,7 +116,7 @@ const keyPrefixes = computed(
 
 const agentInstallPrompt = '阅读 https://creator.anbanai.com/codex，帮我安装并配置 Anban Creator 插件。需要 ANBAN_API_KEY 时向我索取。'
 
-const manualInstallSnippet = `git clone --recurse-submodules https://github.com/anbanai/harness.git "$HOME/.anban/harness"
+const manualInstallSnippet = `git clone --recurse-submodules https://github.com/anbanai/creator-harness.git "$HOME/.anban/harness"
 codex plugin marketplace add "$HOME/.anban/harness"
 codex plugin add anban@anbanai
 bash "$HOME/.anban/harness/install/install-subagents.sh"`
