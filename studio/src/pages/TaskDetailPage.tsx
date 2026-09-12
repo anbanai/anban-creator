@@ -904,7 +904,7 @@ export default function TaskDetailPage() {
               </>
             )}
             {processFiles.length > 0 && (
-              <section className="border-t border-border pt-4 opacity-70" aria-label="仅支持预览的文件">
+              <section className="border-t border-border pt-4" aria-label="仅支持预览的文件">
                 <FilePreviewGallery
                   files={processFiles}
                   taskId={task.id}

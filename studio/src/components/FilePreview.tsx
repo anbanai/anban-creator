@@ -129,7 +129,9 @@ function FilePreviewModalContent({
   const isText = isTextPreviewFile(file)
   const isMD = isText && isMarkdownFile(file.file_name)
   const canDownload = file.is_deliverable === true
-  const previewUrl = file.preview_url || file.url || ''
+  // Process files must stay behind the authenticated preview endpoint. The
+  // legacy storage URL fallback is only safe for deliverables.
+  const previewUrl = file.preview_url || (canDownload ? file.url : '') || ''
 
   useEffect(() => {
     let cancelled = false
@@ -155,7 +157,7 @@ function FilePreviewModalContent({
           }
           return
         }
-        if (!firstAbsoluteHTTPURL(url) && (file.preview_url || url.startsWith('/api/v1/files/'))) {
+        if (!firstAbsoluteHTTPURL(url) && (file.preview_url || (canDownload && url.startsWith('/api/v1/files/')))) {
           setLoading(true)
           try {
             const blob = file.preview_url
@@ -191,12 +193,14 @@ function FilePreviewModalContent({
       setLoading(true)
       try {
         if (isHTML) {
+          if (!file.preview_url && !canDownload) return
           const html = file.preview_url
             ? await (await api.tasks.previewFileBlob(taskId, file.id)).text()
             : await api.tasks.fetchPreviewHTML(taskId)
           if (cancelled) return
           setHtmlContent(html)
         } else if (isText) {
+          if (!file.preview_url && !canDownload) return
           const blob = file.preview_url
             ? await api.tasks.previewFileBlob(taskId, file.id)
             : await api.tasks.downloadFileBlob(taskId, file.id)
@@ -552,7 +556,9 @@ function FilePreviewInline({
   const isText = isTextPreviewFile(file)
   const canDownload = file.is_deliverable === true
   const { label: deliveryStatusLabel, Icon: DeliveryStatusIcon, className: deliveryStatusClassName } = fileDeliveryStatus(file)
-  const previewUrl = file.preview_url || file.url || ''
+  // Process files must stay behind the authenticated preview endpoint. The
+  // legacy storage URL fallback is only safe for deliverables.
+  const previewUrl = file.preview_url || (canDownload ? file.url : '') || ''
   const [downloading, setDownloading] = useState(false)
 
   const handleDownload = async () => {
@@ -593,7 +599,7 @@ function FilePreviewInline({
       }
       return
     }
-    if (!firstAbsoluteHTTPURL(url) && (file.preview_url || url.startsWith('/api/v1/files/'))) {
+    if (!firstAbsoluteHTTPURL(url) && (file.preview_url || (canDownload && url.startsWith('/api/v1/files/')))) {
       let cancelled = false
       const loader = file.preview_url
         ? api.tasks.previewFileBlob(taskId, file.id)

@@ -244,4 +244,24 @@ describe('FilePreviewGallery', () => {
     expect(api.tasks.previewFileBlob).toHaveBeenCalledWith('task-1', 'process-1')
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
   })
+
+  it('does not use legacy storage or download endpoints for process files without preview_url', async () => {
+    const processFile = fileWith({
+      id: 'legacy-process',
+      file_name: 'review.json',
+      mime_type: 'application/json',
+      url: '/api/v1/files/review.json',
+      preview_url: undefined,
+      is_deliverable: false,
+    })
+
+    render(<FilePreviewGallery files={[processFile]} taskId="task-1" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 review.json' }))
+
+    await waitFor(() => {
+      expect(api.tasks.previewFileBlob).not.toHaveBeenCalled()
+      expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
+      expect(api.tasks.fetchPreviewHTML).not.toHaveBeenCalled()
+    })
+  })
 })
