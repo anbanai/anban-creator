@@ -85,7 +85,7 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	h := NewAgentHandler(nil, nil, &logger)
 	h.SetExecutionTokenService(tokens)
 	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
-	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{TaskID: "task-1", ExecutionToken: "execution-token"}})
+	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ExecutionToken: "execution-token"}})
 	app := fiber.New()
 	app.Post("/agent/scoped", h.ExecutionAuthMiddleware, func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"user": c.Locals(agentUserIDContextKey), "project": c.Locals(agentProjectIDContextKey), "task": c.Locals(agentTaskIDContextKey), "execution": c.Locals(agentExecutionIDContextKey)})
@@ -133,30 +133,57 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 }
 
 func TestAgentBootstrapRequiresRuntimeContractHeader(t *testing.T) {
+	for _, version := range []string{"", "0", "2", "v1", "1.0"} {
+		t.Run("version_"+version, func(t *testing.T) {
+			logger := zerolog.New(io.Discard)
+			h := NewAgentHandler(nil, nil, &logger)
+			h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1"}})
+			app := fiber.New()
+			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+
+			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+			req.Header.Set("Authorization", "Bearer workload-token")
+			req.Header.Set("Content-Type", "application/json")
+			if version != "" {
+				req.Header.Set("X-Anban-Agent-Contract-Version", version)
+			}
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusUpgradeRequired {
+				t.Fatalf("runtime contract header %q status = %d, want %d", version, resp.StatusCode, fiber.StatusUpgradeRequired)
+			}
+			var body struct {
+				ErrorCode string `json:"error_code"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.ErrorCode != "agent_runtime_upgrade_required" {
+				t.Fatalf("error_code = %q", body.ErrorCode)
+			}
+		})
+	}
+}
+
+func TestAgentBootstrapRejectsMismatchedResponseExecutionID(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	h := NewAgentHandler(nil, nil, &logger)
-	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1"}})
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-2"}})
 	app := fiber.New()
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "1")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusUpgradeRequired {
-		t.Fatalf("missing runtime contract header status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
-	}
-	var body struct {
-		ErrorCode string `json:"error_code"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.ErrorCode != "agent_runtime_upgrade_required" {
-		t.Fatalf("error_code = %q", body.ErrorCode)
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusConflict)
 	}
 }
 
@@ -586,6 +613,36 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 				t.Fatalf("terminal task after retries = %#v, %v", persisted, err)
 			}
 		})
+	}
+}
+
+func TestAgentCompletionPersistsRecoverableFailureIdentity(t *testing.T) {
+	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"执行环境未建立，暂时无法生成或结算图片","terminal_reason":"platform_error","root_error_code":"execution_identity_unavailable","failure_stage":"image_generation","resume_from":"image_generation"}}`
+	req := agentJSONRequest("/agent/complete", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 200", resp.StatusCode, responseBody)
+	}
+
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Status != model.TaskStatusFailed || foundTask.ErrorMessage != "执行环境未建立，暂时无法生成或结算图片" || foundTask.Result == nil {
+		t.Fatalf("task = %#v", foundTask)
+	}
+	var result serveragent.ExecutionResult
+	if err := json.Unmarshal([]byte(*foundTask.Result), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.RootErrorCode != "execution_identity_unavailable" || result.FailureStage != "image_generation" || result.ResumeFrom != "image_generation" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

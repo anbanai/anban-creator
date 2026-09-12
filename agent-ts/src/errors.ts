@@ -6,15 +6,9 @@ export class CompletionReportError extends Error {
   }
 }
 
-export class ExecutionIdentityError extends Error {
-  readonly code = "execution_identity_unavailable";
-  readonly resumeFrom = "image_generation";
-  constructor(message = "执行环境未建立，暂时无法生成或结算图片") {
-    super(message);
-    this.name = "ExecutionIdentityError";
-  }
-}
-
 export function exitCodeForError(error: unknown): number {
-  return error instanceof CompletionReportError ? 2 : 1;
+  if (!(error instanceof CompletionReportError)) return 1;
+  const root = error.rootError as { success?: unknown; root_error_code?: unknown } | undefined;
+  if (root?.success === false && root.root_error_code === "execution_identity_unavailable") return 3;
+  return 2;
 }

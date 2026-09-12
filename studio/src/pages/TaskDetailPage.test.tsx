@@ -1754,6 +1754,30 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
   })
 
+  it('shows a localized recoverable execution identity failure and preserves operator diagnostics', async () => {
+    mockTask(taskWith({
+      status: 'failed',
+      error_message: '执行环境未建立，暂时无法生成或结算图片',
+      result: JSON.stringify({
+        success: false,
+        root_error_code: 'execution_identity_unavailable',
+        failure_stage: 'image_generation',
+        resume_from: 'image_generation',
+      }),
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('执行环境未建立')).toBeInTheDocument()
+    expect(screen.getByText('执行环境未建立，暂时无法生成或结算图片。')).toBeInTheDocument()
+    expect(screen.getByText('修复执行环境后可从“图片生成”阶段继续。')).toBeInTheDocument()
+
+    await openTaskDetails('概览')
+    expect(screen.getByRole('region', { name: '故障诊断' })).toBeInTheDocument()
+    expect(screen.getByText('execution_identity_unavailable')).toBeInTheDocument()
+    expect(screen.getByText('执行环境未建立，暂时无法生成或结算图片')).toBeInTheDocument()
+  })
+
   it('does not invent an interruption reason or preserved workspace when failure details are absent', async () => {
     mockTask(taskWith({
       status: 'failed',

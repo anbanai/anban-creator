@@ -14,6 +14,16 @@ import (
 	"github.com/anbanai/anban-creator/server/resolver"
 )
 
+func TestExecutionResultPreservesRecoverableFailureIdentity(t *testing.T) {
+	var result ExecutionResult
+	if err := json.Unmarshal([]byte(`{"success":false,"error":"执行环境未建立","root_error_code":"execution_identity_unavailable","failure_stage":"image_generation","resume_from":"image_generation"}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.RootErrorCode != "execution_identity_unavailable" || result.FailureStage != "image_generation" || result.ResumeFrom != "image_generation" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
 	optsType := reflect.TypeOf(ExecutionOptions{})
 	if _, ok := optsType.FieldByName("Model"); ok {

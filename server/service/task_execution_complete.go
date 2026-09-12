@@ -601,7 +601,7 @@ func (s *TaskService) TerminalizeCurrentExecution(ctx context.Context, execution
 		return err
 	}
 	if !isTerminalExecution(execution.Status) {
-		result := &agent.ExecutionResult{Success: false, Error: reason, RemoteArtifacts: true}
+		result := &agent.ExecutionResult{Success: false, Error: reason, RootErrorCode: reason, RemoteArtifacts: true}
 		encoded, _ := json.Marshal(result)
 		won, transitionErr := s.repo.TaskExecutions().Transition(ctx, execution.ID,
 			[]string{model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting, model.TaskExecutionRunning}, status,

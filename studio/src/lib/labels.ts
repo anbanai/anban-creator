@@ -1,3 +1,5 @@
+import type { Task } from '@/types'
+
 // --- Label Maps ---
 
 export const tierLabels: Record<string, string> = {
@@ -90,11 +92,20 @@ export const taskErrorLabels: Record<string, { title: string; message: string; r
   execution_identity_mismatch: { title: '执行身份不匹配', message: '当前执行身份与任务不匹配，请重新启动任务。' },
 }
 
-export function taskFailurePresentation(task: Pick<Task, 'error_message'>): { code?: string; title: string; message: string; recovery?: string; raw?: string } | null {
+export function taskFailurePresentation(task: Pick<Task, 'error_message' | 'result'>): { code?: string; title: string; message: string; recovery?: string; raw?: string } | null {
   const raw = task.error_message?.trim()
   if (!raw) return null
-  let code: string | undefined
-  try { code = (JSON.parse(raw) as { code?: string; error_code?: string }).error_code || (JSON.parse(raw) as { code?: string }).code } catch { /* plain server message */ }
+  let code: string | undefined = taskErrorLabels[raw] ? raw : undefined
+  try {
+    const parsed = JSON.parse(raw) as { code?: string; error_code?: string }
+    code = parsed.error_code || parsed.code
+  } catch { /* plain server message */ }
+  if (!code && task.result) {
+    try {
+      const result = JSON.parse(task.result) as { root_error_code?: string; error_code?: string }
+      code = result.root_error_code || result.error_code
+    } catch { /* malformed legacy result */ }
+  }
   const mapped = code ? taskErrorLabels[code] : undefined
   return mapped ? { code, ...mapped, raw } : { message: raw, title: '执行失败', raw }
 }

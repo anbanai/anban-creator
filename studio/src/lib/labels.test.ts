@@ -50,7 +50,24 @@ describe('taskFailurePresentation', () => {
     })
   })
 
+  it('uses the structured terminal result when error_message is user-facing text', () => {
+    expect(taskFailurePresentation({
+      error_message: '执行环境未建立，暂时无法生成或结算图片',
+      result: JSON.stringify({
+        success: false,
+        root_error_code: 'execution_identity_unavailable',
+        failure_stage: 'image_generation',
+        resume_from: 'image_generation',
+      }),
+    })).toMatchObject({
+      code: 'execution_identity_unavailable',
+      title: '执行环境未建立',
+      message: '执行环境未建立，暂时无法生成或结算图片。',
+      raw: '执行环境未建立，暂时无法生成或结算图片',
+    })
+  })
+
   it('maps completion report failures to a recoverable result message', () => {
-    expect(taskFailurePresentation({ error_message: '{"code":"completion_report_failed"}' })?.title).toBe('结果提交失败（可恢复）')
+    expect(taskFailurePresentation({ error_message: 'completion_report_failed' })?.title).toBe('结果提交失败（可恢复）')
   })
 })

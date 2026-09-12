@@ -13,7 +13,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const runtimeCompletionReportFailedExitCode int32 = 2
+const (
+	runtimeCompletionReportFailedExitCode       int32 = 2
+	runtimeExecutionIdentityUnavailableExitCode int32 = 3
+)
 
 type RuntimeReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
@@ -189,12 +192,17 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 }
 
 func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32) error {
-	diagnostics, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"reason":         reason,
 		"runtime_reason": sanitizeRuntimeDiagnostic(runtimeReason),
 		"message":        sanitizeRuntimeDiagnostic(message),
 		"exit_code":      exitCodeValue(exitCode),
-	})
+	}
+	if exitCode != nil && *exitCode == runtimeExecutionIdentityUnavailableExitCode {
+		payload["completion_report_failed"] = true
+		payload["root_error_code"] = "execution_identity_unavailable"
+	}
+	diagnostics, _ := json.Marshal(payload)
 	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics); err != nil {
 		return err
 	}
@@ -263,6 +271,8 @@ func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 		return "oom_killed", model.TaskExecutionFailed
 	case state.ExitCode != nil && *state.ExitCode == runtimeCompletionReportFailedExitCode:
 		return "completion_report_failed", model.TaskExecutionFailed
+	case state.ExitCode != nil && *state.ExitCode == runtimeExecutionIdentityUnavailableExitCode:
+		return "execution_identity_unavailable", model.TaskExecutionFailed
 	default:
 		return "runtime_failed", model.TaskExecutionFailed
 	}

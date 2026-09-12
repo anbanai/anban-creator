@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
@@ -117,7 +117,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "b243b5814405f556856f8e433d1570d9231eb670e2112cf79dd4b977175b31b1"
+      "digest": "3ad27f3b01fa93b7ccc74d2d20bc4c99b6387f0d35a5e5834d6488e06d072ac1"
     },
     {
       "id": "ecommerce",
@@ -246,7 +246,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "4c2d9545eca7b84920e84fce2ff594cde440dbd7d959a663539f4b363764edc1"
+      "digest": "e07c75c323ef704e08eaf2078ae06cff0bbc334dc7877da1fcaab27155df5dee"
     },
     {
       "id": "live-slicer",
@@ -347,7 +347,7 @@
         }
       ],
       "ui": {},
-      "digest": "1e49fa787c42abb985a997550c6da141fd2a1c141c9db8987d537341d2367e1f"
+      "digest": "893556dbf951ce685ed6bb992d08f43bad981c2a25431bce74f3e841c1e3158d"
     },
     {
       "id": "moments",
@@ -498,7 +498,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "1e9f7eb0b34b86b723234d4f2ffa436024fa2e8d380394baea0bc1b49f74996c"
+      "digest": "9194f30c272448b421a6521967cd0937b7a55113c02cababdb9d422f31340ead"
     },
     {
       "id": "montage",
@@ -758,7 +758,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "0722dea597b55b661ed96149672a1d124afd66131bbf0f77d3e53b932f42765d"
+      "digest": "fd069fc5b585c530ee5f89b9f637dd63c104fc51e748ade97adf97e503d4bedd"
     }
   ]
 }

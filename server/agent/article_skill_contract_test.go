@@ -72,6 +72,30 @@ func TestArticleSkillContracts_ImageControlsSizesAndTextPolicy(t *testing.T) {
 	}
 }
 
+func TestArticleIdentityFailuresAreNonRetryableAndRecoverable(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "harness", "agents", "article.md"),
+		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"execution_identity_required", "execution_identity_mismatch", "不可重试",
+				"execution_identity_unavailable", "\"resume_from\":\"image_generation\"",
+				"保留", "不得包含令牌、密钥或完整环境变量",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing execution identity recovery contract %q", path, term)
+				}
+			}
+		})
+	}
+}
+
 func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{

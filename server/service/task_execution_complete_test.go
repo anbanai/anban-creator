@@ -1031,6 +1031,32 @@ func TestReconcileExecutionFailureAlwaysTerminalizesCurrentExecution(t *testing.
 	})
 }
 
+func TestReconcileExecutionFailurePersistsMachineReadableRootCause(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "execution_identity_unavailable", []byte(`{"completion_report_failed":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	foundExecution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result agent.ExecutionResult
+	if err := json.Unmarshal(foundExecution.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.RootErrorCode != "execution_identity_unavailable" {
+		t.Fatalf("result = %#v", result)
+	}
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.ErrorMessage != "execution_identity_unavailable" {
+		t.Fatalf("error_message = %q", foundTask.ErrorMessage)
+	}
+}
+
 func TestReconcilePreStartFailureKeepsOriginalExecution(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
 	dispatcher := &dispatchTestDispatcher{}

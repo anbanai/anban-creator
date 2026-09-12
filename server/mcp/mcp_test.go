@@ -151,6 +151,36 @@ func TestRequireMCPExecutionIdentity(t *testing.T) {
 	}
 }
 
+func TestMCPHandlerStaticKeyCannotReachFixedSKUServices(t *testing.T) {
+	old := svcs
+	svcs = nil
+	t.Cleanup(func() { svcs = old })
+
+	const token = "static-test-key"
+	handler := NewMCPHandler(nil, token, nil)
+	sessionID := initializeMCPExecutionSession(t, handler, token)
+	tests := []struct {
+		name, arguments string
+	}{
+		{name: "generate_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"cover","output_path":"output/cover.png","aspect_ratio":"16:9"}`},
+		{name: "upload_image", arguments: `{"project_id":"project-1","task_id":"task-1","file_path":"output/cover.png"}`},
+		{name: "analyze_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"review","file_path":"output/cover.png"}`},
+		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","execution_id":"execution-1","metadata":"{}"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := callMCPToolForScopeTest(handler, token, sessionID, tt.name, tt.arguments)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if body := rec.Body.String(); !strings.Contains(body, "execution_identity_required") {
+				t.Fatalf("body = %s", body)
+			}
+		})
+	}
+}
+
 func toolResultText(result *mcp.CallToolResult) string {
 	if result == nil || len(result.Content) == 0 {
 		return ""

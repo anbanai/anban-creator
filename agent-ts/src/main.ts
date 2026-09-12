@@ -1,10 +1,11 @@
 import { pathToFileURL } from "node:url";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile } from "node:fs/promises";
 
 import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
 import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
-import { CompletionReportError, ExecutionIdentityError, exitCodeForError } from "./errors.js";
+import { CompletionReportError, exitCodeForError } from "./errors.js";
 import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
@@ -90,13 +91,11 @@ export async function runJob(
     let data: ResolvedBootstrapResponse | undefined;
     try {
       data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
-      assertManagedIdentity(data, config);
       await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
       await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
     } catch (error) {
       const identity: BootstrapIdentity | undefined = data ?? (error instanceof BootstrapResponseError ? error.identity : undefined);
       if (identity) {
-        if (error instanceof ExecutionIdentityError) await writeFailureState(config.workspace, error);
         const reporter = dependencies.createReporter(config, identity);
         const completionAbort = abortAfter(finalizationTimeouts().completion);
         try {
@@ -117,6 +116,7 @@ export async function runJob(
     } catch (error) {
       result = failure(config.workspace, error);
     }
+    result = await applyFailureState(config.workspace, result);
     if (shutdown.signal.aborted && !result.success && !result.error) result.error = "agent shutdown: received termination signal";
 
     const timeouts = finalizationTimeouts();
@@ -173,15 +173,36 @@ function failure(workspace: string, error: unknown): ExecutionResult {
   };
 }
 
-export function assertManagedIdentity(data: Pick<BootstrapResponse, "execution_id" | "task_id" | "project_id">, config: Pick<JobConfig, "executionID">): void {
-  if (!data.execution_id?.trim() || data.execution_id !== config.executionID || !data.task_id?.trim() || !data.project_id?.trim()) {
-    throw new ExecutionIdentityError();
+async function applyFailureState(workspace: string, result: ExecutionResult): Promise<ExecutionResult> {
+  const path = `${workspace}/output/failure-state.json`;
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await file.stat();
+    if (!info.isFile() || info.size > 64 * 1024) return result;
+    const value = JSON.parse(await file.readFile("utf8")) as Record<string, unknown>;
+    const code = typeof value.error_code === "string" && /^[a-z0-9_]{1,64}$/.test(value.error_code) ? value.error_code : undefined;
+    const stage = typeof value.stage === "string" && /^[a-z0-9_]{1,64}$/.test(value.stage) ? value.stage : undefined;
+    const resumeFrom = typeof value.resume_from === "string" && /^[a-z0-9_]{1,64}$/.test(value.resume_from) ? value.resume_from : undefined;
+    if (value.version !== "1.0" || value.status !== "recoverable_failure" || !code || !stage || !resumeFrom) return result;
+    const message = typeof value.message === "string" && value.message.trim()
+      ? value.message.trim().replace(/\s+/g, " ").slice(0, 1024)
+      : undefined;
+    if (!message) return result;
+    return {
+      ...result,
+      success: false,
+      error: message,
+      terminal_reason: "platform_error",
+      root_error_code: code,
+      failure_stage: stage,
+      resume_from: resumeFrom,
+    };
+  } catch {
+    return result;
+  } finally {
+    await file?.close().catch(() => {});
   }
-}
-
-async function writeFailureState(workspace: string, error: ExecutionIdentityError): Promise<void> {
-  await mkdir(`${workspace}/output`, { recursive: true });
-  await writeFile(`${workspace}/output/failure-state.json`, JSON.stringify({ version: "1.0", status: "recoverable_failure", stage: error.resumeFrom, error_code: error.code, message: error.message, resume_from: error.resumeFrom }) + "\n");
 }
 
 function startHeartbeat(reporter: HeartbeatReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void {

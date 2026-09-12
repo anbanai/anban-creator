@@ -35,7 +35,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatFullDateTimeCN, statusBadgeVariant, taskStatusLabel } from '@/lib/labels'
+import { formatFullDateTimeCN, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
 
@@ -200,6 +200,7 @@ function TaskOverviewDetails({
     ['完成时间', formatFullDateTimeCN(task.completed_at)],
     ['来源', task.plan_id ? '计划任务' : '手动创建'],
   ]
+  const failure = taskFailurePresentation(task)
 
   return (
     <div className="flex flex-col gap-4">
@@ -216,6 +217,14 @@ function TaskOverviewDetails({
         ]} />
       </TaskDetailsSection>
       <TaskBillingDetails task={task} />
+      {failure && (
+        <TaskDetailsSection label="故障诊断" title="故障诊断" icon={AlertTriangle}>
+          <DetailRows rows={[
+            ['错误代码', failure.code || '未分类'],
+            ['原始信息', failure.raw || failure.message],
+          ]} />
+        </TaskDetailsSection>
+      )}
     </div>
   )
 }

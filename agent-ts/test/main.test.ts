@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -38,6 +38,18 @@ describe("exitCodeForError", () => {
   test("reserves exit code two for an unacknowledged completion", () => {
     expect(exitCodeForError(new CompletionReportError(new Error("server unavailable")))).toBe(2);
     expect(exitCodeForError(new Error("bootstrap failed"))).toBe(1);
+  });
+
+  test("reserves exit code three when completion delivery hides an execution identity failure", () => {
+    const root: ExecutionResult = {
+      success: false,
+      error: "执行环境未建立，暂时无法生成或结算图片",
+      terminal_reason: "platform_error",
+      root_error_code: "execution_identity_unavailable",
+      work_dir: "/workspace",
+    };
+
+    expect(exitCodeForError(new CompletionReportError(new Error("server unavailable"), root))).toBe(3);
   });
 });
 
@@ -286,6 +298,133 @@ describe("runJob finalization", () => {
       ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("promotes a valid failure state into the terminal result", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-failure-state-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+        version: "1.0",
+        status: "recoverable_failure",
+        stage: "image_generation",
+        error_code: "execution_identity_unavailable",
+        message: "执行环境未建立，暂时无法生成或结算图片",
+        resume_from: "image_generation",
+      }));
+      harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+
+      expect(result).toMatchObject({
+        success: false,
+        error: "执行环境未建立，暂时无法生成或结算图片",
+        root_error_code: "execution_identity_unavailable",
+        failure_stage: "image_generation",
+        resume_from: "image_generation",
+      });
+      expect(harness.completed).toEqual(result);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("uses exit code three when identity failure completion cannot be delivered", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-failure-state-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+        version: "1.0",
+        status: "recoverable_failure",
+        stage: "image_generation",
+        error_code: "execution_identity_unavailable",
+        message: "执行环境未建立，暂时无法生成或结算图片",
+        resume_from: "image_generation",
+      }));
+      harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+      harness.complete = async () => { throw new Error("server unavailable"); };
+
+      try {
+        await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+        throw new Error("runJob unexpectedly succeeded");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CompletionReportError);
+        expect(exitCodeForError(error)).toBe(3);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores untrusted failure state files", async () => {
+    const cases = [
+      {
+        name: "invalid error code",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+          version: "1.0", status: "recoverable_failure", error_code: "EXECUTION IDENTITY", message: "untrusted",
+        })),
+      },
+      {
+        name: "unsupported schema version",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+          version: "2.0", status: "recoverable_failure", stage: "image_generation",
+          error_code: "execution_identity_unavailable", message: "untrusted", resume_from: "image_generation",
+        })),
+      },
+      {
+        name: "non-recoverable status",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+          version: "1.0", status: "success", stage: "image_generation",
+          error_code: "execution_identity_unavailable", message: "untrusted", resume_from: "image_generation",
+        })),
+      },
+      {
+        name: "invalid recovery stage",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+          version: "1.0", status: "recoverable_failure", stage: "../../secret",
+          error_code: "execution_identity_unavailable", message: "untrusted", resume_from: "../../secret",
+        })),
+      },
+      {
+        name: "missing safe message",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), JSON.stringify({
+          version: "1.0", status: "recoverable_failure", stage: "image_generation",
+          error_code: "execution_identity_unavailable", message: "", resume_from: "image_generation",
+        })),
+      },
+      {
+        name: "oversized file",
+        prepare: (workspace: string) => writeFile(join(workspace, "output", "failure-state.json"), "x".repeat(64 * 1024 + 1)),
+      },
+      {
+        name: "symbolic link",
+        prepare: async (workspace: string) => {
+          const target = join(workspace, "outside-failure-state.json");
+          await writeFile(target, JSON.stringify({
+            version: "1.0", status: "recoverable_failure", error_code: "execution_identity_unavailable", message: "untrusted",
+          }));
+          await symlink(target, join(workspace, "output", "failure-state.json"));
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const workspace = await mkdtemp(join(tmpdir(), "anban-managed-failure-state-"));
+      const harness = runJobHarness();
+      try {
+        await mkdir(join(workspace, "output"));
+        await testCase.prepare(workspace);
+        harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+
+        const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+
+        expect(result, testCase.name).toEqual({ success: true, work_dir: workspace });
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
     }
   });
 

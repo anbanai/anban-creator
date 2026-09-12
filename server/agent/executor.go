@@ -296,6 +296,9 @@ type CostDiagnostic struct {
 type ExecutionResult struct {
 	Success         bool   `json:"success"`
 	Error           string `json:"error,omitempty"`
+	RootErrorCode   string `json:"root_error_code,omitempty"`
+	FailureStage    string `json:"failure_stage,omitempty"`
+	ResumeFrom      string `json:"resume_from,omitempty"`
 	ResultSubtype   string `json:"result_subtype,omitempty"`
 	TerminalReason  string `json:"terminal_reason,omitempty"`
 	WorkDir         string `json:"work_dir,omitempty"`

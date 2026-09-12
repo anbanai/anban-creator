@@ -176,6 +176,7 @@ func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, 
 
 func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 	exit2 := int32(2)
+	exit3 := int32(3)
 	exit137 := int32(137)
 	tests := []struct {
 		name, phase, reason, wantReason, wantStatus string
@@ -186,6 +187,7 @@ func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 		{"oom reason", RuntimePhaseFailed, "OOMKilled", "oom_killed", model.TaskExecutionFailed, nil},
 		{"oom exit code", RuntimePhaseFailed, "Failed", "oom_killed", model.TaskExecutionFailed, &exit137},
 		{"completion report", RuntimePhaseFailed, "Failed", "completion_report_failed", model.TaskExecutionFailed, &exit2},
+		{"identity failure hidden by completion report", RuntimePhaseFailed, "Failed", "execution_identity_unavailable", model.TaskExecutionFailed, &exit3},
 		{"scheduling", RuntimePhaseFailed, "FailedScheduling", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"mount", RuntimePhaseFailed, "FailedMount", "runtime_failed", model.TaskExecutionFailed, nil},
 		{"attach volume", RuntimePhaseFailed, "FailedAttachVolume", "runtime_failed", model.TaskExecutionFailed, nil},
@@ -208,6 +210,39 @@ func TestRuntimeTerminalReasonPrecedence(t *testing.T) {
 				t.Fatalf("reason/status = %q/%q, want %q/%q", gotReason, gotStatus, tc.wantReason, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestRuntimeReconcilerPreservesIdentityRootCauseWhenCompletionReportFails(t *testing.T) {
+	exit3 := int32(3)
+	execution := &model.TaskExecution{
+		ID: "identity-completion-failed", Status: model.TaskExecutionRunning,
+		RuntimeScope: "test", RuntimeWorkload: "runtime-identity-completion-failed",
+	}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{
+			execution.ID: {Phase: RuntimePhaseFailed, Reason: "Failed", ExitCode: &exit3},
+		},
+		errs: map[string]error{},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.failures) != 1 || service.failures[0].reason != "execution_identity_unavailable" {
+		t.Fatalf("failures = %#v", service.failures)
+	}
+	var diagnostics map[string]any
+	if err := json.Unmarshal(service.diagnostics[execution.ID], &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostics["completion_report_failed"] != true || diagnostics["root_error_code"] != "execution_identity_unavailable" {
+		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 }
 

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -194,6 +195,56 @@ func TestImageOperationHandlersRejectMissingRequestParametersWithoutPanicking(t 
 			})
 		}
 	}
+}
+
+func TestFixedSKUHandlersRejectMissingOrMismatchedExecutionIdentityBeforeServices(t *testing.T) {
+	old := svcs
+	svcs = nil
+	t.Cleanup(func() { svcs = old })
+
+	tests := []struct {
+		name    string
+		args    map[string]any
+		handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
+	}{
+		{name: "generate_image", args: map[string]any{"project_id": "project-1", "task_id": "task-1", "prompt": "cover", "output_path": "output/cover.png", "aspect_ratio": "16:9"}, handler: generateImageHandler},
+		{name: "upload_image", args: map[string]any{"project_id": "project-1", "task_id": "task-1", "file_path": "output/cover.png"}, handler: uploadImageHandler},
+		{name: "analyze_image", args: map[string]any{"project_id": "project-1", "task_id": "task-1", "prompt": "review", "file_path": "output/cover.png"}, handler: analyzeImageHandler},
+		{name: "submit_completion_metadata", args: map[string]any{"task_id": "task-1", "execution_id": "execution-1", "metadata": `{}`}, handler: contentMetadataSubmitHandler},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"/missing", func(t *testing.T) {
+			request := callToolRequest(t, tt.args)
+			result, err := tt.handler(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text := toolResultText(result); !strings.Contains(text, "execution_identity_required") {
+				t.Fatalf("result = %q", text)
+			}
+		})
+		t.Run(tt.name+"/mismatch", func(t *testing.T) {
+			request := callToolRequest(t, tt.args)
+			ctx := withMCPExecutionIdentity(context.Background(), "user-1", "project-other", "task-other", "execution-other")
+			result, err := tt.handler(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text := toolResultText(result); !strings.Contains(text, "execution_identity_mismatch") {
+				t.Fatalf("result = %q", text)
+			}
+		})
+	}
+}
+
+func callToolRequest(t *testing.T, args map[string]any) *mcp.CallToolRequest {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: raw}}
 }
 
 func TestCategorizeImageGenFailureDetectsFilesystemErrors(t *testing.T) {
