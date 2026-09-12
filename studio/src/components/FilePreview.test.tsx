@@ -234,7 +234,9 @@ describe('FilePreviewGallery', () => {
 
     const downloadButton = screen.getByRole('button', { name: '下载 review.json' })
     expect(downloadButton).toBeDisabled()
-    expect(downloadButton).toHaveAttribute('title', '过程文件仅支持预览')
+    expect(downloadButton).toHaveAttribute('title', '仅支持预览')
+    expect(screen.getByLabelText('仅支持预览')).toBeInTheDocument()
+    expect(screen.queryByText(/过程文件/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '预览 review.json' }))
 

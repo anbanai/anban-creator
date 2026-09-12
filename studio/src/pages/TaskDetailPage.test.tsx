@@ -1153,7 +1153,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: /下载交付文件/ })).toBeEnabled()
   })
 
-  it('groups published process files below deliverables and keeps ZIP scoped to deliverables', async () => {
+  it('shows additional files below deliverables and keeps ZIP scoped to deliverables', async () => {
     mockTask(taskWith({
       status: 'completed',
       result: null,
@@ -1192,9 +1192,10 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const deliverables = await screen.findByRole('heading', { name: '交付文件 (1)' })
-    const processHeading = await screen.findByRole('heading', { name: '过程文件 (1)' })
-    expect(deliverables.compareDocumentPosition(processHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const previewOnly = await screen.findByLabelText('仅支持预览')
+    expect(deliverables.compareDocumentPosition(previewOnly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '下载 review.json' })).toBeDisabled()
+    expect(screen.queryByText(/过程文件/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /下载交付文件/ }))
     await waitFor(() => expect(api.tasks.downloadZipBlob).toHaveBeenCalledWith('task-1'))

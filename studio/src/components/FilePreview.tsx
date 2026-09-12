@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw } from 'lucide-react'
+import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
@@ -72,6 +72,15 @@ function filePreviewIcon(file: TaskFile) {
   if (file.mime_type === 'text/html' || isMarkdownFile(file.file_name) || /\.(json|ya?ml)$/i.test(file.file_name)) return FileCode
   if (file.mime_type?.startsWith('text/')) return FileText
   return File
+}
+
+function fileDeliveryStatus(file: TaskFile) {
+  const isDeliverable = file.is_deliverable === true
+  return {
+    label: isDeliverable ? '可下载' : '仅支持预览',
+    Icon: isDeliverable ? CheckCircle2 : Eye,
+    className: isDeliverable ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground',
+  }
 }
 
 const montageRoleLabel: Record<string, string> = {
@@ -399,7 +408,7 @@ function FilePreviewModalContent({
             复制 HTML
           </Button>
         )}
-        <Button variant="secondary" size="sm" disabled={downloading || !canDownload} title={!canDownload ? '过程文件仅支持预览' : undefined} onClick={handleDownload}>
+        <Button variant="secondary" size="sm" disabled={downloading || !canDownload} title={!canDownload ? '仅支持预览' : undefined} onClick={handleDownload}>
           {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           {downloading ? '下载中' : '下载'}
         </Button>
@@ -542,6 +551,7 @@ function FilePreviewInline({
   const isHTML = file.mime_type === 'text/html'
   const isText = isTextPreviewFile(file)
   const canDownload = file.is_deliverable === true
+  const { label: deliveryStatusLabel, Icon: DeliveryStatusIcon, className: deliveryStatusClassName } = fileDeliveryStatus(file)
   const previewUrl = file.preview_url || file.url || ''
   const [downloading, setDownloading] = useState(false)
 
@@ -611,21 +621,31 @@ function FilePreviewInline({
 
   if (isImage) {
     return (
-      <div className={`space-y-1 ${file.is_deliverable === true ? '' : 'opacity-55'}`}>
-        {imgSrc ? (
-          <img
-            src={imgSrc}
-            alt={file.file_name}
-            className="h-48 w-auto cursor-pointer rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
-            onClick={onClick}
-          />
-        ) : (
-          <div className="flex h-48 w-36 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-            加载中...
-          </div>
-        )}
+      <div className={`space-y-1 ${file.is_deliverable === true ? '' : 'opacity-55 grayscale'}`}>
+        <div className="relative w-fit">
+          {imgSrc ? (
+            <img
+              src={imgSrc}
+              alt={file.file_name}
+              className="h-48 w-auto cursor-pointer rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
+              onClick={onClick}
+            />
+          ) : (
+            <div className="flex h-48 w-36 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
+              加载中...
+            </div>
+          )}
+          <span
+            role="img"
+            aria-label={deliveryStatusLabel}
+            title={deliveryStatusLabel}
+            className={`pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-background/90 p-1 shadow-sm ${deliveryStatusClassName}`}
+          >
+            <DeliveryStatusIcon aria-hidden="true" className="h-3.5 w-3.5" />
+          </span>
+        </div>
         <p className="truncate text-xs text-muted-foreground" title={file.file_name}>
-          {file.is_deliverable === true ? '交付文件 · ' : '过程文件 · '}{file.file_name}
+          {file.file_name}
         </p>
       </div>
     )
@@ -642,12 +662,20 @@ function FilePreviewInline({
           <Icon className="h-5 w-5 shrink-0" />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>
-              {file.is_deliverable === true ? '交付文件 · ' : '过程文件 · '}{roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}
+              {roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}
             </p>
             <p className="text-xs text-muted-foreground">{file.mime_type} &middot; {formatSize(file.file_size)}</p>
           </div>
         </div>
         <div className="ml-3 flex shrink-0 items-center gap-2">
+          <span
+            role="img"
+            aria-label={deliveryStatusLabel}
+            title={deliveryStatusLabel}
+            className={deliveryStatusClassName}
+          >
+            <DeliveryStatusIcon aria-hidden="true" className="h-4 w-4" />
+          </span>
           {canPreview && (
           <button
             onClick={onClick}
@@ -661,7 +689,7 @@ function FilePreviewInline({
           <button
             onClick={handleDownload}
             disabled={downloading || !canDownload}
-            title={!canDownload ? '过程文件仅支持预览' : undefined}
+            title={!canDownload ? '仅支持预览' : undefined}
             className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
             aria-label={`下载 ${file.file_name}`}
           >

@@ -836,15 +836,12 @@ export default function TaskDetailPage() {
         </section>
       )}
 
-      {/* Deliverables and preview-only process files. */}
+      {/* Deliverables and preview-only files. */}
       {publishedFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold text-foreground">交付文件 ({deliverableFiles.length})</h2>
-              {processFiles.length > 0 && (
-                <p className="mt-0.5 text-xs text-muted-foreground">过程文件 {processFiles.length} 个，仅供预览</p>
-              )}
             </div>
             <Button
               size="sm"
@@ -907,18 +904,12 @@ export default function TaskDetailPage() {
               </>
             )}
             {processFiles.length > 0 && (
-              <section className="border-t border-border pt-4 opacity-70" aria-labelledby="process-files-heading">
-                <div className="mb-2">
-                  <h3 id="process-files-heading" className="text-xs font-medium text-muted-foreground">过程文件 ({processFiles.length})</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">保留用于预览和审计，不支持下载。</p>
-                </div>
-                <div className="space-y-2">
-                  <FilePreviewGallery
-                    files={processFiles}
-                    taskId={task.id}
-                    taskType={task.type}
-                  />
-                </div>
+              <section className="border-t border-border pt-4 opacity-70" aria-label="仅支持预览的文件">
+                <FilePreviewGallery
+                  files={processFiles}
+                  taskId={task.id}
+                  taskType={task.type}
+                />
               </section>
             )}
           </div>
