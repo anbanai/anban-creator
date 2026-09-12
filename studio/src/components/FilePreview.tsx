@@ -219,7 +219,7 @@ function FilePreviewModalContent({
     }
     void load()
     return () => { cancelled = true }
-  }, [file.id, file.url, file.preview_url, taskId, isImage, isVideo, isHTML, isText, loadAttempt])
+  }, [file.id, file.url, file.preview_url, taskId, isImage, isVideo, isHTML, isText, canDownload, loadAttempt])
 
   useEffect(() => {
     return () => {
@@ -623,7 +623,7 @@ function FilePreviewInline({
       }
       setImgSrc(url)
     }
-  }, [isImage, isVideo, file.url, file.preview_url, taskId, file.id])
+  }, [isImage, isVideo, file.url, file.preview_url, taskId, file.id, canDownload])
 
   if (isImage) {
     return (
