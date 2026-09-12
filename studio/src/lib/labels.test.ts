@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { contentTypeLabel, platformDefaultRatio, platformLabels, progressStageLabel, statusBadgeVariant, taskTypeLabelCN } from './labels'
+import { contentTypeLabel, platformDefaultRatio, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
 
 describe('statusBadgeVariant', () => {
   it('returns "outline" for running', () => {
@@ -38,5 +38,19 @@ describe('moments labels', () => {
   it('labels moments-specific progress stages', () => {
     expect(progressStageLabel.material_analysis).toBe('素材分析')
     expect(progressStageLabel.quality_review).toBe('质量复核')
+  })
+})
+
+describe('taskFailurePresentation', () => {
+  it('localizes execution identity failures and keeps the code', () => {
+    expect(taskFailurePresentation({ error_message: '{"error_code":"execution_identity_unavailable"}' })).toMatchObject({
+      code: 'execution_identity_unavailable',
+      title: '执行环境未建立',
+      recovery: '修复执行环境后可从“图片生成”阶段继续。',
+    })
+  })
+
+  it('maps completion report failures to a recoverable result message', () => {
+    expect(taskFailurePresentation({ error_message: '{"code":"completion_report_failed"}' })?.title).toBe('结果提交失败（可恢复）')
   })
 })
