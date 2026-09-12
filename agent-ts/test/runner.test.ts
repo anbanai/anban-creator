@@ -859,9 +859,9 @@ describe("buildExecutionEnvironment", () => {
         task_id: "task-1",
         execution_id: "execution-1",
         env: {
-          NEW_PROVIDER_TOKEN: "future-secret",
           ANBAN_API_KEY: "montage-override",
           ANBAN_API_URL: "https://montage.invalid",
+          ANBAN_EXECUTION_TOKEN: "secret-execution-jwt",
           ANBAN_DEFAULT_PROJECT: "montage-project",
           ANTHROPIC_AUTH_TOKEN: "montage-token",
           ANTHROPIC_BASE_URL: "https://montage.invalid/anthropic",
@@ -881,7 +881,6 @@ describe("buildExecutionEnvironment", () => {
       "execution-jwt",
     );
     expect(managed).toEqual(expect.objectContaining({
-      NEW_PROVIDER_TOKEN: "future-secret",
       ANBAN_DEFAULT_PROJECT: "project-1",
       ANBAN_TASK_ID: "task-1",
       ANBAN_EXECUTION_ID: "execution-1",
@@ -893,6 +892,7 @@ describe("buildExecutionEnvironment", () => {
     }));
     expect(managed).not.toHaveProperty("ANBAN_API_KEY");
     expect(managed).not.toHaveProperty("ANBAN_API_URL");
+    expect(managed).not.toHaveProperty("ANBAN_EXECUTION_TOKEN");
     const isolated = buildExecutionEnvironment(
       { ANTHROPIC_API_KEY: "inherited-api-key", CLAUDE_CODE_USE_BEDROCK: "true", CLAUDE_CODE_USE_VERTEX: "true" },
       { task_type: "article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },

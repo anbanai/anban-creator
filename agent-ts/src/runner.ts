@@ -291,8 +291,7 @@ export function createCompletionMetadataHook(
     const script = `${pluginRoot}/hooks/completion-metadata.sh`;
     return await new Promise<HookJSONOutput>((resolve) => {
       const environment = { ...process.env };
-      delete environment.ANBAN_API_KEY;
-      delete environment.ANBAN_API_URL;
+      sanitizeCredentialEnvironment(environment);
       environment.CLAUDE_PROJECT_DIR = workspace;
       environment.ANBAN_TASK_ID = data.task_id;
       environment.ANBAN_EXECUTION_ID = data.execution_id;
@@ -480,8 +479,7 @@ export function buildExecutionEnvironment(
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
-  delete environment.ANBAN_API_KEY;
-  delete environment.ANBAN_API_URL;
+  sanitizeCredentialEnvironment(environment);
   const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
@@ -492,6 +490,12 @@ export function buildExecutionEnvironment(
   };
   if (data.task_type === "montage") managed.ANBAN_MONTAGE_SUBMODULE_PATH = `${workspace}/openmontage`;
   return managed;
+}
+
+function sanitizeCredentialEnvironment(environment: NodeJS.ProcessEnv): void {
+  for (const key of Object.keys(environment)) {
+    if (/(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL)/i.test(key) || key === "ANBAN_API_URL") delete environment[key];
+  }
 }
 
 export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills" | "tools">, taskType: string): void {
