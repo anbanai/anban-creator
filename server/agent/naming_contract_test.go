@@ -13,16 +13,16 @@ import (
 func TestAnbanCreatorNamingContract(t *testing.T) {
 	root := repoRoot(t)
 
-	assertJSONField(t, filepath.Join(root, "plugins", ".claude-plugin", "plugin.json"), "name", "anban")
-	assertClaudePluginUserConfig(t, filepath.Join(root, "plugins", ".claude-plugin", "plugin.json"))
-	assertJSONField(t, filepath.Join(root, "plugins", ".codex-plugin", "plugin.json"), "name", "anban")
-	assertClaudeMarketplacePlugin(t, filepath.Join(root, "plugins", ".claude-plugin", "marketplace.json"))
+	assertJSONField(t, filepath.Join(root, "harness", ".claude-plugin", "plugin.json"), "name", "anban")
+	assertClaudePluginUserConfig(t, filepath.Join(root, "harness", ".claude-plugin", "plugin.json"))
+	assertJSONField(t, filepath.Join(root, "harness", ".codex-plugin", "plugin.json"), "name", "anban")
+	assertClaudeMarketplacePlugin(t, filepath.Join(root, "harness", ".claude-plugin", "marketplace.json"))
 
-	assertOnlyMCPServerKey(t, filepath.Join(root, "plugins", ".mcp.json"), "creator")
+	assertOnlyMCPServerKey(t, filepath.Join(root, "harness", ".mcp.json"), "creator")
 
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
-		filepath.Join(root, "plugins", "README.md"),
+		filepath.Join(root, "harness", "README.md"),
 		filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
 		filepath.Join(root, "deploy/docker/Dockerfile.server"),
 		filepath.Join(root, "studio", "src", "pages", "PluginsPage.tsx"),
@@ -30,8 +30,8 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		filepath.Join(root, "studio", "public", "codex", "index.html"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "claude-code.vue"),
 		filepath.Join(root, "miniapp", "src", "pages", "connect", "codex.vue"),
-		filepath.Join(root, "plugins", "README.md"),
-		filepath.Join(root, "plugins", "install", "install-subagents.sh"),
+		filepath.Join(root, "harness", "README.md"),
+		filepath.Join(root, "harness", "install", "install-subagents.sh"),
 	} {
 		assertFileNotContains(t, path, "anbancreator"+"@anbanai")
 		assertFileNotContains(t, path, "creator"+"@anbanai")
@@ -44,19 +44,19 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
-	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "claude plugin install --scope user anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "/anban:anban-setup")
-	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "/anban:article")
-	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "--agent anban:article")
-	assertFileNotExists(t, filepath.Join(root, "plugins", "agents", "wechat"+"article.md"))
-	assertFileNotExists(t, filepath.Join(root, "plugins", "agents", "wechat"+"article.toml"))
-	assertFileNotContains(t, filepath.Join(root, "plugins", "README.md"), "--dangerously-skip-permissions")
-	assertFileContains(t, filepath.Join(root, "plugins", "README.md"), "插件内的 MCP server key 固定为 `creator`")
-	assertFileNotExists(t, filepath.Join(root, "plugins", "CLAUDE.md"))
-	assertFileContains(t, filepath.Join(root, "plugins", "docs", "plugin-development.md"), "Plugin developer notes")
-	assertJSONMCPServerURL(t, filepath.Join(root, "plugins", ".mcp.json"), "creator", "https://creator.anbanai.com/mcp")
-	assertFileNotContains(t, filepath.Join(root, "plugins", ".mcp.json"), "user_config.api_url")
-	assertFileContains(t, filepath.Join(root, "plugins", ".mcp.json"), "Bearer ${user_config.api_key}")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "claude plugin install --scope user anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:anban-setup")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:article")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "--agent anban:article")
+	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "wechat"+"article.md"))
+	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "wechat"+"article.toml"))
+	assertFileNotContains(t, filepath.Join(root, "harness", "README.md"), "--dangerously-skip-permissions")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "插件内的 MCP server key 固定为 `creator`")
+	assertFileNotExists(t, filepath.Join(root, "harness", "CLAUDE.md"))
+	assertFileContains(t, filepath.Join(root, "harness", "docs", "plugin-development.md"), "Plugin developer notes")
+	assertJSONMCPServerURL(t, filepath.Join(root, "harness", ".mcp.json"), "creator", "https://creator.anbanai.com/mcp")
+	assertFileNotContains(t, filepath.Join(root, "harness", ".mcp.json"), "user_config.api_url")
+	assertFileContains(t, filepath.Join(root, "harness", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
 }
@@ -72,26 +72,26 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 	}{
 		{
 			name: "claude plugin",
-			path: filepath.Join(root, "plugins", ".mcp.json"),
+			path: filepath.Join(root, "harness", ".mcp.json"),
 			assertURL: func(t *testing.T, path, want string) {
 				assertJSONMCPServerURL(t, path, "creator", want)
 			},
 		},
 		{
 			name: "codex registration",
-			path: filepath.Join(root, "plugins", "install", "agents-registration.toml"),
+			path: filepath.Join(root, "harness", "install", "agents-registration.toml"),
 			assertURL: func(t *testing.T, path, want string) {
 				assertTOMLMCPServerURL(t, path, "creator", want)
 			},
 		},
 	}
 
-	agentPaths, err := filepath.Glob(filepath.Join(root, "plugins", "agents", "*.toml"))
+	agentPaths, err := filepath.Glob(filepath.Join(root, "harness", "agents", "*.toml"))
 	if err != nil {
 		t.Fatalf("glob Codex agent configurations: %v", err)
 	}
 	if len(agentPaths) == 0 {
-		t.Fatal("no plugins/agents/*.toml files found")
+		t.Fatal("no harness/agents/*.toml files found")
 	}
 	for _, path := range agentPaths {
 		cases = append(cases, struct {
@@ -127,7 +127,7 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 }
 
 func TestAnbanSetupExamplesUseFixedHostedEndpoint(t *testing.T) {
-	path := filepath.Join(repoRoot(t), "plugins", "skills", "anban-setup", "references", "examples.md")
+	path := filepath.Join(repoRoot(t), "harness", "skills", "anban-setup", "references", "examples.md")
 	body := readTextFile(t, path)
 
 	for _, required := range []string{
@@ -171,7 +171,7 @@ func TestConfigurableSetupEndpointGuidanceScanner(t *testing.T) {
 func TestPluginAgentCredentialDiagnosticsStayHostSpecific(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"plugins/agents/ecommerce.md",
+		"harness/agents/ecommerce.md",
 	} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		for _, required := range []string{"`api_key`", "原始认证错误", "MCP"} {
@@ -185,7 +185,7 @@ func TestPluginAgentCredentialDiagnosticsStayHostSpecific(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"plugins/agents/ecommerce.toml",
+		"harness/agents/ecommerce.toml",
 	} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		for _, required := range []string{
@@ -271,7 +271,7 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 		t.Fatalf("%s author name = %q, want %q", path, plugin.Author.Name, "anbanai")
 	}
 	for _, got := range []string{plugin.Homepage, plugin.Repository} {
-		if !strings.Contains(got, "github.com/anbanai/creator-skills") {
+		if !strings.Contains(got, "github.com/anbanai/harness") {
 			t.Fatalf("%s plugin URL = %q, want canonical plugin repository", path, got)
 		}
 	}
@@ -394,11 +394,11 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 	}
 
 	addFile("CLAUDE.md")
-	addFile(filepath.Join("plugins", "README.md"))
-	addFile(filepath.Join("plugins", "docs", "plugin-development.md"))
-	addTree(filepath.Join("plugins", "agents"))
-	addTree(filepath.Join("plugins", "skills"))
-	addTree(filepath.Join("plugins", "skills"))
+	addFile(filepath.Join("harness", "README.md"))
+	addFile(filepath.Join("harness", "docs", "plugin-development.md"))
+	addTree(filepath.Join("harness", "agents"))
+	addTree(filepath.Join("harness", "skills"))
+	addTree(filepath.Join("harness", "skills"))
 	addTree(filepath.Join("studio", "src", "components", "connect"))
 	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
 	return out

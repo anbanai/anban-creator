@@ -8,7 +8,7 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **MCP Server** — exposes atomic writing, image, publishing, billing, and Seednote capabilities to connected agents.
 - **Agent Runtime** — executes Desktop-claimed tasks or dispatches `article`, `seednote`, and related managed work to one-shot containers.
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
-- **Plugin Assets** — Claude Code and Codex share one plugin source under `plugins/`, with native manifests and host adapters for each harness.
+- **Plugin Assets** — Claude Code and Codex share one plugin source under `harness/`, with native manifests and host adapters for each harness.
 
 Managed execution uses separate `creator-agent-article`, `creator-agent-seednote`,
 and `creator-agent-montage` images. They share the same plugin tree while keeping
@@ -244,7 +244,7 @@ app/          Shared Go packages for config, converter, writer, humanizer, image
 studio/       React Web Studio
 desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)
 miniapp/      WeChat Mini Program parity client
-plugins/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
+harness/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
 docs/         Design specs and implementation plans
 ```
 

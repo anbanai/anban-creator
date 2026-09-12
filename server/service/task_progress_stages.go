@@ -41,7 +41,7 @@ var legacyStagePercentByType = map[string]map[string]int{
 		"archive":           97,
 		"finalize":          100,
 	},
-	// Ecommerce stage slugs come from plugins/agents/ecommerce.md
+	// Ecommerce stage slugs come from harness/agents/ecommerce.md
 	// update_task_progress calls (project → analysis → copywriting →
 	// image_generation → compliance → archive). The bulk of work is image
 	// generation; archive is the last progress event before the task completes.

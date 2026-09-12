@@ -7,9 +7,9 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   exit 1
 }
 
-plugin_script=$repo_root/plugins/scripts/update-humanizer.sh
+plugin_script=$repo_root/harness/scripts/update-humanizer.sh
 if [ ! -x "$plugin_script" ]; then
-  git -C "$repo_root" submodule update --init --depth 1 -- plugins
+  git -C "$repo_root" submodule update --init --depth 1 -- harness
 fi
 
 exec "$plugin_script"

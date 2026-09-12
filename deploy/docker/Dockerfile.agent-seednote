@@ -20,7 +20,7 @@ RUN set -eux; \
 
 COPY --from=builder /app/anban-agent/node_modules /app/anban-agent/node_modules
 COPY --from=builder /app/anban-agent/dist /app/anban-agent/dist
-COPY plugins/ /anbanai/
+COPY harness/ /anbanai/
 COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
 RUN set -eux; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \

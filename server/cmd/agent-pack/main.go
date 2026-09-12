@@ -22,7 +22,7 @@ func run(args []string) error {
 	switch args[0] {
 	case "new":
 		flags := flag.NewFlagSet("new", flag.ContinueOnError)
-		pluginRoot := flags.String("plugin-root", "plugins", "canonical plugin root")
+		pluginRoot := flags.String("plugin-root", "harness", "canonical plugin root")
 		id := flags.String("id", "", "kebab-case Pack ID")
 		kind := flags.String("kind", agentpack.KindManaged, "plugin or managed")
 		taskType := flags.String("task-type", "", "managed task type")
@@ -36,7 +36,7 @@ func run(args []string) error {
 		})
 	case "generate", "check":
 		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
-		pluginRoot := flags.String("plugin-root", "plugins", "canonical plugin root")
+		pluginRoot := flags.String("plugin-root", "harness", "canonical plugin root")
 		catalogPath := flags.String("catalog", "server/agentpack/catalog.generated.json", "generated Server Catalog")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err

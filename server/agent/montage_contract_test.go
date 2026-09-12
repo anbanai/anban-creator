@@ -181,7 +181,7 @@ func TestMontageTaskFilesRequireFinalVideoAndManifest(t *testing.T) {
 
 func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	root := repoRoot(t)
-	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "montage.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "montage.md"))
 	for _, want := range []string{
 		"name: montage",
 		"  - montage",
@@ -209,7 +209,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 			t.Fatalf("claudecode montage agent missing %q", want)
 		}
 	}
-	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "montage.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "montage.toml"))
 	for _, want := range []string{
 		`name = "montage"`,
 		"montage-input.json",
@@ -240,7 +240,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		t.Fatal("codex montage agent must use env_keys without the legacy provider_env name")
 	}
 
-	reg := readRepoFile(t, filepath.Join(root, "plugins", "install", "agents-registration.toml"))
+	reg := readRepoFile(t, filepath.Join(root, "harness", "install", "agents-registration.toml"))
 	for _, want := range []string{
 		"[agents.montage]",
 		"montage.toml",
@@ -254,8 +254,8 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 
 func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 	root := repoRoot(t)
-	canonical := readRepoFile(t, filepath.Join(root, "plugins", "skills", "montage", "SKILL.md"))
-	for _, distro := range []string{"plugins"} {
+	canonical := readRepoFile(t, filepath.Join(root, "harness", "skills", "montage", "SKILL.md"))
+	for _, distro := range []string{"harness"} {
 		path := filepath.Join(root, distro, "skills", "montage", "SKILL.md")
 		if got := readRepoFile(t, path); got != canonical {
 			t.Fatalf("%s must match claudecode montage skill", path)
@@ -295,7 +295,7 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 		}
 	}
 
-	examples := readRepoFile(t, filepath.Join(root, "plugins", "skills", "montage", "references", "examples.md"))
+	examples := readRepoFile(t, filepath.Join(root, "harness", "skills", "montage", "references", "examples.md"))
 	for _, want := range []string{
 		"output/montage-project.json",
 		"output/delivery-manifest.json",
@@ -318,8 +318,8 @@ func TestMontageSkillMirrorsStayInSync(t *testing.T) {
 
 func TestMontageManagedApprovalPolicy(t *testing.T) {
 	root := repoRoot(t)
-	agentText := readRepoFile(t, filepath.Join(root, "plugins", "agents", "montage.md"))
-	skillText := readRepoFile(t, filepath.Join(root, "plugins", "skills", "montage", "SKILL.md"))
+	agentText := readRepoFile(t, filepath.Join(root, "harness", "agents", "montage.md"))
+	skillText := readRepoFile(t, filepath.Join(root, "harness", "skills", "montage", "SKILL.md"))
 	for _, want := range []string{
 		`"approval_policy"`,
 		`"mode": "auto"`,
@@ -337,8 +337,8 @@ func TestMontageManagedApprovalPolicy(t *testing.T) {
 func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 	root := repoRoot(t)
 	for _, path := range []string{
-		filepath.Join(root, "plugins", ".claude-plugin", "plugin.json"),
-		filepath.Join(root, "plugins", ".codex-plugin", "plugin.json"),
+		filepath.Join(root, "harness", ".claude-plugin", "plugin.json"),
+		filepath.Join(root, "harness", ".codex-plugin", "plugin.json"),
 	} {
 		body := readRepoFile(t, path)
 		if !strings.Contains(body, "Montage") {

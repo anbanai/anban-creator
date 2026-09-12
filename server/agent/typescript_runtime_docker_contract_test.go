@@ -15,7 +15,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 			"agent-ts/package.json agent-ts/package-lock.json",
 			"npm ci",
 			"@anthropic-ai/claude-agent-sdk",
-			"COPY plugins/ /anbanai/",
+			"COPY harness/ /anbanai/",
 			"COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban",
 			"ENTRYPOINT [\"tini\", \"--\", \"anban\"]",
 			"USER 1000:1000",

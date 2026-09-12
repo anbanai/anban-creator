@@ -9,7 +9,7 @@ import (
 
 func TestGeneratingSkillsDeclareSemanticAspectRatioRule(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	for _, plugin := range []string{"plugins"} {
+	for _, plugin := range []string{"harness"} {
 		skillsRoot := filepath.Join(root, plugin, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

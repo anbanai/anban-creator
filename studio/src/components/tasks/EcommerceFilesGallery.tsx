@@ -3,13 +3,12 @@ import type { TaskFile } from '@/types'
 import { FilePreviewGallery } from '@/components/FilePreview'
 
 // E-commerce delivery gallery: groups generated images by module prefix
-// (main_/detail_/cover_/share_/sku_) and renders the agent's text deliverables
-// (product-bible.md, copywriting.md, asset-plan.md, compliance-report.md,
-// manifest.json, ...) through the SAME FilePreviewGallery used by seednote /
+// (main_/detail_/cover_/share_/sku_) and renders the agent's delivery documents
+// (copywriting.md, manifest.json, ...) through the SAME FilePreviewGallery used by seednote /
 // article tasks — so markdown renders, copy / download / modal navigation all
 // work identically to the rest of the app. No bespoke doc viewer here.
 // Filename prefixes match the agent's file-naming contract in
-// plugins/agents/ecommerce.md.
+// harness/agents/ecommerce.md.
 
 const MODULE_GROUPS = [
   { prefix: 'main_', label: '主图套', key: 'main' },

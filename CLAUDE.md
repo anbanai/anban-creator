@@ -15,7 +15,7 @@ Client surfaces wrapping the same server API:
 
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
-Claude Code and Codex share one repository-owned plugin source at `plugins/`. Third-party dependencies remain submodules and should be initialized before Docker builds. The `sidecar-ilink` image used by the iLink WeChat assistant channel is fetched from `lich0821/wcfLink` by `deploy/docker/Dockerfile.sidecar-ilink` at build time.
+Claude Code and Codex share one repository-owned plugin source at `harness/`. Third-party dependencies remain submodules and should be initialized before Docker builds. The `sidecar-ilink` image used by the iLink WeChat assistant channel is fetched from `lich0821/wcfLink` by `deploy/docker/Dockerfile.sidecar-ilink` at build time.
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
@@ -243,7 +243,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 5. **Studio 首页 / AI 入口 UX 必须克制**：首页是 Codex-style AI 输入中心，不是数据看板。默认首屏只保留创作输入、项目选择、附件、发送等必要控件；不要常驻接入状态、下一步建议、统计卡、空状态面板或解释性文案。只有在存在阻塞、错误、补配置需求或用户主动进入管理页时，才展示对应提示和入口。新增首页内容前先问：它是否直接帮助用户现在输入并创建任务？如果不是，默认不要放在首页。
 6. **大型重构必须验证字段完整性**：在重构 studio 页面、表单对话框、API handler 或任何用户可见的功能时，必须**逐项检查原有功能**（表单字段、按钮、交互、API endpoint）是否被完整保留。禁止以"代码净化"、"简化"、"cleanup"等名义删除已发布的用户可见功能。若确需移除某个功能，必须在 commit message 中**明确列出被删除的功能并说明原因**。重构前建议：① 列出受影响的所有表单字段/交互/按钮；② `git diff` 后逐项核对；③ 不确定的功能一律保留。
 7. **Golang 能用泛型时优先用泛型**：遇到类型参数化场景（JSON 列存储、容器类型、类型安全的 helper、仓储/工具函数）时，**优先使用泛型**——例如 `datatypes.JSONSlice[T]` / `datatypes.JSONType[T]` 处理 JSON 列、自定义泛型类型替代 `any` / `interface{}` / 裸 `string` + 手动 `json.Marshal`。优势：① 编译期类型安全；② 零值序列化为合法 JSON（nil slice → `"null"` 字面量，MySQL JSON 列接受；而非空字符串 `""` 触发 `Error 3140`）；③ 减少重复的 marshal/unmarshal 样板代码。仅当泛型会显著增加复杂度、或第三方库不兼容、或性能敏感场景才退回非泛型。
-8. **修改插件/Skill 必须更新版本号**：每次修改 `plugins/` 下的运行资产（agents、skills/`SKILL.md`、hooks、themes、writers、manifest、安装脚本或会影响插件运行/发布的文档）时，必须在同一次变更中同步更新 `.claude-plugin/plugin.json` 与 `.codex-plugin/plugin.json` 的 `version`。默认 bump patch，除非变更范围需要 minor/major。
+8. **修改插件/Skill 必须更新版本号**：每次修改 `harness/` 下的运行资产（agents、skills/`SKILL.md`、hooks、themes、writers、manifest、安装脚本或会影响插件运行/发布的文档）时，必须在同一次变更中同步更新 `.claude-plugin/plugin.json` 与 `.codex-plugin/plugin.json` 的 `version`。默认 bump patch，除非变更范围需要 minor/major。
 9. **优先基于 Claude Code / Agentic-first 思想设计**：所有面向 Claude Code 的功能、插件、Agent、Skill、Hook、MCP 接入和执行流程，都必须优先站在 Claude Code 官方能力与约定之上进行拓展，充分利用 Claude Code 已提供的 Agent、Skill、Hook、MCP、配置、权限、上下文管理、工具调用和工作流能力。系统级功能（server、agent runner、scheduler、task execution、Studio workflow、人机协作入口等）也遵循同一原则：优先参考 AI 时代 Claude Code 体现的 agentic 前卫思想来设计，把复杂工作交给具备上下文、工具调用、计划执行、可观察进度和可恢复性的 Agent 工作流承载，而不是退回传统的硬编码流程或封闭式表单向导。不要在仓库内自造一套重复的调度、插件、工具发现、上下文注入或执行框架；只有在官方能力无法满足当前产品需求、且已有方案经过明确评估后，才允许实现必要的最小补充，并在代码或文档中说明原因。
 10. **网络失败时使用本地代理重试**：执行依赖下载、Git、`curl` 或其他联网命令时，如果直连网络不可用，使用 `HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897` 为该命令临时设置代理后重试；不要因此永久修改仓库或系统的全局代理配置。
 11. **MCP 只承载原子能力**：MCP is a stateless capability transport. Agents and Skills own business workflow orchestration，包括调用顺序、重试、质量闸门和停止/继续决策。MCP handler 只允许完成身份解析、协议与安全校验、调用 one application capability，并编码结果；禁止组合多个领域 Service 或按结果继续调用另一能力。需要保持一致性的持久化与结算必须封装在应用 Service 的原子操作中。
@@ -301,12 +301,12 @@ The public naming model is **brand + capability**:
 - Agent namespaces use the plugin/brand ID, for example `anban:<agent>`.
 - Do not use compact aliases or alternate install names based on `creator`, the unhyphenated product name, or the full product slug.
 
-### Unified Claude Code and Codex Plugin (`plugins/`)
+### Unified Claude Code and Codex Plugin (`harness/`)
 
 The layout follows the same one-repository pattern used by Superpowers and ECC: shared capability content lives once, while each harness keeps its native adapter.
 
 ```
-plugins/
+harness/
 ├── .claude-plugin/                # Claude Code manifest and marketplace metadata
 ├── .codex-plugin/                 # Codex manifest
 ├── .mcp.json                      # Claude Code userConfig MCP adapter
@@ -318,7 +318,7 @@ plugins/
 └── writers/                       # Shared writing styles
 ```
 
-Codex install flow: `codex plugin marketplace add ./plugins && codex plugin add anban@anbanai`, then `bash plugins/install/install-subagents.sh`.
+Codex install flow: `codex plugin marketplace add ./harness && codex plugin add anban@anbanai`, then `bash harness/install/install-subagents.sh`.
 
 Both adapters use the `creator` MCP server key. Skills must remain host-neutral; unavoidable host syntax belongs in a manifest, Agent, MCP, Hook, or install adapter. Agents must call MCP tools directly, with no ad-hoc HTTP clients.
 
@@ -328,7 +328,7 @@ Agent Packs are the canonical execution, distribution, and extension units for A
 
 Choose the smallest integration level that satisfies the product requirement:
 
-1. **Skill-only**: add a host-neutral `plugins/skills/<id>/SKILL.md`; no Pack is required unless the Skill needs its own invokable Agent.
+1. **Skill-only**: add a host-neutral `harness/skills/<id>/SKILL.md`; no Pack is required unless the Skill needs its own invokable Agent.
 2. **Plugin Agent**: scaffold a `kind: plugin` Pack. It is distributed to Claude Code and Codex but has no managed task binding or runtime.
 3. **Managed Agent**: scaffold a `kind: managed` Pack and bind an execution route to a reusable runtime profile. The scaffold starts plugin-only; expose product surfaces only after business validation and billing are implemented.
 4. **First-class business scenario**: in addition to the managed Pack, add explicit Server model/service validation and Studio project/task/plan behavior. Only expose a surface that the corresponding service actually supports.
@@ -340,7 +340,7 @@ make agent-pack-new ARGS="-id <kebab-id> -kind plugin"
 make agent-pack-new ARGS="-id <kebab-id> -kind managed -task-type <task-type> -runtime-profile article"
 ```
 
-The command creates `plugins/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and `agent.codex.toml`. Treat these as canonical sources; never edit generated `plugins/agents/<name>.md` or `.toml` directly. Put reusable, host-neutral workflow knowledge under `plugins/skills/` and reference Skill IDs from `agent.skills`.
+The command creates `harness/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and `agent.codex.toml`. Treat these as canonical sources; never edit generated `harness/agents/<name>.md` or `.toml` directly. Put reusable, host-neutral workflow knowledge under `harness/skills/` and reference Skill IDs from `agent.skills`.
 
 #### Manifest contract
 
@@ -381,7 +381,7 @@ make agent-pack-generate
 make agent-pack-check
 ```
 
-Generation copies native Claude/Codex Agent files and refreshes both `server/agentpack/catalog.generated.json` and the image-consumed `plugins/agent-pack-catalog.json`. Commit all generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), excluding checkout-specific `.git` metadata, so regenerate after any of them changes.
+Generation copies native Claude/Codex Agent files and refreshes both `server/agentpack/catalog.generated.json` and the image-consumed `harness/agent-pack-catalog.json`. Commit all generated output in the same change. Pack digests include canonical Agent sources, Schemas, and every file under each referenced Skill directory (scripts/assets included), excluding checkout-specific `.git` metadata, so regenerate after any of them changes.
 
 Before completing a new scenario, verify every applicable item:
 
@@ -398,7 +398,7 @@ Before completing a new scenario, verify every applicable item:
 - [ ] A new runtime image/profile is added only when dependency isolation requires it, with Docker/Kubernetes configuration and smoke validation.
 - [ ] `make agent-pack-generate` and `make agent-pack-check` pass without unexpected generated drift.
 - [ ] Targeted tests, `go test ./...`, Server and Agent builds, Studio tests, and Studio build pass.
-- [ ] Both `plugins/.claude-plugin/plugin.json` and `plugins/.codex-plugin/plugin.json` receive the same semantic-version bump, and `plugins/CHANGELOG.md` documents the release.
+- [ ] Both `harness/.claude-plugin/plugin.json` and `harness/.codex-plugin/plugin.json` receive the same semantic-version bump, and `harness/CHANGELOG.md` documents the release.
 
 ## Notes
 

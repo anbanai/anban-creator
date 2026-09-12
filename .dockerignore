@@ -15,7 +15,7 @@
 *.log
 
 # Frontend, desktop, and mobile sources that are not needed for
-# building the Server or Agent runtime images. plugins/ and agent-ts/ are
+# building the Server or Agent runtime images. harness/ and agent-ts/ are
 # intentionally kept because the Agent Dockerfiles copy them into the image.
 /studio/
 /desktop/

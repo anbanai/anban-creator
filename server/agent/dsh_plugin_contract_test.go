@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.21"
-	dshPluginReleaseDate = "2026-09-11"
+	dshPluginVersion     = "4.1.22"
+	dshPluginReleaseDate = "2026-09-12"
 )
 
 type dshPackageManifest struct {
@@ -43,7 +43,7 @@ var dshConfigurableEndpoint = regexp.MustCompile(`(?i)mcp[_-]?(?:url|endpoint)[[
 
 func TestDSHPluginContract(t *testing.T) {
 	root := repoRoot(t)
-	pluginRoot := filepath.Join(root, "plugins")
+	pluginRoot := filepath.Join(root, "harness")
 
 	t.Run("distribution versions and bundle patch stay aligned", func(t *testing.T) {
 		var npm dshPackageManifest
@@ -225,7 +225,7 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 		for _, want := range []string{
 			"DSH is not a separate Anban business workflow or Skill tree.",
-			"plugins/skills/**",
+			"harness/skills/**",
 			"Agent Pack generator copies the exact declared Skills",
 			"DSH-only code",
 			"only Article and Seednote",
@@ -512,9 +512,9 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		`"@anban/dsh-plugin@4.1.14"`,
 		`"/tmp/anban-dsh-plugin-4.1.14.tgz"`,
 		`"file:/tmp/anban-dsh-plugin-4.1.14.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz"`,
-		`"git+https://github.com/anbanai/creator-skills.git#v4.1.14"`,
-		`"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567"`,
+		`"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz"`,
+		`"git+https://github.com/anbanai/harness.git#v4.1.14"`,
+		`"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(allowed)); len(findings) != 0 {
 			t.Errorf("approved add %q findings = %v", allowed, findings)
@@ -523,11 +523,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, forbidden := range []string{
 		".",
 		"..",
-		"../creator-skills",
+		"../legacy-plugin",
 		"./plugins",
-		"/tmp/creator-skills",
-		"file:../creator-skills",
-		"file:/tmp/creator-skills",
+		"/tmp/legacy-plugin",
+		"file:../legacy-plugin",
+		"file:/tmp/legacy-plugin",
 		"file:/tmp/anban-dsh-plugin.tgz",
 		`"@anban/dsh-plugin"`,
 		`"@anban/dsh-plugin@latest"`,
@@ -535,11 +535,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 		`"@anban/dsh-plugin@01.2.3"`,
 		`"/tmp/arbitrary-plugin-4.1.12.tgz"`,
 		`"https://example.com/anban-dsh-plugin-4.1.12.tgz"`,
-		`"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.15.tgz"`,
-		`"git+https://github.com/anbanai/creator-skills.git#main"`,
-		`"git+https://github.com/anbanai/creator-skills.git#HEAD"`,
-		`"git+https://github.com/anbanai/creator-skills.git#v01.2.3"`,
-		`"git+https://github.com/anbanai/creator-skills.git"`,
+		`"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.15.tgz"`,
+		`"git+https://github.com/anbanai/harness.git#main"`,
+		`"git+https://github.com/anbanai/harness.git#HEAD"`,
+		`"git+https://github.com/anbanai/harness.git#v01.2.3"`,
+		`"git+https://github.com/anbanai/harness.git"`,
 	} {
 		if findings := dshDocumentationPluginAddFindings(fixture(forbidden)); len(findings) == 0 {
 			t.Errorf("source-directory add %q was accepted", forbidden)
@@ -548,12 +548,12 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, source := range []string{
 		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
-		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#main\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"file:/tmp/creator-skills\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#main\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"file:/tmp/legacy-plugin\"\n```",
 		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin\"\n```",
 		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/arbitrary-plugin-4.1.12.tgz\"\n```",
-		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#main\"\n```",
-		"```bash\nONE=1 TWO=2 wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/creator-skills\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#main\"\n```",
+		"```bash\nONE=1 TWO=2 wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/legacy-plugin\"\n```",
 		"```bash\nLABEL=\"two words\" dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/arbitrary-plugin-4.1.12.tgz\"\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add\n```",
 		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \"unterminated\n```",
@@ -565,11 +565,11 @@ func TestDSHDocumentationPluginAddClassifierRejectsSourceDirectories(t *testing.
 	for _, source := range []string{
 		"```bash\n$ dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
 		"```bash\nCHECK_ONLY=1 dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
-		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
-		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/royalmorty/anbanwriter/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz\"\n```",
+		"```bash\ncommand dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\ndsh plugin --profile \"$ACTIVE_PROFILE\" add \\\n  \"https://github.com/anbanai/anbancreator/releases/download/v4.1.14/anban-dsh-plugin-4.1.14.tgz\"\n```",
 		"```bash\nenv -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"@anban/dsh-plugin@4.1.14\"\n```",
 		"```bash\ncommand -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"file:/tmp/anban-dsh-plugin-4.1.14.tgz\"\n```",
-		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/creator-skills.git#0123456789abcdef0123456789abcdef01234567\"\n```",
+		"```bash\nenv -u DSH_HOME dsh plugin --profile \"$ACTIVE_PROFILE\" add \"git+https://github.com/anbanai/harness.git#0123456789abcdef0123456789abcdef01234567\"\n```",
 		"```bash\nONE=1 TWO=2 LABEL=\"two words\" wrapper -- dsh plugin --profile \"$ACTIVE_PROFILE\" add \"/tmp/with spaces/anban-dsh-plugin-4.1.14.tgz\"\n```",
 	} {
 		if findings := dshDocumentationPluginAddFindings(source); len(findings) != 0 {
@@ -585,8 +585,8 @@ var dshShellFencePattern = regexp.MustCompile("(?s)```(?:bash|sh|shell)\\n(.*?)`
 var dshShellAssignmentPattern = regexp.MustCompile(`^([A-Z_][A-Z0-9_]*)=["']([^"']*)["']$`)
 var dshNpmAddPattern = regexp.MustCompile(`^@anban/dsh-plugin@(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$`)
 var dshLocalTarballAddPattern = regexp.MustCompile(`(^|[/\\])anban-dsh-plugin-(?:replace-with-published-version|(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
-var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/royalmorty/anbanwriter/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
-var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/creator-skills\.git#(.+)$`)
+var dshReleaseTarballAddPattern = regexp.MustCompile(`^https://github\.com/anbanai/anbancreator/releases/download/v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))/anban-dsh-plugin-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.tgz$`)
+var dshGitAddPattern = regexp.MustCompile(`^git\+https://github\.com/anbanai/harness\.git#(.+)$`)
 var dshGitTagPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
 var dshGitCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
@@ -961,7 +961,7 @@ func TestDSHReliabilityPlanUsesExecutableVitestRepetition(t *testing.T) {
 }
 
 func TestDSHWindowsCmdProbeUsesTheRealPlatformGate(t *testing.T) {
-	body := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "dsh", "tests", "profile-smoke.test.ts"))
+	body := readRepoFile(t, filepath.Join(repoRoot(t), "harness", "dsh", "tests", "profile-smoke.test.ts"))
 	gate := "it.runIf(process.platform === 'win32')"
 	probe := "executes a cmd shim with spaces and metacharacters through cross-spawn"
 	if !strings.Contains(body, gate) || !strings.Contains(body, probe) {
@@ -1269,8 +1269,8 @@ func parseWorkflowContract(t *testing.T, body string) workflowContract {
 
 func validateDSHCIWorkflow(workflow workflowContract) error {
 	check, ok := workflow.Jobs["dsh-plugin"]
-	if !ok || check.RunsOn != "ubuntu-latest" || check.Defaults.Run.WorkingDirectory != "plugins" {
-		return fmt.Errorf("dsh-plugin must be an Ubuntu job with plugins as its working directory")
+	if !ok || check.RunsOn != "ubuntu-latest" || check.Defaults.Run.WorkingDirectory != "harness" {
+		return fmt.Errorf("dsh-plugin must be an Ubuntu job with harness as its working directory")
 	}
 	if err := requireActionInput(check, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
 		return err
@@ -1308,7 +1308,7 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 
 	portable, ok := workflow.Jobs["dsh-plugin-portability"]
 	if !ok || portable.RunsOn != "${{ matrix.os }}" {
-		return fmt.Errorf("dsh-plugin-portability must run its plugins commands on matrix.os")
+		return fmt.Errorf("dsh-plugin-portability must run its harness commands on matrix.os")
 	}
 	gotOS := append([]string(nil), portable.Strategy.Matrix["os"]...)
 	sort.Strings(gotOS)
@@ -1332,8 +1332,8 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if err != nil {
 		return err
 	}
-	if pluginInstall.WorkingDirectory != "plugins" {
-		return fmt.Errorf("portable DSH dependency install must run from plugins")
+	if pluginInstall.WorkingDirectory != "harness" {
+		return fmt.Errorf("portable DSH dependency install must run from harness")
 	}
 	commandShape, err := requireEnabledStep(portable, "Run portable profile command tests")
 	if err != nil || !runHasCode(commandShape.Run, "dsh/tests/profile-smoke.test.ts") || !runHasCode(commandShape.Run, "portable profile-smoke commands") {
@@ -1531,11 +1531,11 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	}
 	versions, err := requireEnabledStep(release, "Validate every DSH plugin version location and changelog")
 	for _, path := range []string{
-		"plugins/package.json",
-		"plugins/.claude-plugin/plugin.json",
-		"plugins/.codex-plugin/plugin.json",
-		"plugins/.claude-plugin/marketplace.json",
-		"plugins/CHANGELOG.md",
+		"harness/package.json",
+		"harness/.claude-plugin/plugin.json",
+		"harness/.codex-plugin/plugin.json",
+		"harness/.claude-plugin/marketplace.json",
+		"harness/CHANGELOG.md",
 	} {
 		if err != nil || !runHasCode(versions.Run, path) {
 			return fmt.Errorf("release version locations step missing executable validation for %s", path)

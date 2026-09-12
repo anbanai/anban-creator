@@ -139,13 +139,13 @@ agent-build:
 	@cd agent-ts && bun run build
 
 dsh-plugin-install:
-	@$(MAKE) -C plugins dsh-install
+	@$(MAKE) -C harness dsh-install
 
 dsh-plugin-check:
-	@$(MAKE) -C plugins dsh-check
+	@$(MAKE) -C harness dsh-check
 
 dsh-plugin-smoke:
-	@$(MAKE) -C plugins dsh-smoke
+	@$(MAKE) -C harness dsh-smoke
 
 # ---------------------------------------------------------------------------
 # Frontend targets

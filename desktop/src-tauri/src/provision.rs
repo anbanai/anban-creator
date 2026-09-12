@@ -267,7 +267,9 @@ mod tests {
         Resources {
             agent_entry: Some(PathBuf::from("/bundle/agent/dist/main.js")),
             node_bin: Some(PathBuf::from("/bundle/node")),
-            claude_sdk: Some(PathBuf::from("/bundle/agent/node_modules/@anthropic-ai/claude-agent-sdk")),
+            claude_sdk: Some(PathBuf::from(
+                "/bundle/agent/node_modules/@anthropic-ai/claude-agent-sdk",
+            )),
             plugin_dir: Some(PathBuf::from("/bundle/anban")),
             ffmpeg: Some(PathBuf::from("/bundle/ffmpeg")),
         }

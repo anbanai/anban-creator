@@ -24,15 +24,15 @@
     <h2>Install</h2>
     <p>The plugin uses a fixed built-in service endpoint. Configure only the <code>ANBAN_API_KEY</code> environment credential.</p>
     <ol>
-      <li>Clone <code>https://github.com/anbanai/creator-skills.git</code> into a stable user-owned directory, including nested submodules.</li>
+      <li>Clone <code>https://github.com/anbanai/harness.git</code> into a stable user-owned directory, including nested submodules.</li>
       <li>Register the clone as a Codex plugin marketplace and add <code>anban@anbanai</code>.</li>
       <li>Run the bundled subagent installer. It merges the Creator MCP server and six Anban subagents into Codex configuration.</li>
       <li>Ask the user for ANBAN_API_KEY. Add it to the user's chosen shell profile and the current environment without printing it.</li>
     </ol>
-    <pre><code>git clone --recurse-submodules https://github.com/anbanai/creator-skills.git "$HOME/.anban/creator-skills"
-codex plugin marketplace add "$HOME/.anban/creator-skills"
+    <pre><code>git clone --recurse-submodules https://github.com/anbanai/harness.git "$HOME/.anban/harness"
+codex plugin marketplace add "$HOME/.anban/harness"
 codex plugin add anban@anbanai
-bash "$HOME/.anban/creator-skills/install/install-subagents.sh"</code></pre>
+bash "$HOME/.anban/harness/install/install-subagents.sh"</code></pre>
 
     <h2>Credential configuration</h2>
     <p>The MCP configuration uses <code>bearer_token_env_var = "ANBAN_API_KEY"</code>. Do not put the literal key in <code>~/.codex/config.toml</code>. Persist it in the user's selected shell profile, then restart Codex.</p>

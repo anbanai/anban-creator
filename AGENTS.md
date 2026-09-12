@@ -13,7 +13,7 @@ The current repository is not a standalone Cobra CLI. It has four main surfaces:
 - `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
-Plugin assets have one canonical source at `plugins/`:
+Plugin assets have one canonical source at `harness/`:
 
 - `.claude-plugin/` and `.codex-plugin/` are native host manifests.
 - `skills/`, templates, writers, scripts, and binaries are shared once.
@@ -168,7 +168,7 @@ Prefer route-level lazy loading and explicit vendor chunking for heavy dependenc
 
 ## Skills And Agents
 
-The project ships all agent-facing workflows from `plugins/agents` and `plugins/skills`.
+The project ships all agent-facing workflows from `harness/agents` and `harness/skills`.
 
 Current major agents:
 
@@ -178,7 +178,7 @@ Current major agents:
 
 Development rules:
 
-- Agent Packs under `plugins/packs/<id>/` are the canonical execution and distribution units. They never replace strong business identity: first-class scenarios keep explicit `Project.Platform` and `Task.Type`; do not add compatibility fields such as `platform_or_type`.
+- Agent Packs under `harness/packs/<id>/` are the canonical execution and distribution units. They never replace strong business identity: first-class scenarios keep explicit `Project.Platform` and `Task.Type`; do not add compatibility fields such as `platform_or_type`.
 - Use `make agent-pack-new`, then `make agent-pack-generate` and `make agent-pack-check`. Managed scaffolds start with plugin-only surfaces; add `project`, `task`, or `plan` only after the typed Go/Studio business fields, Schema validation, billing operation/SKUs, and service/UI surface are implemented.
 - Runtime profiles express dependency images; runtime adapters express exceptional workspace layouts. Keep ordinary workflow sequencing in Agents/Skills, not adapters or MCP handlers.
 - Agents must use MCP tools directly, not ad hoc HTTP clients.
@@ -186,7 +186,7 @@ Development rules:
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
 - Skills must stay host-neutral. Put unavoidable host syntax in the native manifest, MCP, Hook, Agent, or install adapter rather than duplicating a Skill tree.
-- When changing plugin assets under `plugins/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `plugins/.claude-plugin/plugin.json` and `plugins/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
+- When changing plugin assets under `harness/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `harness/.claude-plugin/plugin.json` and `harness/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
 

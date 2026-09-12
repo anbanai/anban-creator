@@ -12,7 +12,7 @@ import (
 
 func TestManagedAgentProgressContracts(t *testing.T) {
 	root := repositoryRoot(t)
-	pluginRoot := filepath.Join(root, "plugins")
+	pluginRoot := filepath.Join(root, "harness")
 	catalog, err := agentpack.LoadCatalog(pluginRoot)
 	if err != nil {
 		t.Fatalf("load Agent Pack catalog: %v", err)

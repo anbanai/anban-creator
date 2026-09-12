@@ -25,7 +25,10 @@ pub fn resolve(app: &tauri::AppHandle) -> Resources {
     Resources {
         agent_entry: resolve_one(app, "resources/agent/dist/main.js"),
         node_bin: resolve_one(app, "resources/bin/node"),
-        claude_sdk: resolve_one(app, "resources/agent/node_modules/@anthropic-ai/claude-agent-sdk"),
+        claude_sdk: resolve_one(
+            app,
+            "resources/agent/node_modules/@anthropic-ai/claude-agent-sdk",
+        ),
         plugin_dir: resolve_one(app, "resources/anban"),
         ffmpeg: resolve_one(app, "resources/bin/ffmpeg"),
     }

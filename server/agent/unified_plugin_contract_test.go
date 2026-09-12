@@ -13,7 +13,7 @@ import (
 
 func TestUnifiedPluginLayout(t *testing.T) {
 	root := repoRoot(t)
-	pluginRoot := filepath.Join(root, "plugins")
+	pluginRoot := filepath.Join(root, "harness")
 
 	for _, legacy := range []string{"claudecode", "codex"} {
 		if _, err := os.Stat(filepath.Join(root, legacy)); !os.IsNotExist(err) {
@@ -63,8 +63,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.1.21" {
-		t.Fatalf("native manifest version = %q, want 4.1.21 for the current plugin surface", claudeManifest.Version)
+	if claudeManifest.Version != "4.1.22" {
+		t.Fatalf("native manifest version = %q, want 4.1.22 for the current plugin surface", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
@@ -139,9 +139,9 @@ func validateCodexHooksDisabled(raw json.RawMessage) error {
 func TestRuntimeContractsDoNotUseTaskFileListingAsCompletionGate(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range []string{
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/ecommerce.toml",
-		"plugins/skills/seednote-visual-design/SKILL.md",
+		"harness/agents/ecommerce.md",
+		"harness/agents/ecommerce.toml",
+		"harness/skills/seednote-visual-design/SKILL.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, rel))
 		if strings.Contains(body, "list_task_files") {
@@ -151,7 +151,7 @@ func TestRuntimeContractsDoNotUseTaskFileListingAsCompletionGate(t *testing.T) {
 }
 
 func TestPluginImagePromptRecordsStayCreativeOnly(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
+	root := filepath.Join(repoRoot(t), "harness")
 	for _, path := range pluginWorkflowFiles(t, root) {
 		for _, finding := range technicalImagePromptRecordFields(readRepoFile(t, path)) {
 			t.Errorf("%s image prompt record exposes technical field %q", path, finding)
@@ -174,7 +174,7 @@ func TestImagePromptRecordScannerRejectsMultilineTechnicalMetadata(t *testing.T)
 }
 
 func TestPluginImageCapabilitiesUseTaskOwnedOutput(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
+	root := filepath.Join(repoRoot(t), "harness")
 	for _, path := range pluginWorkflowFiles(t, root) {
 		body := readRepoFile(t, path)
 		if strings.Contains(body, "/tmp/anban-") {

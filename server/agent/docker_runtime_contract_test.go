@@ -320,7 +320,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 		"COPY agent-ts/package.json agent-ts/package-lock.json ./",
 		"npm prune --omit=dev",
 		"@anthropic-ai/claude-agent-sdk",
-		"COPY plugins/",
+		"COPY harness/",
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 		"COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban",
 	} {
@@ -353,7 +353,7 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 		for _, want := range []string{
 			"COPY --from=builder /app/anban-agent/node_modules",
 			"COPY --from=builder /app/anban-agent/dist",
-			"COPY plugins/",
+			"COPY harness/",
 			"ENTRYPOINT",
 		} {
 			if !strings.Contains(body, want) {
@@ -442,7 +442,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"ghcr.io/openhands/agent-server",
 		"./agent",
 		"/usr/local/bin/anban",
-		"COPY plugins/",
+		"COPY harness/",
 		"COPY third_party/OpenMontage/",
 		"COPY third_party/Agent-Reach/",
 		"/build/server/billing/policy.yaml",
@@ -574,7 +574,7 @@ func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
-			"COPY plugins/ /anbanai/",
+			"COPY harness/ /anbanai/",
 			"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 			`find /anbanai -type l -print -quit`,
 			`chown -R root:root /anbanai /app/anban-agent`,
@@ -632,7 +632,7 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 			t.Fatalf(".dockerignore missing %q", want)
 		}
 	}
-	if strings.Contains(body, "/plugins/") {
+	if strings.Contains(body, "/harness/") {
 		t.Fatal(".dockerignore must keep the unified plugin available to Agent Docker builds")
 	}
 }
@@ -753,7 +753,7 @@ func TestCollectOwnedDockerfilesDetectsUnexpectedEntrypoints(t *testing.T) {
 	got := collectOwnedDockerfilePaths([]string{
 		"deploy/docker/Dockerfile.server",
 		"nested/Dockerfile.extra",
-		"plugins/Dockerfile.plugin",
+		"harness/Dockerfile.plugin",
 		"third_party/tool/Dockerfile",
 		"web/node_modules/Dockerfile",
 		"web/dist/Dockerfile.generated",
@@ -1387,7 +1387,7 @@ func dockerignoreRuleIndex(t *testing.T, rules []string, want string) int {
 func ownedDockerContractPath(path string) bool {
 	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
 		switch segment {
-		case ".git", ".worktrees", "plugins", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
+		case ".git", ".worktrees", "harness", "third_party", "vendor", "node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", "bin", "data", "release":
 			return false
 		}
 	}

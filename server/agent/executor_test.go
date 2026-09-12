@@ -941,7 +941,7 @@ func TestLoadAgentDefinition(t *testing.T) {
 	})
 
 	t.Run("real agent files load", func(t *testing.T) {
-		pluginDir := filepath.Join("..", "..", "plugins")
+		pluginDir := filepath.Join("..", "..", "harness")
 		entries, err := os.ReadDir(filepath.Join(pluginDir, "agents"))
 		if err != nil {
 			t.Skip("unified plugin source not available")
@@ -966,7 +966,7 @@ func TestLoadAgentDefinition(t *testing.T) {
 				if len(def.Tools) != 0 {
 					// All MCP-needing agents omit `tools:` to inherit the full MCP
 					// toolset (Claude Code treats `tools` as an allowlist — see
-					// plugins/docs/plugin-development.md). The legacy "must specify tools" policy was dropped when
+					// harness/docs/plugin-development.md). The legacy "must specify tools" policy was dropped when
 					// agents migrated to MCP-tool inheritance.
 					t.Errorf("%s agent should omit tools frontmatter to inherit MCP tools; got %v", agentName, def.Tools)
 				}

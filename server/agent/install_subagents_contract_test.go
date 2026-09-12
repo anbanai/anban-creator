@@ -76,7 +76,7 @@ url = "https://other.example/mcp"
 				t.Fatalf("write temporary Codex config: %v", err)
 			}
 
-			pluginRoot := filepath.Join(repoRoot(t), "plugins")
+			pluginRoot := filepath.Join(repoRoot(t), "harness")
 			scriptPath := filepath.Join(pluginRoot, "install", "install-subagents.sh")
 			runInstaller := func() []byte {
 				t.Helper()
@@ -181,7 +181,7 @@ func TestInstallSubagentsCreatesMissingConfigFromRegistration(t *testing.T) {
 		t.Fatalf("create dedicated temporary directory: %v", err)
 	}
 
-	pluginRoot := filepath.Join(repoRoot(t), "plugins")
+	pluginRoot := filepath.Join(repoRoot(t), "harness")
 	scriptPath := filepath.Join(pluginRoot, "install", "install-subagents.sh")
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Env = []string{
@@ -266,7 +266,7 @@ secret = "` + secret + `"
 				t.Fatalf("set temporary Codex config mode: %v", err)
 			}
 
-			pluginRoot := filepath.Join(repoRoot(t), "plugins")
+			pluginRoot := filepath.Join(repoRoot(t), "harness")
 			scriptPath := filepath.Join(pluginRoot, "install", "install-subagents.sh")
 			cmd := exec.Command("bash", scriptPath)
 			cmd.Env = []string{
@@ -334,7 +334,7 @@ credential = "` + secret + `"
 		t.Fatalf("set temporary Codex config mode: %v", err)
 	}
 
-	pluginRoot := filepath.Join(repoRoot(t), "plugins")
+	pluginRoot := filepath.Join(repoRoot(t), "harness")
 	scriptPath := filepath.Join(pluginRoot, "install", "install-subagents.sh")
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Env = []string{

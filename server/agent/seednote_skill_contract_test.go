@@ -23,8 +23,8 @@ func extractSeednoteReferenceContract(t *testing.T, body string) string {
 func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 
 	artifacts := []string{
@@ -104,8 +104,8 @@ func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 func TestSeednoteAgentsStopAfterViralAnalysisArtifacts(t *testing.T) {
 	root := repoRoot(t)
 	for _, path := range []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -128,12 +128,12 @@ func TestSeednoteAgentsStopAfterViralAnalysisArtifacts(t *testing.T) {
 func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.T) {
 	root := repoRoot(t)
 	visualSkills := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 	contentReferences := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "references", "content.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	selectionRule := "封面、内容图和尾图均不预设是否使用任务上传图片。每页根据 `image-plan.md` 独立选择 0、1 或多张任务原图；没有相关任务参考时使用纯文生图。项目风格图只使用分析得到的文本风格块，原图路径不得进入生成调用。"
 
@@ -187,14 +187,14 @@ func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.
 func TestSeednoteReferenceRolesSeparateStyleAnalysisFromTaskReferences(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "dsh", "presets", "seednote", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
-		filepath.Join(root, "plugins", "packs", "seednote", "agent.claude.md"),
-		filepath.Join(root, "plugins", "packs", "seednote", "agent.codex.toml"),
-		filepath.Join(root, "plugins", "packs", "seednote", "agent.dsh.yml"),
-		filepath.Join(root, "plugins", "dsh", "presets", "seednote", "agent.cordis.yml"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "dsh", "presets", "seednote", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "packs", "seednote", "agent.claude.md"),
+		filepath.Join(root, "harness", "packs", "seednote", "agent.codex.toml"),
+		filepath.Join(root, "harness", "packs", "seednote", "agent.dsh.yml"),
+		filepath.Join(root, "harness", "dsh", "presets", "seednote", "agent.cordis.yml"),
 	}
 	required := []string{
 		"始终是纯项目风格图：先调用 `analyze_image`",
@@ -235,8 +235,8 @@ func TestSeednoteReferenceRolesSeparateStyleAnalysisFromTaskReferences(t *testin
 func TestSeednoteAgentsShareReferenceContract(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 
 	var reference string
@@ -260,8 +260,8 @@ func TestSeednoteAgentsShareReferenceContract(t *testing.T) {
 func TestSeednoteWorkflowDocumentsReferenceUsageSchemaAndFailurePolicy(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 	required := []string{
 		`"version": "1.0"`,
@@ -301,8 +301,8 @@ func TestSeednoteWorkflowDocumentsReferenceUsageSchemaAndFailurePolicy(t *testin
 func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
 	required := []string{
@@ -338,8 +338,8 @@ func TestSeednoteVisualDesignSkillKeepsImageRelevanceContract(t *testing.T) {
 func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
 	}
 
 	required := []string{
@@ -380,8 +380,8 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 
 	required := []string{
@@ -425,8 +425,8 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-writing", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-writing", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-writing", "SKILL.md"),
 	}
 
 	required := []string{
@@ -456,12 +456,12 @@ func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "SKILL.md"),
-		filepath.Join(root, "plugins", "skills", "seednote-visual-design", "references", "content.md"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "references", "content.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-visual-design", "references", "content.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -497,8 +497,8 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -561,7 +561,7 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) 
 
 func TestAgentReachSkillIsNotDistributed(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	path := filepath.Join(root, "plugins", "skills", "agent-reach")
+	path := filepath.Join(root, "harness", "skills", "agent-reach")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("removed Agent-Reach Skill still exists at %s: %v", path, err)
 	}
@@ -570,7 +570,7 @@ func TestAgentReachSkillIsNotDistributed(t *testing.T) {
 func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "skills", "seednote-research", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "seednote-research", "SKILL.md"),
 	}
 
 	for _, path := range paths {
@@ -653,8 +653,8 @@ func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *tes
 func TestSeednoteAgentsPreserveReadOnlyResearchBoundary(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 
 	for _, path := range paths {

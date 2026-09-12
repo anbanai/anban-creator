@@ -1,6 +1,6 @@
-[submodule "plugins"]
-	path = plugins
-	url = https://github.com/anbanai/creator-skills.git
+[submodule "harness"]
+	path = harness
+	url = https://github.com/anbanai/harness.git
 	branch = main
 	syncPush = true
 	syncRemote = origin

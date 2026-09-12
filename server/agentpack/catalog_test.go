@@ -1024,7 +1024,7 @@ func TestPackDigestIncludesEveryReferencedSkillFile(t *testing.T) {
 }
 
 func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing.T) {
-	pluginRoot := filepath.Clean(filepath.Join("..", "..", "plugins"))
+	pluginRoot := filepath.Clean(filepath.Join("..", "..", "harness"))
 	catalog, err := LoadCatalog(pluginRoot)
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)

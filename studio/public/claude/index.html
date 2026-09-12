@@ -24,13 +24,13 @@
     <h2>Install</h2>
     <p>The plugin uses a fixed built-in service endpoint. Configure only the required sensitive <code>api_key</code> in the plugin user config.</p>
     <ol>
-      <li>Clone <code>https://github.com/anbanai/creator-skills.git</code> into a stable user-owned directory, including nested submodules.</li>
+      <li>Clone <code>https://github.com/anbanai/harness.git</code> into a stable user-owned directory, including nested submodules.</li>
       <li>From any directory, register that clone as a Claude Code plugin marketplace.</li>
       <li>Install <code>anban@anbanai</code> with user scope.</li>
       <li>When Claude Code asks for the required sensitive <code>api_key</code> user configuration, ask the user for ANBAN_API_KEY and enter it without echoing it.</li>
     </ol>
-    <pre><code>git clone --recurse-submodules https://github.com/anbanai/creator-skills.git "$HOME/.anban/creator-skills"
-claude plugin marketplace add "$HOME/.anban/creator-skills"
+    <pre><code>git clone --recurse-submodules https://github.com/anbanai/harness.git "$HOME/.anban/harness"
+claude plugin marketplace add "$HOME/.anban/harness"
 claude plugin install --scope user anban@anbanai</code></pre>
 
     <h2>Verify</h2>

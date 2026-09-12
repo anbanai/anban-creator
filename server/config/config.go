@@ -1485,7 +1485,7 @@ func (c *Config) resolvePaths(rootConfigDir string) {
 func detectPluginDir() string {
 	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
-		pluginDir := filepath.Join(wd, "plugins")
+		pluginDir := filepath.Join(wd, "harness")
 		if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
 			return pluginDir
 		}
@@ -1499,7 +1499,7 @@ func detectPluginDir() string {
 	}
 	for _, dir := range candidates {
 		for range 5 {
-			pluginDir := filepath.Join(dir, "plugins")
+			pluginDir := filepath.Join(dir, "harness")
 			if info, err := os.Stat(filepath.Join(pluginDir, "agents")); err == nil && info.IsDir() {
 				return pluginDir
 			}

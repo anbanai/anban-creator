@@ -56,12 +56,12 @@ echo "    -> $BIN_DIR/node  ($(node --version))"
 # 3. Unified Anban plugin → CLAUDE_PLUGIN_ROOT.
 # ---------------------------------------------------------------------------
 echo "==> Bundling Anban plugin…"
-if [[ ! -d "$REPO_ROOT/plugins/.claude-plugin" ]]; then
-  echo "ERROR: plugins is missing the Claude Code manifest." >&2
+if [[ ! -d "$REPO_ROOT/harness/.claude-plugin" ]]; then
+  echo "ERROR: harness is missing the Claude Code manifest." >&2
   exit 1
 fi
 rm -rf "$RES_DIR/anban"
-cp -R "$REPO_ROOT/plugins" "$RES_DIR/anban"
+cp -R "$REPO_ROOT/harness" "$RES_DIR/anban"
 echo "    -> $RES_DIR/anban"
 
 # ---------------------------------------------------------------------------

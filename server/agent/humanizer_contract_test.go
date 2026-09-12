@@ -11,7 +11,7 @@ const pinnedHumanizerRevision = "9862685f575c65a8247f90369951df1b3416e3d6"
 
 func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	root := repoRoot(t)
-	pluginRoot := filepath.Join(root, "plugins")
+	pluginRoot := filepath.Join(root, "harness")
 	cmd := exec.Command("git", "ls-tree", "HEAD", "--", "skills/humanizer")
 	cmd.Dir = pluginRoot
 	entry, err := cmd.Output()
@@ -23,7 +23,7 @@ func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 		t.Fatalf("Humanizer gitlink = %q, want %q", got, wantEntry)
 	}
 
-	upstreamPath := filepath.Join(root, "plugins", "skills", "humanizer", "SKILL.md")
+	upstreamPath := filepath.Join(root, "harness", "skills", "humanizer", "SKILL.md")
 	upstream := readRepoFile(t, upstreamPath)
 	frontmatter := parseSkillFrontmatter(t, upstreamPath, upstream)
 	if got := frontmatterStringValue(frontmatter["name"]); got != "humanizer" {
@@ -55,7 +55,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 		t.Fatal("Anban Writer must not retain the old root Humanizer submodule")
 	}
 
-	pluginModules := readRepoFile(t, filepath.Join(root, "plugins", ".gitmodules"))
+	pluginModules := readRepoFile(t, filepath.Join(root, "harness", ".gitmodules"))
 	for _, want := range []string{
 		`[submodule "skills/humanizer"]`,
 		"path = skills/humanizer",
@@ -67,7 +67,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 		}
 	}
 
-	script := readRepoFile(t, filepath.Join(root, "plugins", "scripts", "update-humanizer.sh"))
+	script := readRepoFile(t, filepath.Join(root, "harness", "scripts", "update-humanizer.sh"))
 	for _, want := range []string{
 		"submodule_name=skills/humanizer",
 		`submodule_root=$(git -C "$submodule_path" rev-parse --show-toplevel 2>/dev/null || true)`,
@@ -87,13 +87,13 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 		t.Fatal("Creator Skills updater must not mistake the parent repository for an initialized nested submodule")
 	}
 
-	checkScript := readRepoFile(t, filepath.Join(root, "plugins", "scripts", "check-humanizer.sh"))
+	checkScript := readRepoFile(t, filepath.Join(root, "harness", "scripts", "check-humanizer.sh"))
 	if !strings.Contains(checkScript, `submodule_root=$(git -C "$submodule_path" rev-parse --show-toplevel 2>/dev/null || true)`) ||
 		!strings.Contains(checkScript, `if [ "$submodule_root" != "$repo_root/$submodule_path" ]; then`) {
 		t.Fatal("Creator Skills checker must verify the nested repository boundary")
 	}
 
-	makefile := readRepoFile(t, filepath.Join(root, "plugins", "Makefile"))
+	makefile := readRepoFile(t, filepath.Join(root, "harness", "Makefile"))
 	if !strings.Contains(makefile, "humanizer-update:") ||
 		!strings.Contains(makefile, "scripts/update-humanizer.sh") ||
 		!strings.Contains(makefile, "humanizer-check:") ||
@@ -103,7 +103,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 
 	rootScript := readRepoFile(t, filepath.Join(root, "scripts", "update-humanizer.sh"))
 	for _, want := range []string{
-		`git -C "$repo_root" submodule update --init --depth 1 -- plugins`,
+		`git -C "$repo_root" submodule update --init --depth 1 -- harness`,
 		`exec "$plugin_script"`,
 	} {
 		if !strings.Contains(rootScript, want) {
@@ -111,11 +111,11 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 		}
 	}
 
-	codexInstall := readRepoFile(t, filepath.Join(root, "plugins", "docs", "codex-installation.md"))
+	codexInstall := readRepoFile(t, filepath.Join(root, "harness", "docs", "codex-installation.md"))
 	for _, want := range []string{
 		"Codex marketplace Git sources do not initialize nested submodules",
-		"git submodule update --init --recursive plugins",
-		"test -f plugins/skills/humanizer/SKILL.md",
+		"git submodule update --init --recursive harness",
+		"test -f harness/skills/humanizer/SKILL.md",
 		"codex plugin add anban@anbanai",
 	} {
 		if !strings.Contains(codexInstall, want) {
@@ -130,10 +130,10 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"plugins/agents/article.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/moments.md",
-		"plugins/agents/seednote.md",
+		"harness/agents/article.md",
+		"harness/agents/ecommerce.md",
+		"harness/agents/moments.md",
+		"harness/agents/seednote.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
@@ -143,10 +143,10 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"plugins/agents/article.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/agents/moments.toml",
-		"plugins/agents/seednote.toml",
+		"harness/agents/article.toml",
+		"harness/agents/ecommerce.toml",
+		"harness/agents/moments.toml",
+		"harness/agents/seednote.toml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		if !strings.Contains(body, `path = "__PLUGIN_ROOT__/skills/humanizer/SKILL.md"`) {
@@ -155,9 +155,9 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"plugins/agents/seednote.md",
-		"plugins/agents/seednote.toml",
-		"plugins/skills/seednote-writing/SKILL.md",
+		"harness/agents/seednote.md",
+		"harness/agents/seednote.toml",
+		"harness/skills/seednote-writing/SKILL.md",
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		for _, banned := range []string{"内置去 AI", "不要再调用 `humanizer` Skill", "额外加载通用 33 类规则会浪费上下文"} {
@@ -169,7 +169,7 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
-			"COPY plugins/ /anbanai/",
+			"COPY harness/ /anbanai/",
 			"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 			"@anthropic-ai/claude-agent-sdk",
 		} {
@@ -190,24 +190,24 @@ func TestHumanizerBusinessConstraintsStayInOwningWorkflows(t *testing.T) {
 		{
 			name: "seednote",
 			relPaths: []string{
-				"plugins/skills/seednote-writing/SKILL.md",
-				"plugins/skills/seednote-writing/SKILL.md",
+				"harness/skills/seednote-writing/SKILL.md",
+				"harness/skills/seednote-writing/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "仍 ≤1000 字", "不得在改写中引入新的违禁词"},
 		},
 		{
 			name: "article",
 			relPaths: []string{
-				"plugins/skills/article/SKILL.md",
-				"plugins/skills/article/SKILL.md",
+				"harness/skills/article/SKILL.md",
+				"harness/skills/article/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "覆盖原文全部信息点", "不得引入新的违禁词或导流风险"},
 		},
 		{
 			name: "ecommerce",
 			relPaths: []string{
-				"plugins/skills/ecommerce-copywriting/SKILL.md",
-				"plugins/skills/ecommerce-copywriting/SKILL.md",
+				"harness/skills/ecommerce-copywriting/SKILL.md",
+				"harness/skills/ecommerce-copywriting/SKILL.md",
 			},
 			wants: []string{"不得调用 `AskUserQuestion`", "FABE 信息点", "先去 AI，后合规"},
 		},

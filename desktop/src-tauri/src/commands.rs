@@ -265,9 +265,7 @@ fn is_safe_download_url(url: &str) -> bool {
                     || v4.is_unspecified()
                     || v4.is_broadcast())
             }
-            IpAddr::V6(v6) => {
-                !(v6.is_loopback() || v6.is_unspecified() || v6.is_unique_local())
-            }
+            IpAddr::V6(v6) => !(v6.is_loopback() || v6.is_unspecified() || v6.is_unique_local()),
         };
     }
     true

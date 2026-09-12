@@ -14,7 +14,7 @@ var agentSkillNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?
 
 func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"plugins"} {
+	for _, distro := range []string{"harness"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -40,7 +40,7 @@ func isUpstreamHumanizerSkillPath(path string) bool {
 }
 
 func isUpstreamHumanizerPath(path string) bool {
-	return strings.Contains(filepath.ToSlash(path), "/plugins/skills/humanizer/")
+	return strings.Contains(filepath.ToSlash(path), "/harness/skills/humanizer/")
 }
 
 func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
@@ -51,7 +51,7 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 		"INSTALLATION_GUIDE.md": true,
 		"QUICK_REFERENCE.md":    true,
 	}
-	for _, distro := range []string{"plugins"} {
+	for _, distro := range []string{"harness"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -76,8 +76,8 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 
 func TestDistributedWriterSkillReferencesStayMirrored(t *testing.T) {
 	root := repoRoot(t)
-	canonical := readRepoFile(t, filepath.Join(root, "plugins", "skills", "writers", "references", "writer-style-schema.md"))
-	for _, distro := range []string{"plugins"} {
+	canonical := readRepoFile(t, filepath.Join(root, "harness", "skills", "writers", "references", "writer-style-schema.md"))
+	for _, distro := range []string{"harness"} {
 		path := filepath.Join(root, distro, "skills", "writers", "references", "writer-style-schema.md")
 		if got := readRepoFile(t, path); got != canonical {
 			t.Fatalf("%s must match claudecode writer-style-schema.md", path)
@@ -87,7 +87,7 @@ func TestDistributedWriterSkillReferencesStayMirrored(t *testing.T) {
 
 func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 	root := repoRoot(t)
-	claudeReadme := readRepoFile(t, filepath.Join(root, "plugins", "README.md"))
+	claudeReadme := readRepoFile(t, filepath.Join(root, "harness", "README.md"))
 	for _, want := range []string{
 		"docs/claude/",
 		"moments",
@@ -108,7 +108,7 @@ func TestSkillUpstreamIndexDocumentsMirroredSourceBoundaries(t *testing.T) {
 
 func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "plugins", "agents")
+	agentsRoot := filepath.Join(root, "harness", "agents")
 	forbiddenPluginAgentFields := []string{"hooks", "mcpServers", "permissionMode"}
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
@@ -148,7 +148,7 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 			}
 		}
 		for _, skill := range frontmatterStringValues(fm["skills"]) {
-			skillPath := filepath.Join(root, "plugins", "skills", skill, "SKILL.md")
+			skillPath := filepath.Join(root, "harness", "skills", skill, "SKILL.md")
 			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("%s preloads missing Skill %q: %v", path, skill, err)
 			}
@@ -172,7 +172,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	}
 
 	for agentName, want := range expected {
-		path := filepath.Join(root, "plugins", "agents", agentName+".md")
+		path := filepath.Join(root, "harness", "agents", agentName+".md")
 		body := readRepoFile(t, path)
 		fm := parseSkillFrontmatter(t, path, body)
 		got := frontmatterStringValues(fm["skills"])
@@ -184,8 +184,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 
 func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "plugins", "agents")
-	skillsRoot := filepath.Join(root, "plugins", "skills")
+	agentsRoot := filepath.Join(root, "harness", "agents")
+	skillsRoot := filepath.Join(root, "harness", "skills")
 	referenced := map[string]bool{}
 	agents, err := os.ReadDir(agentsRoot)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 
 func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 	root := repoRoot(t)
-	agentsRoot := filepath.Join(root, "plugins", "agents")
+	agentsRoot := filepath.Join(root, "harness", "agents")
 	skillPathRE := regexp.MustCompile(`path\s*=\s*"__PLUGIN_ROOT__/skills/([^/]+)/SKILL\.md"`)
 
 	err := filepath.WalkDir(agentsRoot, func(path string, d os.DirEntry, err error) error {
@@ -244,7 +244,7 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 		body := readRepoFile(t, path)
 		for _, match := range skillPathRE.FindAllStringSubmatch(body, -1) {
 			skillName := match[1]
-			skillPath := filepath.Join(root, "plugins", "skills", skillName, "SKILL.md")
+			skillPath := filepath.Join(root, "harness", "skills", skillName, "SKILL.md")
 			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("%s references missing bundled skill %q at %s", path, skillName, skillPath)
 			}
@@ -263,7 +263,7 @@ func TestCodexAgentsDoNotPreloadDuplicateUmbrellaSkills(t *testing.T) {
 		"seednote":  "seednote",
 		"article":   "article",
 	} {
-		path := filepath.Join(root, "plugins", "agents", agentName+".toml")
+		path := filepath.Join(root, "harness", "agents", agentName+".toml")
 		body := readRepoFile(t, path)
 		config := `path = "__PLUGIN_ROOT__/skills/` + umbrellaSkill + `/SKILL.md"`
 		if strings.Contains(body, config) {
@@ -321,7 +321,7 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 
 func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
 	root := repoRoot(t)
-	for _, distro := range []string{"plugins"} {
+	for _, distro := range []string{"harness"} {
 		skillsRoot := filepath.Join(root, distro, "skills")
 		err := filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

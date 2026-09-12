@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: plugins/pnpm-lock.yaml
+          cache-dependency-path: harness/pnpm-lock.yaml
 
       - name: Validate release version contract
         id: version
@@ -50,26 +50,26 @@ jobs:
         run: node -e "const {appendFileSync}=require('node:fs'); const event=process.env.GITHUB_EVENT_NAME; const ref=process.env.GITHUB_REF_NAME; const version=event==='workflow_dispatch'?process.env.REQUESTED_VERSION:ref.startsWith('v')?ref.slice(1):''; if(!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)||process.env.GITHUB_REF_TYPE!=='tag'||ref!=='v'+version) process.exit(1); appendFileSync(process.env.GITHUB_OUTPUT,'VERSION='+version+'\n')"
 
       - name: Install DSH plugin dependencies
-        working-directory: plugins
+        working-directory: harness
         run: pnpm install --frozen-lockfile
 
       - name: Type-check and test DSH plugin
-        working-directory: plugins
+        working-directory: harness
         run: |
           pnpm run typecheck
           pnpm run test
 
       - name: Build DSH plugin
-        working-directory: plugins
+        working-directory: harness
         run: pnpm run build
 
       - name: Verify DSH plugin source
-        working-directory: plugins
+        working-directory: harness
         run: pnpm run verify:source
 
       - name: Pack DSH plugin exactly once
         id: pack
-        working-directory: plugins
+        working-directory: harness
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
           PACK_ROOT: ${{ github.workspace }}/release/dsh
@@ -122,7 +122,7 @@ jobs:
           import {
             inspectAndExtractArchive,
             parsePackResult,
-          } from './plugins/dsh/scripts/package-integrity.mjs'
+          } from './harness/dsh/scripts/package-integrity.mjs'
 
           const result = parsePackResult(await readFile(process.env.PACK_METADATA, 'utf8'))
           const extractionRoot = join(process.env.RUNNER_TEMP, 'verified-dsh-package')
@@ -146,7 +146,7 @@ jobs:
           NODE
 
       - name: Smoke-test exact local DSH package
-        working-directory: plugins
+        working-directory: harness
         env:
           PACK_METADATA: ${{ steps.pack.outputs.metadata }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
@@ -297,7 +297,7 @@ jobs:
       - name: Validate packaged Desktop profile exports and Skill catalogs
         env:
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-        run: node plugins/dsh/scripts/smoke-profile.mjs --existing-profile desktop "${{ steps.version.outputs.VERSION }}"
+        run: node harness/dsh/scripts/smoke-profile.mjs --existing-profile desktop "${{ steps.version.outputs.VERSION }}"
 
   release:
     needs:
@@ -333,7 +333,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: plugins/pnpm-lock.yaml
+          cache-dependency-path: harness/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
 
       - name: Run tests
@@ -373,18 +373,18 @@ jobs:
 
           const version = process.env.VERSION
           const locations = [
-            ['plugins/package.json', JSON.parse(readFileSync('plugins/package.json', 'utf8')).version],
-            ['plugins/.claude-plugin/plugin.json', JSON.parse(readFileSync('plugins/.claude-plugin/plugin.json', 'utf8')).version],
-            ['plugins/.codex-plugin/plugin.json', JSON.parse(readFileSync('plugins/.codex-plugin/plugin.json', 'utf8')).version],
+            ['harness/package.json', JSON.parse(readFileSync('harness/package.json', 'utf8')).version],
+            ['harness/.claude-plugin/plugin.json', JSON.parse(readFileSync('harness/.claude-plugin/plugin.json', 'utf8')).version],
+            ['harness/.codex-plugin/plugin.json', JSON.parse(readFileSync('harness/.codex-plugin/plugin.json', 'utf8')).version],
           ]
           const marketplace = JSON.parse(
-            readFileSync('plugins/.claude-plugin/marketplace.json', 'utf8'),
+            readFileSync('harness/.claude-plugin/marketplace.json', 'utf8'),
           )
           const marketplacePlugin = marketplace.plugins?.find(
             (plugin) => plugin.name === 'anban',
           )
           locations.push([
-            'plugins/.claude-plugin/marketplace.json',
+            'harness/.claude-plugin/marketplace.json',
             marketplacePlugin?.version,
           ])
 
@@ -395,10 +395,10 @@ jobs:
           }
 
           const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          const changelog = readFileSync('plugins/CHANGELOG.md', 'utf8')
+          const changelog = readFileSync('harness/CHANGELOG.md', 'utf8')
           const heading = new RegExp(`^## \\[${escaped}\\](?: - .+)?$`, 'gm')
           if ([...changelog.matchAll(heading)].length !== 1) {
-            throw new Error(`plugins/CHANGELOG.md must contain exactly one ${version} release heading`)
+            throw new Error(`harness/CHANGELOG.md must contain exactly one ${version} release heading`)
           }
           NODE
 
@@ -668,7 +668,7 @@ jobs:
             if env -u NODE_AUTH_TOKEN -u NPM_TOKEN \
               HOME="$attempt_root/home" \
               NPM_CONFIG_USERCONFIG="$attempt_root/npmrc" \
-              node plugins/dsh/scripts/smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"; then
+              node harness/dsh/scripts/smoke-profile.mjs "@anban/dsh-plugin@${VERSION}"; then
               healthy=true
               break
             fi

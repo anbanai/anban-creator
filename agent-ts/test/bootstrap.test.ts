@@ -63,7 +63,7 @@ const validResponse = (): BootstrapResponse => {
 describe("validateBootstrapResponse", () => {
   test("accepts and validates the frozen Agent Pack identity against the generated Catalog", async () => {
     const response = validResponse();
-    const catalog = JSON.parse(await readFile(new URL("../../plugins/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;
+    const catalog = JSON.parse(await readFile(new URL("../../harness/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;
     const article = catalog.packs.find((pack) => pack.id === "article");
     if (!article) throw new Error("article Agent Pack is missing");
     response.agent_pack_version = article.version;

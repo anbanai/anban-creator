@@ -9,7 +9,7 @@ import (
 
 func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 	root := repoRoot(t)
-	skillRoot := filepath.Join(root, "plugins", "skills", "video-cover-design")
+	skillRoot := filepath.Join(root, "harness", "skills", "video-cover-design")
 	body := readRepoFile(t, filepath.Join(skillRoot, "SKILL.md"))
 
 	for _, want := range []string{
@@ -50,7 +50,7 @@ func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 
 func TestVideoCoverDesignReferencesUseRuntimeRatioAndCleanPackaging(t *testing.T) {
 	root := repoRoot(t)
-	skillRoot := filepath.Join(root, "plugins", "skills", "video-cover-design")
+	skillRoot := filepath.Join(root, "harness", "skills", "video-cover-design")
 
 	for _, forbiddenPath := range []string{"README.md", ".git", ".gitignore", "assets/.gitkeep"} {
 		if _, err := os.Stat(filepath.Join(skillRoot, forbiddenPath)); !os.IsNotExist(err) {

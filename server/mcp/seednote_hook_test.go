@@ -13,7 +13,7 @@ import (
 
 func TestSeednoteQualityGateRejectsEmptyOrNonPNGImages(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
-	hookPath := filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh")
+	hookPath := filepath.Join(root, "harness", "hooks", "seednote-quality-gate.sh")
 	workspace := t.TempDir()
 	output := filepath.Join(workspace, "output")
 	if err := os.MkdirAll(output, 0o755); err != nil {
@@ -80,7 +80,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
 	t.Run("agent owns finalization calls", func(t *testing.T) {
-		agentPath := filepath.Join(root, "plugins", "agents", "seednote.md")
+		agentPath := filepath.Join(root, "harness", "agents", "seednote.md")
 		raw, err := os.ReadFile(agentPath)
 		if err != nil {
 			t.Fatalf("read %s: %v", agentPath, err)
@@ -101,7 +101,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 
 	t.Run("hooks contain only mechanical gates", func(t *testing.T) {
-		hooksPath := filepath.Join(root, "plugins", "hooks", "hooks.json")
+		hooksPath := filepath.Join(root, "harness", "hooks", "hooks.json")
 		hooksRaw, err := os.ReadFile(hooksPath)
 		if err != nil {
 			t.Fatalf("read %s: %v", hooksPath, err)
@@ -143,7 +143,7 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 	})
 
 	t.Run("duplicate umbrella skills are absent", func(t *testing.T) {
-		for _, distro := range []string{"plugins"} {
+		for _, distro := range []string{"harness"} {
 			skillPath := filepath.Join(root, distro, "skills", "seednote", "SKILL.md")
 			if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 				t.Errorf("%s must not ship a duplicate top-level Seednote Skill", skillPath)
@@ -155,8 +155,8 @@ func TestSeednoteFinalizationOwnership(t *testing.T) {
 func TestRuntimeHooksDoNotSubmitAgentFeedback(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
 	for _, relativePath := range []string{
-		"plugins/hooks/hooks.json",
-		"plugins/hooks/hooks.json",
+		"harness/hooks/hooks.json",
+		"harness/hooks/hooks.json",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			path := filepath.Join(root, filepath.FromSlash(relativePath))
@@ -177,18 +177,18 @@ func TestRuntimeHooksDoNotSubmitAgentFeedback(t *testing.T) {
 func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 	root := filepath.Clean(filepath.Join(mustGetwd(t), "..", ".."))
 	paths := []string{
-		"plugins/agents/moments.md",
-		"plugins/agents/seednote.md",
-		"plugins/agents/live-slicer.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/article.md",
-		"plugins/agents/montage.md",
-		"plugins/agents/moments.toml",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/live-slicer.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/agents/article.toml",
-		"plugins/agents/montage.toml",
+		"harness/agents/moments.md",
+		"harness/agents/seednote.md",
+		"harness/agents/live-slicer.md",
+		"harness/agents/ecommerce.md",
+		"harness/agents/article.md",
+		"harness/agents/montage.md",
+		"harness/agents/moments.toml",
+		"harness/agents/seednote.toml",
+		"harness/agents/live-slicer.toml",
+		"harness/agents/ecommerce.toml",
+		"harness/agents/article.toml",
+		"harness/agents/montage.toml",
 	}
 	for _, relativePath := range paths {
 		t.Run(relativePath, func(t *testing.T) {
@@ -206,14 +206,14 @@ func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
 		path         string
 		reportMarker string
 	}{
-		{path: "plugins/agents/seednote.md", reportMarker: "#### 步骤 11：最终报告"},
-		{path: "plugins/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
-		{path: "plugins/agents/moments.md", reportMarker: "最终摘要包含"},
-		{path: "plugins/agents/article.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
-		{path: "plugins/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
-		{path: "plugins/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
-		{path: "plugins/agents/moments.toml", reportMarker: "最终摘要包含"},
-		{path: "plugins/agents/article.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "harness/agents/seednote.md", reportMarker: "#### 步骤 11：最终报告"},
+		{path: "harness/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "harness/agents/moments.md", reportMarker: "最终摘要包含"},
+		{path: "harness/agents/article.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
+		{path: "harness/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "harness/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
+		{path: "harness/agents/moments.toml", reportMarker: "最终摘要包含"},
+		{path: "harness/agents/article.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -322,8 +322,8 @@ func TestSeednoteRuntimeDeliveryContracts(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "seednote.md"),
-		filepath.Join(root, "plugins", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.md"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -356,7 +356,7 @@ func TestSeednoteRuntimeDeliveryContractRejectsMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Clean(filepath.Join(wd, "..", "..", "plugins", "agents", "seednote.md"))
+	path := filepath.Clean(filepath.Join(wd, "..", "..", "harness", "agents", "seednote.md"))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -462,7 +462,7 @@ func TestSeednoteFinalizationContractRejectsMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Clean(filepath.Join(wd, "..", "..", "plugins", "agents", "seednote.md"))
+	path := filepath.Clean(filepath.Join(wd, "..", "..", "harness", "agents", "seednote.md"))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

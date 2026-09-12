@@ -10,7 +10,7 @@ import (
 )
 
 func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "plugins")
+	root := filepath.Join(repoRoot(t), "harness")
 	forbidden := managedWorkspaceForbiddenPatterns()
 
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -41,7 +41,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 			}
 		}
 		pluginPath := filepath.ToSlash(relativePath)
-		if !strings.HasPrefix(pluginPath, "plugins/hooks/") && bareFailureStatePattern.Match(body) {
+		if !strings.HasPrefix(pluginPath, "harness/hooks/") && bareFailureStatePattern.Match(body) {
 			t.Errorf("%s contains a failure-state.json instruction outside canonical output/", filepath.ToSlash(relativePath))
 		}
 		return nil

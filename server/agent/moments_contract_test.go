@@ -12,7 +12,7 @@ import (
 func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	root := repositoryRoot(t)
 
-	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "moments.md"))
 	for _, want := range []string{
 		"name: moments",
 		"$TASK_ID",
@@ -35,7 +35,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "moments.toml"))
 	for _, want := range []string{
 		`name = "moments"`,
 		"skills/moments/SKILL.md",
@@ -59,7 +59,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 		}
 	}
 
-	reg := readRepoFile(t, filepath.Join(root, "plugins", "install", "agents-registration.toml"))
+	reg := readRepoFile(t, filepath.Join(root, "harness", "install", "agents-registration.toml"))
 	if !strings.Contains(reg, "[agents.moments]") {
 		t.Fatal("codex agents-registration.toml missing moments registration")
 	}
@@ -67,7 +67,7 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 
 func TestMomentsProgressHookContract(t *testing.T) {
 	root := repositoryRoot(t)
-	catalog, err := agentpack.LoadCatalog(filepath.Join(root, "plugins"))
+	catalog, err := agentpack.LoadCatalog(filepath.Join(root, "harness"))
 	if err != nil {
 		t.Fatalf("load Agent Pack catalog: %v", err)
 	}
@@ -77,8 +77,8 @@ func TestMomentsProgressHookContract(t *testing.T) {
 	}
 
 	claudePaths := []string{
-		filepath.Join(root, "plugins", "packs", "moments", "agent.claude.md"),
-		filepath.Join(root, "plugins", "agents", "moments.md"),
+		filepath.Join(root, "harness", "packs", "moments", "agent.claude.md"),
+		filepath.Join(root, "harness", "agents", "moments.md"),
 	}
 	for _, path := range claudePaths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestMomentsProgressHookContract(t *testing.T) {
 		})
 	}
 
-	codexAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.toml"))
+	codexAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "moments.toml"))
 	if !strings.Contains(codexAgent, "update_task_progress") {
 		t.Fatal("Codex moments agent must retain explicit update_task_progress")
 	}
@@ -123,7 +123,7 @@ func TestMomentsProgressHookContract(t *testing.T) {
 
 func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeAgent := readRepoFile(t, filepath.Join(root, "plugins", "agents", "moments.md"))
+	claudeAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "moments.md"))
 	if err := validateClaudeAgentFeedbackContract(
 		claudeAgent,
 		"moments",
@@ -148,10 +148,10 @@ func TestMomentsDeliveryOwnershipByPlatform(t *testing.T) {
 
 func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 	root := repositoryRoot(t)
-	claudeSkill := readRepoFile(t, filepath.Join(root, "plugins", "skills", "moments", "SKILL.md"))
-	claudeExamples := readRepoFile(t, filepath.Join(root, "plugins", "skills", "moments", "references", "examples.md"))
+	claudeSkill := readRepoFile(t, filepath.Join(root, "harness", "skills", "moments", "SKILL.md"))
+	claudeExamples := readRepoFile(t, filepath.Join(root, "harness", "skills", "moments", "references", "examples.md"))
 
-	for _, plugin := range []string{"plugins"} {
+	for _, plugin := range []string{"harness"} {
 		t.Run(plugin, func(t *testing.T) {
 			skillPath := filepath.Join(root, plugin, "skills", "moments", "SKILL.md")
 			body := readRepoFile(t, skillPath)
@@ -211,7 +211,7 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 
 func TestMomentsSkillDoesNotVendorReferenceRepository(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, plugin := range []string{"plugins"} {
+	for _, plugin := range []string{"harness"} {
 		dir := filepath.Join(root, plugin, "skills", "moments")
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

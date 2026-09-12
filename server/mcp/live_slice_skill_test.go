@@ -10,12 +10,10 @@ import (
 
 func TestLiveSliceSkillFiles(t *testing.T) {
 	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	if err != nil { t.Fatal(err) }
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
-	for _, plugin := range []string{"plugins"} {
+	for _, plugin := range []string{"harness"} {
 		skillDir := filepath.Join(root, plugin, "skills", "live-slice")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		legacyPythonHelper := "live_slice_media" + ".py"
@@ -80,7 +78,7 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 		if firstBody == "" {
 			firstBody = body
 		} else if body != firstBody {
-			t.Fatalf("live-slice SKILL.md differs between plugins")
+			t.Fatalf("live-slice SKILL.md differs between harness distributions")
 		}
 	}
 }
@@ -90,9 +88,9 @@ func TestLiveSliceSkillOwnsSemanticJSONWithoutGenerativeMCP(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	paths := []string{
-		filepath.Join(root, "plugins", "agents", "live-slicer.md"),
-		filepath.Join(root, "plugins", "agents", "live-slicer.toml"),
-		filepath.Join(root, "plugins", "skills", "live-slice", "SKILL.md"),
+		filepath.Join(root, "harness", "agents", "live-slicer.md"),
+		filepath.Join(root, "harness", "agents", "live-slicer.toml"),
+		filepath.Join(root, "harness", "skills", "live-slice", "SKILL.md"),
 	}
 	removed := []string{"recognize_live_subjects", "recognize_live_invalid_sentences", "recognize_live_segments", "complete_live_subject"}
 	required := []string{"output/invalid-sentences.json", "output/segments.json", "output/subjects.json", "output/subject-completions.json", "build_live_clip_plan", "build_live_subject_clip_plan", "analysis.json", "index", "range", "source"}
@@ -122,7 +120,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	agentPath := filepath.Join(root, "plugins", "agents", "live-slicer.md")
+	agentPath := filepath.Join(root, "harness", "agents", "live-slicer.md")
 	raw, err := os.ReadFile(agentPath)
 	if err != nil {
 		t.Fatalf("live-slicer agent missing: %v", err)
@@ -238,7 +236,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		}
 	}
 
-	claudePath := filepath.Join(root, "plugins", "docs", "plugin-development.md")
+	claudePath := filepath.Join(root, "harness", "docs", "plugin-development.md")
 	claudeRaw, err := os.ReadFile(claudePath)
 	if err != nil {
 		t.Fatalf("claudecode plugin development docs missing: %v", err)
@@ -263,8 +261,8 @@ func TestLiveSlicerAgentsUseMCPPlannedExportPaths(t *testing.T) {
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
 	for _, relativePath := range []string{
-		"plugins/agents/live-slicer.md",
-		"plugins/agents/live-slicer.toml",
+		"harness/agents/live-slicer.md",
+		"harness/agents/live-slicer.toml",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -302,7 +300,7 @@ func TestCapCutDraftSkillUsesShellJSONValidation(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	referencePath := filepath.Join(root, "plugins", "skills", "capcut-draft", "references", "operations.md")
+	referencePath := filepath.Join(root, "harness", "skills", "capcut-draft", "references", "operations.md")
 	raw, err := os.ReadFile(referencePath)
 	if err != nil {
 		t.Fatalf("capcut-draft operations reference missing: %v", err)

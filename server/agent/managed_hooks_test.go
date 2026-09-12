@@ -238,7 +238,7 @@ func TestSeednoteQualityGateSkipsNonSeednoteWithoutRuntimeWorkspaceInjection(t *
 }
 
 func TestSeednoteQualityGateDoesNotFallBackToProcessWorkingDirectory(t *testing.T) {
-	hook := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	hook := readRepoFile(t, filepath.Join(repoRoot(t), "harness", "hooks", "seednote-quality-gate.sh"))
 	for _, forbidden := range []string{"$PWD", "os.getcwd()", "CLAUDE_PROJECT_DIR:-"} {
 		if strings.Contains(hook, forbidden) {
 			t.Errorf("seednote quality gate contains forbidden CWD fallback %q", forbidden)
@@ -247,7 +247,7 @@ func TestSeednoteQualityGateDoesNotFallBackToProcessWorkingDirectory(t *testing.
 }
 
 func TestSeednoteQualityGateUsesRuntimeNodeWithoutPython(t *testing.T) {
-	hook := readRepoFile(t, filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh"))
+	hook := readRepoFile(t, filepath.Join(repoRoot(t), "harness", "hooks", "seednote-quality-gate.sh"))
 	if !strings.Contains(hook, "node <<'JS'") {
 		t.Fatal("seednote quality gate must execute with the Node runtime shipped in every Seednote image")
 	}
@@ -532,7 +532,7 @@ func TestSeednoteQualityGateRejectsNonObjectSummary(t *testing.T) {
 }
 
 func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
-	script := filepath.Join(repoRoot(t), "plugins", "scripts", "archive-seednote-workspace.sh")
+	script := filepath.Join(repoRoot(t), "harness", "scripts", "archive-seednote-workspace.sh")
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
 		t.Fatalf("archive script still exists or could not be checked: %v", err)
 	}
@@ -540,8 +540,8 @@ func TestSeednoteArchiveScriptIsRemoved(t *testing.T) {
 
 func TestSeednoteQualityGateStaysMirroredForClaudeAndCodex(t *testing.T) {
 	root := repoRoot(t)
-	claudeHook := readRepoFile(t, filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh"))
-	codexHook := readRepoFile(t, filepath.Join(root, "plugins", "hooks", "seednote-quality-gate.sh"))
+	claudeHook := readRepoFile(t, filepath.Join(root, "harness", "hooks", "seednote-quality-gate.sh"))
+	codexHook := readRepoFile(t, filepath.Join(root, "harness", "hooks", "seednote-quality-gate.sh"))
 	if codexHook != claudeHook {
 		t.Fatal("Claude and Codex seednote quality gates must stay byte-identical")
 	}
@@ -644,7 +644,7 @@ func runSeednoteQualityGate(t *testing.T, workspace string) string {
 
 func runSeednoteQualityGateInvocation(t *testing.T, workspace, input string, workspaceEnv ...string) string {
 	t.Helper()
-	script := filepath.Join(repoRoot(t), "plugins", "hooks", "seednote-quality-gate.sh")
+	script := filepath.Join(repoRoot(t), "harness", "hooks", "seednote-quality-gate.sh")
 	cmd := exec.Command("bash", script)
 	cmd.Dir = workspace
 	cmd.Env = make([]string, 0, len(os.Environ())+1)

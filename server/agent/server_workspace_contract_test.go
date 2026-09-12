@@ -13,30 +13,30 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		"server/config.example.yaml",
-		"plugins/agents/seednote.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/moments.md",
-		"plugins/agents/article.md",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
-		"plugins/skills/seednote-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-platform-specs/SKILL.md",
-		"plugins/hooks/hooks.json",
-		"plugins/README.md",
-		"plugins/docs/plugin-development.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/agents/moments.toml",
-		"plugins/agents/article.toml",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/skills/article/SKILL.md",
-		"plugins/skills/seednote-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-visual-design/SKILL.md",
-		"plugins/skills/ecommerce-platform-specs/SKILL.md",
-		"plugins/hooks/hooks.json",
-		"plugins/CODEX.md",
-		"plugins/install/agents-registration.toml",
+		"harness/agents/seednote.md",
+		"harness/agents/ecommerce.md",
+		"harness/agents/moments.md",
+		"harness/agents/article.md",
+		"harness/skills/ecommerce/SKILL.md",
+		"harness/skills/article/SKILL.md",
+		"harness/skills/seednote-visual-design/SKILL.md",
+		"harness/skills/ecommerce-visual-design/SKILL.md",
+		"harness/skills/ecommerce-platform-specs/SKILL.md",
+		"harness/hooks/hooks.json",
+		"harness/README.md",
+		"harness/docs/plugin-development.md",
+		"harness/agents/seednote.toml",
+		"harness/agents/ecommerce.toml",
+		"harness/agents/moments.toml",
+		"harness/agents/article.toml",
+		"harness/skills/ecommerce/SKILL.md",
+		"harness/skills/article/SKILL.md",
+		"harness/skills/seednote-visual-design/SKILL.md",
+		"harness/skills/ecommerce-visual-design/SKILL.md",
+		"harness/skills/ecommerce-platform-specs/SKILL.md",
+		"harness/hooks/hooks.json",
+		"harness/CODEX.md",
+		"harness/install/agents-registration.toml",
 	}
 	forbidden := []string{
 		"archive_workspace",
@@ -72,18 +72,18 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		path    string
 		outputs []string
 	}{
-		{path: "plugins/agents/article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
-		{path: "plugins/agents/article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
-		{path: "plugins/agents/seednote.md", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
-		{path: "plugins/agents/seednote.toml", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
-		{path: "plugins/agents/moments.md", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
-		{path: "plugins/agents/moments.toml", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
-		{path: "plugins/agents/ecommerce.md", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
-		{path: "plugins/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
-		{path: "plugins/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
-		{path: "plugins/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
-		{path: "plugins/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
-		{path: "plugins/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
+		{path: "harness/agents/article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "harness/agents/article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "harness/agents/seednote.md", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "harness/agents/seednote.toml", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
+		{path: "harness/agents/moments.md", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
+		{path: "harness/agents/moments.toml", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
+		{path: "harness/agents/ecommerce.md", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "harness/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
+		{path: "harness/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
+		{path: "harness/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
+		{path: "harness/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
+		{path: "harness/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 	}
 	for _, workflow := range workflowOutputs {
 		relativePath := workflow.path
@@ -110,12 +110,12 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 	}
 
 	for _, relativePath := range []string{
-		"plugins/agents/seednote.md",
-		"plugins/agents/ecommerce.md",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/ecommerce.toml",
-		"plugins/skills/ecommerce/SKILL.md",
+		"harness/agents/seednote.md",
+		"harness/agents/ecommerce.md",
+		"harness/skills/ecommerce/SKILL.md",
+		"harness/agents/seednote.toml",
+		"harness/agents/ecommerce.toml",
+		"harness/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath+"/mode-aware-progress", func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -153,8 +153,8 @@ func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 		"seednote",
 	} {
 		t.Run(agentName, func(t *testing.T) {
-			markdownPath := "plugins/agents/" + agentName + ".md"
-			tomlPath := "plugins/agents/" + agentName + ".toml"
+			markdownPath := "harness/agents/" + agentName + ".md"
+			tomlPath := "harness/agents/" + agentName + ".toml"
 			markdownOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(markdownPath))))
 			tomlOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(tomlPath))))
 			if strings.Join(markdownOutputs, "\n") != strings.Join(tomlOutputs, "\n") {
@@ -185,8 +185,8 @@ func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 func TestSeednoteNativeAgentsDeclareModeAwareImageSemantics(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
-		"plugins/agents/seednote.md",
-		"plugins/agents/seednote.toml",
+		"harness/agents/seednote.md",
+		"harness/agents/seednote.toml",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -234,10 +234,10 @@ func containsOutputPath(values []string, want string) bool {
 func TestEcommerceWorkflowsUseUnifiedInputAttachmentIndex(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
-		"plugins/agents/ecommerce.md",
-		"plugins/skills/ecommerce/SKILL.md",
-		"plugins/agents/ecommerce.toml",
-		"plugins/skills/ecommerce/SKILL.md",
+		"harness/agents/ecommerce.md",
+		"harness/skills/ecommerce/SKILL.md",
+		"harness/agents/ecommerce.toml",
+		"harness/skills/ecommerce/SKILL.md",
 	} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
@@ -257,7 +257,7 @@ func TestEcommerceWorkflowsUseUnifiedInputAttachmentIndex(t *testing.T) {
 
 func TestEcommerceProductAnalysisPreservesBootstrapInputDirectory(t *testing.T) {
 	root := repoRoot(t)
-	relativePath := "plugins/skills/ecommerce-product-analysis/SKILL.md"
+	relativePath := "harness/skills/ecommerce-product-analysis/SKILL.md"
 	body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 
 	for _, forbidden := range []string{
@@ -282,7 +282,7 @@ func TestEcommerceProductAnalysisPreservesBootstrapInputDirectory(t *testing.T) 
 
 func TestCodexOverviewDocsUseCanonicalTaskDelivery(t *testing.T) {
 	root := repoRoot(t)
-	for _, relativePath := range []string{"plugins/CODEX.md", "plugins/docs/codex-installation.md"} {
+	for _, relativePath := range []string{"harness/CODEX.md", "harness/docs/codex-installation.md"} {
 		t.Run(relativePath, func(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relativePath)))
 			seednote := lineContaining(t, body, "| `seednote` |")
@@ -416,8 +416,8 @@ func indexAfterText(body, needle string, after int) int {
 func TestArchiveWorkspaceImplementationIsAbsent(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativePath := range []string{
-		"plugins/scripts/archive-seednote-workspace.sh",
-		"plugins/scripts/archive-seednote-workspace.sh",
+		"harness/scripts/archive-seednote-workspace.sh",
+		"harness/scripts/archive-seednote-workspace.sh",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(relativePath))
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

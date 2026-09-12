@@ -10,7 +10,7 @@ import (
 
 func generatingSkillContractPaths(t *testing.T, root string) []string {
 	t.Helper()
-	skillRoot := filepath.Join(root, "plugins", "skills")
+	skillRoot := filepath.Join(root, "harness", "skills")
 	var paths []string
 	err := filepath.WalkDir(skillRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -42,14 +42,14 @@ func generatingSkillContractPaths(t *testing.T, root string) []string {
 func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"plugins/agents/article.md",
-		"plugins/agents/article.toml",
-		"plugins/agents/seednote.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/moments.md",
-		"plugins/agents/moments.toml",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/ecommerce.toml",
+		"harness/agents/article.md",
+		"harness/agents/article.toml",
+		"harness/agents/seednote.md",
+		"harness/agents/seednote.toml",
+		"harness/agents/moments.md",
+		"harness/agents/moments.toml",
+		"harness/agents/ecommerce.md",
+		"harness/agents/ecommerce.toml",
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -107,7 +107,7 @@ func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.
 		})
 	}
 
-	cover := readImageGenerationContractFile(t, filepath.Join(root, "plugins/skills/article-cover-design/SKILL.md"))
+	cover := readImageGenerationContractFile(t, filepath.Join(root, "harness/skills/article-cover-design/SKILL.md"))
 	for _, want := range []string{"crop_image(", "目标宽高", "锚点"} {
 		if !strings.Contains(cover, want) {
 			t.Fatalf("article cover skill missing explicit crop contract %q", want)
@@ -118,14 +118,14 @@ func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.
 func TestEveryDocumentedGenerateImageCallPassesAspectRatio(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"plugins/agents/article.md",
-		"plugins/agents/article.toml",
-		"plugins/agents/seednote.md",
-		"plugins/agents/seednote.toml",
-		"plugins/agents/moments.md",
-		"plugins/agents/moments.toml",
-		"plugins/agents/ecommerce.md",
-		"plugins/agents/ecommerce.toml",
+		"harness/agents/article.md",
+		"harness/agents/article.toml",
+		"harness/agents/seednote.md",
+		"harness/agents/seednote.toml",
+		"harness/agents/moments.md",
+		"harness/agents/moments.toml",
+		"harness/agents/ecommerce.md",
+		"harness/agents/ecommerce.toml",
 	}
 	paths = append(paths, generatingSkillContractPaths(t, root)...)
 	for _, rel := range paths {
@@ -178,8 +178,8 @@ func TestGeneratingSkillProseDoesNotDescribeTaskMCPSizeParameter(t *testing.T) {
 func TestEcommercePlatformGuidanceDoesNotPassFixedSizePresetsToTaskGeneration(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{
-		"plugins/skills/ecommerce-platform-specs/SKILL.md",
-		"plugins/skills/ecommerce-platform-specs/references/platforms.md",
+		"harness/skills/ecommerce-platform-specs/SKILL.md",
+		"harness/skills/ecommerce-platform-specs/references/platforms.md",
 	} {
 		t.Run(rel, func(t *testing.T) {
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
@@ -195,9 +195,9 @@ func TestEcommercePlatformGuidanceDoesNotPassFixedSizePresetsToTaskGeneration(t 
 func TestMomentsGeneratesSemanticRatioImageArtifacts(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{
-		"plugins/agents/moments.md",
-		"plugins/agents/moments.toml",
-		"plugins/skills/moments/SKILL.md",
+		"harness/agents/moments.md",
+		"harness/agents/moments.toml",
+		"harness/skills/moments/SKILL.md",
 	} {
 		t.Run(rel, func(t *testing.T) {
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
@@ -222,11 +222,11 @@ func TestImageSkillGuidanceDoesNotOverrideEffectiveRatioOrRestoreLegacyRoutes(t 
 		path  string
 		stale []string
 	}{
-		{path: "plugins/skills/article-cover-design/SKILL.md", stale: []string{"宽银幕叙事构图", "A cinematic 2.35:1 wide banner", "the 2.35:1 hero"}},
-		{path: "plugins/skills/article-visual-design/references/cover.md", stale: []string{"硬编码 900×383 / 2.35:1", "image_size=full-bleed`, `2.35:1", "A 2.35:1 horizontal image"}},
-		{path: "plugins/skills/ecommerce-visual-design/SKILL.md", stale: []string{"1:1:2K", "3:4:2K", "16:9:2K", "默认 cover 用更高质量"}},
-		{path: "plugins/skills/portrait-pose-variants/SKILL.md", stale: []string{"size=\"9:16\""}},
-		{path: "plugins/skills/short-video-cover/SKILL.md", stale: []string{"size=\"9:16\"", "size` 参数固定传 `\"9:16\"`"}},
+		{path: "harness/skills/article-cover-design/SKILL.md", stale: []string{"宽银幕叙事构图", "A cinematic 2.35:1 wide banner", "the 2.35:1 hero"}},
+		{path: "harness/skills/article-visual-design/references/cover.md", stale: []string{"硬编码 900×383 / 2.35:1", "image_size=full-bleed`, `2.35:1", "A 2.35:1 horizontal image"}},
+		{path: "harness/skills/ecommerce-visual-design/SKILL.md", stale: []string{"1:1:2K", "3:4:2K", "16:9:2K", "默认 cover 用更高质量"}},
+		{path: "harness/skills/portrait-pose-variants/SKILL.md", stale: []string{"size=\"9:16\""}},
+		{path: "harness/skills/short-video-cover/SKILL.md", stale: []string{"size=\"9:16\"", "size` 参数固定传 `\"9:16\"`"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -243,10 +243,10 @@ func TestImageSkillGuidanceDoesNotOverrideEffectiveRatioOrRestoreLegacyRoutes(t 
 func TestArticleExactCoverIsCroppedBeforeTheUploadedCoverIsSelected(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"plugins/agents/article.md",
-		"plugins/agents/article.toml",
-		"plugins/packs/article/agent.claude.md",
-		"plugins/packs/article/agent.codex.toml",
+		"harness/agents/article.md",
+		"harness/agents/article.toml",
+		"harness/packs/article/agent.claude.md",
+		"harness/packs/article/agent.codex.toml",
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -266,8 +266,8 @@ func TestArticleExactCoverIsCroppedBeforeTheUploadedCoverIsSelected(t *testing.T
 func TestImageGuidanceDoesNotDescribeImplicitPlatformCropping(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"plugins/skills/article/SKILL.md",
-		"plugins/skills/article-visual-design/references/cover.md",
+		"harness/skills/article/SKILL.md",
+		"harness/skills/article-visual-design/references/cover.md",
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
