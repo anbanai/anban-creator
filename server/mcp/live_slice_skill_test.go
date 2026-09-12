@@ -10,7 +10,9 @@ import (
 
 func TestLiveSliceSkillFiles(t *testing.T) {
 	wd, err := os.Getwd()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
 	for _, plugin := range []string{"harness"} {
@@ -85,7 +87,9 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 
 func TestLiveSliceSkillOwnsSemanticJSONWithoutGenerativeMCP(t *testing.T) {
 	wd, err := os.Getwd()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	paths := []string{
 		filepath.Join(root, "harness", "agents", "live-slicer.md"),
