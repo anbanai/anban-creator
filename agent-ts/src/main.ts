@@ -30,7 +30,7 @@ export interface RunJobDependencies {
   bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse>;
   materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
   prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
-  createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "task_id">): JobReporter;
+  createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "execution_id" | "task_id">): JobReporter;
   startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
   runClaude(config: JobConfig, data: ResolvedBootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
   uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
@@ -60,10 +60,10 @@ const defaultRunJobDependencies: RunJobDependencies = {
   bootstrap,
   materializeBootstrapFiles,
   prepareWorkspace,
-  createReporter: (config, data) => new Reporter(config, data.execution_token, data.task_id),
+  createReporter: (config, data) => new Reporter({ ...config, executionID: data.execution_id }, data.execution_token, data.task_id),
   startHeartbeat,
   runClaude: (config, data, reporter, signal) =>
-    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal, config.executionID),
+    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal),
   uploadWorkspaceArtifacts,
   subscribeShutdown: (onSignal) => {
     process.once("SIGINT", onSignal);

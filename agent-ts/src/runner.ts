@@ -173,10 +173,10 @@ export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "res
   return appendResumeContextToPrompt(data.prompt, data.resume_context_path);
 }
 
-export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal, executionID = process.env.ANBAN_EXECUTION_ID ?? ""): Promise<ExecutionResult> {
+export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller, executionID);
+  const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
   const cwd = options.cwd!;
   let logText = "";
   let initValidated = false;
@@ -224,7 +224,6 @@ export function buildQueryOptions(
   token = "test-token",
   reporter: RunnerReporter = { progress: async () => {}, stageProgress: async () => {} },
   controller = new AbortController(),
-  executionID = process.env.ANBAN_EXECUTION_ID ?? "",
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
@@ -243,7 +242,7 @@ export function buildQueryOptions(
       diagnostic,
     );
   }
-  const completionHook = createCompletionMetadataHook(cwd, data, executionID, serverURL, token, pluginRoot);
+  const completionHook = createCompletionMetadataHook(cwd, data, serverURL, token, pluginRoot);
   const composedStopHook: HookCallback = async (input, toolUseID, hookOptions) => {
     const result = await stopHook(input, toolUseID, hookOptions);
     const specific = "hookSpecificOutput" in result ? result.hookSpecificOutput as { permissionDecision?: string } : undefined;
@@ -281,8 +280,7 @@ export function buildQueryOptions(
 
 export function createCompletionMetadataHook(
   workspace: string,
-  data: Pick<ResolvedBootstrapResponse, "task_id" | "task_type" | "execution_profile">,
-  executionID: string,
+  data: Pick<ResolvedBootstrapResponse, "task_id" | "task_type" | "execution_id" | "execution_profile">,
   _serverURL: string,
   _token: string,
   pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai",
@@ -292,10 +290,17 @@ export function createCompletionMetadataHook(
     if (input.hook_event_name === "Stop" && input.stop_hook_active) return {};
     const script = `${pluginRoot}/hooks/completion-metadata.sh`;
     return await new Promise<HookJSONOutput>((resolve) => {
+      const environment = { ...process.env };
+      delete environment.ANBAN_API_KEY;
+      delete environment.ANBAN_API_URL;
+      environment.CLAUDE_PROJECT_DIR = workspace;
+      environment.ANBAN_TASK_ID = data.task_id;
+      environment.ANBAN_EXECUTION_ID = data.execution_id;
+      environment.ANBAN_TASK_TYPE = data.task_type;
       const child = spawn(script, [], {
         cwd: workspace,
         signal: hookOptions.signal as AbortSignal,
-        env: { ...process.env, CLAUDE_PROJECT_DIR: workspace, ANBAN_TASK_ID: data.task_id, ANBAN_EXECUTION_ID: executionID, ANBAN_TASK_TYPE: data.task_type },
+        env: environment,
         stdio: ["pipe", "ignore", "ignore"],
       });
       child.on("error", () => resolve({}));
@@ -468,7 +473,7 @@ function createManagedMCPBoundaryHook() {
 
 export function buildExecutionEnvironment(
   processEnvironment: NodeJS.ProcessEnv,
-  data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "execution_profile">,
+  data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "task_id" | "execution_id" | "execution_profile">,
   _serverURL: string,
   _token: string,
   workspace = "/workspace",
@@ -480,6 +485,9 @@ export function buildExecutionEnvironment(
   const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
+    ANBAN_TASK_ID: data.task_id,
+    ANBAN_EXECUTION_ID: data.execution_id,
+    ANBAN_TASK_TYPE: data.task_type,
     ...data.execution_profile.envs,
   };
   if (data.task_type === "montage") managed.ANBAN_MONTAGE_SUBMODULE_PATH = `${workspace}/openmontage`;

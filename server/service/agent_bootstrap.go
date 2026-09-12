@@ -53,6 +53,7 @@ type AgentRuntimeProfile struct {
 
 type AgentBootstrapResponse struct {
 	ExecutionToken      string              `json:"execution_token"`
+	ExecutionID         string              `json:"execution_id"`
 	TaskID              string              `json:"task_id"`
 	TaskType            string              `json:"task_type"`
 	AgentPackID         string              `json:"agent_pack_id"`
@@ -350,7 +351,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
 	return &AgentBootstrapResponse{
-		ExecutionToken: token, TaskID: task.ID, TaskType: task.Type,
+		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: task.Type,
 		AgentPackID: execution.AgentPackID, AgentPackVersion: execution.AgentPackVersion,
 		AgentPackDigest: execution.AgentPackDigest, RuntimeAdapter: execution.RuntimeAdapter, RuntimeProfile: execution.RuntimeProfile,
 		ProjectID: task.ProjectID, Prompt: prompt,

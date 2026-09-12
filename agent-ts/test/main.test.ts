@@ -48,7 +48,7 @@ const jobArgs = (workspace = "/workspace") => [
 ];
 
 const bootstrapData: ResolvedBootstrapResponse = {
-  execution_token: "execution-token", task_id: "task-1", task_type: "article",
+  execution_token: "execution-token", execution_id: "execution-1", task_id: "task-1", task_type: "article",
   agent_pack_id: "article", agent_pack_version: "1.0.0", agent_pack_digest: "0".repeat(64),
   runtime_profile: "article", runtime_adapter: "standard", project_id: "project-1", prompt: "write",
   execution_profile: {

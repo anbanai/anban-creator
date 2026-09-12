@@ -16,9 +16,10 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
+export const AGENT_RUNTIME_CONTRACT_VERSION = 1;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
-  "execution_token", "task_id", "task_type", "project_id", "prompt",
+  "execution_token", "execution_id", "task_id", "task_type", "project_id", "prompt",
   "agent_pack_id", "agent_pack_version", "agent_pack_digest", "runtime_profile", "runtime_adapter",
   "execution_profile", "max_turns", "agent_flag", "auto_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
@@ -86,6 +87,7 @@ export interface ExecutionProfile {
 
 export interface BootstrapResponse {
   execution_token: string;
+  execution_id: string;
   task_id: string;
   task_type: string;
   agent_pack_id: string;
@@ -147,6 +149,7 @@ export function resolveAgentPackForTaskType(pack: AgentPack, taskType: string): 
 
 export interface BootstrapIdentity {
   execution_token: string;
+  execution_id: string;
   task_id: string;
   project_id: string;
 }
@@ -173,7 +176,7 @@ export async function readWorkloadToken(path: string): Promise<string> {
 export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
     body: JSON.stringify({ execution_id: config.executionID }),
     signal,
     redirect: "error",
@@ -219,10 +222,11 @@ function trustedBootstrapIdentity(executionID: string, input: unknown): Bootstra
   if (!isRecord(input)) return undefined;
   const identity = {
     execution_token: input.execution_token,
+    execution_id: input.execution_id,
     task_id: input.task_id,
     project_id: input.project_id,
   };
-  if (!cleanString(identity.execution_token) || !cleanString(identity.task_id) || !cleanString(identity.project_id)) return undefined;
+  if (!cleanString(identity.execution_token) || !cleanString(identity.execution_id) || !cleanString(identity.task_id) || !cleanString(identity.project_id)) return undefined;
   try {
     validateExecutionToken(executionID, identity as BootstrapResponse);
     return identity as BootstrapIdentity;
@@ -239,9 +243,10 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     throw new Error("bootstrap response contains unknown fields");
   }
   const data = input as unknown as BootstrapResponse;
-  if (!data || !cleanString(data.execution_token) || !cleanString(data.task_id) || !cleanString(data.project_id)) {
-    throw new Error("bootstrap response identity is incomplete");
+  if (!data || !cleanString(data.execution_token) || !cleanString(data.execution_id) || !cleanString(data.task_id) || !cleanString(data.project_id)) {
+    throw new Error("bootstrap execution identity is incomplete");
   }
+  if (data.execution_id !== executionID) throw new Error("bootstrap execution identity mismatch");
   validateExecutionToken(executionID, data);
   if (!cleanString(data.task_type) || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(data.task_type)) throw new Error("bootstrap task type is invalid");
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_pack_id) || !/^\d+\.\d+\.\d+$/.test(data.agent_pack_version) || !/^[0-9a-f]{64}$/.test(data.agent_pack_digest)) throw new Error("bootstrap Agent Pack identity is invalid");
@@ -510,6 +515,7 @@ export async function readBoundedText(response: Response, limit: number, label: 
 function validateExecutionToken(executionID: string, data: BootstrapResponse): void {
   const token = data.execution_token;
   if (Buffer.byteLength(token) > MAX_EXECUTION_TOKEN_BYTES || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) throw new Error("bootstrap execution token is malformed");
+  if (data.execution_id !== executionID) throw new Error("bootstrap response identity mismatch");
   try {
     const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")) as Record<string, unknown>;
     if (claims.execution_id !== executionID || claims.task_id !== data.task_id || claims.project_id !== data.project_id) throw new Error("bootstrap response identity mismatch");

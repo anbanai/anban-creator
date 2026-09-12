@@ -133,7 +133,7 @@ export async function runLocal(
   process.once("SIGTERM", onShutdown);
   const stopHeartbeat = startHeartbeat(reporter, stderr, shutdown.signal);
   try {
-    let result = await runClaude(config.workspace, data, config.serverURL, config.executionToken, reporter, shutdown.signal, config.executionID);
+    let result = await runClaude(config.workspace, data, config.serverURL, config.executionToken, reporter, shutdown.signal);
     try {
       await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
     } catch (error) {
@@ -175,6 +175,7 @@ function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {
   if (config.model) envs.ANTHROPIC_MODEL = config.model;
   return {
     execution_token: config.executionToken,
+    execution_id: config.executionID,
     task_id: config.taskID,
     task_type: config.taskType,
     project_id: process.env.ANBAN_DEFAULT_PROJECT?.trim() || "",

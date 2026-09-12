@@ -118,6 +118,7 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 
 	req = httptest.NewRequest("POST", "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "1")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = app.Test(req)
 	if err != nil {
@@ -128,6 +129,25 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("bootstrap Cache-Control = %q, want no-store", got)
+	}
+}
+
+func TestAgentBootstrapRequiresRuntimeContractHeader(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	h := NewAgentHandler(nil, nil, &logger)
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1"}})
+	app := fiber.New()
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUpgradeRequired {
+		t.Fatalf("missing runtime contract header status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
 	}
 }
 
@@ -219,6 +239,7 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 			req.Header.Set("Authorization", "Bearer workload-token")
+			req.Header.Set("X-Anban-Agent-Contract-Version", "1")
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
@@ -247,6 +268,7 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "1")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {

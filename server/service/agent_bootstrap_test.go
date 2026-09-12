@@ -551,7 +551,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
-	if first.ExecutionToken == "" || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
+	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
 	if first.AgentPackID != "seednote" || first.AgentPackVersion != "1.0.1" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { bootstrap, executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import type { JobConfig } from "../src/config.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -31,6 +32,7 @@ const validProfileEnvs = () => ({
 const validResponse = (): BootstrapResponse => {
   const response: BootstrapResponse = {
     execution_token: tokenFor({ execution_id: "execution-1", task_id: "task-1", project_id: "project-1" }),
+    execution_id: "execution-1",
     task_id: "task-1",
     task_type: "article",
     agent_pack_id: "article",
@@ -61,6 +63,40 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
+  test("rejects a response with a missing execution ID", () => {
+    const response = validResponse() as Record<string, unknown>;
+    delete response.execution_id;
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow("execution identity is incomplete");
+  });
+
+  test("rejects a response with a mismatched execution ID", () => {
+    const response = validResponse();
+    response.execution_id = "execution-2";
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow("execution identity mismatch");
+  });
+
+  test("sends the runtime contract version header during bootstrap", async () => {
+    const originalFetch = globalThis.fetch;
+    let request: Request | undefined;
+    globalThis.fetch = (async (input, init) => {
+      request = new Request(input, init);
+      return new Response("", { status: 503 });
+    }) as typeof fetch;
+    try {
+      const config: JobConfig = {
+        serverURL: "https://creator.example.test",
+        executionID: "execution-1",
+        workspace: "/workspace",
+        workloadTokenFile: "/token",
+        allowHTTPServer: false,
+      };
+      await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("accepts and validates the frozen Agent Pack identity against the generated Catalog", async () => {
     const response = validResponse();
     const catalog = JSON.parse(await readFile(new URL("../../harness/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;

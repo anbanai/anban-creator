@@ -211,6 +211,9 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 	if h.workloadVerifier == nil || h.bootstrapper == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "agent bootstrap unavailable")
 	}
+	if strings.TrimSpace(c.Get("X-Anban-Agent-Contract-Version")) != fmt.Sprintf("%d", agentRuntimeContractVersion) {
+		return Error(c, fiber.StatusUpgradeRequired, "agent runtime contract upgrade required")
+	}
 	var req agentBootstrapRequest
 	if err := c.Bind().Body(&req); err != nil || strings.TrimSpace(req.ExecutionID) == "" {
 		return Error(c, fiber.StatusBadRequest, "execution_id is required")
@@ -462,6 +465,7 @@ type agentCompleteRequest struct {
 }
 
 const agentPackContractVersion = 3
+const agentRuntimeContractVersion = 1
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for

@@ -64,6 +64,8 @@ const finalArtifactPack: AgentPack = {
 };
 
 const validBootstrap = () => ({
+  execution_token: "execution-token",
+  execution_id: "execution-1",
   task_type: "article",
   agent_pack_id: "article",
   agent_pack_version: "1.0.0",
@@ -854,6 +856,8 @@ describe("buildExecutionEnvironment", () => {
       },
       {
         task_type: "montage",
+        task_id: "task-1",
+        execution_id: "execution-1",
         env: {
           NEW_PROVIDER_TOKEN: "future-secret",
           ANBAN_API_KEY: "montage-override",
@@ -879,6 +883,9 @@ describe("buildExecutionEnvironment", () => {
     expect(managed).toEqual(expect.objectContaining({
       NEW_PROVIDER_TOKEN: "future-secret",
       ANBAN_DEFAULT_PROJECT: "project-1",
+      ANBAN_TASK_ID: "task-1",
+      ANBAN_EXECUTION_ID: "execution-1",
+      ANBAN_TASK_TYPE: "montage",
       ANTHROPIC_AUTH_TOKEN: "runtime-token",
       ANTHROPIC_BASE_URL: "https://runtime.example.com/anthropic",
       ANTHROPIC_MODEL: "runtime-model",
@@ -888,7 +895,7 @@ describe("buildExecutionEnvironment", () => {
     expect(managed).not.toHaveProperty("ANBAN_API_URL");
     const isolated = buildExecutionEnvironment(
       { ANTHROPIC_API_KEY: "inherited-api-key", CLAUDE_CODE_USE_BEDROCK: "true", CLAUDE_CODE_USE_VERTEX: "true" },
-      { task_type: "article", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },
+      { task_type: "article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },
       "https://server.example.com",
       "execution-jwt",
     );
@@ -900,6 +907,8 @@ describe("buildExecutionEnvironment", () => {
       {
         task_type: "montage",
         env: { CLAUDE_CODE_DISABLE_THINKING: "true" },
+        task_id: "task-1",
+        execution_id: "execution-1",
         project_id: "project-1",
         execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } },
       },
@@ -952,7 +961,7 @@ describe("buildExecutionEnvironment", () => {
 
     const environment = buildExecutionEnvironment(
       inherited,
-      { task_type: "article", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "frozen-model" } } },
+      { task_type: "article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "frozen-model" } } },
       "https://server.example.com",
       "execution-jwt",
     );
