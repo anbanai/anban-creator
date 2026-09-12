@@ -264,4 +264,24 @@ describe('FilePreviewGallery', () => {
       expect(api.tasks.fetchPreviewHTML).not.toHaveBeenCalled()
     })
   })
+
+  it('does not use the task-wide HTML preview endpoint for process HTML without preview_url', async () => {
+    const processFile = fileWith({
+      id: 'legacy-process-html',
+      file_name: 'review.html',
+      mime_type: 'text/html',
+      url: '/api/v1/files/review.html',
+      preview_url: undefined,
+      is_deliverable: false,
+    })
+
+    render(<FilePreviewGallery files={[processFile]} taskId="task-1" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 review.html' }))
+
+    await waitFor(() => {
+      expect(api.tasks.fetchPreviewHTML).not.toHaveBeenCalled()
+      expect(api.tasks.previewFileBlob).not.toHaveBeenCalled()
+      expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
+    })
+  })
 })
