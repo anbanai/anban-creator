@@ -36,7 +36,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel, taskFailurePresentation } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { taskFailureMessage } from '@/lib/studio-ux'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
@@ -591,7 +591,8 @@ export default function TaskDetailPage() {
 	const canCancel = task.status === 'pending' || task.status === 'running'
 	const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
 	const canResume = task.status === 'failed' || task.status === 'cancelled'
-  const failureMessage = taskFailureMessage(task)
+  const failurePresentation = taskFailurePresentation(task)
+  const failureMessage = failurePresentation?.message || taskFailureMessage(task)
   const currentTask = task
   const snapshot = task.project_snapshot
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
@@ -745,17 +746,19 @@ export default function TaskDetailPage() {
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
                 <div className="min-w-0">
                   <h2 className="text-sm font-semibold text-foreground">
-                    {hasPreservedDelivery ? '续跑失败，历史交付已保留' : failureMessage ? '执行失败' : '任务未完成'}
+                    {hasPreservedDelivery ? '续跑失败，历史交付已保留' : failurePresentation?.title || (failureMessage ? '执行失败' : '任务未完成')}
                   </h2>
                   {hasPreservedDelivery ? (
                     <>
                       <p className="mt-1 text-sm text-muted-foreground">最新一次继续执行未完成；下方已有交付文件仍可预览和下载。</p>
                       {failureMessage && <p className="mt-1 break-words text-xs text-muted-foreground">失败原因：{failureMessage}</p>}
+                      {failurePresentation?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failurePresentation.recovery}</p>}
                     </>
                   ) : (
                     <p className="mt-1 break-words text-sm text-muted-foreground">
                       {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
                     </p>
+                    {failurePresentation?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failurePresentation.recovery}</p>}
                   )}
                 </div>
               </div>

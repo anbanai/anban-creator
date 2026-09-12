@@ -83,6 +83,22 @@ export const progressStageLabel: Record<string, string> = {
   finalize: '完成',
 }
 
+export const taskErrorLabels: Record<string, { title: string; message: string; recovery?: string }> = {
+  completion_report_failed: { title: '结果提交失败（可恢复）', message: '任务结果提交失败，但已有产物已保留。' },
+  execution_identity_unavailable: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
+  execution_identity_required: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
+  execution_identity_mismatch: { title: '执行身份不匹配', message: '当前执行身份与任务不匹配，请重新启动任务。' },
+}
+
+export function taskFailurePresentation(task: Pick<Task, 'error_message'>): { code?: string; title: string; message: string; recovery?: string; raw?: string } | null {
+  const raw = task.error_message?.trim()
+  if (!raw) return null
+  let code: string | undefined
+  try { code = (JSON.parse(raw) as { code?: string; error_code?: string }).error_code || (JSON.parse(raw) as { code?: string }).code } catch { /* plain server message */ }
+  const mapped = code ? taskErrorLabels[code] : undefined
+  return mapped ? { code, ...mapped, raw } : { message: raw, title: '执行失败', raw }
+}
+
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
