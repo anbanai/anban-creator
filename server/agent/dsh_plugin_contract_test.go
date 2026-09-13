@@ -943,23 +943,6 @@ func TestDSHDesktopProcessSupervisor(t *testing.T) {
 	}
 }
 
-func TestDSHReliabilityPlanUsesExecutableVitestRepetition(t *testing.T) {
-	body := readRepoFile(t, filepath.Join(repoRoot(t), "docs", "superpowers", "plans", "2026-08-17-dsh-plugin-reliability.md"))
-	if strings.Contains(body, "--repeat=3") {
-		t.Fatal("Vitest 4.1.8 plan command uses unsupported --repeat=3")
-	}
-	for _, want := range []string{
-		"Vitest 4.1.8",
-		"for run in 1 2 3; do",
-		"pnpm vitest run dsh/tests/preset-lock.test.ts dsh/tests/presets.test.ts dsh/tests/preset-manager.test.ts",
-		"done",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("DSH reliability plan missing executable repetition fragment %q", want)
-		}
-	}
-}
-
 func TestDSHWindowsCmdProbeUsesTheRealPlatformGate(t *testing.T) {
 	body := readRepoFile(t, filepath.Join(repoRoot(t), "harness", "dsh", "tests", "profile-smoke.test.ts"))
 	gate := "it.runIf(process.platform === 'win32')"

@@ -1254,10 +1254,6 @@ func TestDockerRuntimeContract(t *testing.T) {
 			}
 		}
 
-		obsolete := filepath.Join(root, "docs", "superpowers", "specs", "2026-04-15-persistent-docker-executor-design.md")
-		if _, err := os.Stat(obsolete); !os.IsNotExist(err) {
-			t.Errorf("superseded persistent executor design must be removed; stat error = %v", err)
-		}
 	})
 }
 

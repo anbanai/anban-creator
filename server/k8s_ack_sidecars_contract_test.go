@@ -128,8 +128,6 @@ func assertACKSeednoteRawTemplateContract(t *testing.T, raw string) {
 		"../deploy/k8s/ack-wcflink.yaml",
 		"../deploy/k8s/ack-seednote.yaml",
 		"../deploy/k8s/ack-seednote.md",
-		"../docs/superpowers/specs/2026-07-20-ack-seednote-standalone-design.md",
-		"../docs/superpowers/plans/2026-07-20-ack-seednote-standalone.md",
 	} {
 		if _, err := os.Stat(obsoletePath); err == nil {
 			t.Fatalf("obsolete standalone ACK Seednote file still exists: %s", obsoletePath)

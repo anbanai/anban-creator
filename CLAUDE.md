@@ -303,7 +303,7 @@ The public naming model is **brand + capability**:
 
 ### Unified Claude Code and Codex Plugin (`harness/`)
 
-The layout follows the same one-repository pattern used by Superpowers and ECC: shared capability content lives once, while each harness keeps its native adapter.
+The layout follows the same one-repository pattern used by ECC: shared capability content lives once, while each harness keeps its native adapter.
 
 ```
 harness/
