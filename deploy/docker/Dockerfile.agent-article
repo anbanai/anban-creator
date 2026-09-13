@@ -6,7 +6,8 @@ RUN npm ci
 COPY agent-ts/ ./
 RUN npm run build && \
     grep -Fq 'X-Anban-Agent-Contract-Version' dist/bootstrap.js && \
-    grep -Fq 'agent_runtime_upgrade_required' dist/bootstrap.js && \
+    grep -Fq 'bootstrapHTTPError' dist/bootstrap.js && \
+    grep -Fq 'error_code' dist/bootstrap.js && \
     npm prune --omit=dev && \
     test -d node_modules/@anthropic-ai/claude-agent-sdk
 

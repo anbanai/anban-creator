@@ -168,7 +168,8 @@ func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
 	text := string(raw)
 	for _, required := range []string{
 		`grep -Fq 'X-Anban-Agent-Contract-Version' dist/bootstrap.js`,
-		`grep -Fq 'agent_runtime_upgrade_required' dist/bootstrap.js`,
+		`grep -Fq 'bootstrapHTTPError' dist/bootstrap.js`,
+		`grep -Fq 'error_code' dist/bootstrap.js`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("Article Dockerfile missing managed bootstrap verification %q", required)
