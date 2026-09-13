@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -184,5 +187,40 @@ func TestMigrateChannelsToProjects_FreshInstallIsNoOp(t *testing.T) {
 	}
 	if db.Migrator().HasTable("channels") || db.Migrator().HasTable("projects") {
 		t.Error("fresh install should not create projects or leave channels")
+	}
+}
+
+func TestMigrateProjectFKColumn_MySQLMissingTableIsNoOp(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      sqlDB,
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open mysql mock: %v", err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT DATABASE()")).
+		WillReturnRows(sqlmock.NewRows([]string{"database"}).AddRow("creator"))
+	mock.ExpectQuery(regexp.QuoteMeta(
+		"SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE ? ORDER BY SCHEMA_NAME=? DESC,SCHEMA_NAME limit 1",
+	)).WithArgs("creator%", "creator").
+		WillReturnRows(sqlmock.NewRows([]string{"SCHEMA_NAME"}).AddRow("creator"))
+	mock.ExpectQuery(regexp.QuoteMeta(
+		"SELECT count(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ? AND table_type = ?",
+	)).WithArgs("creator", "image_generations", "BASE TABLE").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	log := zerolog.Nop()
+	if err := migrateProjectFKColumn(context.Background(), db, &log, "image_generations", true); err != nil {
+		t.Fatalf("missing legacy table should be ignored: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mysql migration expectations: %v", err)
 	}
 }

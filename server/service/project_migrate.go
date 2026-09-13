@@ -94,6 +94,9 @@ func MigrateChannelsToProjects(ctx context.Context, db *gorm.DB, log *zerolog.Lo
 // exist we rename the column in place, preserving its definition.
 func migrateProjectFKColumn(ctx context.Context, db *gorm.DB, log *zerolog.Logger, table string, notNull bool) error {
 	m := db.Migrator()
+	if !m.HasTable(table) {
+		return nil
+	}
 
 	hasChannelID, err := columnExists(m, table, "channel_id")
 	if err != nil {
