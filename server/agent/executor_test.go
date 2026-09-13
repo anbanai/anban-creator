@@ -113,6 +113,27 @@ func TestBuildAppConfig(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "article portrait reference is cover only",
+			ch: &model.Project{
+				Platform: model.ScopeArticle,
+				Name:     "Portrait Account",
+			},
+			wantErr:      false,
+			hasReference: true,
+			check: func(t *testing.T, cfg map[string]any) {
+				wechat := cfg["wechat"].(map[string]any)
+				article := wechat["article"].(map[string]any)
+				cover := article["cover"].(map[string]any)["image"].(map[string]any)
+				content := article["content"].(map[string]any)["image"].(map[string]any)
+				if cover["refer"] != TaskReferenceImagePath {
+					t.Fatalf("article cover refer = %v, want %q", cover["refer"], TaskReferenceImagePath)
+				}
+				if content["refer"] != nil {
+					t.Fatalf("article content refer = %v, want nil", content["refer"])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

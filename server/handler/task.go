@@ -324,13 +324,13 @@ func trustedTaskCreationProjectReference(source *model.Task, assetID string) boo
 		assetID == strings.TrimSpace(source.ProjectSnapshot.Data().ReferenceImageAssetID)
 }
 
-func taskCreationReferencePurposes(source *model.Task, selection service.ReferenceImageSelection) []string {
+func taskCreationReferencePurposes(source *model.Task, selection service.ReferenceImageSelection, targetPlatform string) []string {
 	allowed := []string{service.DirectUploadPurposeTaskReference}
 	assetID := strings.TrimSpace(selection.AssetID)
 	if source != nil && assetID != "" && assetID == strings.TrimSpace(source.ReferenceImageAssetID) {
 		allowed = append(allowed, service.DirectUploadPurposeAIEntryAttachment)
 	}
-	if trustedTaskCreationProjectReference(source, assetID) {
+	if targetPlatform != model.PlatformArticle && trustedTaskCreationProjectReference(source, assetID) {
 		allowed = append(allowed, service.DirectUploadPurposeProjectReference)
 	}
 	return allowed
@@ -453,7 +453,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		if h.referenceAssets == nil {
 			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
-		allowed := taskCreationReferencePurposes(source, *req.ReferenceImage)
+		allowed := taskCreationReferencePurposes(source, *req.ReferenceImage, project.Platform)
 		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, allowed)
 		if err != nil {
 			return nil, respondReferenceAssetError(c, h.logger, err)

@@ -189,6 +189,45 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
   })
 
+  it('keeps the article plan portrait opt-in and submits the uploaded reference', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '22222222-2222-4222-8222-222222222222',
+      uploadId: 'plan-portrait-upload',
+      key: 'uploads/pending/plan-portrait.png',
+      publicUrl: '',
+      previewUrl: '',
+      contentType: 'image/png',
+      size: 8,
+    })
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('switch', { name: '使用人物图' }))
+    fireEvent.change(within(dialog).getByLabelText('参考图文件'), {
+      target: { files: [new File(['portrait'], 'plan-portrait.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'task_reference' })))
+    fireEvent.submit(document.getElementById('plan-form')!)
+
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      reference_image: { upload_session_id: '22222222-2222-4222-8222-222222222222' },
+    })))
+  })
+
+  it('shows a field error when a plan portrait is enabled without an upload', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    fireEvent.click(within(dialog).getByRole('switch', { name: '使用人物图' }))
+    fireEvent.submit(document.getElementById('plan-form')!)
+
+    expect(await within(dialog).findByText('请上传封面人物图')).toBeInTheDocument()
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')

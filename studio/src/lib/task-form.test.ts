@@ -494,9 +494,9 @@ describe('task form mapping', () => {
       has_tail_image: false,
       article_with_cover: false,
       article_with_content_images: false,
-      reference_image: { asset_id: 'asset-1' },
+      reference_image: type === 'article' ? null : { asset_id: 'asset-1' },
       input_attachments: [
-        { type: 'image', asset_id: 'asset-1', file_name: 'reference.png', content_type: 'image/png', size: 10 },
+        ...(type === 'article' ? [] : [{ type: 'image' as const, asset_id: 'asset-1', file_name: 'reference.png', content_type: 'image/png', size: 10 }]),
         { type: 'document', key: 'keep', role: 'brief', instruction: 'use this' },
       ],
       ...platformFields,
@@ -726,5 +726,66 @@ describe('task form mapping', () => {
       skip_reference_image: true,
       reference_image: null,
     })
+  })
+
+  it('submits an article portrait only when the portrait parameter is enabled', () => {
+    const reference = { asset_id: '11111111-1111-4111-8111-111111111111' } as const
+    const enabled = {
+      ...createTaskFormDefaults(project({ platform: 'article' })),
+      article_use_portrait: true,
+      reference_image: reference,
+    }
+    const disabled = {
+      ...enabled,
+      article_use_portrait: false,
+    }
+
+    expect(taskFormValuesToRequest(enabled).reference_image).toEqual(reference)
+    expect(taskFormValuesToRequest(disabled)).not.toHaveProperty('reference_image')
+  })
+
+  it('does not restore or submit an article portrait when cover generation is disabled', () => {
+    const reference = { asset_id: '11111111-1111-4111-8111-111111111111' } as const
+    const cloned = cloneTaskFormDefaults(task({
+      type: 'article',
+      article_with_cover: false,
+      reference_image: {
+        ...reference,
+        file_name: 'portrait.png',
+        content_type: 'image/png',
+        size: 8,
+        download_url: 'https://cdn.example/portrait.png',
+        download_expires_at: '2026-09-13T12:00:00Z',
+      },
+    }))
+    const request = taskFormValuesToRequest({
+      ...createTaskFormDefaults(project({ platform: 'article' })),
+      article_with_cover: false,
+      article_use_portrait: true,
+      reference_image: reference,
+    })
+
+    expect(cloned.article_use_portrait).toBe(false)
+    expect(request).not.toHaveProperty('reference_image')
+  })
+
+  it('keeps a cloned article portrait out of general input attachments', () => {
+    const cloned = cloneTaskFormDefaults(task({
+      type: 'article',
+      article_with_cover: true,
+      input_attachments: [{ type: 'document', key: 'brief', role: 'brief' }],
+      reference_image: {
+        asset_id: '11111111-1111-4111-8111-111111111111',
+        file_name: 'portrait.png',
+        content_type: 'image/png',
+        size: 8,
+        download_url: 'https://cdn.example/portrait.png',
+        download_expires_at: '2026-09-13T12:00:00Z',
+      },
+    }))
+
+    expect(cloned.article_use_portrait).toBe(true)
+    expect(cloned.reference_image).toEqual({ asset_id: '11111111-1111-4111-8111-111111111111' })
+    expect(cloned.input_attachments).toEqual([{ type: 'document', key: 'brief', role: 'brief' }])
   })
 })

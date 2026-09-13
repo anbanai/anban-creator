@@ -4,7 +4,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Loader2, Images } from 'lucide-react'
+import { Plus, FileText, Stamp, Loader2, Images, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -49,6 +49,8 @@ import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameter
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
+import { explicitlyRejectsReferenceImages } from '@/lib/image-capability'
 
 function isPlanType(value: string | undefined): value is PlanType {
   return value === 'seednote' || value === 'article' || value === 'montage'
@@ -65,6 +67,9 @@ function planToFormValues(plan: Plan): PlanFormValues {
     image_ratio: normalizeImageRatio(plan.image_ratio),
     skip_reference_image: plan.skip_reference_image || false,
     reference_image: plan.reference_image ?? null,
+    article_use_portrait: plan.type === 'article'
+      && plan.article_with_cover !== false
+      && Boolean(plan.reference_image),
     input_attachments: plan.input_attachments ?? [],
     agent_input: plan.agent_input ?? {},
     watermark: plan.watermark || false,
@@ -106,6 +111,7 @@ export default function PlansPage() {
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const [montageUploading, setMontageUploading] = useState(false)
+  const [portraitUploading, setPortraitUploading] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const [scheduleValid, setScheduleValid] = useState(true)
   const { submit } = useSubmitLock()
@@ -127,6 +133,7 @@ export default function PlansPage() {
       image_capability_key: '',
       image_ratio: 'auto',
       reference_image: null,
+      article_use_portrait: false,
       input_attachments: [],
       agent_input: {},
       has_content_image: true,
@@ -176,6 +183,7 @@ export default function PlansPage() {
 	const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' })
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
+	const articleUsePortrait = useWatch({ control: form.control, name: 'article_use_portrait' }) ?? false
 	const isMontagePlan = watchedType === 'montage'
 	const usesImageSettings = true
 	const {
@@ -202,6 +210,8 @@ export default function PlansPage() {
 				? '正在加载图像能力，请稍候。'
 				: imageCapabilityUnavailable
 					? '当前图像能力不可用，请重新选择。'
+					: watchedType === 'article' && articleUsePortrait && explicitlyRejectsReferenceImages(selectedImageCapability)
+						? '当前图像能力不支持人物参考，请更换图像能力。'
 					: null
 	const selectedAgentPack = useMemo(
 		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
@@ -382,6 +392,7 @@ export default function PlansPage() {
     scheduleManuallyChangedRef.current = false
     setRecommendationUnavailable(false)
     setMontageUploading(false)
+    setPortraitUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -396,6 +407,7 @@ export default function PlansPage() {
       image_capability_key: '',
       image_ratio: normalizeImageRatio(selectedIntentProject?.image_ratio),
       reference_image: null,
+      article_use_portrait: false,
       input_attachments: [],
       agent_input: {},
       has_content_image: true,
@@ -435,6 +447,7 @@ export default function PlansPage() {
     setRecommendationUnavailable(false)
     setAttachmentSubmitError('')
     setMontageUploading(false)
+    setPortraitUploading(false)
     form.reset(planToFormValues(plan))
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -456,6 +469,7 @@ export default function PlansPage() {
     setShowDirtyDialog(false)
     setEditingPlan(null)
     setMontageUploading(false)
+    setPortraitUploading(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -470,6 +484,7 @@ export default function PlansPage() {
       image_capability_key: '',
 		image_ratio: 'auto',
       reference_image: null,
+      article_use_portrait: false,
       input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
@@ -528,6 +543,9 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
+      ...(values.type === 'article'
+        ? { reference_image: values.article_with_cover && values.article_use_portrait ? values.reference_image : null }
+        : {}),
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -539,7 +557,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
+    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontagePlan && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -566,6 +584,8 @@ export default function PlansPage() {
         form.setValue('type', nextType, { shouldDirty: true })
         form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
         form.setValue('agent_input', {}, { shouldDirty: true })
+        form.setValue('article_use_portrait', false, { shouldDirty: true })
+        form.setValue('reference_image', null, { shouldDirty: true })
         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
       }}
       ariaLabel={selectedProject ? `项目：${selectedProject.name}` : '项目：未选择'}
@@ -919,16 +939,57 @@ export default function PlansPage() {
                           <div className="flex items-center justify-between py-2">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-foreground">封面图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">公众号头图（900×383，作为发布草稿封面）</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">按任务比例生成，保护微信中心分享卡安全区</p>
                             </div>
-                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                            <Switch aria-label="生成封面图" checked={!!field.value} onCheckedChange={(checked) => {
+                              field.onChange(checked)
+                              if (!checked) {
+                                form.setValue('article_use_portrait', false, { shouldDirty: true })
+                                form.setValue('reference_image', null, { shouldDirty: true })
+                              }
+                            }} />
+                          </div>
+                          <div className="py-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground">使用人物图</p>
+                                  <p className="mt-0.5 text-xs text-muted-foreground">每次生成封面时使用，不传给正文配图</p>
+                                </div>
+                              </div>
+                              <Switch
+                                aria-label="使用人物图"
+                                checked={articleUsePortrait}
+                                disabled={!field.value}
+                                onCheckedChange={(checked) => {
+                                  form.setValue('article_use_portrait', checked, { shouldDirty: true, shouldValidate: true })
+                                  if (!checked) form.setValue('reference_image', null, { shouldDirty: true, shouldValidate: true })
+                                }}
+                              />
+                            </div>
+                            {articleUsePortrait ? (
+                              <FormField control={form.control} name="reference_image" render={({ field: referenceField }) => (
+                                <FormItem className="mt-3">
+                                  <div className="flex justify-end">
+                                    <ReferenceAssetUpload
+                                      value={referenceField.value ?? null}
+                                      onChange={referenceField.onChange}
+                                      purpose="task_reference"
+                                      onUploadingChange={setPortraitUploading}
+                                    />
+                                  </div>
+                                  <FormMessage />
+                                </FormItem>
+                              )} />
+                            ) : null}
                           </div>
                           <div className="flex items-center justify-between py-2">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-foreground">正文配图</p>
                               <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
                             </div>
-                            <Switch checked={!!withContent} onCheckedChange={(v) => form.setValue('article_with_content_images', v, { shouldDirty: true })} />
+                            <Switch aria-label="生成正文配图" checked={!!withContent} onCheckedChange={(v) => form.setValue('article_with_content_images', v, { shouldDirty: true })} />
                           </div>
                         </div>
                         <p className="mt-2 text-xs text-muted-foreground">{summary}</p>
@@ -993,6 +1054,7 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
+                || portraitUploading
                 || (isMontagePlan && montageUploading)}
             >
               {editingPlan ? '更新' : '创建'}

@@ -10,6 +10,7 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   has_tail_image: boolean
   article_with_cover: boolean
   article_with_content_images: boolean
+  article_use_portrait: boolean
 }
 
 function cloneValue<T>(value: T): T {
@@ -43,6 +44,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     image_capability_key: defaults.imageCapabilityKey,
     skip_reference_image: false,
     reference_image: null,
+    article_use_portrait: false,
     input_attachments: [],
     agent_input: {},
     watermark: false,
@@ -102,6 +104,7 @@ export function switchTaskFormDefaults(
     quantity: current.quantity,
     skip_reference_image: current.skip_reference_image,
     reference_image: cloneValue(current.reference_image),
+    article_use_portrait: current.article_use_portrait,
     input_attachments: cloneValue(current.input_attachments),
     watermark: current.watermark,
     montage_input: projectMontageInput(project, current.prompt),
@@ -114,11 +117,15 @@ function taskReferenceSelection(task: Task): ReferenceImageSelection | null {
 
 export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
   const ecommerce = task.ecommerce
+  const directReference = task.reference_image
+  const articleUsesPortrait = task.type === 'article'
+    && task.article_with_cover !== false
+    && directReference != null
+    && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id
   const clonedAttachments = (task.input_attachments ?? [])
     .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
     .map((attachment) => cloneValue(attachment))
-  const directReference = task.reference_image
-  if (directReference && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id) {
+  if (task.type !== 'article' && directReference && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id) {
     const withoutDuplicate = clonedAttachments.filter((attachment) => attachment.asset_id !== directReference.asset_id)
     clonedAttachments.splice(0, clonedAttachments.length, {
       type: 'image', asset_id: directReference.asset_id, file_name: directReference.file_name,
@@ -133,10 +140,11 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     topic: task.topic,
     prompt: task.prompt,
     quantity: 1,
-	image_ratio: (task.image_ratio || 'auto') as TaskFormDefaults['image_ratio'],
-	image_capability_key: task.image_capability_key ?? '',
+    image_ratio: (task.image_ratio || 'auto') as TaskFormDefaults['image_ratio'],
+    image_capability_key: task.image_capability_key ?? '',
     skip_reference_image: task.skip_reference_image ?? false,
-    reference_image: taskReferenceSelection(task),
+    reference_image: task.type === 'article' && !articleUsesPortrait ? null : taskReferenceSelection(task),
+    article_use_portrait: articleUsesPortrait,
     input_attachments: clonedAttachments,
     agent_input: cloneValue(task.agent_input ?? {}),
     watermark: task.watermark ?? false,
@@ -177,10 +185,14 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
     prompt,
     project_id: values.project_id,
     quantity: values.quantity,
-	image_ratio: values.image_ratio,
-	image_capability_key: values.image_capability_key || undefined,
+    image_ratio: values.image_ratio,
+    image_capability_key: values.image_capability_key || undefined,
     skip_reference_image: values.skip_reference_image,
-    ...(values.skip_reference_image ? { reference_image: null } : {}),
+    ...(values.type === 'article'
+      ? values.article_with_cover && values.article_use_portrait
+        ? { reference_image: values.reference_image }
+        : {}
+      : values.skip_reference_image ? { reference_image: null } : {}),
     input_attachments: cloneValue(values.input_attachments),
     agent_input: cloneValue(values.agent_input),
     watermark: values.watermark,

@@ -285,6 +285,87 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
   })
 
+  it('keeps the article portrait opt-in and submits the uploaded reference', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '11111111-1111-4111-8111-111111111111',
+      uploadId: 'portrait-upload',
+      key: 'uploads/pending/portrait.png',
+      publicUrl: '',
+      previewUrl: '',
+      contentType: 'image/png',
+      size: 8,
+    })
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
+    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
+    fireEvent.click(portraitSwitch)
+    fireEvent.change(within(dialog).getByLabelText('参考图文件'), {
+      target: { files: [new File(['portrait'], 'portrait.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'task_reference' })))
+    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '使用作者人物图生成文章封面' },
+    })
+    fireEvent.submit(document.getElementById('task-create-form')!)
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      reference_image: { upload_session_id: '11111111-1111-4111-8111-111111111111' },
+    })))
+  })
+
+  it('shows a field error when an article portrait is enabled without an upload', async () => {
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    fireEvent.click(await within(dialog).findByRole('switch', { name: '使用人物图' }))
+    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '使用作者人物图生成文章封面' },
+    })
+    fireEvent.submit(document.getElementById('task-create-form')!)
+
+    expect(await within(dialog).findByText('请上传封面人物图')).toBeInTheDocument()
+    expect(api.tasks.create).not.toHaveBeenCalled()
+  })
+
+  it('clears the article portrait when cover generation is turned off', async () => {
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
+
+    expect(portraitSwitch).toHaveAttribute('aria-checked', 'false')
+    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
+    fireEvent.click(portraitSwitch)
+    expect(within(dialog).getByLabelText('参考图文件')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
+
+    expect(portraitSwitch).toHaveAttribute('aria-disabled', 'true')
+    expect(portraitSwitch).toHaveAttribute('aria-checked', 'false')
+    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
+  })
+
+  it('blocks an article portrait when the selected image capability has no reference slots', async () => {
+    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
+      tier: 'pro',
+      default_capability: 'standard',
+      items: [{
+        key: 'standard',
+        display_name: '标准图像',
+        enabled: true,
+        price_available: true,
+        generation_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: true, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
+      }],
+    })
+    renderDialog()
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    fireEvent.click(await within(dialog).findByRole('switch', { name: '使用人物图' }))
+
+    expect(within(dialog).getByText('当前图像能力不支持人物参考，请更换图像能力。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+
   it('在任务创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {
     const createView = renderDialog({ initialProjectId: fixtures.seednoteProject.id })
     const createDialog = await screen.findByRole('dialog', { name: '新建任务' })
@@ -582,7 +663,7 @@ describe('TaskFormDialog', () => {
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目'))
     expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('复制后的完整创作要求')
     expect(await findImageSettings(dialog, '16:9 · 源图像')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '预览 reference.png' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '预览 reference.png' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '预览 keep.pdf' })).toBeInTheDocument()
     expect(within(dialog).queryByText('resume.txt')).not.toBeInTheDocument()
     expect(within(dialog).getByText('仅生成正文配图；发布草稿不设封面')).toBeInTheDocument()
@@ -608,11 +689,6 @@ describe('TaskFormDialog', () => {
       article_with_cover: false,
       article_with_content_images: true,
       input_attachments: [
-        expect.objectContaining({
-          type: 'image',
-          asset_id: '11111111-1111-4111-8111-111111111111',
-          file_name: 'reference.png',
-        }),
         expect.objectContaining({ upload_id: 'keep-upload', key: 'uploads/pending/keep.pdf' }),
       ],
     })))
@@ -725,7 +801,7 @@ describe('TaskFormDialog', () => {
           display_name: '源图像',
           enabled: true,
           price_available: true,
-          generation_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: false, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
+          generation_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 1, supports_reference: true, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
         },
       ],
     })

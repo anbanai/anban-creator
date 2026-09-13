@@ -69,16 +69,32 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 
 	if cloneParams.Overrides != nil {
 		override := cloneParams.Overrides
+		destinationProject, err := s.ResolveTaskCreationProject(ctx, src.UserID, override.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		attachments := cloneEntryAttachments(override.InputAttachments)
 		referenceAssetID := strings.TrimSpace(override.ReferenceImageAssetID)
-		if referenceAssetID == "" {
-			referenceAssetID = strings.TrimSpace(src.ReferenceImageAssetID)
+		preserveArticleReference := destinationProject.Platform == model.PlatformArticle
+		if preserveArticleReference {
+			attachments = removeAttachmentAsset(attachments, referenceAssetID)
+			if override.ArticleWithCover != nil && !*override.ArticleWithCover {
+				referenceAssetID = ""
+			}
+		} else {
+			if referenceAssetID == "" {
+				referenceAssetID = strings.TrimSpace(src.ReferenceImageAssetID)
+			}
 		}
-		if referenceAssetID != strings.TrimSpace(src.ProjectSnapshot.Data().ReferenceImageAssetID) {
+		if !preserveArticleReference && referenceAssetID != strings.TrimSpace(src.ProjectSnapshot.Data().ReferenceImageAssetID) {
 			attachments, err = s.prependVerifiedReferenceAttachment(ctx, src.UserID, referenceAssetID, attachments)
 			if err != nil {
 				return nil, err
 			}
+		}
+		preservedReferenceAssetID := ""
+		if preserveArticleReference {
+			preservedReferenceAssetID = referenceAssetID
 		}
 		params := CreateManualParams{
 			UserID:                   src.UserID,
@@ -89,6 +105,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			ImageRatio:               override.ImageRatio,
 			ImageCapabilityKey:       override.ImageCapabilityKey,
 			SkipRefImage:             override.SkipRefImage,
+			ReferenceImageAssetID:    preservedReferenceAssetID,
 			InputSourceTaskID:        inputSourceTaskID,
 			InputSourceProjectID:     inputSourceProjectID,
 			InputAttachments:         attachments,
@@ -136,6 +153,13 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if err != nil {
 		return nil, err
 	}
+	preservedReferenceAssetID := ""
+	if src.Type == model.PlatformArticle {
+		directReferenceAssetID := strings.TrimSpace(src.ReferenceImageAssetID)
+		if (src.ArticleWithCover == nil || *src.ArticleWithCover) && directReferenceAssetID != strings.TrimSpace(snapshot.ReferenceImageAssetID) {
+			preservedReferenceAssetID = directReferenceAssetID
+		}
+	}
 	params := CreateManualParams{
 		UserID:                        src.UserID,
 		ProjectID:                     src.ProjectID,
@@ -148,6 +172,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ImageCapabilityKey:            src.ImageCapabilityKey,
 		frozenImageCapabilitySnapshot: ptrImageCapabilitySnapshot(src.ImageCapabilitySnapshot.Data()),
 		SkipRefImage:                  &skipRef,
+		ReferenceImageAssetID:         preservedReferenceAssetID,
 		InputSourceTaskID:             inputSourceTaskID,
 		InputSourceProjectID:          inputSourceProjectID,
 		Overrides:                     &overrides,
@@ -174,9 +199,13 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
-	params.InputAttachments, err = s.prependClonedReferenceAttachment(ctx, src, params.InputAttachments)
-	if err != nil {
-		return nil, err
+	if src.Type == model.PlatformArticle {
+		params.InputAttachments = removeAttachmentAsset(params.InputAttachments, src.ReferenceImageAssetID)
+	} else {
+		params.InputAttachments, err = s.prependClonedReferenceAttachment(ctx, src, params.InputAttachments)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()
@@ -199,6 +228,20 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		Str("new_task_id", tasks[0].ID).
 		Msg("task cloned as new task")
 	return tasks, nil
+}
+
+func removeAttachmentAsset(attachments []model.EntryAttachment, rawAssetID string) []model.EntryAttachment {
+	assetID := strings.TrimSpace(rawAssetID)
+	if assetID == "" {
+		return attachments
+	}
+	filtered := make([]model.EntryAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.AssetID) != assetID {
+			filtered = append(filtered, attachment)
+		}
+	}
+	return filtered
 }
 
 func ptrImageCapabilitySnapshot(snapshot model.ImageCapabilitySnapshot) *model.ImageCapabilitySnapshot {

@@ -123,6 +123,7 @@ export const createTaskSchema = z.object({
   image_capability_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
+  article_use_portrait: z.boolean().default(false),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
@@ -199,6 +200,22 @@ export const createTaskSchema = z.object({
     }
   }
 
+  if (data.type === "article" && data.article_use_portrait && !data.reference_image) {
+    ctx.addIssue({
+      code: "custom",
+      message: "请上传封面人物图",
+      path: ["reference_image"],
+    })
+  }
+
+  if (data.type === "article" && data.article_use_portrait && !data.article_with_cover) {
+    ctx.addIssue({
+      code: "custom",
+      message: "开启封面图后才能使用人物图",
+      path: ["article_use_portrait"],
+    })
+  }
+
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
@@ -212,6 +229,7 @@ export const planSchema = z.object({
   image_ratio: imageRatioSchema.default('auto'),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
+  article_use_portrait: z.boolean().default(false),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
@@ -226,6 +244,22 @@ export const planSchema = z.object({
   article_with_content_images: z.boolean().default(true),
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
+  if (data.type === "article" && data.article_use_portrait && !data.reference_image) {
+    ctx.addIssue({
+      code: "custom",
+      message: "请上传封面人物图",
+      path: ["reference_image"],
+    })
+  }
+
+  if (data.type === "article" && data.article_use_portrait && !data.article_with_cover) {
+    ctx.addIssue({
+      code: "custom",
+      message: "开启封面图后才能使用人物图",
+      path: ["article_use_portrait"],
+    })
+  }
+
   if (data.type === "montage") {
     const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {

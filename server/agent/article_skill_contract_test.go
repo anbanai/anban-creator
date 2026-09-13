@@ -171,9 +171,10 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 			}
 			text := string(data)
 			for _, term := range []string{
-				"封面关·配图开",
+				"封面关闭",
+				"人物参考启用",
 				"不传",
-				"链到首张已生成图",
+				"文本风格块",
 				"不存在的 `output/cover.png`",
 			} {
 				if !strings.Contains(text, term) {

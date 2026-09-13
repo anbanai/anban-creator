@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
@@ -117,7 +117,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "3ad27f3b01fa93b7ccc74d2d20bc4c99b6387f0d35a5e5834d6488e06d072ac1"
+      "digest": "bed9cb76610530eb9c040ea1ad0a8c3c9fe5bdeb6d20ca71e671e342fd13da3a"
     },
     {
       "id": "ecommerce",

@@ -163,7 +163,6 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 		switch ch.Platform {
 		case model.ScopeArticle:
 			cfg.Wechat.Article.Cover.Image.Refer = TaskReferenceImagePath
-			cfg.Wechat.Article.Content.Image.Refer = TaskReferenceImagePath
 		case model.ScopeSeednote:
 			cfg.Seednote.Cover.Image.Refer = TaskReferenceImagePath
 			cfg.Seednote.Content.Image.Refer = TaskReferenceImagePath

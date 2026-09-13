@@ -1178,7 +1178,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 }
 
-func TestCloneConvertsDirectReferenceToPrependedAttachment(t *testing.T) {
+func TestCloneArticlePreservesDirectReferenceOutsideGenericAttachments(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1205,17 +1205,14 @@ func TestCloneConvertsDirectReferenceToPrependedAttachment(t *testing.T) {
 		t.Fatalf("Clone: %v", err)
 	}
 	clone := clones[0]
-	if clone.ReferenceImageAssetID != "" {
-		t.Fatalf("clone reference asset = %q, want empty", clone.ReferenceImageAssetID)
+	if clone.ReferenceImageAssetID != asset.ID {
+		t.Fatalf("clone reference asset = %q, want %q", clone.ReferenceImageAssetID, asset.ID)
 	}
 	attachments := clone.InputAttachments.Data()
-	if len(attachments) != 3 {
-		t.Fatalf("clone attachments = %#v, want reference plus two materials", attachments)
+	if len(attachments) != 2 {
+		t.Fatalf("clone attachments = %#v, want only the two generic materials", attachments)
 	}
-	if attachments[0].AssetID != asset.ID || attachments[0].Type != "image" || attachments[0].FileName != asset.FileName || attachments[0].ContentType != asset.ContentType || attachments[0].Size != asset.Size {
-		t.Fatalf("first attachment = %#v, want canonical asset material", attachments[0])
-	}
-	if attachments[1].FileName != "brief.md" || attachments[2].FileName != "notes.txt" {
+	if attachments[0].FileName != "brief.md" || attachments[1].FileName != "notes.txt" {
 		t.Fatalf("existing material order changed: %#v", attachments)
 	}
 }
@@ -1224,13 +1221,13 @@ func TestCloneDoesNotDuplicateDirectReferenceAttachment(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
@@ -1313,13 +1310,13 @@ func TestCloneMovesDuplicateReferenceAttachmentToFront(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
@@ -1349,11 +1346,11 @@ func TestCloneRemovesAllDuplicateReferenceAttachmentsPreservingFirstInstruction(
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
 	source.SetInputAttachments([]model.EntryAttachment{
 		{AssetID: asset.ID, Type: "document", Instruction: "first instruction", FileName: "forged-a.pdf"},
 		{Type: "text", FileName: "brief.txt"},
@@ -1378,11 +1375,11 @@ func TestCloneAcceptsHistoricalAIEntryReferenceAsset(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeAIEntryAttachment)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard"}
 	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
@@ -1393,7 +1390,7 @@ func TestCloneAcceptsHistoricalAIEntryReferenceAsset(t *testing.T) {
 	}
 }
 
-func TestCloneEditableOverridesConvertReferenceToPrependedAttachment(t *testing.T) {
+func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttachments(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1425,11 +1422,49 @@ func TestCloneEditableOverridesConvertReferenceToPrependedAttachment(t *testing.
 	}
 	clone := clones[0]
 	attachments := clone.InputAttachments.Data()
-	if clone.ReferenceImageAssetID != "" {
-		t.Fatalf("clone reference asset = %q, want empty", clone.ReferenceImageAssetID)
+	if clone.ReferenceImageAssetID != asset.ID {
+		t.Fatalf("clone reference asset = %q, want %q", clone.ReferenceImageAssetID, asset.ID)
 	}
-	if len(attachments) != 3 || attachments[0].AssetID != asset.ID || attachments[0].Type != "image" || attachments[1].FileName != "brief.pdf" || attachments[2].FileName != "notes.txt" {
+	if len(attachments) != 2 || attachments[0].FileName != "brief.pdf" || attachments[1].FileName != "notes.txt" {
 		t.Fatalf("clone attachments = %#v", attachments)
+	}
+}
+
+func TestCloneArticleEditableOverridesCanClearDirectReference(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
+	seedReferenceAsset(t, repo, asset)
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+	}
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+
+	withoutCover := false
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{
+		ExecutionProfile: source.ExecutionProfile,
+		Overrides: &CloneTaskOverrides{
+			ProjectID: projectID, Quantity: 1, ArticleWithCover: &withoutCover, ReferenceImageAssetID: asset.ID,
+			InputAttachments: []model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Clone editable task without cover: %v", err)
+	}
+	clone := clones[0]
+	if clone.ReferenceImageAssetID != "" {
+		t.Fatalf("clone reference asset = %q, want cleared", clone.ReferenceImageAssetID)
+	}
+	attachments := clone.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].FileName != "notes.txt" {
+		t.Fatalf("clone attachments = %#v, want only generic material", attachments)
 	}
 }
 
@@ -1604,7 +1639,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	}
 }
 
-func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.T) {
+func TestTaskService_CloneKeepsProjectStyleReferencesOutOfArticlePortraitField(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
@@ -1683,17 +1718,12 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 			ProjectID: destinationProjectID, Quantity: 1, ReferenceImageAssetID: assetID,
 		}})
 	}
-	clones, err := clone(inherited.ID)
-	if err != nil || len(clones) != 1 || clones[0].ReferenceImageAssetID != "" || len(clones[0].InputAttachments.Data()) != 0 {
-		t.Fatalf("trusted inherited clone = %#v, %v", clones, err)
+	before = taskCount()
+	if clones, err := clone(inherited.ID); !errors.Is(err, ErrReferenceAssetPurposeMismatch) || len(clones) != 0 {
+		t.Fatalf("project style clone = %#v, %v; want purpose mismatch", clones, err)
 	}
-	firstClone := clones[0]
-	firstClone.Status = model.TaskStatusCompleted
-	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
-		t.Fatalf("complete first clone: %v", err)
-	}
-	if exactClones, err := svc.Clone(ctx, firstClone.ID, CloneTaskParams{ExecutionProfile: firstClone.ExecutionProfile}); err != nil || len(exactClones) != 1 || exactClones[0].ReferenceImageAssetID != "" || len(exactClones[0].InputAttachments.Data()) != 0 {
-		t.Fatalf("exact clone-of-clone = %#v, %v", exactClones, err)
+	if got := taskCount(); got != before {
+		t.Fatalf("task count after rejected style reference = %d, want %d", got, before)
 	}
 
 	for _, test := range []struct {
@@ -1716,7 +1746,7 @@ func TestTaskService_CloneOnlyReusesTrustedInheritedProjectReference(t *testing.
 	}
 
 	normalClones, err := clone(taskReference.ID)
-	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != "" || len(normalClones[0].InputAttachments.Data()) != 1 || normalClones[0].InputAttachments.Data()[0].AssetID != taskReference.ID {
+	if err != nil || len(normalClones) != 1 || normalClones[0].ReferenceImageAssetID != taskReference.ID || len(normalClones[0].InputAttachments.Data()) != 0 {
 		t.Fatalf("normal task-reference clone = %#v, %v", normalClones, err)
 	}
 }

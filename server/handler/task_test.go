@@ -1635,7 +1635,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
 		}
-		if task.ImageRatio != "1:1" || task.ImageCapabilityKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || len(task.InputAttachments.Data()) == 0 || task.InputAttachments.Data()[0].AssetID != referenceAsset.ID || !task.Watermark {
+		if task.ImageRatio != "1:1" || task.ImageCapabilityKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || !task.Watermark {
 			t.Fatalf("shared overrides = %#v", task)
 		}
 		if task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
@@ -1644,7 +1644,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
 			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
 		}
-		if got := task.InputAttachments.Data(); len(got) != 2 || got[0].AssetID != referenceAsset.ID || got[1].Text != "validated attachment" {
+		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
 			t.Fatalf("attachments = %#v", got)
 		}
 		if task.InputSourceTaskID != source.ID || task.InputSourceProjectID != source.ProjectID {
@@ -1653,7 +1653,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	}
 }
 
-func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing.T) {
+func TestCloneTask_FullEditableRejectsProjectStyleReferenceAsArticlePortrait(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := t.Context()
@@ -1664,7 +1664,8 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	inherited := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "inherited.png", "image/png")
 	unrelated := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeProjectReference, "unrelated.png", "image/png")
 	foreign := cutoverAsset(uuid.NewString(), uuid.NewString(), service.DirectUploadPurposeProjectReference, "foreign.png", "image/png")
-	for _, asset := range []*model.Asset{inherited, unrelated, foreign} {
+	portrait := cutoverAsset(uuid.NewString(), userID, service.DirectUploadPurposeTaskReference, "portrait.png", "image/png")
+	for _, asset := range []*model.Asset{inherited, unrelated, foreign, portrait} {
 		if err := repo.Assets().Create(ctx, asset); err != nil {
 			t.Fatalf("create asset %q: %v", asset.ID, err)
 		}
@@ -1726,74 +1727,80 @@ func TestCloneTask_FullEditableReusesTrustedInheritedProjectReference(t *testing
 	}
 
 	resp := postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(inherited.ID))
+	if resp.StatusCode != fiber.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("project style clone status = %d, want 400 body=%s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = postJSON(t, app, "/tasks/"+source.ID+"/clone", cloneBody(portrait.ID))
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		t.Fatalf("trusted inherited clone status = %d, want 200 body=%s", resp.StatusCode, body)
+		t.Fatalf("portrait clone status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 	var firstEnvelope struct {
 		Data model.Task `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&firstEnvelope); err != nil {
 		resp.Body.Close()
-		t.Fatalf("decode first clone: %v", err)
+		t.Fatalf("decode portrait clone: %v", err)
 	}
 	resp.Body.Close()
-	if firstEnvelope.Data.ReferenceImage == nil || firstEnvelope.Data.ReferenceImage.AssetID != inherited.ID {
-		t.Fatalf("first clone reference view = %#v, want %q", firstEnvelope.Data.ReferenceImage, inherited.ID)
+	if firstEnvelope.Data.ReferenceImage == nil || firstEnvelope.Data.ReferenceImage.AssetID != portrait.ID {
+		t.Fatalf("portrait clone reference = %#v, want %q", firstEnvelope.Data.ReferenceImage, portrait.ID)
 	}
 
 	firstClone, err := repo.Tasks().FindByID(ctx, firstEnvelope.Data.ID)
 	if err != nil {
-		t.Fatalf("find first clone: %v", err)
+		t.Fatalf("find portrait clone: %v", err)
 	}
-	if firstClone.ReferenceImageAssetID != "" {
-		t.Fatalf("first persisted clone dedicated reference = %q, want cleared", firstClone.ReferenceImageAssetID)
+	if firstClone.ReferenceImageAssetID != portrait.ID || len(firstClone.InputAttachments.Data()) != 0 {
+		t.Fatalf("persisted portrait clone = reference %q attachments %#v", firstClone.ReferenceImageAssetID, firstClone.InputAttachments.Data())
 	}
 	firstClone.Status = model.TaskStatusCompleted
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
-		t.Fatalf("complete first clone: %v", err)
+		t.Fatalf("complete portrait clone: %v", err)
 	}
 	resp = postJSON(t, app, "/tasks/"+firstClone.ID+"/clone", `{"execution_profile":"effective"}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		t.Fatalf("exact clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+		t.Fatalf("exact portrait clone status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 	var exactEnvelope struct {
 		Data model.Task `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&exactEnvelope); err != nil {
 		resp.Body.Close()
-		t.Fatalf("decode exact clone-of-clone: %v", err)
+		t.Fatalf("decode exact portrait clone: %v", err)
 	}
 	resp.Body.Close()
-	if exactEnvelope.Data.ReferenceImage != nil {
-		t.Fatalf("exact clone dedicated reference view = %#v, want nil", exactEnvelope.Data.ReferenceImage)
+	if exactEnvelope.Data.ReferenceImage == nil || exactEnvelope.Data.ReferenceImage.AssetID != portrait.ID {
+		t.Fatalf("exact portrait clone reference = %#v, want %q", exactEnvelope.Data.ReferenceImage, portrait.ID)
 	}
+
 	firstClone.Status = model.TaskStatusFailed
 	if err := repo.Tasks().Update(ctx, firstClone); err != nil {
-		t.Fatalf("fail first clone: %v", err)
+		t.Fatalf("fail portrait clone: %v", err)
 	}
 	resp = postJSON(t, app, "/tasks/bulk-clone", `{"task_ids":["`+firstClone.ID+`"],"execution_profile":"effective"}`)
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		t.Fatalf("bulk clone-of-clone status = %d, want 200 body=%s", resp.StatusCode, body)
+		t.Fatalf("bulk portrait clone status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 	var bulkEnvelope struct {
 		Data bulkTasksResponse `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&bulkEnvelope); err != nil {
 		resp.Body.Close()
-		t.Fatalf("decode bulk clone-of-clone: %v", err)
+		t.Fatalf("decode bulk portrait clone: %v", err)
 	}
 	resp.Body.Close()
 	if bulkEnvelope.Data.Succeeded != 1 || len(bulkEnvelope.Data.Results) != 1 || !bulkEnvelope.Data.Results[0].OK {
-		t.Fatalf("bulk clone-of-clone result = %#v, want one success", bulkEnvelope.Data)
-	}
-	if taskCount() != 4 {
-		t.Fatalf("task count after bulk clone-of-clone = %d, want 4", taskCount())
+		t.Fatalf("bulk portrait clone result = %#v, want one success", bulkEnvelope.Data)
 	}
 
 	retiredCapabilityTask, err := repo.Tasks().FindByID(ctx, exactEnvelope.Data.ID)
@@ -1950,8 +1957,8 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 	if err != nil {
 		t.Fatalf("find trusted AI-entry clone: %v", err)
 	}
-	if persisted.ReferenceImageAssetID != "" || len(persisted.InputAttachments.Data()) == 0 || persisted.InputAttachments.Data()[0].AssetID != trusted.ID {
-		t.Fatalf("persisted clone reference = %q attachments=%#v, want ordered asset %q", persisted.ReferenceImageAssetID, persisted.InputAttachments.Data(), trusted.ID)
+	if persisted.ReferenceImageAssetID != trusted.ID || len(persisted.InputAttachments.Data()) != 0 {
+		t.Fatalf("persisted clone reference = %q attachments=%#v, want dedicated asset %q", persisted.ReferenceImageAssetID, persisted.InputAttachments.Data(), trusted.ID)
 	}
 
 	for _, test := range []struct {

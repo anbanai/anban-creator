@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldPath, type FieldPathValue, type Resolver } from 'react-hook-form'
 import { Link } from 'react-router-dom'
-import { Images, Minus, Package, Plus, Stamp } from 'lucide-react'
+import { Images, Minus, Package, Plus, Stamp, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -14,6 +14,7 @@ import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachm
 import { Button } from '@/components/common/button'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -34,6 +35,7 @@ import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
+import { explicitlyRejectsReferenceImages } from '@/lib/image-capability'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
 import { TaskComposerParameters } from './TaskComposerParameters'
@@ -95,6 +97,7 @@ export function TaskFormDialog({
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
   const [montageUploading, setMontageUploading] = useState(false)
+  const [portraitUploading, setPortraitUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
@@ -167,6 +170,7 @@ export function TaskFormDialog({
   const hasTailImage = useWatch({ control: form.control, name: 'has_tail_image' }) ?? false
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
   const articleWithContentImages = useWatch({ control: form.control, name: 'article_with_content_images' }) ?? true
+  const articleUsePortrait = useWatch({ control: form.control, name: 'article_use_portrait' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
@@ -241,6 +245,7 @@ export function TaskFormDialog({
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
+    setPortraitUploading(false)
     setShowDirtyDialog(false)
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
@@ -294,6 +299,7 @@ export function TaskFormDialog({
     form.reset(createTaskFormDefaults())
     attachmentController.clear()
     setMontageUploading(false)
+    setPortraitUploading(false)
     setShowDirtyDialog(false)
     onOpenChange(false)
   }
@@ -339,7 +345,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -367,19 +373,21 @@ export function TaskFormDialog({
         ? { message: '图像能力暂时无法加载，请稍后重试。', href: '' }
       : usesImageSettings && imageCapabilitiesLoading
         ? { message: '正在加载图像能力，请稍候。', href: '' }
-      : !costPreview.priceAvailable
-    ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
-    : mode === 'clone' && projectsLoading
-      ? { message: '正在加载可用项目，请稍候。', href: '' }
-      : mode === 'clone' && !selectedProject
-        ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
-        : hasIncompatibleSeednoteAttachments
-          ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
-          : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+        : !costPreview.priceAvailable
+          ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
+          : mode === 'clone' && projectsLoading
+            ? { message: '正在加载可用项目，请稍候。', href: '' }
+            : mode === 'clone' && !selectedProject
+              ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
+          : hasIncompatibleSeednoteAttachments
+            ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
+            : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-              : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+                : watchedType === 'article' && articleUsePortrait && explicitlyRejectsReferenceImages(selectedImageCapability)
+                  ? { message: '当前图像能力不支持人物参考，请更换图像能力。', href: '' }
+                  : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
                     ? { message: '电商出图需要先上传产品图。', href: '' }
                     : null
 
@@ -603,16 +611,57 @@ export function TaskFormDialog({
                       <div className="flex items-center justify-between py-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-foreground">封面图</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">公众号头图（900×383，作为发布草稿封面）</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">按任务比例生成，保护微信中心分享卡安全区</p>
                         </div>
-                        <Switch checked={articleWithCover} onCheckedChange={(checked) => setFormValue('article_with_cover', checked)} />
+                        <Switch aria-label="生成封面图" checked={articleWithCover} onCheckedChange={(checked) => {
+                          setFormValue('article_with_cover', checked)
+                          if (!checked) {
+                            setFormValue('article_use_portrait', false)
+                            setFormValue('reference_image', null)
+                          }
+                        }} />
+                      </div>
+                      <div className="py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">使用人物图</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">仅用于封面人物身份参考，不传给正文配图</p>
+                            </div>
+                          </div>
+                          <Switch
+                            aria-label="使用人物图"
+                            checked={articleUsePortrait}
+                            disabled={!articleWithCover}
+                            onCheckedChange={(checked) => {
+                              setFormValue('article_use_portrait', checked)
+                              if (!checked) setFormValue('reference_image', null)
+                            }}
+                          />
+                        </div>
+                        {articleUsePortrait ? (
+                          <FormField control={form.control} name="reference_image" render={({ field }) => (
+                            <FormItem className="mt-3">
+                              <div className="flex justify-end">
+                                <ReferenceAssetUpload
+                                  value={field.value ?? null}
+                                  onChange={field.onChange}
+                                  purpose="task_reference"
+                                  onUploadingChange={setPortraitUploading}
+                                />
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )} />
+                        ) : null}
                       </div>
                       <div className="flex items-center justify-between py-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-foreground">正文配图</p>
                           <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
                         </div>
-                        <Switch checked={articleWithContentImages} onCheckedChange={(checked) => setFormValue('article_with_content_images', checked)} />
+                        <Switch aria-label="生成正文配图" checked={articleWithContentImages} onCheckedChange={(checked) => setFormValue('article_with_content_images', checked)} />
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
