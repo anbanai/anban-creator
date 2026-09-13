@@ -97,6 +97,29 @@ describe("validateBootstrapResponse", () => {
     }
   });
 
+  test("preserves the server error code when bootstrap rejects the runtime contract", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      code: 42600,
+      msg: "agent runtime contract upgrade required",
+      error_code: "agent_runtime_upgrade_required",
+    }), { status: 426, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+    try {
+      const config: JobConfig = {
+        serverURL: "https://creator.example.test",
+        executionID: "execution-1",
+        workspace: "/workspace",
+        workloadTokenFile: "/token",
+        allowHTTPServer: false,
+      };
+      await expect(bootstrap(config, "workload-token")).rejects.toThrow(
+        "bootstrap returned HTTP 426: agent_runtime_upgrade_required: agent runtime contract upgrade required",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("accepts and validates the frozen Agent Pack identity against the generated Catalog", async () => {
     const response = validResponse();
     const catalog = JSON.parse(await readFile(new URL("../../harness/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;

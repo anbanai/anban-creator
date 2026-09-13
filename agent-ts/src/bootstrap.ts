@@ -181,8 +181,8 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
     signal,
     redirect: "error",
   });
-  if (!response.ok) throw new Error(`bootstrap returned HTTP ${response.status}`);
   const body = await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES, "bootstrap response");
+  if (!response.ok) throw bootstrapHTTPError(response.status, body);
   let envelope: { code: number; msg?: string; data?: unknown };
   try {
     envelope = JSON.parse(body) as typeof envelope;
@@ -201,6 +201,20 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
     }
     throw error;
   }
+}
+
+function bootstrapHTTPError(status: number, body: string): Error {
+  let code = "";
+  let message = "";
+  try {
+    const envelope = JSON.parse(body) as { msg?: unknown; error_code?: unknown };
+    if (typeof envelope.error_code === "string" && /^[a-z0-9_]{1,64}$/.test(envelope.error_code)) code = envelope.error_code;
+    if (typeof envelope.msg === "string") message = envelope.msg.trim().replace(/\s+/g, " ").slice(0, 512);
+  } catch {
+    // Preserve the stable HTTP status when the server did not return JSON.
+  }
+  const detail = [code, message].filter(Boolean).join(": ");
+  return new Error(`bootstrap returned HTTP ${status}${detail ? `: ${detail}` : ""}`);
 }
 
 export async function readAgentPackCatalog(path = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<AgentPackCatalog> {

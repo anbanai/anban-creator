@@ -211,7 +211,19 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 	if h.workloadVerifier == nil || h.bootstrapper == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "agent bootstrap unavailable")
 	}
-	if strings.TrimSpace(c.Get("X-Anban-Agent-Contract-Version")) != fmt.Sprintf("%d", agentRuntimeContractVersion) {
+	receivedContractVersion := strings.TrimSpace(c.Get("X-Anban-Agent-Contract-Version"))
+	expectedContractVersion := fmt.Sprintf("%d", agentRuntimeContractVersion)
+	if receivedContractVersion != expectedContractVersion {
+		c.Set("X-Anban-Agent-Contract-Version-Expected", expectedContractVersion)
+		if h.logger != nil {
+			var req agentBootstrapRequest
+			_ = json.Unmarshal(c.Body(), &req)
+			h.logger.Warn().
+				Str("execution_id", strings.TrimSpace(req.ExecutionID)).
+				Str("received_contract_version", receivedContractVersion).
+				Str("expected_contract_version", expectedContractVersion).
+				Msg("agent bootstrap rejected: runtime contract mismatch")
+		}
 		return ErrorWithCode(c, fiber.StatusUpgradeRequired, "agent_runtime_upgrade_required", "agent runtime contract upgrade required")
 	}
 	var req agentBootstrapRequest

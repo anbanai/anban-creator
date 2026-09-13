@@ -322,6 +322,32 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	}
 }
 
+func TestAgentBootstrapLogsRuntimeContractMismatch(t *testing.T) {
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	h := NewAgentHandler(nil, nil, &logger)
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{})
+	app := fiber.New()
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusUpgradeRequired {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
+	}
+	line := logs.String()
+	for _, field := range []string{"agent bootstrap rejected: runtime contract mismatch", `"execution_id":"execution-1"`, `"received_contract_version":""`, `"expected_contract_version":"1"`} {
+		if !strings.Contains(line, field) {
+			t.Fatalf("runtime contract diagnostic missing %q in %s", field, line)
+		}
+	}
+}
+
 func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 	endpoints := []struct {
 		name    string

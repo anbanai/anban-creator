@@ -309,7 +309,7 @@ func main() {
 	default:
 		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")
 	}
-	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes)
+	reconcilerConfig := managedRuntimeReconcilerConfig(cfg.Claude.Executor, cfg.Claude.Docker, cfg.Claude.Kubernetes, cfg.Claude.RuntimeDiagnosticRetentionSeconds)
 	activeDeadline := reconcilerConfig.ActiveDeadline
 	defaultImageAPI, _ := cfg.ImageAPIForCapability("")
 	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{

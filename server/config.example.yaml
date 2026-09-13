@@ -312,6 +312,8 @@ claude:
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
+  # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
+  runtime_diagnostic_retention_seconds: 600
   # 所有托管执行器共享同一组 canonical runtime 镜像。
   runtime_images:
     article: "${ANBAN_AGENT_IMAGE_ARTICLE}"

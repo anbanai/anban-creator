@@ -248,6 +248,34 @@ func TestRuntimeReconcilerPreservesIdentityRootCauseWhenCompletionReportFails(t 
 	}
 }
 
+func TestRuntimeReconcilerRetainsFailedRuntimeDuringDiagnosticWindow(t *testing.T) {
+	now := time.Now()
+	execution := &model.TaskExecution{
+		ID: "diagnostic-retention", Status: model.TaskExecutionFailed,
+		RuntimeScope: "test", RuntimeWorkload: "runtime-diagnostic-retention",
+		CleanupStatus: model.TaskExecutionCleanupPending, CompletedAt: &now,
+	}
+	dispatcher := &reconcileTestDispatcher{}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{DiagnosticRetention: time.Minute}, zerolog.Nop())
+	reconciler.now = func() time.Time { return now.Add(30 * time.Second) }
+
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.deleted) != 0 {
+		t.Fatalf("runtime deleted during diagnostic window: %#v", dispatcher.deleted)
+	}
+
+	reconciler.now = func() time.Time { return now.Add(2 * time.Minute) }
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.deleted) != 1 {
+		t.Fatalf("runtime delete count = %d, want 1 after diagnostic window", len(dispatcher.deleted))
+	}
+}
+
 func TestRuntimeReconcilerGracesAndItemIsolation(t *testing.T) {
 	now := time.Now()
 	executions := []*model.TaskExecution{

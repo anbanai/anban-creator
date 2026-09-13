@@ -513,17 +513,20 @@ func (c TingWuConfig) Complete() bool {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	ExecutionProfiles    map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
-	Executor             string                                  `yaml:"executor"` // "docker" or "kubernetes"
-	RuntimeImages        RuntimeImages                           `yaml:"runtime_images"`
-	ExecutionTokenSecret string                                  `yaml:"execution_token_secret" json:"-"`
-	PluginDir            string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
-	Sandbox              bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker               DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	Kubernetes           KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
-	MaxTurns             map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
-	TaskLogDir           string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL       string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
+	ExecutionProfiles                 map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	Executor                          string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	RuntimeImages                     RuntimeImages                           `yaml:"runtime_images"`
+	RuntimeDiagnosticRetentionSeconds int                                     `yaml:"runtime_diagnostic_retention_seconds"`
+	runtimeDiagnosticRetentionSet     bool                                    `yaml:"-"`
+	runtimeDiagnosticRetentionInvalid bool                                    `yaml:"-"`
+	ExecutionTokenSecret              string                                  `yaml:"execution_token_secret" json:"-"`
+	PluginDir                         string                                  `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
+	Sandbox                           bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker                            DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	Kubernetes                        KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	MaxTurns                          map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
+	TaskLogDir                        string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL                    string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 type ClaudeExecutionProfileConfig struct {
@@ -535,7 +538,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "runtime_images": true,
+		"execution_profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -555,6 +558,14 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain ClaudeConfig
 	if err := value.Decode((*plain)(c)); err != nil {
 		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "runtime_diagnostic_retention_seconds" {
+			c.runtimeDiagnosticRetentionSet = true
+			if c.RuntimeDiagnosticRetentionSeconds <= 0 {
+				c.runtimeDiagnosticRetentionInvalid = true
+			}
+		}
 	}
 	return nil
 }
@@ -640,6 +651,9 @@ func (c ClaudeConfig) GoString() string {
 
 func (c ClaudeConfig) Validate() error {
 	var errs []string
+	if c.RuntimeDiagnosticRetentionSeconds < 0 || c.runtimeDiagnosticRetentionInvalid {
+		errs = append(errs, "claude.runtime_diagnostic_retention_seconds must be positive")
+	}
 	for name, profile := range c.ExecutionProfiles {
 		path := "claude.execution_profiles." + name
 		if strings.TrimSpace(name) == "" {
@@ -1168,6 +1182,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Kubernetes.TTLSecondsAfterFinished == 0 {
 		c.Claude.Kubernetes.TTLSecondsAfterFinished = 600
+	}
+	if c.Claude.RuntimeDiagnosticRetentionSeconds == 0 {
+		c.Claude.RuntimeDiagnosticRetentionSeconds = 600
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {

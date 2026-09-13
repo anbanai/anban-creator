@@ -25,7 +25,8 @@ func startRuntimeReconciler(ctx context.Context, runner runtimeReconcilerRunner)
 	return done
 }
 
-func managedRuntimeReconcilerConfig(executor string, docker config.DockerConfig, kubernetes config.KubernetesConfig) serveragent.RuntimeReconcilerConfig {
+func managedRuntimeReconcilerConfig(executor string, docker config.DockerConfig, kubernetes config.KubernetesConfig, diagnosticRetentionSeconds int) serveragent.RuntimeReconcilerConfig {
+	diagnosticRetention := time.Duration(diagnosticRetentionSeconds) * time.Second
 	switch executor {
 	case "docker":
 		activeDeadline := time.Duration(docker.TimeoutSec) * time.Second
@@ -34,15 +35,17 @@ func managedRuntimeReconcilerConfig(executor string, docker config.DockerConfig,
 			heartbeatTimeout = activeDeadline / 2
 		}
 		return serveragent.RuntimeReconcilerConfig{
-			ActiveDeadline:   activeDeadline,
-			HeartbeatTimeout: heartbeatTimeout,
-			CompletionGrace:  30 * time.Second,
+			ActiveDeadline:      activeDeadline,
+			HeartbeatTimeout:    heartbeatTimeout,
+			CompletionGrace:     30 * time.Second,
+			DiagnosticRetention: diagnosticRetention,
 		}
 	case "kubernetes":
 		return serveragent.RuntimeReconcilerConfig{
-			ActiveDeadline:   time.Duration(kubernetes.ActiveDeadlineSeconds) * time.Second,
-			HeartbeatTimeout: time.Duration(kubernetes.HeartbeatTimeoutSeconds) * time.Second,
-			CompletionGrace:  time.Duration(kubernetes.CompletionGraceSeconds) * time.Second,
+			ActiveDeadline:      time.Duration(kubernetes.ActiveDeadlineSeconds) * time.Second,
+			HeartbeatTimeout:    time.Duration(kubernetes.HeartbeatTimeoutSeconds) * time.Second,
+			CompletionGrace:     time.Duration(kubernetes.CompletionGraceSeconds) * time.Second,
+			DiagnosticRetention: diagnosticRetention,
 		}
 	default:
 		return serveragent.RuntimeReconcilerConfig{}

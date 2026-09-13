@@ -36,6 +36,7 @@ type RuntimeReconcilerConfig struct {
 	BatchSize            int
 	Concurrency          int
 	CompletionGrace      time.Duration
+	DiagnosticRetention  time.Duration
 	MissingResourceGrace time.Duration
 	HeartbeatTimeout     time.Duration
 	ActiveDeadline       time.Duration
@@ -219,12 +220,30 @@ func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecu
 	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics); err != nil {
 		return err
 	}
+	if isDiagnosticRuntimeStatus(status) && r.config.DiagnosticRetention > 0 {
+		// Keep the provider workload briefly after a failure so operators can
+		// inspect pod/container logs and events before normal cleanup removes it.
+		return nil
+	}
 	return r.cleanupExecution(ctx, execution)
 }
 
 func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
 	if execution == nil || execution.CleanupStatus == model.TaskExecutionCleanupDone {
 		return nil
+	}
+	if isDiagnosticRuntimeStatus(execution.Status) && r.config.DiagnosticRetention > 0 {
+		completedAt := execution.CompletedAt
+		if completedAt == nil && !execution.UpdatedAt.IsZero() {
+			completedAt = &execution.UpdatedAt
+		}
+		if completedAt != nil {
+			age := r.now().Sub(*completedAt)
+			if age < r.config.DiagnosticRetention {
+				r.logger.Info().Str("execution_id", execution.ID).Dur("remaining", r.config.DiagnosticRetention-age).Msg("retaining failed runtime for diagnostics")
+				return nil
+			}
+		}
 	}
 	token := uuid.NewString()
 	won, err := r.service.ClaimExecutionCleanup(ctx, execution.ID, token, r.config.CleanupLease)
@@ -260,6 +279,10 @@ func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *mod
 		return errors.New("runtime execution cleanup lease lost")
 	}
 	return nil
+}
+
+func isDiagnosticRuntimeStatus(status string) bool {
+	return status == model.TaskExecutionFailed || status == model.TaskExecutionTimedOut
 }
 
 func exitCodeValue(exitCode *int32) any {

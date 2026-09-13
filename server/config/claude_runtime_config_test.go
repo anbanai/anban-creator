@@ -89,6 +89,33 @@ func TestClaudeConfigAcceptsOnlyProfileEnvs(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigRuntimeDiagnosticRetention(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "  executor: docker\n", "  executor: docker\n  runtime_diagnostic_retention_seconds: 42\n", 1)
+	cfg, err := loadClaudeConfigYAML(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.RuntimeDiagnosticRetentionSeconds != 42 {
+		t.Fatalf("runtime diagnostic retention = %d, want 42", cfg.Claude.RuntimeDiagnosticRetentionSeconds)
+	}
+}
+
+func TestClaudeConfigRuntimeDiagnosticRetentionDefaultsAndRejectsInvalidValues(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.RuntimeDiagnosticRetentionSeconds != 600 {
+		t.Fatalf("default runtime diagnostic retention = %d, want 600", cfg.Claude.RuntimeDiagnosticRetentionSeconds)
+	}
+	for _, value := range []string{"0", "-1"} {
+		body := strings.Replace(validClaudeConfigYAML, "  executor: docker\n", "  executor: docker\n  runtime_diagnostic_retention_seconds: "+value+"\n", 1)
+		if _, err := loadClaudeConfigYAML(t, body); err == nil || !strings.Contains(err.Error(), "claude.runtime_diagnostic_retention_seconds must be positive") {
+			t.Fatalf("value %s error = %v", value, err)
+		}
+	}
+}
+
 func TestClaudeConfigAllowsOptionalProfileEnvsToBeOmitted(t *testing.T) {
 	body := strings.ReplaceAll(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"\n", "")
 	body = strings.ReplaceAll(body, "        ENABLE_TOOL_SEARCH: \"false\"\n", "")
