@@ -1,3 +1,0 @@
-This is a sample file for the hooks example.
-It demonstrates how hooks can monitor and control tool execution.
-The hook system provides lifecycle event callbacks for security and observability.
