@@ -115,6 +115,12 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if c.Image != "registry.example.com/creator-agent:v2" {
 		t.Fatalf("image = %q, want configured image", c.Image)
 	}
+	if c.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+		t.Fatalf("termination message policy = %q, want stderr fallback", c.TerminationMessagePolicy)
+	}
+	if got := spec.InitContainers[0].TerminationMessagePolicy; got != corev1.TerminationMessageFallbackToLogsOnError {
+		t.Fatalf("init termination message policy = %q, want stderr fallback", got)
+	}
 	if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
 		t.Fatalf("security context = %#v, want read-only root filesystem", c.SecurityContext)
 	}
@@ -1321,6 +1327,156 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 	}
 	if state.Phase != RuntimePhaseFailed {
 		t.Fatalf("phase = %q, want failed from terminated container before Job condition", state.Phase)
+	}
+}
+
+func TestKubernetesDispatcherInspectMapsWorkspaceInitTermination(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+		Reason: "BackoffLimitExceeded", Message: "Job has reached the specified backoff limit",
+	}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-pod", Namespace: "anban",
+			Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+			Name: kubernetesWorkspaceInitContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 1, Reason: "Error", Message: "chown: operation not permitted",
+			}},
+		}}},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), persistedKubernetesTestExecution(job))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != RuntimePhaseFailed || state.ExitCode == nil || *state.ExitCode != 1 {
+		t.Fatalf("state = %#v, want failed init container with exit 1", state)
+	}
+	if state.Reason != "Error" || state.Message != "chown: operation not permitted" {
+		t.Fatalf("diagnostics = %q/%q, want init termination diagnostics", state.Reason, state.Message)
+	}
+}
+
+func TestKubernetesDispatcherInspectPrefersWorkspaceInitFailureOverAgentWaiting(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-pod", Namespace: "anban",
+			Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: kubernetesAgentContainerName,
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+					Reason: "PodInitializing", Message: "initializing containers",
+				}},
+			}},
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name: kubernetesWorkspaceInitContainerName,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 1, Reason: "Error", Message: "chown: operation not permitted",
+				}},
+			}},
+		},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), persistedKubernetesTestExecution(job))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != RuntimePhaseFailed || state.ExitCode == nil || *state.ExitCode != 1 {
+		t.Fatalf("state = %#v, want failed init container diagnostics", state)
+	}
+	if state.Reason != "Error" || state.Message != "chown: operation not permitted" {
+		t.Fatalf("diagnostics = %q/%q, want init termination diagnostics", state.Reason, state.Message)
+	}
+}
+
+func TestKubernetesDispatcherInspectPreservesJobDiagnosticsWhenInitDetailsAreEmpty(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+		Reason: "BackoffLimitExceeded", Message: "Job has reached the specified backoff limit",
+	}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-pod", Namespace: "anban",
+			Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+			Name:  kubernetesWorkspaceInitContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+		}}},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), persistedKubernetesTestExecution(job))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != RuntimePhaseFailed || state.ExitCode == nil || *state.ExitCode != 1 {
+		t.Fatalf("state = %#v, want failed init container with exit 1", state)
+	}
+	if state.Reason != "BackoffLimitExceeded" || state.Message != "Job has reached the specified backoff limit" {
+		t.Fatalf("diagnostics = %q/%q, want preserved Job diagnostics", state.Reason, state.Message)
+	}
+}
+
+func TestKubernetesDispatcherInspectDoesNotInterpretWorkspaceInitReservedExitCodes(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-pod", Namespace: "anban",
+			Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+			Name:  kubernetesWorkspaceInitContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3, Reason: "Error"}},
+		}}},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), persistedKubernetesTestExecution(job))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if got, _ := runtimeTerminalReason(state); got != "runtime_failed" {
+		t.Fatalf("runtime terminal reason = %q, want runtime_failed for init exit code 3", got)
+	}
+}
+
+func TestKubernetesDispatcherInspectIgnoresSuccessfulWorkspaceInitTermination(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job.UID = types.UID("job-uid-1")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-pod", Namespace: "anban",
+			Labels: map[string]string{kubernetesExecutionIDLabel: testExecution().ID},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name: kubernetesWorkspaceInitContainerName,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 0, Reason: "Completed",
+				}},
+			}},
+		},
+	}
+	ownTestPod(job, pod)
+	state, err := testDispatcher(fake.NewSimpleClientset(job, pod)).Inspect(context.Background(), persistedKubernetesTestExecution(job))
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Phase != RuntimePhasePending || state.ExitCode != nil {
+		t.Fatalf("state = %#v, want pending while the main container status is not available", state)
 	}
 }
 

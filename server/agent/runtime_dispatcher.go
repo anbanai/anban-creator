@@ -31,6 +31,7 @@ type RuntimeDispatcher interface {
 type RuntimeExecutionState struct {
 	Phase       string
 	InstanceID  string
+	Container   string
 	Reason      string
 	Message     string
 	ExitCode    *int32

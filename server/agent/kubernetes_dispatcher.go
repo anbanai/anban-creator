@@ -546,8 +546,10 @@ func normalizeContainerDefaults(container *corev1.Container) {
 	if container.TerminationMessagePath == "" {
 		container.TerminationMessagePath = corev1.TerminationMessagePathDefault
 	}
-	if container.TerminationMessagePolicy == "" {
-		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	if container.TerminationMessagePolicy == "" || container.TerminationMessagePolicy == corev1.TerminationMessageReadFile {
+		// Jobs created before stderr fallback was enabled remain compatible across
+		// a Server rollout; newly created Jobs still carry the stronger policy.
+		container.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
 	}
 }
 
@@ -670,6 +672,34 @@ func applyPodDiagnostics(state *RuntimeExecutionState, pod *corev1.Pod) {
 			state.Phase = RuntimePhaseFailed
 		}
 	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.Name != kubernetesWorkspaceInitContainerName {
+			continue
+		}
+		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			terminated := status.State.Terminated
+			state.Phase = RuntimePhaseFailed
+			state.Container = kubernetesWorkspaceInitContainerName
+			if terminated.Reason != "" {
+				state.Reason = terminated.Reason
+			}
+			if terminated.Message != "" {
+				state.Message = terminated.Message
+			}
+			exitCode := terminated.ExitCode
+			state.ExitCode = &exitCode
+			if !terminated.FinishedAt.IsZero() {
+				completedAt := terminated.FinishedAt.Time
+				state.CompletedAt = &completedAt
+			}
+			return
+		}
+		if status.State.Waiting != nil && !jobTerminal {
+			state.Reason = status.State.Waiting.Reason
+			state.Message = status.State.Waiting.Message
+			return
+		}
+	}
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != kubernetesAgentContainerName {
 			continue
@@ -683,6 +713,7 @@ func applyPodDiagnostics(state *RuntimeExecutionState, pod *corev1.Pod) {
 			continue
 		}
 		terminated := status.State.Terminated
+		state.Container = kubernetesAgentContainerName
 		if !terminated.FinishedAt.IsZero() {
 			completedAt := terminated.FinishedAt.Time
 			state.CompletedAt = &completedAt
@@ -703,13 +734,6 @@ func applyPodDiagnostics(state *RuntimeExecutionState, pod *corev1.Pod) {
 			state.Message = terminated.Message
 		}
 		return
-	}
-	for _, status := range pod.Status.InitContainerStatuses {
-		if status.State.Waiting != nil && !jobTerminal {
-			state.Reason = status.State.Waiting.Reason
-			state.Message = status.State.Waiting.Message
-			return
-		}
 	}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && !jobTerminal {

@@ -192,10 +192,12 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 }
 
 func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecution, status, reason, runtimeReason, message string, exitCode *int32) error {
+	runtimeReason = sanitizeRuntimeDiagnostic(runtimeReason)
+	message = sanitizeRuntimeDiagnostic(message)
 	payload := map[string]any{
 		"reason":         reason,
-		"runtime_reason": sanitizeRuntimeDiagnostic(runtimeReason),
-		"message":        sanitizeRuntimeDiagnostic(message),
+		"runtime_reason": runtimeReason,
+		"message":        message,
 		"exit_code":      exitCodeValue(exitCode),
 	}
 	if exitCode != nil && *exitCode == runtimeExecutionIdentityUnavailableExitCode {
@@ -203,6 +205,17 @@ func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecu
 		payload["root_error_code"] = "execution_identity_unavailable"
 	}
 	diagnostics, _ := json.Marshal(payload)
+	event := r.logger.Warn().
+		Str("task_id", execution.TaskID).
+		Str("execution_id", execution.ID).
+		Str("failure_reason", reason).
+		Str("runtime_reason", runtimeReason).
+		Str("runtime_message", message).
+		Bool("started", execution.Started)
+	if exitCode != nil {
+		event = event.Int32("exit_code", *exitCode)
+	}
+	event.Msg("runtime execution failed")
 	if err := r.service.ReconcileExecutionFailure(ctx, execution.ID, status, reason, diagnostics); err != nil {
 		return err
 	}
@@ -269,9 +282,9 @@ func runtimeTerminalReason(state *RuntimeExecutionState) (string, string) {
 		return "deadline_exceeded", model.TaskExecutionTimedOut
 	case reason == "oomkilled" || (state.ExitCode != nil && *state.ExitCode == 137):
 		return "oom_killed", model.TaskExecutionFailed
-	case state.ExitCode != nil && *state.ExitCode == runtimeCompletionReportFailedExitCode:
+	case (state.Container == "" || state.Container == kubernetesAgentContainerName) && state.ExitCode != nil && *state.ExitCode == runtimeCompletionReportFailedExitCode:
 		return "completion_report_failed", model.TaskExecutionFailed
-	case state.ExitCode != nil && *state.ExitCode == runtimeExecutionIdentityUnavailableExitCode:
+	case (state.Container == "" || state.Container == kubernetesAgentContainerName) && state.ExitCode != nil && *state.ExitCode == runtimeExecutionIdentityUnavailableExitCode:
 		return "execution_identity_unavailable", model.TaskExecutionFailed
 	default:
 		return "runtime_failed", model.TaskExecutionFailed

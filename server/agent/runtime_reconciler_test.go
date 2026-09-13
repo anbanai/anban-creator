@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -558,7 +560,7 @@ func TestRuntimeReconcilerRetriesDurableCleanup(t *testing.T) {
 
 func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 	exitCode := int32(1)
-	execution := &model.TaskExecution{ID: "execution-1", Status: model.TaskExecutionRunning, Started: true}
+	execution := &model.TaskExecution{ID: "execution-1", TaskID: "task-1", Status: model.TaskExecutionStarting, Started: false}
 	dispatcher := &reconcileTestDispatcher{
 		states: map[string]*RuntimeExecutionState{
 			execution.ID: {Phase: RuntimePhaseFailed, InstanceID: "container-id", Reason: "BackoffLimitExceeded", Message: "runtime exited", ExitCode: &exitCode},
@@ -566,7 +568,8 @@ func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 		errs: map[string]error{},
 	}
 	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
-	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	var logs bytes.Buffer
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.New(&logs))
 
 	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)
@@ -585,6 +588,15 @@ func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 	}
 	if diagnostic["reason"] != "runtime_failed" || diagnostic["runtime_reason"] != "BackoffLimitExceeded" || diagnostic["message"] != "runtime exited" {
 		t.Fatalf("diagnostics = %#v", diagnostic)
+	}
+	for _, want := range []string{
+		`"message":"runtime execution failed"`, `"task_id":"task-1"`, `"execution_id":"execution-1"`,
+		`"failure_reason":"runtime_failed"`, `"runtime_reason":"BackoffLimitExceeded"`,
+		`"runtime_message":"runtime exited"`, `"exit_code":1`, `"started":false`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log = %q, want %s", logs.String(), want)
+		}
 	}
 	dispatcher.mu.Lock()
 	defer dispatcher.mu.Unlock()
