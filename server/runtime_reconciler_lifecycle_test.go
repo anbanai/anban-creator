@@ -57,7 +57,7 @@ func TestManagedRuntimeReconcilerConfigCoversDockerAndKubernetes(t *testing.T) {
 	want := serveragent.RuntimeReconcilerConfig{
 		ActiveDeadline: 15 * time.Minute, HeartbeatTimeout: 2 * time.Minute, CompletionGrace: 45 * time.Second, DiagnosticRetention: 42 * time.Second,
 	}
-	if kubernetes.ActiveDeadline != want.ActiveDeadline || kubernetes.HeartbeatTimeout != want.HeartbeatTimeout || kubernetes.CompletionGrace != want.CompletionGrace {
+	if kubernetes.ActiveDeadline != want.ActiveDeadline || kubernetes.HeartbeatTimeout != want.HeartbeatTimeout || kubernetes.CompletionGrace != want.CompletionGrace || kubernetes.DiagnosticRetention != want.DiagnosticRetention {
 		t.Fatalf("Kubernetes reconciler config = %+v, want %+v", kubernetes, want)
 	}
 }
