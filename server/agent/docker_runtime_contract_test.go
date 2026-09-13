@@ -363,24 +363,15 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 	}
 }
 
-func TestServerDockerfileStagesLocalGoSDKModuleBeforeDependencyDownload(t *testing.T) {
+func TestServerDockerfileDoesNotReferenceRemovedGoSDK(t *testing.T) {
 	root := repositoryRoot(t)
-	const sdkModuleCopy = "COPY third_party/claude-agent-sdk-go/go.mod ./third_party/claude-agent-sdk-go/go.mod"
-	const dependencyDownload = "RUN go mod download"
+	const sdkPath = "third_party/claude-agent-sdk-go"
 
 	for _, name := range []string{"deploy/docker/Dockerfile.server"} {
 		t.Run(name, func(t *testing.T) {
 			body := readTextFile(t, filepath.Join(root, name))
-			copyIndex := strings.Index(body, sdkModuleCopy)
-			downloadIndex := strings.Index(body, dependencyDownload)
-			if copyIndex < 0 {
-				t.Fatalf("%s must copy the repository-local Claude Agent SDK module before resolving the root go.mod", name)
-			}
-			if downloadIndex < 0 {
-				t.Fatalf("%s missing %q", name, dependencyDownload)
-			}
-			if copyIndex > downloadIndex {
-				t.Fatalf("%s copies the repository-local Claude Agent SDK module after dependency download", name)
+			if strings.Contains(body, sdkPath) {
+				t.Fatalf("%s references removed Claude Agent SDK path %q", name, sdkPath)
 			}
 		})
 	}

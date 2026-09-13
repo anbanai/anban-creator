@@ -31,7 +31,6 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
-	github.com/severity1/claude-agent-sdk-go v0.6.22
 	github.com/silenceper/wechat/v2 v2.1.14
 	github.com/volcengine/volcengine-go-sdk v1.2.52
 	github.com/wneessen/go-mail v0.8.1
@@ -176,5 +175,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 )
-
-replace github.com/severity1/claude-agent-sdk-go => ./third_party/claude-agent-sdk-go

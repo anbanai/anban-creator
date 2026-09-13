@@ -6,17 +6,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/agentpack"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
-
-	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
 type UserPromptParams struct {
@@ -166,70 +161,6 @@ func articleImageMode(withCover, withContent bool) string {
 	default:
 		return "text_only"
 	}
-}
-
-// truncateKey returns the first 8 characters of a key for safe logging.
-func truncateKey(key string) string {
-	if len(key) <= 8 {
-		return key
-	}
-	return key[:8] + "..."
-}
-
-// loadAgentDefinition reads an agent markdown file from the plugin directory,
-// parses its YAML frontmatter, and returns an SDK AgentDefinition.
-func loadAgentDefinition(pluginDir, agentName string) (*claudecode.AgentDefinition, error) {
-	path := filepath.Join(pluginDir, "agents", agentName+".md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read agent file %s: %w", path, err)
-	}
-
-	content := string(data)
-	if !strings.HasPrefix(content, "---") {
-		return nil, fmt.Errorf("agent file %s missing frontmatter delimiter", path)
-	}
-	end := strings.Index(content[3:], "---")
-	if end < 0 {
-		return nil, fmt.Errorf("agent file %s missing closing frontmatter delimiter", path)
-	}
-	fm := content[3 : 3+end]
-	prompt := strings.TrimSpace(content[3+end+6:])
-
-	// NOTE: only description/tools/model are parsed. The agent frontmatter's
-	// `maxTurns` is intentionally NOT parsed here — the SDK AgentDefinition has
-	// no MaxTurns field, so it cannot be forwarded via WithAgent(). The
-	// production turn budget is governed solely by the server's per-task-type
-	// `max_turns` config (applied via WithMaxTurns in the Execute path). The frontmatter
-	// maxTurns only affects interactive Claude Code runs where the CLI parses
-	// it natively. Keep the two values in sync (config.yaml + agent .md).
-	var frontmatter struct {
-		Description string   `yaml:"description"`
-		Tools       []string `yaml:"tools"`
-		Model       string   `yaml:"model"`
-	}
-	if err := yaml.Unmarshal([]byte(fm), &frontmatter); err != nil {
-		return nil, fmt.Errorf("parse frontmatter in %s: %w", path, err)
-	}
-
-	var model claudecode.AgentModel
-	switch frontmatter.Model {
-	case "sonnet":
-		model = claudecode.AgentModelSonnet
-	case "haiku":
-		model = claudecode.AgentModelHaiku
-	case "opus":
-		model = claudecode.AgentModelOpus
-	default:
-		model = claudecode.AgentModelInherit
-	}
-
-	return &claudecode.AgentDefinition{
-		Description: frontmatter.Description,
-		Prompt:      prompt,
-		Tools:       frontmatter.Tools,
-		Model:       model,
-	}, nil
 }
 
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
@@ -431,144 +362,4 @@ func MarshalResultJSON(r *ExecutionResult) (string, error) {
 		return "", err
 	}
 	return string(data), nil
-}
-
-// PopulateTerminalModelUsage updates cost evidence only for a terminal result
-// message. Assistant/system events and top-level aggregate usage are ignored.
-func PopulateTerminalModelUsage(result *ExecutionResult, message claudecode.Message, aliases map[string]ModelUsageIdentity) {
-	if result == nil {
-		return
-	}
-	if result.CostStatus == "" {
-		markMissingTerminalModelUsage(result)
-	}
-	resultMessage, ok := message.(*claudecode.ResultMessage)
-	if !ok {
-		return
-	}
-	result.DurationAPIMs = resultMessage.DurationAPIMs
-	if len(resultMessage.ModelUsage) == 0 {
-		markMissingTerminalModelUsage(result)
-		return
-	}
-
-	rawModels := make([]string, 0, len(resultMessage.ModelUsage))
-	for rawModel := range resultMessage.ModelUsage {
-		rawModels = append(rawModels, rawModel)
-	}
-	sort.Strings(rawModels)
-
-	merged := make(map[ModelUsageIdentity]ModelTokenUsage, len(rawModels))
-	invalidIdentities := make(map[ModelUsageIdentity]bool)
-	diagnostics := make([]CostDiagnostic, 0)
-	for _, rawModel := range rawModels {
-		usage := resultMessage.ModelUsage[rawModel]
-		if hasNegativeModelUsage(usage) {
-			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticInvalidModelUsageTokens, RawModel: rawModel})
-			continue
-		}
-
-		identity, mapped := aliases[rawModel]
-		if !mapped {
-			identity = ModelUsageIdentity{Model: rawModel}
-			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticUnmappedModelUsageAlias, RawModel: rawModel})
-		} else if strings.TrimSpace(identity.Provider) == "" || strings.TrimSpace(identity.Model) == "" {
-			identity = ModelUsageIdentity{Model: rawModel}
-			diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticInvalidModelUsageAlias, RawModel: rawModel})
-		}
-		if invalidIdentities[identity] {
-			continue
-		}
-
-		candidate := ModelTokenUsage{
-			Provider:                 identity.Provider,
-			Model:                    identity.Model,
-			InputTokens:              usage.InputTokens,
-			OutputTokens:             usage.OutputTokens,
-			CacheReadInputTokens:     usage.CacheReadInputTokens,
-			CacheCreationInputTokens: usage.CacheCreationInputTokens,
-		}
-		if existing, exists := merged[identity]; exists {
-			var overflow bool
-			candidate, overflow = checkedMergeModelUsage(existing, candidate)
-			if overflow {
-				delete(merged, identity)
-				invalidIdentities[identity] = true
-				diagnostics = append(diagnostics, CostDiagnostic{Code: CostDiagnosticModelUsageTokenOverflow, RawModel: rawModel})
-				continue
-			}
-		}
-		merged[identity] = candidate
-	}
-
-	modelUsage := make([]ModelTokenUsage, 0, len(merged))
-	for _, usage := range merged {
-		modelUsage = append(modelUsage, usage)
-	}
-	sort.Slice(modelUsage, func(i, j int) bool {
-		if modelUsage[i].Provider != modelUsage[j].Provider {
-			return modelUsage[i].Provider < modelUsage[j].Provider
-		}
-		return modelUsage[i].Model < modelUsage[j].Model
-	})
-	result.ModelUsage = modelUsage
-	result.CostDiagnostics = diagnostics
-	if len(diagnostics) == 0 {
-		result.CostStatus = CostStatusReconciled
-	} else {
-		result.CostStatus = CostStatusUnreconciled
-	}
-}
-
-func markMissingTerminalModelUsage(result *ExecutionResult) {
-	result.ModelUsage = nil
-	result.CostStatus = CostStatusUnreconciled
-	result.CostDiagnostics = []CostDiagnostic{{Code: CostDiagnosticMissingTerminalModelUsage}}
-}
-
-func hasNegativeModelUsage(usage claudecode.ModelUsage) bool {
-	return usage.InputTokens < 0 || usage.OutputTokens < 0 ||
-		usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0
-}
-
-func checkedMergeModelUsage(a, b ModelTokenUsage) (ModelTokenUsage, bool) {
-	input, overflow := checkedAddInt64(a.InputTokens, b.InputTokens)
-	if overflow {
-		return ModelTokenUsage{}, true
-	}
-	output, overflow := checkedAddInt64(a.OutputTokens, b.OutputTokens)
-	if overflow {
-		return ModelTokenUsage{}, true
-	}
-	cacheRead, overflow := checkedAddInt64(a.CacheReadInputTokens, b.CacheReadInputTokens)
-	if overflow {
-		return ModelTokenUsage{}, true
-	}
-	cacheCreation, overflow := checkedAddInt64(a.CacheCreationInputTokens, b.CacheCreationInputTokens)
-	if overflow {
-		return ModelTokenUsage{}, true
-	}
-	return ModelTokenUsage{
-		Provider: a.Provider, Model: a.Model,
-		InputTokens: input, OutputTokens: output,
-		CacheReadInputTokens: cacheRead, CacheCreationInputTokens: cacheCreation,
-	}, false
-}
-
-func checkedAddInt64(a, b int64) (int64, bool) {
-	const maxInt64 = int64(^uint64(0) >> 1)
-	if b > maxInt64-a {
-		return 0, true
-	}
-	return a + b, false
-}
-
-func fallbackAgentError(defaultMsg, toolName, toolError string) string {
-	if strings.TrimSpace(toolError) == "" {
-		return defaultMsg
-	}
-	if strings.TrimSpace(toolName) == "" {
-		return "last tool error: " + strings.TrimSpace(toolError)
-	}
-	return fmt.Sprintf("last tool error from %s: %s", strings.TrimSpace(toolName), strings.TrimSpace(toolError))
 }
