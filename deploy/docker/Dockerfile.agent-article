@@ -4,7 +4,11 @@ WORKDIR /app/anban-agent
 COPY agent-ts/package.json agent-ts/package-lock.json ./
 RUN npm ci
 COPY agent-ts/ ./
-RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
+RUN npm run build && \
+    grep -Fq 'X-Anban-Agent-Contract-Version' dist/bootstrap.js && \
+    grep -Fq 'agent_runtime_upgrade_required' dist/bootstrap.js && \
+    npm prune --omit=dev && \
+    test -d node_modules/@anthropic-ai/claude-agent-sdk
 
 FROM node:bookworm-slim
 

@@ -159,6 +159,23 @@ func TestRuntimeSmokeGeneratedServerConfigUsesProfileEnvs(t *testing.T) {
 	}
 }
 
+func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
+	repoRoot := runtimeSmokeRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile.agent-article"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, required := range []string{
+		`grep -Fq 'X-Anban-Agent-Contract-Version' dist/bootstrap.js`,
+		`grep -Fq 'agent_runtime_upgrade_required' dist/bootstrap.js`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("Article Dockerfile missing managed bootstrap verification %q", required)
+		}
+	}
+}
+
 func TestRuntimeSmokeCreateTaskUsesEffectiveExecutionProfile(t *testing.T) {
 	for _, profile := range []string{"article", "montage"} {
 		t.Run(profile, func(t *testing.T) {
