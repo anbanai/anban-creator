@@ -192,6 +192,11 @@ func TestMySQLTaskDeliveryConstraintReadiness(t *testing.T) {
 			execClause: "`manifest_status` in ('','pending','delivered','retained','discarded','rejected')",
 		},
 		{
+			name:       "RDS escaped literals",
+			fileClause: "(`state` in (_utf8mb4\\'pending\\',_utf8mb4\\'delivered\\',_utf8mb4\\'retained\\',_utf8mb4\\'superseded\\'))",
+			execClause: "(`manifest_status` in (_utf8mb4\\'\\',_utf8mb4\\'pending\\',_utf8mb4\\'delivered\\',_utf8mb4\\'retained\\',_utf8mb4\\'discarded\\',_utf8mb4\\'rejected\\'))",
+		},
+		{
 			name:       "legacy file constraint",
 			fileClause: "`state` in ('pending','published','collected','superseded')",
 			execClause: "`manifest_status` in ('','pending','delivered','retained','discarded','rejected')",

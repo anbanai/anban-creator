@@ -1050,6 +1050,9 @@ func requireMySQLTaskDeliveryConstraints(db *gorm.DB) error {
 		if err := row.Scan(&clause); err != nil {
 			return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup (constraint %s is unavailable)", check.name)
 		}
+		// Alibaba Cloud RDS MySQL 8.0.18 preserves backslash-escaped quotes
+		// around character-set-prefixed string literals in CHECK_CLAUSE.
+		clause = strings.ReplaceAll(clause, `\'`, `'`)
 		normalized := strings.ToLower(strings.Join(strings.Fields(clause), ""))
 		for _, required := range check.required {
 			if !strings.Contains(normalized, required) {
