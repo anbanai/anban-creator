@@ -71,6 +71,21 @@ export interface ProjectDetail {
   stats: ProjectStats
 }
 
+export interface ProjectMemoryFile {
+  path: string
+  content: string
+  size_bytes: number
+  modified_at: string
+  truncated: boolean
+}
+
+export interface ProjectMemory {
+  status: 'empty' | 'ready'
+  updated_at: string | null
+  partial: boolean
+  files: ProjectMemoryFile[]
+}
+
 export interface CreateProjectRequest {
   platform: string
   name?: string

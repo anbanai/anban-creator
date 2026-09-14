@@ -155,6 +155,7 @@ services:
       ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
       ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
       ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
+      ANBAN_AGENT_PROJECT_MEMORY_VOLUME: "creator-project-memory"
       ANBAN_SEEDNOTE_BASE_URL: "http://sidecar-seednote:18060"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
@@ -163,6 +164,7 @@ services:
       - ./server/config.yaml:/app/conf/config.yaml:ro
       - ./data/files:/app/data/files
       - ./data/logs:/app/data/logs
+      - creator-project-memory:/app/data/project-memory
       - /var/run/docker.sock:/var/run/docker.sock
     # make docker-up resolves this from the host socket. Direct Compose users
     # can export DOCKER_GID=$(stat -L -c '%g' /var/run/docker.sock) on Linux.
@@ -208,3 +210,7 @@ networks:
   creator-runtime-network:
     name: creator-runtime-network
     driver: bridge
+
+volumes:
+  creator-project-memory:
+    name: creator-project-memory

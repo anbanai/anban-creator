@@ -7,6 +7,7 @@ import type {
   CreateProjectResponse,
   PlatformConfig,
   PlatformProfile,
+  ProjectMemory,
 } from '@/types'
 
 export const projectsApi = {
@@ -15,6 +16,9 @@ export const projectsApi = {
 
   get: (id: string) =>
     unwrap<ProjectDetail>(http.get(`/projects/${id}`)),
+
+  memory: (id: string) =>
+    unwrap<ProjectMemory>(http.get(`/projects/${id}/memory`)),
 
   stats: (ids: string[]) =>
     unwrap<Record<string, ProjectStats>>(http.get('/projects/stats', {

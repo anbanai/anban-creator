@@ -52,6 +52,7 @@ type DockerDispatcher struct {
 	serverURL     string
 	tokens        *auth.WorkloadTokenService
 	engine        dockerEngine
+	memory        ProjectMemoryStore
 	now           func() time.Time
 }
 
@@ -64,15 +65,16 @@ func NewDockerDispatcher(
 	serverURL string,
 	tokens *auth.WorkloadTokenService,
 	engine dockerEngine,
+	memory ProjectMemoryStore,
 	now func() time.Time,
 ) (*DockerDispatcher, error) {
-	if tokens == nil || engine == nil || now == nil {
-		return nil, fmt.Errorf("Docker dispatcher requires token service, Engine client, and clock")
+	if tokens == nil || engine == nil || memory == nil || now == nil {
+		return nil, fmt.Errorf("Docker dispatcher requires token service, Engine client, project memory store, and clock")
 	}
 	if strings.TrimSpace(serverURL) == "" {
 		return nil, fmt.Errorf("Docker dispatcher Server URL is required")
 	}
-	if strings.TrimSpace(cfg.Network) == "" || cfg.CPUCores <= 0 || cfg.MemoryMB <= 0 || cfg.PidsLimit <= 0 || cfg.TimeoutSec <= 0 {
+	if strings.TrimSpace(cfg.Network) == "" || strings.TrimSpace(cfg.ProjectMemoryVolume) == "" || cfg.CPUCores <= 0 || cfg.MemoryMB <= 0 || cfg.PidsLimit <= 0 || cfg.TimeoutSec <= 0 {
 		return nil, fmt.Errorf("Docker dispatcher configuration is incomplete")
 	}
 	for _, profile := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage} {
@@ -86,6 +88,7 @@ func NewDockerDispatcher(
 		serverURL:     strings.TrimRight(strings.TrimSpace(serverURL), "/"),
 		tokens:        tokens,
 		engine:        engine,
+		memory:        memory,
 		now:           now,
 	}, nil
 }
@@ -102,6 +105,10 @@ func (d *DockerDispatcher) ResolveRuntime(taskType string) srvconfig.RuntimeImag
 func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
 	if err := d.validateDispatch(execution, task); err != nil {
 		return nil, NewPermanentDispatchError(err)
+	}
+	resume := execution.Attempt > 1 || strings.TrimSpace(execution.ParentExecutionID) != "" || strings.TrimSpace(execution.RuntimeInstanceID) != ""
+	if err := prepareProjectMemory(ctx, d.memory, task.ProjectID, resume); err != nil {
+		return nil, fmt.Errorf("prepare Docker project memory: %w", err)
 	}
 
 	dispatchCtx, cancel := context.WithTimeout(ctx, time.Duration(d.config.TimeoutSec)*time.Second)
@@ -129,9 +136,6 @@ func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExe
 		if err := d.verifyPersistedContainer(dispatchCtx, spec, execution.RuntimeInstanceID); err != nil {
 			return nil, err
 		}
-	}
-	if err := d.ensureVolume(dispatchCtx, spec.ProjectVolume, "project memory", true); err != nil {
-		return nil, err
 	}
 	allowTaskVolumeCreation := execution.Attempt <= 1 && strings.TrimSpace(execution.ParentExecutionID) == ""
 	if err := d.ensureVolume(dispatchCtx, spec.TaskVolume, "task workspace", allowTaskVolumeCreation); err != nil {
@@ -524,23 +528,6 @@ func (d *DockerDispatcher) DeleteTaskWorkspace(ctx context.Context, task *model.
 	})
 }
 
-func (d *DockerDispatcher) DeleteProjectMemory(ctx context.Context, projectID string) error {
-	if d == nil || d.engine == nil {
-		return fmt.Errorf("Docker dispatcher is not configured")
-	}
-	if !isCanonicalDockerIdentity(projectID) {
-		return fmt.Errorf("project ID is required and must be canonical")
-	}
-	desiredName := dockerProjectMemoryVolumeName(projectID)
-	return d.deleteVolume(ctx, volume.CreateOptions{Name: desiredName}, func(existing volume.Volume) error {
-		if existing.Name != desiredName || existing.Driver != dockerVolumeDriver || len(existing.Labels) != 2 ||
-			existing.Labels[dockerProjectIDLabel] != projectID || !isCanonicalDockerIdentity(existing.Labels[dockerUserIDLabel]) || len(existing.Options) != 0 {
-			return fmt.Errorf("Docker project memory volume identity or specification drift")
-		}
-		return nil
-	})
-}
-
 func (d *DockerDispatcher) deleteVolume(ctx context.Context, desired volume.CreateOptions, verify func(volume.Volume) error) error {
 	existing, err := d.engine.VolumeInspect(ctx, desired.Name)
 	if errdefs.IsNotFound(err) {
@@ -556,13 +543,6 @@ func (d *DockerDispatcher) deleteVolume(ctx context.Context, desired volume.Crea
 		return fmt.Errorf("remove Docker volume %q: %w", desired.Name, err)
 	}
 	return nil
-}
-
-func dockerProjectMemoryVolume(task *model.Task) volume.CreateOptions {
-	return volume.CreateOptions{
-		Name: dockerProjectMemoryVolumeName(task.ProjectID), Driver: dockerVolumeDriver,
-		Labels: map[string]string{dockerProjectIDLabel: task.ProjectID, dockerUserIDLabel: task.UserID},
-	}
 }
 
 func dockerTaskWorkspaceVolume(task *model.Task) volume.CreateOptions {

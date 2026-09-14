@@ -27,6 +27,7 @@ import (
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -254,6 +255,16 @@ func main() {
 	var runtimeDispatcher agent.RuntimeDispatcher
 	var workloadVerifier agent.WorkloadVerifier
 	var runtimeClientCloser interface{ Close() error }
+	projectMemoryStore, err := projectmemory.NewFilesystemStore(cfg.Claude.ProjectMemory.RootDir, projectmemory.Limits{
+		MaxProjectBytes: cfg.Claude.ProjectMemory.MaxProjectBytes,
+		MaxFiles:        cfg.Claude.ProjectMemory.MaxFiles,
+		MaxDepth:        cfg.Claude.ProjectMemory.MaxDepth,
+		MaxFileBytes:    cfg.Claude.ProjectMemory.MaxFileBytes,
+		MaxPreviewBytes: cfg.Claude.ProjectMemory.MaxPreviewBytes,
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("project memory filesystem is unavailable")
+	}
 	executionTokens, err := auth.NewExecutionTokenService(cfg.Claude.ExecutionTokenSecret)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create execution token service")
@@ -271,7 +282,7 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to create Docker client")
 		}
 		runtimeClientCloser = dockerClient
-		runtimeDispatcher, err = agent.NewDockerDispatcher(cfg.Claude.RuntimeImages, cfg.Claude.Docker, cfg.AgentServerURL(), workloadTokens, dockerClient, time.Now)
+		runtimeDispatcher, err = agent.NewDockerDispatcher(cfg.Claude.RuntimeImages, cfg.Claude.Docker, cfg.AgentServerURL(), workloadTokens, dockerClient, projectMemoryStore, time.Now)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker runtime dispatcher")
 		}
@@ -294,7 +305,7 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Kubernetes client")
 		}
-		runtimeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient)
+		runtimeDispatcher, err = agent.NewKubernetesDispatcherWithClient(cfg.Claude.Kubernetes, cfg.Claude.RuntimeImages, cfg.AgentServerURL(), kubeClient, projectMemoryStore)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Kubernetes Job dispatcher")
 		}
@@ -380,11 +391,7 @@ func main() {
 			log.Fatal().Str("provider", cfg.Claude.Executor).Msg("runtime dispatcher does not manage task workspaces")
 		}
 		taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
-		projectMemoryLifecycle, ok := runtimeDispatcher.(service.ProjectMemoryLifecycle)
-		if !ok {
-			log.Fatal().Str("provider", cfg.Claude.Executor).Msg("runtime dispatcher does not manage project memory")
-		}
-		projectSvc.SetProjectMemoryLifecycle(projectMemoryLifecycle)
+		projectSvc.SetProjectMemoryLifecycle(projectMemoryStore)
 		runtimeReconciler = agent.NewRuntimeReconciler(runtimeDispatcher, taskSvc, reconcilerConfig, *log)
 		taskSvc.SetNASResumeEnabled(true)
 		if cap := managedRuntimeProjectConcurrencyCap(cfg.Claude.Executor); cap > 0 {
@@ -529,6 +536,7 @@ func main() {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
+		projectHandler.SetProjectMemoryStore(projectMemoryStore)
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		projectHandler.SetUploadRepository(repo)
 		projectHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)

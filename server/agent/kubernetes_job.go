@@ -111,7 +111,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
-							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath},
+							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath, SubPath: "projects/" + projectID(task)},
 						},
 					}},
 					Containers: []corev1.Container{{
@@ -146,7 +146,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
-							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath},
+							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath, SubPath: "projects/" + projectID(task)},
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
 							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
@@ -154,7 +154,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 					}},
 					Volumes: []corev1.Volume{
 						{Name: kubernetesWorkspaceMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesTaskWorkspacePVCName(taskID(task))}}},
-						{Name: kubernetesMemoryMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesProjectMemoryPVCName(projectID(task))}}},
+						{Name: kubernetesMemoryMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ProjectMemoryClaim}}},
 						{Name: kubernetesTmpVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						{Name: kubernetesTokenVolumeName, VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
 							DefaultMode: int32Ptr(0440),
@@ -233,30 +233,6 @@ func kubernetesResourceList(values map[string]string) corev1.ResourceList {
 		}
 	}
 	return out
-}
-
-func buildProjectMemoryPVC(cfg kubernetesJobConfig, projectID string) *corev1.PersistentVolumeClaim {
-	storageClass := cfg.NASStorageClass
-	quantity := resource.MustParse(cfg.ProjectMemorySize)
-	return &corev1.PersistentVolumeClaim{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubernetesProjectMemoryPVCName(projectID),
-			Namespace: cfg.Namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":      kubernetesAgentAppName,
-				"app.kubernetes.io/component": "project-memory",
-				kubernetesProjectIDLabel:      kubernetesLabelValue(projectID),
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			StorageClassName: &storageClass,
-			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
-				corev1.ResourceStorage: quantity,
-			}},
-		},
-	}
 }
 
 func buildTaskWorkspacePVC(cfg kubernetesJobConfig, task *model.Task) *corev1.PersistentVolumeClaim {

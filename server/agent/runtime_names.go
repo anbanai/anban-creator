@@ -23,7 +23,6 @@ const (
 	MontageRuntimeDirName            = "openmontage"
 	ContainerMontageTemplatePath     = "/opt/montage-template"
 	dockerRuntimeContainerNamePrefix = "creator-agent-job"
-	dockerProjectMemoryNamePrefix    = "creator-agent-memory"
 	dockerTaskWorkspaceNamePrefix    = "creator-agent-workspace"
 	dockerRuntimeNameMaxLength       = 128
 )
@@ -54,10 +53,6 @@ func RuntimeImageForTask(images srvconfig.RuntimeImages, taskType string) srvcon
 
 func dockerRuntimeContainerName(executionID string) string {
 	return dockerIdentityName(dockerRuntimeContainerNamePrefix, executionID)
-}
-
-func dockerProjectMemoryVolumeName(projectID string) string {
-	return dockerIdentityName(dockerProjectMemoryNamePrefix, projectID)
 }
 
 func dockerTaskWorkspaceVolumeName(taskID string) string {

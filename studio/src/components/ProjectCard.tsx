@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, Lightbulb, Pencil, RotateCcw } from 'lucide-react'
+import { Archive, Brain, Lightbulb, Pencil, RotateCcw } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant } from '@/lib/PlatformIcon'
@@ -7,6 +7,7 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
+import { ProjectMemorySheet } from '@/components/projects/ProjectMemorySheet'
 
 interface ProjectCardProps {
   project: Project
@@ -20,6 +21,7 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
   const platformLabel = platformLabels[project.platform] || project.platform
   const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
   const positioning = project.instructions || project.positioning || ''
@@ -63,6 +65,10 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
               编辑
             </Button>
           )}
+          <Button variant="ghost" size="xs" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`}>
+            <Brain />
+            记忆
+          </Button>
           <Button
             variant="ghost"
             size="xs"
@@ -92,6 +98,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
         </div>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
+      <ProjectMemorySheet projectId={project.id} projectName={project.name} open={memoryOpen} onOpenChange={setMemoryOpen} />
     </div>
   )
 }

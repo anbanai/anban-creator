@@ -47,7 +47,6 @@ type Config struct {
 	Seednote           SeednoteConfig                  `yaml:"seednote"`
 	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
-	Memory             MemoryConfig                    `yaml:"memory"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -524,6 +523,7 @@ type ClaudeConfig struct {
 	Sandbox                           bool                                    `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker                            DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	Kubernetes                        KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
+	ProjectMemory                     ProjectMemoryConfig                     `yaml:"project_memory"`   // Shared filesystem-backed Claude project memory.
 	MaxTurns                          map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
 	TaskLogDir                        string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL                    string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
@@ -540,7 +540,7 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"execution_profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
-		"sandbox": true, "docker": true, "kubernetes": true, "max_turns": true,
+		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
 	}
 	if value.Kind != yaml.MappingNode {
@@ -687,15 +687,16 @@ func (c ClaudeConfig) Validate() error {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Network       string `yaml:"network"`
-	CPUCores      int64  `yaml:"cpu_cores"`
-	cpuCoresSet   bool   `yaml:"-"`
-	MemoryMB      int64  `yaml:"memory_mb"`
-	memoryMBSet   bool   `yaml:"-"`
-	PidsLimit     int64  `yaml:"pids_limit"`
-	pidsLimitSet  bool   `yaml:"-"`
-	TimeoutSec    int    `yaml:"timeout_sec"`
-	timeoutSecSet bool   `yaml:"-"`
+	Network             string `yaml:"network"`
+	ProjectMemoryVolume string `yaml:"project_memory_volume"`
+	CPUCores            int64  `yaml:"cpu_cores"`
+	cpuCoresSet         bool   `yaml:"-"`
+	MemoryMB            int64  `yaml:"memory_mb"`
+	memoryMBSet         bool   `yaml:"-"`
+	PidsLimit           int64  `yaml:"pids_limit"`
+	pidsLimitSet        bool   `yaml:"-"`
+	TimeoutSec          int    `yaml:"timeout_sec"`
+	timeoutSecSet       bool   `yaml:"-"`
 }
 
 // KubernetesConfig holds ACK/Kubernetes Job runtime settings.
@@ -706,7 +707,7 @@ type KubernetesConfig struct {
 	ServerCASecret  string `yaml:"server_ca_secret"`
 
 	NASStorageClass         string                              `yaml:"nas_storage_class"`
-	ProjectMemorySize       string                              `yaml:"project_memory_size"`
+	ProjectMemoryClaim      string                              `yaml:"project_memory_claim"`
 	TaskWorkspaceSize       string                              `yaml:"task_workspace_size"`
 	ActiveDeadlineSeconds   int64                               `yaml:"active_deadline_seconds"`
 	HeartbeatTimeoutSeconds int64                               `yaml:"heartbeat_timeout_seconds"`
@@ -739,7 +740,7 @@ func (c RuntimeImages) ForTask(taskType string) RuntimeImageSelection {
 func (c *DockerConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"network": true, "cpu_cores": true, "memory_mb": true,
-		"pids_limit": true, "timeout_sec": true,
+		"pids_limit": true, "timeout_sec": true, "project_memory_volume": true,
 	}
 	if value.Kind != yaml.MappingNode {
 		return fmt.Errorf("claude.docker config must be a mapping")
@@ -772,7 +773,7 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"namespace": true, "service_account": true, "image_pull_secret": true,
 		"server_ca_secret": true, "nas_storage_class": true,
-		"project_memory_size": true, "task_workspace_size": true,
+		"project_memory_claim": true, "task_workspace_size": true,
 		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
 		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
 		"resources": true, "resource_profiles": true,
@@ -832,15 +833,25 @@ func mergeKubernetesResourceValues(base, override map[string]string) map[string]
 	return merged
 }
 
-// MemoryConfig holds Claude Code project memory projection settings.
-type MemoryConfig struct {
-	Enabled         bool          `yaml:"enabled"`
-	Provider        string        `yaml:"provider"`
-	OSSPrefix       string        `yaml:"oss_prefix"`
-	RuntimeDir      string        `yaml:"runtime_dir"`
-	MaxArchiveBytes int64         `yaml:"max_archive_bytes"`
-	MergeOnStatus   string        `yaml:"merge_on_status"`
-	LockTTL         time.Duration `yaml:"lock_ttl"`
+// ProjectMemoryConfig bounds the shared project-memory filesystem and preview API.
+type ProjectMemoryConfig struct {
+	RootDir         string `yaml:"root_dir"`
+	MaxProjectBytes int64  `yaml:"max_project_bytes"`
+	MaxFiles        int    `yaml:"max_files"`
+	MaxDepth        int    `yaml:"max_depth"`
+	MaxFileBytes    int64  `yaml:"max_file_bytes"`
+	MaxPreviewBytes int64  `yaml:"max_preview_bytes"`
+}
+
+func (c *ProjectMemoryConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "claude.project_memory", map[string]bool{
+		"root_dir": true, "max_project_bytes": true, "max_files": true,
+		"max_depth": true, "max_file_bytes": true, "max_preview_bytes": true,
+	}); err != nil {
+		return err
+	}
+	type plain ProjectMemoryConfig
+	return value.Decode((*plain)(c))
 }
 
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
@@ -956,7 +967,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"seednote":        true,
 		"worldtree":       true,
 		"ilink":           true,
-		"memory":          true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1049,23 +1059,23 @@ func (c *Config) applyDefaults() {
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
 	}
-	if c.Memory.Provider == "" {
-		c.Memory.Provider = "oss"
+	if c.Claude.ProjectMemory.RootDir == "" {
+		c.Claude.ProjectMemory.RootDir = "/app/data/project-memory"
 	}
-	if c.Memory.OSSPrefix == "" {
-		c.Memory.OSSPrefix = "claude-memory/projects"
+	if c.Claude.ProjectMemory.MaxProjectBytes == 0 {
+		c.Claude.ProjectMemory.MaxProjectBytes = 16 * 1024 * 1024
 	}
-	if c.Memory.RuntimeDir == "" {
-		c.Memory.RuntimeDir = ".claude/memory"
+	if c.Claude.ProjectMemory.MaxFiles == 0 {
+		c.Claude.ProjectMemory.MaxFiles = 64
 	}
-	if c.Memory.MaxArchiveBytes == 0 {
-		c.Memory.MaxArchiveBytes = 262144
+	if c.Claude.ProjectMemory.MaxDepth == 0 {
+		c.Claude.ProjectMemory.MaxDepth = 4
 	}
-	if c.Memory.MergeOnStatus == "" {
-		c.Memory.MergeOnStatus = "completed"
+	if c.Claude.ProjectMemory.MaxFileBytes == 0 {
+		c.Claude.ProjectMemory.MaxFileBytes = 64 * 1024
 	}
-	if c.Memory.LockTTL == 0 {
-		c.Memory.LockTTL = time.Minute
+	if c.Claude.ProjectMemory.MaxPreviewBytes == 0 {
+		c.Claude.ProjectMemory.MaxPreviewBytes = 256 * 1024
 	}
 	if c.MCP.ToolTimeouts.GenerateImage == 0 {
 		c.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
@@ -1144,6 +1154,9 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Docker.Network == "" {
 		c.Claude.Docker.Network = "creator-runtime-network"
 	}
+	if c.Claude.Docker.ProjectMemoryVolume == "" {
+		c.Claude.Docker.ProjectMemoryVolume = "creator-project-memory"
+	}
 	if c.Claude.Docker.CPUCores == 0 && !c.Claude.Docker.cpuCoresSet {
 		c.Claude.Docker.CPUCores = 2
 	}
@@ -1165,8 +1178,8 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.ServerCASecret == "" {
 		c.Claude.Kubernetes.ServerCASecret = "anban-internal-ca"
 	}
-	if c.Claude.Kubernetes.ProjectMemorySize == "" {
-		c.Claude.Kubernetes.ProjectMemorySize = "1Gi"
+	if c.Claude.Kubernetes.ProjectMemoryClaim == "" {
+		c.Claude.Kubernetes.ProjectMemoryClaim = "creator-project-memory"
 	}
 	if c.Claude.Kubernetes.TaskWorkspaceSize == "" {
 		c.Claude.Kubernetes.TaskWorkspaceSize = "10Gi"
@@ -1574,25 +1587,18 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Memory.Enabled {
-		if c.Memory.Provider != "oss" {
-			errs = append(errs, fmt.Sprintf("memory.provider must be \"oss\", got %q", c.Memory.Provider))
-		}
-		if strings.TrimSpace(c.Memory.OSSPrefix) == "" {
-			errs = append(errs, "memory.oss_prefix is required when memory is enabled")
-		}
-		if !safeRelativeMemoryDir(c.Memory.RuntimeDir) {
-			errs = append(errs, fmt.Sprintf("memory.runtime_dir must be a safe relative path, got %q", c.Memory.RuntimeDir))
-		}
-		if c.Memory.MaxArchiveBytes <= 0 {
-			errs = append(errs, "memory.max_archive_bytes must be positive")
-		}
-		if c.Memory.MergeOnStatus != "completed" {
-			errs = append(errs, fmt.Sprintf("memory.merge_on_status must be \"completed\", got %q", c.Memory.MergeOnStatus))
-		}
-		if c.Memory.LockTTL <= 0 {
-			errs = append(errs, "memory.lock_ttl must be positive")
-		}
+	pm := c.Claude.ProjectMemory
+	if !filepath.IsAbs(pm.RootDir) {
+		errs = append(errs, "claude.project_memory.root_dir must be absolute")
+	}
+	if pm.MaxProjectBytes <= 0 {
+		errs = append(errs, "claude.project_memory.max_project_bytes must be positive")
+	}
+	if pm.MaxFiles <= 0 || pm.MaxDepth <= 0 || pm.MaxFileBytes <= 0 || pm.MaxPreviewBytes <= 0 {
+		errs = append(errs, "claude.project_memory preview limits must be positive")
+	}
+	if pm.MaxPreviewBytes > pm.MaxProjectBytes {
+		errs = append(errs, "claude.project_memory.max_preview_bytes must not exceed max_project_bytes")
 	}
 
 	if err := c.Montage.Validate(); err != nil {
@@ -1698,6 +1704,9 @@ func (c *Config) Validate() error {
 	// long as content_generate_timeout, otherwise the container is killed before
 	// the asynq task deadline (the agent's work is lost mid-pipeline).
 	if c.Claude.Executor == "docker" {
+		if strings.TrimSpace(c.Claude.Docker.ProjectMemoryVolume) == "" {
+			errs = append(errs, "claude.docker.project_memory_volume is required")
+		}
 		if c.Claude.Docker.CPUCores <= 0 {
 			errs = append(errs, "claude.docker.cpu_cores must be positive")
 		}
@@ -1747,11 +1756,8 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.nas_storage_class is required")
 		}
-		memorySize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.ProjectMemorySize))
-		if err != nil {
-			errs = append(errs, "claude.kubernetes.project_memory_size must be a valid Kubernetes quantity")
-		} else if memorySize.Sign() <= 0 {
-			errs = append(errs, "claude.kubernetes.project_memory_size must be positive")
+		if strings.TrimSpace(c.Claude.Kubernetes.ProjectMemoryClaim) == "" {
+			errs = append(errs, "claude.kubernetes.project_memory_claim is required")
 		}
 		workspaceSize, err := resource.ParseQuantity(strings.TrimSpace(c.Claude.Kubernetes.TaskWorkspaceSize))
 		if err != nil {
@@ -1838,16 +1844,4 @@ func validateStorageCustomDomain(raw string) error {
 		return fmt.Errorf("storage.custom_domain must not point at the Studio/API system domain; leave it empty for default OSS URLs or set a CDN/storage hostname")
 	}
 	return nil
-}
-
-func safeRelativeMemoryDir(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" || filepath.IsAbs(path) {
-		return false
-	}
-	cleaned := filepath.Clean(filepath.FromSlash(path))
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return false
-	}
-	return true
 }

@@ -44,7 +44,7 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 		t.Fatalf("identity = %#v", identity)
 	}
 	assertCallSubsequence(t, engine.calls,
-		"volume-create:project", "volume-create:task", "container-create", "archive-copy",
+		"volume-create:task", "container-create", "archive-copy",
 	)
 	if slices.Contains(engine.calls, "container-start") {
 		t.Fatalf("container started during preparation: calls=%v", engine.calls)
@@ -115,7 +115,7 @@ func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 	runtimeImages[model.PlatformArticle] = mutableTag
 	dispatcher, err := NewDockerDispatcher(
 		runtimeImages, dockerDispatcherTestConfig(), "http://server:8080",
-		dockerDispatcherTestTokens(t), engine, time.Now,
+		dockerDispatcherTestTokens(t), engine, &testProjectMemoryStore{}, time.Now,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -237,9 +237,6 @@ func TestDockerResumeRequiresExistingTaskVolume(t *testing.T) {
 			if slices.Contains(engine.calls, "volume-create:task") || slices.Contains(engine.calls, "container-create") {
 				t.Fatalf("resumed execution created missing workspace or container: calls=%v", engine.calls)
 			}
-			if !slices.Contains(engine.calls, "volume-create:project") {
-				t.Fatalf("resumed execution did not create-or-verify project memory: calls=%v", engine.calls)
-			}
 		})
 	}
 }
@@ -288,24 +285,7 @@ func TestDockerDispatcherRecoversCreateRacesAndRejectsDrift(t *testing.T) {
 		if identity.InstanceID != engine.containerID {
 			t.Fatalf("identity = %#v", identity)
 		}
-		assertCallSubsequence(t, engine.calls, "volume-create:project", "volume-create:task", "container-create", "archive-copy")
-	})
-
-	t.Run("foreign volume", func(t *testing.T) {
-		engine := newFakeDockerEngine()
-		task := dockerDispatcherTestTask()
-		name := dockerProjectMemoryVolumeName(task.ProjectID)
-		engine.volumes[name] = volume.Volume{Name: name, Driver: dockerVolumeDriver, Labels: map[string]string{
-			dockerProjectIDLabel: task.ProjectID,
-			dockerUserIDLabel:    "foreign-user",
-		}}
-		_, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), dockerDispatcherTestExecution(), task)
-		if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "drift") {
-			t.Fatalf("Dispatch error = %v, want permanent volume drift", err)
-		}
-		if slices.Contains(engine.calls, "container-create") {
-			t.Fatalf("container created after volume drift: %v", engine.calls)
-		}
+		assertCallSubsequence(t, engine.calls, "volume-create:task", "container-create", "archive-copy")
 	})
 
 	t.Run("foreign container wins create race", func(t *testing.T) {
@@ -621,28 +601,21 @@ func TestDockerDeleteTreatsAlreadyStoppedContainerAsDesiredState(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskWorkspaceAndProjectMemoryVerifyOwnership(t *testing.T) {
+func TestDeleteTaskWorkspaceVerifiesOwnership(t *testing.T) {
 	engine := newFakeDockerEngine()
 	task := dockerDispatcherTestTask()
 	spec := buildDockerRuntimeSpec(dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig(), ServerURL: "http://server:8080"}, dockerDispatcherTestExecution(), task)
 	engine.volumes[spec.TaskVolume.Name] = fakeDockerVolume(spec.TaskVolume)
-	engine.volumes[spec.ProjectVolume.Name] = fakeDockerVolume(spec.ProjectVolume)
 	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
 
 	if err := dispatcher.DeleteTaskWorkspace(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	if err := dispatcher.DeleteProjectMemory(context.Background(), task.ProjectID); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(engine.removedVolumes, []string{spec.TaskVolume.Name, spec.ProjectVolume.Name}) {
+	if !slices.Equal(engine.removedVolumes, []string{spec.TaskVolume.Name}) {
 		t.Fatalf("removed volumes = %v", engine.removedVolumes)
 	}
 	if err := dispatcher.DeleteTaskWorkspace(context.Background(), task); err != nil {
 		t.Fatalf("missing task volume delete is not idempotent: %v", err)
-	}
-	if err := dispatcher.DeleteProjectMemory(context.Background(), task.ProjectID); err != nil {
-		t.Fatalf("missing project volume delete is not idempotent: %v", err)
 	}
 
 	t.Run("task volume drift", func(t *testing.T) {
@@ -655,23 +628,12 @@ func TestDeleteTaskWorkspaceAndProjectMemoryVerifyOwnership(t *testing.T) {
 			t.Fatalf("DeleteTaskWorkspace error=%v removed=%v", err, foreign.removedVolumes)
 		}
 	})
-
-	t.Run("project volume foreign labels", func(t *testing.T) {
-		foreign := newFakeDockerEngine()
-		got := fakeDockerVolume(spec.ProjectVolume)
-		got.Labels["foreign"] = "resource"
-		foreign.volumes[spec.ProjectVolume.Name] = got
-		err := newDockerDispatcherForTest(t, foreign, dockerDispatcherTestTokens(t)).DeleteProjectMemory(context.Background(), task.ProjectID)
-		if err == nil || len(foreign.removedVolumes) != 0 {
-			t.Fatalf("DeleteProjectMemory error=%v removed=%v", err, foreign.removedVolumes)
-		}
-	})
 }
 
 func newDockerDispatcherForTest(t *testing.T, engine *fakeDockerEngine, tokens *auth.WorkloadTokenService) *DockerDispatcher {
 	t.Helper()
 	dispatcher, err := NewDockerDispatcher(
-		dockerDispatcherTestImages(), dockerDispatcherTestConfig(), "http://server:8080", tokens, engine, time.Now,
+		dockerDispatcherTestImages(), dockerDispatcherTestConfig(), "http://server:8080", tokens, engine, &testProjectMemoryStore{}, time.Now,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -689,7 +651,7 @@ func dockerDispatcherTestTokens(t *testing.T) *auth.WorkloadTokenService {
 }
 
 func dockerDispatcherTestConfig() srvconfig.DockerConfig {
-	return srvconfig.DockerConfig{Network: "anban", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 7200}
+	return srvconfig.DockerConfig{Network: "anban", ProjectMemoryVolume: "creator-project-memory", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 7200}
 }
 
 func dockerDispatcherTestImages() srvconfig.RuntimeImages {

@@ -270,6 +270,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/projects/fetch-profile", svc.ProjectHandler.FetchProfile)
 		apiV1.Post("/projects/analyze-image", svc.ProjectHandler.AnalyzeImage)
 		apiV1.Get("/projects/:id", svc.ProjectHandler.Get)
+		apiV1.Get("/projects/:id/memory", svc.ProjectHandler.Memory)
 		apiV1.Put("/projects/:id", svc.ProjectHandler.Update)
 		apiV1.Patch("/projects/:id/archive", svc.ProjectHandler.Archive)
 		apiV1.Patch("/projects/:id/restore", svc.ProjectHandler.Restore)

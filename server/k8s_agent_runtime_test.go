@@ -56,7 +56,10 @@ type deploymentDoc struct {
 					} `yaml:"volumeMounts"`
 				} `yaml:"containers"`
 				Volumes []struct {
-					Name   string `yaml:"name"`
+					Name                  string `yaml:"name"`
+					PersistentVolumeClaim struct {
+						ClaimName string `yaml:"claimName"`
+					} `yaml:"persistentVolumeClaim"`
 					Secret struct {
 						SecretName string `yaml:"secretName"`
 						Items      []struct {
@@ -139,16 +142,23 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(text, "server does not mount NAS") {
-		t.Fatalf("ACK agent runtime manifest must document that the server does not mount NAS")
+	if !strings.Contains(text, "Server and one-shot Agent Jobs share creator-project-memory") {
+		t.Fatalf("ACK agent runtime manifest must document shared project memory")
 	}
 
 	serverDeployment, err := os.ReadFile("Deployment.yaml")
 	if err != nil {
 		t.Fatalf("read server deployment: %v", err)
 	}
+	serverDocs := splitKubernetesYAMLDocuments(string(serverDeployment))
+	if len(serverDocs) < 2 {
+		t.Fatalf("server deployment manifest has %d documents, want PVC and Deployment", len(serverDocs))
+	}
+	if !strings.Contains(serverDocs[0], "kind: PersistentVolumeClaim") || !strings.Contains(serverDocs[0], "storage: 20Gi") || !strings.Contains(serverDocs[0], "ReadWriteMany") {
+		t.Fatalf("server deployment must declare the shared 20Gi RWX project memory PVC")
+	}
 	var deployment deploymentDoc
-	if err := yaml.Unmarshal(serverDeployment, &deployment); err != nil {
+	if err := yaml.Unmarshal([]byte(serverDocs[1]), &deployment); err != nil {
 		t.Fatalf("parse server deployment: %v", err)
 	}
 	if deployment.Kind != "Deployment" {
@@ -169,7 +179,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_AGENT_SERVER_CA_SECRET":      "anban-internal-ca",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET":     "${imagePullSecret}",
 		"ANBAN_AGENT_NAS_STORAGE_CLASS":     "nas-sc-creator",
-		"ANBAN_AGENT_PROJECT_MEMORY_SIZE":   "1Gi",
+		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":  "creator-project-memory",
 		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":   "10Gi",
 		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
 		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":    "https://open.bigmodel.cn/api/anthropic",
@@ -206,6 +216,15 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	if configMounts != 1 {
 		t.Fatalf("server config file mounts = %d, want exactly one", configMounts)
+	}
+	memoryMounts := 0
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == "project-memory" && mount.MountPath == "/app/data/project-memory" && !mount.ReadOnly {
+			memoryMounts++
+		}
+	}
+	if memoryMounts != 1 {
+		t.Fatalf("server project memory mounts = %d, want one read-write mount", memoryMounts)
 	}
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_AGENT_EXECUTION_TOKEN_SECRET", "anban-agent-execution-token", "token-secret")

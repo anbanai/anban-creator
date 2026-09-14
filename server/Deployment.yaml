@@ -1,3 +1,22 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: creator-project-memory
+  namespace: ${namespace}
+  labels:
+    app: creator-server
+    app.kubernetes.io/component: project-memory
+  annotations:
+    anban.ai/capacity-warning-threshold: "70%"
+    anban.ai/capacity-critical-threshold: "85%"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nas-sc-creator
+  resources:
+    requests:
+      storage: 20Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,8 +79,8 @@ spec:
               value: anban-internal-ca
             - name: ANBAN_AGENT_NAS_STORAGE_CLASS
               value: nas-sc-creator
-            - name: ANBAN_AGENT_PROJECT_MEMORY_SIZE
-              value: 1Gi
+            - name: ANBAN_AGENT_PROJECT_MEMORY_CLAIM
+              value: creator-project-memory
             - name: ANBAN_AGENT_TASK_WORKSPACE_SIZE
               value: 10Gi
             - name: ANBAN_AGENT_EXECUTION_TOKEN_SECRET
@@ -114,6 +133,8 @@ spec:
               memory: ${limits_memory}
               ephemeral-storage: 2Gi
           volumeMounts:
+            - mountPath: /app/data/project-memory
+              name: project-memory
             - mountPath: /app/conf/config.yaml
               name: ${micro_service_name}-config
               subPath: config.yaml
@@ -127,6 +148,9 @@ spec:
       imagePullSecrets:
         - name: ${imagePullSecret}
       volumes:
+        - name: project-memory
+          persistentVolumeClaim:
+            claimName: creator-project-memory
         - name: anban-server-tls
           secret:
             secretName: anban-server-tls

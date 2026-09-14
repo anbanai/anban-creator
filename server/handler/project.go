@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/config"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -38,6 +39,9 @@ type ProjectHandler struct {
 	seednoteClient    *seednote.Client
 	seednoteReady     service.Readiness
 	imageCapabilities map[string]config.ImageGenerationRouteConfig
+	projectMemory     interface {
+		ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+	}
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -66,6 +70,12 @@ func (h *ProjectHandler) SetUploadRepository(repo repository.Repository) {
 
 func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetService) {
 	h.referenceAssets = svc
+}
+
+func (h *ProjectHandler) SetProjectMemoryStore(store interface {
+	ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+}) {
+	h.projectMemory = store
 }
 
 // SetImageCapabilities wires the public capability catalog used to validate
@@ -527,6 +537,38 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 		"project": ch,
 		"stats":   stats,
 	})
+}
+
+// Memory handles GET /projects/:id/memory.
+func (h *ProjectHandler) Memory(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
+	}
+	if _, _, err := h.service.Get(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
+		}
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("verify project memory ownership failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to load project memory")
+	}
+	if h.projectMemory == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	view, err := h.projectMemory.ReadProject(c.Context(), projectID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("read project memory failed")
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	return Success(c, view)
 }
 
 // Update handles PUT /projects/:id.

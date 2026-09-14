@@ -19,7 +19,6 @@ const (
 	kubernetesExecutionIDLabel    = "anban.ai/execution-id"
 	kubernetesWorkspaceMountName  = "workspace"
 	kubernetesJobNamePrefix       = "creator-agent-job"
-	kubernetesMemoryNamePrefix    = "creator-agent-memory"
 	kubernetesWorkspaceNamePrefix = "creator-agent-workspace"
 )
 
@@ -27,10 +26,6 @@ var kubernetesNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func kubernetesJobName(executionID string) string {
 	return kubernetesIdentityName(kubernetesJobNamePrefix, executionID)
-}
-
-func kubernetesProjectMemoryPVCName(projectID string) string {
-	return kubernetesIdentityName(kubernetesMemoryNamePrefix, projectID)
 }
 
 func kubernetesTaskWorkspacePVCName(taskID string) string {

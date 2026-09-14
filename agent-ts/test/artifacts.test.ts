@@ -16,8 +16,10 @@ describe("scanWorkspaceArtifacts", () => {
     const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
     roots.push(root);
     await mkdir(join(root, "output", "nested"), { recursive: true });
+    await mkdir(join(root, ".claude", "memory"), { recursive: true });
     await writeFile(join(root, "output", "nested", "b.txt"), "two");
     await writeFile(join(root, "output", "a.md"), "one");
+    await writeFile(join(root, ".claude", "memory", "MEMORY.md"), "must stay on NAS");
     await symlink("a.md", join(root, "output", "link.md"));
     expect((await scanWorkspaceArtifacts(root)).map((artifact) => artifact.relativePath)).toEqual(["output/a.md", "output/nested/b.txt"]);
   });

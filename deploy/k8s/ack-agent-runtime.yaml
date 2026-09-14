@@ -96,5 +96,5 @@ roleRef:
   kind: Role
   name: creator-agent-runner
 
-# The server does not mount NAS. One-shot Agent Jobs mount a project-scoped
-# memory PVC and a task-scoped workspace PVC, then publish result artifacts to OSS.
+# The Server and one-shot Agent Jobs share creator-project-memory. Jobs mount
+# only projects/<project-id> through subPath; task workspaces remain task-scoped PVCs.
