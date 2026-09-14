@@ -173,6 +173,7 @@ type TaskRepository interface {
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
+	UpdateOutcomeForExecution(ctx context.Context, id, executionID string, outcome model.TaskOutcome) (bool, error)
 	Delete(ctx context.Context, id string) error
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
@@ -181,15 +182,15 @@ type TaskRepository interface {
 type LocalTaskArtifactAction string
 
 const (
-	LocalTaskArtifactsPublish LocalTaskArtifactAction = "publish"
-	LocalTaskArtifactsCollect LocalTaskArtifactAction = "collect"
+	LocalTaskArtifactsDeliver LocalTaskArtifactAction = "deliver"
+	LocalTaskArtifactsRetain  LocalTaskArtifactAction = "retain"
 )
 
 type CloudTaskArtifactAction string
 
 const (
-	CloudTaskArtifactsPublish CloudTaskArtifactAction = "publish"
-	CloudTaskArtifactsCollect CloudTaskArtifactAction = "collect"
+	CloudTaskArtifactsDeliver CloudTaskArtifactAction = "deliver"
+	CloudTaskArtifactsRetain  CloudTaskArtifactAction = "retain"
 )
 
 // TaskFileRepository provides access to the task_files table.
@@ -205,7 +206,7 @@ type TaskFileRepository interface {
 	FindByIDForExecution(ctx context.Context, id, taskID, executionID string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindAllByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
-	FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
+	FindRetainedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByExecutionID(ctx context.Context, executionID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
@@ -217,8 +218,8 @@ type TaskFileRepository interface {
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
-	PublishCurrentExecution(ctx context.Context, taskID, executionID string) error
-	CollectCurrentExecution(ctx context.Context, taskID, executionID string) error
+	DeliverCurrentExecution(ctx context.Context, taskID, executionID string) error
+	RetainCurrentExecution(ctx context.Context, taskID, executionID string) error
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
 	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
@@ -368,6 +369,7 @@ type WechatPublicationRepository interface {
 	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
 	FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error)
+	RebindExecution(ctx context.Context, id, expectedExecutionID, executionID string, expectedUpdatedAt time.Time) (bool, error)
 	FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
 	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatPublication, error)
 	ClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, now, leaseUntil time.Time) (bool, error)

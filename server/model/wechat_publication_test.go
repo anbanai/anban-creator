@@ -72,7 +72,7 @@ func TestWechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract(t *testing.T
 	}
 
 	typeOfPublication := reflect.TypeOf(WechatPublication{})
-	for _, field := range []string{"DraftMediaID", "DraftTitle", "DraftAuthor", "DraftDigest", "DraftThumbMediaID", "DraftContentFingerprint", "DraftRequestFingerprint", "Source", "Status", "PublishID", "MsgDataID", "MsgID", "ArticleID", "ArticleURL", "ArticleIndex", "WechatStatusCode", "DraftCreatedAt", "PublishedAt", "NextCheckAt", "LastCheckedAt", "CheckAttempts", "LastError", "Candidates", "ClaimToken", "ClaimedAt", "SubmitAttemptedAt"} {
+	for _, field := range []string{"ExecutionID", "DraftMediaID", "DraftTitle", "DraftAuthor", "DraftDigest", "DraftThumbMediaID", "DraftContentFingerprint", "DraftRequestFingerprint", "Source", "Status", "PublishID", "MsgDataID", "MsgID", "ArticleID", "ArticleURL", "ArticleIndex", "WechatStatusCode", "DraftCreatedAt", "PublishedAt", "NextCheckAt", "LastCheckedAt", "CheckAttempts", "LastError", "Candidates", "ClaimToken", "ClaimedAt", "SubmitAttemptedAt"} {
 		if _, ok := typeOfPublication.FieldByName(field); !ok {
 			t.Errorf("WechatPublication missing %s", field)
 		}

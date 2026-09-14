@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -102,7 +104,7 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		}
 		files := make([]*model.TaskFile, 0, len(required))
 		for _, spec := range required {
-			body := []byte(spec.Path)
+			body := validTaskDeliveryFixtureBody(spec.Path, spec.MIMEType)
 			key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + spec.Path
 			store.files[key] = body
 			files = append(files, &model.TaskFile{
@@ -187,9 +189,317 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 3 {
+	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 2 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
 	}
+}
+
+func TestCompleteCloudExecutionUsesValidatedCoreArtifactsAfterProviderPolicyFailure(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	result := &agent.ExecutionResult{
+		Success:         false,
+		Error:           "供应商内容安全策略拒绝了本次请求。",
+		TerminalReason:  model.TaskBillingTerminalProviderError,
+		ErrorCode:       "provider_policy_rejection",
+		RemoteArtifacts: true,
+	}
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundTask.Status != model.TaskStatusCompleted || foundExecution.Status != model.TaskExecutionSucceeded {
+		t.Fatalf("task=%s execution=%s, want completed/succeeded", foundTask.Status, foundExecution.Status)
+	}
+	files, err := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("delivered files=%d, want 2", len(files))
+	}
+	var stored agent.ExecutionResult
+	if err := json.Unmarshal(foundExecution.Result, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Success || stored.ErrorCode != "provider_policy_rejection" {
+		t.Fatalf("stored provider result = %#v, want failed SDK result with preserved policy code", stored)
+	}
+}
+
+func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	withCover, withContentImages := true, true
+	task.ArticleWithCover = &withCover
+	task.ArticleWithContentImages = &withContentImages
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	contentHash := cloudArticleFixtureHash()
+	scanBody, _ := json.Marshal(map[string]any{
+		"version": "1.0", "status": "warning", "content_hash": contentHash,
+		"findings": []map[string]string{{"rule_id": "absolute_claim", "severity": "warning"}},
+	})
+	draftBody, _ := json.Marshal(map[string]string{
+		"status": "skipped", "reason": "marketing_scan_block_publish", "content_hash": contentHash,
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft-result.json", "application/json", draftBody)
+
+	result := &agent.ExecutionResult{
+		Success: false, Error: "供应商内容安全策略拒绝了本次请求。",
+		TerminalReason: model.TaskBillingTerminalProviderError,
+		ErrorCode:      "provider_policy_rejection", PolicyDomain: "content_safety",
+		ProviderCode: "content_exists_risk", HTTPStatus: 400,
+		ContentDirection: "unknown", Recoverable: true, ResumeFrom: "provider_request",
+		FailureStage: "writing", RequestID: "request-400", RemoteArtifacts: true,
+		ArtifactUploadFailures: []agent.ArtifactUploadFailure{{Path: "output/img_01.png", Reason: "direct artifact upload returned HTTP 503"}},
+	}
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Outcome == nil {
+		t.Fatal("task outcome was not persisted")
+	}
+	outcome := *found.Outcome
+	if outcome.CoreDelivery.Status != model.TaskCoreDeliveryComplete ||
+		outcome.Visual.Status != model.TaskVisualPartial ||
+		outcome.Review.Status != model.TaskReviewWarning ||
+		outcome.Publication.Status != model.TaskPublicationSkipped {
+		t.Fatalf("outcome dimensions = %#v", outcome)
+	}
+	if outcome.Diagnostic == nil || outcome.Diagnostic.Provider != execution.Provider ||
+		outcome.Diagnostic.ProviderCode != "content_exists_risk" || outcome.Diagnostic.HTTPStatus != 400 ||
+		outcome.Diagnostic.ContentDirection != "unknown" || outcome.Diagnostic.RequestID != "sha256:a73a5354c9cdfae22720ad37e5def080aef995ca12316c84db1238c587a9c9a3" {
+		t.Fatalf("diagnostic = %#v", outcome.Diagnostic)
+	}
+	if strings.Contains(outcome.Diagnostic.Summary, result.Error) || !strings.Contains(outcome.Diagnostic.Summary, "未披露具体片段") {
+		t.Fatalf("diagnostic summary is not sanitized: %q", outcome.Diagnostic.Summary)
+	}
+	warningCodes := make(map[string]bool, len(outcome.Warnings))
+	for _, warning := range outcome.Warnings {
+		warningCodes[warning.Code] = true
+	}
+	for _, code := range []string{"provider_policy_rejection", "visual_partial", "review_warning", "publication_skipped", "artifact_upload_failed"} {
+		if !warningCodes[code] {
+			t.Fatalf("missing warning %q in %#v", code, outcome.Warnings)
+		}
+	}
+}
+
+func TestCompleteCloudExecutionDoesNotTrustStaleArticleStatusArtifacts(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		path            string
+		status          string
+		contentHash     string
+		wantDraft       string
+		wantPublication model.TaskPublicationStatus
+	}{
+		{name: "marketing scan missing hash", path: "output/marketing-scan.json", status: "block_publish", wantDraft: model.TaskExecutionDraftDeliveryNotRequested, wantPublication: model.TaskPublicationNotRequested},
+		{name: "marketing scan mismatched hash", path: "output/marketing-scan.json", status: "block_publish", contentHash: strings.Repeat("a", 64), wantDraft: model.TaskExecutionDraftDeliveryNotRequested, wantPublication: model.TaskPublicationNotRequested},
+		{name: "draft result mismatched hash", path: "output/draft-result.json", status: "skipped", contentHash: strings.Repeat("b", 64), wantDraft: model.TaskExecutionDraftDeliveryAmbiguous, wantPublication: model.TaskPublicationAmbiguous},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, true)
+			body, _ := json.Marshal(map[string]string{"status": tt.status, "content_hash": tt.contentHash})
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, tt.path, "application/json", body)
+
+			if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+				t.Fatal(err)
+			}
+			foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
+			foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+			if foundExecution.DraftDeliveryStatus != tt.wantDraft || foundTask.Outcome == nil ||
+				foundTask.Outcome.Publication.Status != tt.wantPublication || foundTask.Outcome.Review.Status != model.TaskReviewUnavailable {
+				t.Fatalf("draft=%q outcome=%#v", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionSanitizesPublicExecutorDiagnostics(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	secret := "provider-secret-token"
+	result := &agent.ExecutionResult{
+		Success: false, Error: "raw " + secret,
+		TerminalReason: model.TaskBillingTerminalProviderError,
+		ErrorCode:      "provider_policy_rejection", PolicyDomain: "content_safety",
+		ProviderCode: "content_exists_risk:" + secret, HTTPStatus: 999,
+		ContentDirection: "output:" + secret, Recoverable: true,
+		FailureStage: "writing:" + secret, ResumeFrom: "delivery:" + secret,
+		RequestID: secret, RemoteArtifacts: true,
+		ArtifactUploadFailures: []agent.ArtifactUploadFailure{{
+			Path: "../../" + secret, Reason: "authorization failed: " + secret,
+		}},
+	}
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(found.Outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), secret) {
+		t.Fatalf("public outcome leaked executor-controlled diagnostic: %s", encoded)
+	}
+	if found.Outcome == nil || found.Outcome.Diagnostic == nil {
+		t.Fatalf("sanitized diagnostic missing: %#v", found.Outcome)
+	}
+	diagnostic := found.Outcome.Diagnostic
+	if diagnostic.ProviderCode != "" || diagnostic.HTTPStatus != 0 || diagnostic.Stage != "" ||
+		diagnostic.ContentDirection != "unknown" || diagnostic.ResumePoint != "" ||
+		diagnostic.RequestID != "sha256:f2939678ac70cc3c6223ed05ffd6ce4791ddec52b3e7b05389e527c0de22ef00" {
+		t.Fatalf("unsafe diagnostic fields survived sanitization: %#v", diagnostic)
+	}
+}
+
+func TestCompleteCloudExecutionDoesNotInferDraftSuccessFromLogs(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true, LogText: "Using tool: mcp__anban__create_draft"}
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	foundExecution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryNotRequested {
+		t.Fatalf("draft delivery status = %q", foundExecution.DraftDeliveryStatus)
+	}
+	if foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationNotRequested {
+		t.Fatalf("publication outcome = %#v", foundTask.Outcome)
+	}
+}
+
+func TestCompleteCloudExecutionUsesDurableDraftPublication(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	if err := repo.WechatPublications().Create(ctx, &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, UserID: task.UserID, ProjectID: task.ProjectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DraftMediaID:            "draft-media-id",
+		DraftContentFingerprint: WechatContentFingerprint(string(validTaskDeliveryFixtureBody("output/05-article.html", "text/html"))),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	foundTask, _ := repo.Tasks().FindByID(ctx, task.ID)
+	foundExecution, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliverySucceeded ||
+		foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationSucceeded {
+		t.Fatalf("draft=%q outcome=%#v", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
+	}
+}
+
+func TestCompleteCloudExecutionDoesNotTrustPublicationForChangedFinalArticle(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	if err := repo.WechatPublications().Create(ctx, &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, UserID: task.UserID, ProjectID: task.ProjectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DraftMediaID: "draft-media-id", DraftContentFingerprint: WechatContentFingerprint("<p>different final article</p>"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	foundTask, _ := repo.Tasks().FindByID(ctx, task.ID)
+	foundExecution, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryAmbiguous ||
+		foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationAmbiguous {
+		t.Fatalf("draft=%q outcome=%#v, want ambiguous publication", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
+	}
+}
+
+func TestCompleteCloudExecutionIgnoresDraftPublicationFromEarlierExecution(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	ctx := context.Background()
+	if err := repo.WechatPublications().Create(ctx, &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: uuid.NewString(), UserID: task.UserID, ProjectID: task.ProjectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DraftMediaID: "old-draft-media-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	foundTask, _ := repo.Tasks().FindByID(ctx, task.ID)
+	foundExecution, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryNotRequested ||
+		foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationNotRequested {
+		t.Fatalf("draft=%q outcome=%#v", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
+	}
+}
+
+func TestCompleteCloudExecutionTreatsMalformedOptionalReportsAsWarnings(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", []byte(`{"status":`))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft-result.json", "application/json", []byte(`{"status":`))
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatalf("optional report must not block core delivery: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != model.TaskStatusCompleted || found.Outcome == nil ||
+		found.Outcome.Review.Status != model.TaskReviewUnavailable ||
+		found.Outcome.Publication.Status != model.TaskPublicationAmbiguous {
+		t.Fatalf("task outcome = %#v", found)
+	}
+}
+
+func addCloudOutcomeArtifact(t *testing.T, svc *TaskService, repo repository.Repository, task *model.Task, execution *model.TaskExecution, path, mimeType string, body []byte) {
+	t.Helper()
+	store, ok := svc.Storage().(*fakeTaskStorage)
+	if !ok {
+		t.Fatal("cloud completion test storage is unavailable")
+	}
+	key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + path
+	store.files[key] = append([]byte(nil), body...)
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
+		Role: DetermineTaskFileRole(path, mimeType), FilePath: path, FileName: filepath.Base(path),
+		MimeType: mimeType, FileSize: int64(len(body)), OSSKey: key, OSSURL: store.GetURL(key), StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatalf("create outcome artifact %s: %v", path, err)
+	}
+}
+
+func cloudArticleFixtureHash() string {
+	digest := sha256.Sum256(validTaskDeliveryFixtureBody("output/04-article-final.md", "text/markdown"))
+	return fmt.Sprintf("%x", digest)
 }
 
 func TestCompleteCloudExecutionRollsBackArtifactsEvidenceAndTaskWhenBillingPersistenceFails(t *testing.T) {
@@ -241,7 +551,7 @@ func TestCompleteCloudExecutionRollsBackArtifactsEvidenceAndTaskWhenBillingPersi
 	persistedTask, _ = repo.Tasks().FindByID(context.Background(), task.ID)
 	persistedExecution, _ = repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	if persistedTask.Status != model.TaskStatusCompleted || persistedTask.BillingTerminalReason != model.TaskBillingTerminalCompleted ||
-		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || persistedExecution.ManifestStatus != model.TaskExecutionManifestPublished {
+		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || persistedExecution.ManifestStatus != model.TaskExecutionManifestDelivered {
 		t.Fatalf("resumed completion = task:%#v execution:%#v", persistedTask, persistedExecution)
 	}
 }
@@ -490,7 +800,7 @@ func TestCompleteCloudExecutionRejectsSuccessWithoutManifest(t *testing.T) {
 	}
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
-	if foundTask.Status != model.TaskStatusFailed || foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestCollected {
+	if foundTask.Status != model.TaskStatusFailed || foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestRetained {
 		t.Fatalf("task=%s execution=%s manifest=%s", foundTask.Status, foundExecution.Status, foundExecution.ManifestStatus)
 	}
 }
@@ -524,10 +834,10 @@ func TestCompleteCloudExecutionCollectsArtifactsWhenValidationFails(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestCollected {
+	if foundExecution.Status != model.TaskExecutionFailed || foundExecution.ManifestStatus != model.TaskExecutionManifestRetained {
 		t.Fatalf("execution status=%s manifest=%s", foundExecution.Status, foundExecution.ManifestStatus)
 	}
-	if len(files) != 1 || files[0].State != model.TaskFileStateCollected || files[0].FileName != "failure-state.json" {
+	if len(files) != 1 || files[0].State != model.TaskFileStateRetained || files[0].FileName != "failure-state.json" {
 		t.Fatalf("collected files = %#v", files)
 	}
 }
@@ -556,7 +866,7 @@ func TestCompleteCloudExecutionConcurrentDuplicate(t *testing.T) {
 	}
 	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 3 {
+	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 2 {
 		t.Fatalf("finalization=%s files=%d", found.FinalizationStatus, len(files))
 	}
 }
@@ -645,11 +955,11 @@ func TestCompleteCloudExecutionResumesAfterCoreCommitBeforeStageMarker(t *testin
 	persistedExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByExecutionID(context.Background(), execution.ID)
 	if persistedTask.Status != model.TaskStatusCompleted || persistedTask.BillingTerminalReason != model.TaskBillingTerminalCompleted ||
-		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationTerminal || persistedExecution.ManifestStatus != model.TaskExecutionManifestPublished {
+		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationTerminal || persistedExecution.ManifestStatus != model.TaskExecutionManifestDelivered {
 		t.Fatalf("core commit state = task:%#v execution:%#v", persistedTask, persistedExecution)
 	}
 	for _, file := range files {
-		if file.State != model.TaskFileStatePublished {
+		if file.State != model.TaskFileStateDelivered {
 			t.Fatalf("core commit did not publish artifact %#v", file)
 		}
 	}

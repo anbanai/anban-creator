@@ -44,7 +44,7 @@ func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactV
 	meaningful := 0
 	for _, file := range files {
 		if file == nil || file.FileSize <= 0 ||
-			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStatePublished) {
+			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
 			continue
 		}
 		path := filepath.ToSlash(strings.TrimSpace(file.FilePath))

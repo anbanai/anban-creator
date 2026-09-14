@@ -85,14 +85,103 @@ func TestArticleIdentityFailuresAreNonRetryableAndRecoverable(t *testing.T) {
 			text := readArticleContractFile(t, path)
 			for _, term := range []string{
 				"execution_identity_required", "execution_identity_mismatch", "不可重试",
-				"execution_identity_unavailable", "\"resume_from\":\"image_generation\"",
-				"保留", "不得包含令牌、密钥或完整环境变量",
+				"execution_identity_unavailable", "resume_from=image_generation",
+				"保留", "不得包含令牌、密钥或完整环境变量", "继续生成核心 HTML",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing execution identity recovery contract %q", path, term)
 				}
 			}
 		})
+	}
+}
+
+func TestArticleClaudeAgentUsesOnlyThreeProgressTasks(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "harness", "agents", "article.md"),
+		filepath.Join(root, "harness", "packs", "article", "agent.claude.md"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{"research、writing、delivery", "anban_progress_stage"} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing three-stage progress contract %q", path, term)
+				}
+			}
+			for _, stale := range []string{"流程启动时用 TaskCreate 创建任务列表", "每个任务对应一个流程步骤"} {
+				if strings.Contains(text, stale) {
+					t.Fatalf("%s still contains stale fine-grained task instruction %q", path, stale)
+				}
+			}
+		})
+	}
+}
+
+func TestArticleCodexAgentUsesOnlyThreeProgressTasks(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{"research、writing、delivery", "update_task_progress"} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing Codex three-stage progress contract %q", path, term)
+				}
+			}
+			for _, stale := range []string{"流程启动时用 TaskCreate 创建任务列表", "每个任务对应一个流程步骤", "anban_progress_stage"} {
+				if strings.Contains(text, stale) {
+					t.Fatalf("%s contains incompatible Codex progress instruction %q", path, stale)
+				}
+			}
+		})
+	}
+}
+
+func TestArticleAgentsBindMarketingScanToFinalMarkdown(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	cases := []struct {
+		path        string
+		scannerPath string
+	}{
+		{filepath.Join(root, "harness", "packs", "article", "agent.claude.md"), "$CLAUDE_PLUGIN_ROOT/skills/content-writing/scripts/scan-article-marketing.mjs"},
+		{filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"), "__PLUGIN_ROOT__/skills/content-writing/scripts/scan-article-marketing.mjs"},
+		{filepath.Join(root, "harness", "packs", "article", "agent.dsh.yml"), "$DSH_HOME/.agent-presets/article/skills/content-writing/scripts/scan-article-marketing.mjs"},
+	}
+	for _, tc := range cases {
+			t.Run(tc.path, func(t *testing.T) {
+			text := readArticleContractFile(t, tc.path)
+			if strings.Count(text, tc.scannerPath) < 2 {
+				t.Fatalf("%s must invoke its host scanner for initial and final scans", tc.path)
+			}
+			if strings.Count(text, "node ") < 2 {
+				t.Fatalf("%s must execute its pure ESM marketing scanner with node", tc.path)
+			}
+			if strings.Count(text, "output/04-article-final.md output/marketing-scan.json --fix") != 1 {
+				t.Fatalf("%s must allow exactly one deterministic auto-revision pass", tc.path)
+			}
+			for _, required := range []string{"最终 Markdown 每次修改后", "重新扫描并重新渲染", "content_hash"} {
+				if !strings.Contains(text, required) {
+					t.Fatalf("%s missing final scan contract %q", tc.path, required)
+				}
+			}
+			lastScan := strings.LastIndex(text, tc.scannerPath)
+			renderAfterScan := strings.Index(text[lastScan:], "render_template(")
+			if lastScan < 0 || renderAfterScan < 0 {
+				t.Fatalf("%s must run its authoritative scan before final rendering", tc.path)
+			}
+		})
+	}
+
+	skill := readArticleContractFile(t, filepath.Join(root, "harness", "skills", "content-writing", "SKILL.md"))
+	for _, forbidden := range []string{"$CLAUDE_PLUGIN_ROOT", "$DSH_HOME"} {
+		if strings.Contains(skill, forbidden) {
+			t.Fatalf("content-writing skill contains host-specific path %q", forbidden)
+		}
 	}
 }
 
@@ -200,8 +289,8 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 			for _, term := range []string{
 				"render_template",
 				"article_templates",
-				"主路径",
-				"convert_markdown` 只用于旧版 server 兼容降级",
+				"唯一主路径",
+				"不得使用 `convert_markdown`",
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing content-writing render contract term %q", path, term)
@@ -555,19 +644,17 @@ func TestArticleImageReferencesUseIndependentCapabilitiesAndAgentJudgment(t *tes
 	}
 }
 
-func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testing.T) {
+func TestArticleAgentsSeparateCoreFailuresFromVisualWarnings(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	cases := []struct {
+	coreCases := []struct {
 		path       string
 		errorCodes []string
 	}{
-		{filepath.Join(root, "harness", "agents", "article.md"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
-		{filepath.Join(root, "harness", "agents", "article.toml"), []string{"article_cover_generation_failed", "article_content_images_failed", "article_draft_creation_failed"}},
-		{filepath.Join(root, "harness", "skills", "article", "SKILL.md"), []string{"article_cover_generation_failed", "article_cover_quality_failed", "article_content_images_failed", "article_draft_creation_failed"}},
-		{filepath.Join(root, "harness", "skills", "article-cover-design", "SKILL.md"), []string{"article_cover_quality_failed"}},
-		{filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"), []string{"article_cover_quality_failed", "article_content_images_failed"}},
+		{filepath.Join(root, "harness", "agents", "article.md"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
+		{filepath.Join(root, "harness", "agents", "article.toml"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
+		{filepath.Join(root, "harness", "skills", "article", "SKILL.md"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
 	}
-	for _, tc := range cases {
+	for _, tc := range coreCases {
 		body := readArticleContractFile(t, tc.path)
 		for _, required := range []string{
 			"failure-state.json",
@@ -592,6 +679,21 @@ func TestArticleAgentsUseStructuredFailuresWithoutMidRunUserAssistance(t *testin
 		} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s still contains mid-run user assistance path %q", tc.path, forbidden)
+			}
+		}
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "harness", "agents", "article.md"),
+		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"),
+	} {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{"warning", "视觉失败不得阻止核心 Markdown 与 HTML 继续生成"} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing visual warning contract %q", path, required)
 			}
 		}
 	}
@@ -680,6 +782,7 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 
 	for _, path := range paths {
 		body := readArticleContractFile(t, path)
+		normalizedBody := strings.ReplaceAll(body, "`", "")
 		for _, required := range []string{
 			"托管上下文提供的项目 ID",
 			"恰好一个归属当前用户的 Article 项目",
@@ -693,14 +796,14 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 			"调用成功但缺少可选语义配置",
 			"Agent 默认值",
 			"只有这种成功响应中的可选字段缺失",
-			"`upload_image` 调用失败时只重试上传",
+			"upload_image 调用失败时只重试上传",
 			"article_image_upload_failed",
-			"`analyze_image` 的传输或运行时失败",
+			"analyze_image 的传输或运行时失败",
 			"记录为警告",
 			"不得阻塞后续已规划的图片生成",
 			"最终质量判断由 Agent 负责",
 		} {
-			if !strings.Contains(body, required) {
+			if !strings.Contains(normalizedBody, required) {
 				t.Fatalf("%s missing managed Article resolution term %q", path, required)
 			}
 		}

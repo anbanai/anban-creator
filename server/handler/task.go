@@ -1781,6 +1781,28 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 	return c.SendStream(stream)
 }
 
+// DownloadRetainedZip handles GET /api/v1/tasks/:id/files/retained/zip.
+func (h *TaskHandler) DownloadRetainedZip(c fiber.Ctx) error {
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
+		return nil
+	}
+	stream, zipName, err := h.service.DownloadRetainedZip(c.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrNoDownloadableDeliveryFiles) {
+			return Error(c, fiber.StatusNotFound, "没有可下载的已保留产物")
+		}
+		h.logger.Error().Err(err).Str("task_id", taskID).Msg("download retained zip failed")
+		return Error(c, fiber.StatusNotFound, "failed to create retained ZIP archive")
+	}
+	c.Set("Content-Type", "application/zip")
+	c.Set("Content-Disposition", taskFileContentDisposition("attachment", zipName))
+	return c.SendStream(stream)
+}
+
 // DownloadTasksZip handles POST /api/v1/tasks/files/zip.
 // It creates a single ZIP archive containing all readable files from selected completed tasks.
 func (h *TaskHandler) DownloadTasksZip(c fiber.Ctx) error {

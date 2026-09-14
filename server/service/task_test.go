@@ -2194,6 +2194,7 @@ func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, Result: &resultJSON,
+		Outcome:            &model.TaskOutcome{CoreDelivery: model.TaskCoreDeliveryOutcome{Status: model.TaskCoreDeliveryNone}},
 		TerminalModelUsage: datatypes.NewJSONType([]model.ModelTokenUsage{{Provider: "provider", Model: "old", InputTokens: 9}}),
 		CostStatus:         agent.CostStatusReconciled,
 	}
@@ -2213,15 +2214,15 @@ func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if resumed.Result != nil || len(resumed.TerminalModelUsage.Data()) != 0 || resumed.CostStatus != "" {
-		t.Fatalf("returned resumed task exposes old evidence: result=%v usage=%+v cost=%q", resumed.Result, resumed.TerminalModelUsage.Data(), resumed.CostStatus)
+	if resumed.Result != nil || resumed.Outcome != nil || len(resumed.TerminalModelUsage.Data()) != 0 || resumed.CostStatus != "" {
+		t.Fatalf("returned resumed task exposes old evidence: result=%v outcome=%v usage=%+v cost=%q", resumed.Result, resumed.Outcome, resumed.TerminalModelUsage.Data(), resumed.CostStatus)
 	}
 	found, err := repo.Tasks().FindByID(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found.Result != nil || len(found.TerminalModelUsage.Data()) != 0 || found.CostStatus != "" {
-		t.Fatalf("persisted resumed task exposes old evidence: result=%v usage=%+v cost=%q", found.Result, found.TerminalModelUsage.Data(), found.CostStatus)
+	if found.Result != nil || found.Outcome != nil || len(found.TerminalModelUsage.Data()) != 0 || found.CostStatus != "" {
+		t.Fatalf("persisted resumed task exposes old evidence: result=%v outcome=%v usage=%+v cost=%q", found.Result, found.Outcome, found.TerminalModelUsage.Data(), found.CostStatus)
 	}
 }
 
@@ -3047,21 +3048,21 @@ func TestTaskService_GetVisibleFilesIncludesCollectedAfterPublished(t *testing.T
 		t.Fatal(err)
 	}
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	published, err := svc.GetFiles(ctx, taskID)
-	if err != nil || len(published) != 1 || published[0].State != model.TaskFileStatePublished {
+	if err != nil || len(published) != 1 || published[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("published files = %#v, err=%v", published, err)
 	}
 	visible, err := svc.GetVisibleFiles(ctx, taskID)
 	if err != nil {
 		t.Fatalf("GetVisibleFiles: %v", err)
 	}
-	if len(visible) != 2 || visible[0].State != model.TaskFileStatePublished || visible[1].State != model.TaskFileStateCollected {
+	if len(visible) != 2 || visible[0].State != model.TaskFileStateDelivered || visible[1].State != model.TaskFileStateRetained {
 		t.Fatalf("visible files = %#v", visible)
 	}
 }
@@ -3102,8 +3103,8 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	}
 	collectedID := uuid.NewString()
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown", OSSKey: publishedUpload.Key, FileSize: publishedUpload.Size, StorageProvider: store.Name()},
-		{ID: collectedID, TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json", OSSKey: collectedUpload.Key, FileSize: collectedUpload.Size, StorageProvider: store.Name()},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown", OSSKey: publishedUpload.Key, FileSize: publishedUpload.Size, StorageProvider: store.Name()},
+		{ID: collectedID, TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json", OSSKey: collectedUpload.Key, FileSize: collectedUpload.Size, StorageProvider: store.Name()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3116,7 +3117,7 @@ func TestTaskServiceCollectedFileIsDownloadableButExcludedFromZip(t *testing.T) 
 	}
 	data, readErr := io.ReadAll(stream)
 	stream.Close()
-	if readErr != nil || string(data) != "failure" || file.State != model.TaskFileStateCollected {
+	if readErr != nil || string(data) != "failure" || file.State != model.TaskFileStateRetained {
 		t.Fatalf("downloaded collected file=%#v data=%q err=%v", file, data, readErr)
 	}
 
@@ -3213,7 +3214,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	}
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID: uuid.NewString(), TaskID: completed.ID, ExecutionID: completedExecutionID,
-		State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown,
+		State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown,
 		FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown",
 		FileSize: completedUpload.Size, OSSKey: completedUpload.Key, OSSURL: completedUpload.URL, StorageProvider: store.Name(),
 	}); err != nil {
@@ -3331,7 +3332,7 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 		}
 		if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID,
-			State: model.TaskFileStatePublished, FilePath: file.path, FileName: filepath.Base(file.path),
+			State: model.TaskFileStateDelivered, FilePath: file.path, FileName: filepath.Base(file.path),
 			MimeType: file.mime, FileSize: uploaded.Size, OSSKey: uploaded.Key, OSSURL: uploaded.URL,
 			StorageProvider: store.Name(),
 		}); err != nil {

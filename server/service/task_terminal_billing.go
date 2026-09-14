@@ -76,7 +76,7 @@ func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string)
 	}
 	filesByExecution := make(map[string][]*model.TaskFile)
 	for _, file := range files {
-		if file == nil || file.TaskID != taskID || file.State != model.TaskFileStatePublished {
+		if file == nil || file.TaskID != taskID || file.State != model.TaskFileStateDelivered {
 			continue
 		}
 		executionID := strings.TrimSpace(file.ExecutionID)
@@ -95,7 +95,7 @@ func (s *TaskService) taskHasDurableDelivery(ctx context.Context, taskID string)
 		}
 		if execution.TaskID != taskID || execution.Status != model.TaskExecutionSucceeded ||
 			execution.CompletedAt == nil || execution.FinalizationStatus != model.TaskExecutionFinalizationDone ||
-			!execution.ManifestSealed || execution.ManifestStatus != model.TaskExecutionManifestPublished {
+			!execution.ManifestSealed || execution.ManifestStatus != model.TaskExecutionManifestDelivered {
 			continue
 		}
 		if validateErr := s.validateExecutionDelivery(ctx, taskID, execution, executionFiles); validateErr == nil {

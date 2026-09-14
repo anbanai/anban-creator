@@ -50,7 +50,7 @@ func TestTaskFileDefaultsToPublishedForLegacyWriters(t *testing.T) {
 	if err := db.Create(row).Error; err != nil {
 		t.Fatal(err)
 	}
-	if row.State != TaskFileStatePublished {
+	if row.State != TaskFileStateDelivered {
 		t.Fatalf("state = %q, want published", row.State)
 	}
 	invalid := &TaskFile{ID: "f2", TaskID: "t1", State: "invalid", Role: FileRoleOther, FilePath: "b.md", FileName: "b.md"}
@@ -70,13 +70,13 @@ func TestTaskArtifactCollectionStates(t *testing.T) {
 	}
 	if err := db.Create(&TaskExecution{
 		ID: "e-collected", TaskID: "t-collected", Attempt: 1, Target: "kubernetes",
-		Status: TaskExecutionFailed, ManifestStatus: "collected",
+		Status: TaskExecutionFailed, ManifestStatus: "retained",
 	}).Error; err != nil {
 		t.Fatalf("create collected execution: %v", err)
 	}
 	if err := db.Create(&TaskFile{
 		ID: "f-collected", TaskID: "t-collected", ExecutionID: "e-collected",
-		State: "collected", Role: FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
+		State: "retained", Role: FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
 	}).Error; err != nil {
 		t.Fatalf("create collected task file: %v", err)
 	}

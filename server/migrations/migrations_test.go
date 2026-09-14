@@ -106,6 +106,57 @@ func TestTaskFixedSKUBillingMigration(t *testing.T) {
 	}
 }
 
+func TestTaskDeliveryStateMigrationIsOneWay(t *testing.T) {
+	raw, err := os.ReadFile("20260914_task_delivery_states.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"update `task_files` set `state` = 'delivered' where `state` = 'published'",
+		"update `task_files` set `state` = 'retained' where `state` = 'collected'",
+		"check (`state` in ('pending', 'delivered', 'retained', 'superseded'))",
+		"update `task_executions` set `manifest_status` = 'delivered' where `manifest_status` = 'published'",
+		"update `task_executions` set `manifest_status` = 'retained' where `manifest_status` = 'collected'",
+		"where `file`.`execution_id` = '6686adfb-1b1d-4042-b0a2-b89a0d4545b3'",
+		"where `execution`.`id` = '6686adfb-1b1d-4042-b0a2-b89a0d4545b3'",
+		"join `task_executions` as `execution` on `execution`.`id` = `file`.`execution_id`",
+		"join `tasks` as `task` on `task`.`id` = `execution`.`task_id`",
+		"`execution`.`status` = 'failed'",
+		"`task`.`status` = 'failed'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("task delivery state migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "delete") {
+		t.Fatal("historical execution repair must retain artifacts without deleting data")
+	}
+}
+
+func TestTaskOutcomeMigrationAddsPublicOutcomeAndExecutionBoundDraftEvidence(t *testing.T) {
+	raw, err := os.ReadFile("20260914_task_outcome.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, required := range []string{
+		"alter table `tasks` add column `outcome` json null",
+		"alter table `wechat_publications`",
+		"add column `execution_id` char(36) not null default ''",
+		"add index `idx_wechat_publications_execution_id` (`execution_id`)",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("task outcome migration is missing %q: %s", required, raw)
+		}
+	}
+	for _, forbidden := range []string{"drop column", "drop table", "provider_content_policy", "task.result"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("task outcome migration contains forbidden fragment %q", forbidden)
+		}
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {

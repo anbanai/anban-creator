@@ -37,11 +37,11 @@ func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *
 		{path: "output/05-article.html", mimeType: "text/html", role: model.FileRoleHTML},
 		{path: "output/final-review.md", mimeType: "text/markdown", role: model.FileRoleReview},
 	} {
-		body := []byte("validated delivery: " + spec.path)
+		body := validTaskDeliveryFixtureBody(spec.path, spec.mimeType)
 		objectKey := buildTaskMCPArtifactStoragePrefix(task, executionID) + spec.path
 		store.files[objectKey] = body
 		if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
-			TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: spec.role,
+			TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: spec.role,
 			FileName: filepath.Base(spec.path), FilePath: spec.path, MimeType: spec.mimeType,
 			FileSize: int64(len(body)), OSSKey: objectKey, StorageProvider: store.Name(),
 		}); err != nil {
@@ -410,7 +410,7 @@ func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T
 	priorExecution := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: model.ExecutionTargetCloud,
 		Status: model.TaskExecutionSucceeded, Started: true, StartedAt: &now, CompletedAt: &now,
-		ManifestStatus: model.TaskExecutionManifestPublished, ManifestSealed: true,
+		ManifestStatus: model.TaskExecutionManifestDelivered, ManifestSealed: true,
 		FinalizationStatus: model.TaskExecutionFinalizationDone,
 	}
 	if err := applyAgentPackIdentity(priorExecution, task.Type); err != nil {
@@ -452,7 +452,7 @@ func TestLocalTaskTerminalBillingReversesForPublishedFileWithoutSuccessfulExecut
 	objectKey := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + "output/04-article-final.md"
 	store.files[objectKey] = body
 	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
-		TaskID: task.ID, ExecutionID: *task.CurrentExecutionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown,
+		TaskID: task.ID, ExecutionID: *task.CurrentExecutionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown,
 		FileName: "04-article-final.md", FilePath: "output/04-article-final.md", MimeType: "text/markdown",
 		FileSize: int64(len(body)), OSSKey: objectKey, StorageProvider: store.Name(),
 	}); err != nil {

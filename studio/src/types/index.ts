@@ -49,6 +49,7 @@ export type {
 export type {
   TaskType,
   TaskStatus,
+  TaskOutcome,
   ExecutionTarget,
   Task,
   TaskBillingChargeDetail,

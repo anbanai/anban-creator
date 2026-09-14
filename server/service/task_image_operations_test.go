@@ -33,6 +33,7 @@ type fakeTaskImageOperationsImage struct {
 	uploadData   []byte
 	readUpload   bool
 	uploadErr    error
+	uploadResult *UploadImageResult
 	compressPath string
 	compressData []byte
 }
@@ -48,6 +49,9 @@ func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, file
 	}
 	if f.uploadErr != nil {
 		return nil, f.uploadErr
+	}
+	if f.uploadResult != nil {
+		return f.uploadResult, nil
 	}
 	return &UploadImageResult{URL: "https://cdn.example/image.png"}, nil
 }
@@ -345,6 +349,28 @@ func TestTaskImageOperationsUploadMaterializesCurrentExecutionTaskFile(t *testin
 	}
 }
 
+func TestTaskImageOperationsUploadPersistsWechatMetadataOnCurrentExecutionFile(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.service.images = &fakeTaskImageOperationsImage{uploadResult: &UploadImageResult{
+		URL: "https://wechat.example/image.png", MediaID: "wechat-media-1", WechatURL: "https://wechat.example/image.png",
+	}}
+
+	result, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID,
+		TaskID: f.task.ID, FilePath: "output/source-a.png",
+	})
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if result.MediaID != "wechat-media-1" || result.WechatURL != "https://wechat.example/image.png" {
+		t.Fatalf("upload result = %#v", result)
+	}
+	persisted := findTaskImageOperationOutputFile(t, f.repo, f.executionID, "output/source-a.png")
+	if persisted.MediaID != result.MediaID || persisted.WechatURL != result.WechatURL {
+		t.Fatalf("persisted metadata = media:%q url:%q, want media:%q url:%q", persisted.MediaID, persisted.WechatURL, result.MediaID, result.WechatURL)
+	}
+}
+
 func TestTaskImageOperationsAnalyzeMaterializesCurrentExecutionTaskFile(t *testing.T) {
 	f := newTaskImageOperationsCropFixture(t)
 	understanding := &fakeTaskImageUnderstandingClient{}
@@ -495,7 +521,7 @@ func TestTaskImageOperationsCropRejectsStaleExecutionBeforeReadingPublishedInput
 		t.Fatal(err)
 	}
 	for _, file := range files {
-		file.State = model.TaskFileStatePublished
+		file.State = model.TaskFileStateDelivered
 		if _, err := f.repo.TaskFiles().Upsert(context.Background(), file); err != nil {
 			t.Fatal(err)
 		}

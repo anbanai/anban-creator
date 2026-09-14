@@ -94,7 +94,6 @@ export const mockTasks: PaginatedResponse<Task> = {
       plan_id: null,
       project_id: 'ch-1',
       execution_profile: 'effective',
-      result: null,
       billing_price_credits: 6000,
       created_at: '2025-01-15T10:00:00Z',
       started_at: '2025-01-15T10:00:05Z',

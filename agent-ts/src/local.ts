@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { uploadWorkspaceArtifacts } from "./artifacts.js";
 import { readAgentPackCatalog, resolveAgentPackForTaskType, type AgentPack, type AgentPackCatalog, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { CompletionReportError } from "./errors.js";
-import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
+import { runWithProviderPolicyRecovery } from "./policy-recovery.js";
 import { appendResumeContextToPrompt } from "./resume.js";
 import { runClaude } from "./runner.js";
 import { prepareWorkspace } from "./workspace.js";
@@ -133,9 +133,27 @@ export async function runLocal(
   process.once("SIGTERM", onShutdown);
   const stopHeartbeat = startHeartbeat(reporter, stderr, shutdown.signal);
   try {
-    let result = await runClaude(config.workspace, data, config.serverURL, config.executionToken, reporter, shutdown.signal);
+    let result = await runWithProviderPolicyRecovery(
+      config.workspace,
+      data,
+      async (sessionData) => {
+        try {
+          return await runClaude(config.workspace, sessionData, config.serverURL, config.executionToken, reporter, shutdown.signal);
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : "agent execution failed",
+            terminal_reason: "provider_error",
+            work_dir: config.workspace,
+          };
+        }
+      },
+      (message) => reporter.progress(message, shutdown.signal),
+      shutdown.signal,
+    );
     try {
-      await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
+      const summary = await uploadWorkspaceArtifacts(config.workspace, { ...data, artifact_transport: { mode: config.artifactUploadMode } }, reporter, shutdown.signal);
+      if (summary.failures.length > 0) result = { ...result, artifact_upload_failures: summary.failures };
     } catch (error) {
       const message = error instanceof Error ? error.message : "artifact upload failed";
       void reporter.progress(`artifact upload failed: ${message}`, shutdown.signal).catch(() => {});
@@ -144,7 +162,6 @@ export async function runLocal(
     let completionError: Error | undefined;
     try {
       try {
-        await evaluateCompletionMetadata(config.workspace, data.execution_profile, shutdown.signal);
         const metadata = JSON.parse(await readFile(join(config.workspace, "output", "completion-metadata.json"), "utf8"));
         await reporter.submitCompletionMetadata(metadata, shutdown.signal);
       } catch (metadataError) {

@@ -161,10 +161,11 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"effective", "balanced"} {
-		if got := len(cfg.Claude.ExecutionProfiles[name].ModelUsageAliases); got != 0 {
-			t.Errorf("%s model_usage_aliases length = %d, want 0", name, got)
-		}
+	if got := cfg.Claude.ExecutionProfiles["effective"].ModelUsageAliases; len(got) != 1 || got["deepseek-flash[1m]"] != "deepseek-flash" {
+		t.Errorf("effective model_usage_aliases = %#v, want deepseek-flash[1m]: deepseek-flash", got)
+	}
+	if got := len(cfg.Claude.ExecutionProfiles["balanced"].ModelUsageAliases); got != 0 {
+		t.Errorf("balanced model_usage_aliases length = %d, want 0", got)
 	}
 	if got := cfg.Claude.ExecutionProfiles["quality"].ModelUsageAliases; len(got) != 1 || got["kimi-k3[1m]"] != "kimi-k3" {
 		t.Errorf("quality model_usage_aliases = %#v, want only kimi-k3[1m]: kimi-k3", got)

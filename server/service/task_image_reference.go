@@ -67,7 +67,7 @@ func (s *TaskService) materializeAuthorizedTaskImageReference(
 	}
 	file, err := s.repo.TaskFiles().FindExisting(ctx, task.ID, cleanPath)
 	if err != nil {
-		return "", nil, fmt.Errorf("find published task image %q: %w", cleanPath, err)
+		return "", nil, fmt.Errorf("find delivered task image %q: %w", cleanPath, err)
 	}
 	if file != nil {
 		return s.materializeTaskImageFile(ctx, file, cleanPath, maxBytes)
@@ -181,7 +181,7 @@ func (s *TaskService) currentExecutionImageFile(ctx context.Context, taskID, exe
 	}
 	for _, file := range files {
 		if file != nil && file.TaskID == taskID && file.FilePath == logicalPath &&
-			(file.State == model.TaskFileStatePending || file.State == model.TaskFileStatePublished) {
+			(file.State == model.TaskFileStatePending || file.State == model.TaskFileStateDelivered) {
 			return file, nil
 		}
 	}

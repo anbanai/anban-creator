@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -14,6 +15,7 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -115,6 +117,118 @@ func TestTaskBillingSchemaReadiness(t *testing.T) {
 	}
 }
 
+func TestTaskDeliverySchemaReadiness(t *testing.T) {
+	openDB := func(t *testing.T) *gorm.DB {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+
+	fresh := openDB(t)
+	if err := requireTaskDeliverySchema(fresh); err != nil {
+		t.Fatalf("fresh database readiness: %v", err)
+	}
+
+	legacy := openDB(t)
+	for _, statement := range []string{
+		"CREATE TABLE tasks (id text primary key, outcome json)",
+		"CREATE TABLE task_files (id text primary key, state text)",
+		"CREATE TABLE task_executions (id text primary key, manifest_status text)",
+		"INSERT INTO task_files (id, state) VALUES ('file-1', 'published')",
+	} {
+		if err := legacy.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := requireTaskDeliverySchema(legacy); err == nil || !strings.Contains(err.Error(), "20260914_task_delivery_states.sql") {
+		t.Fatalf("legacy delivery readiness = %v, want migration instruction", err)
+	}
+
+	missingOutcome := openDB(t)
+	if err := missingOutcome.Exec("CREATE TABLE tasks (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireTaskDeliverySchema(missingOutcome); err == nil || !strings.Contains(err.Error(), "20260914_task_outcome.sql") {
+		t.Fatalf("missing outcome readiness = %v, want outcome migration instruction", err)
+	}
+
+	missingPublicationExecution := openDB(t)
+	for _, statement := range []string{
+		"CREATE TABLE tasks (id text primary key, outcome json)",
+		"CREATE TABLE task_files (id text primary key, state text)",
+		"CREATE TABLE task_executions (id text primary key, manifest_status text)",
+		"CREATE TABLE wechat_publications (id text primary key, task_id text)",
+	} {
+		if err := missingPublicationExecution.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := requireTaskDeliverySchema(missingPublicationExecution); err == nil || !strings.Contains(err.Error(), "20260914_task_outcome.sql") {
+		t.Fatalf("missing publication execution binding readiness = %v, want outcome migration instruction", err)
+	}
+
+	ready := openDB(t)
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireTaskDeliverySchema(ready); err != nil {
+		t.Fatalf("current delivery schema readiness: %v", err)
+	}
+}
+
+func TestMySQLTaskDeliveryConstraintReadiness(t *testing.T) {
+	tests := []struct {
+		name       string
+		fileClause string
+		execClause string
+		wantErr    bool
+	}{
+		{
+			name:       "current",
+			fileClause: "`state` in ('pending','delivered','retained','superseded')",
+			execClause: "`manifest_status` in ('','pending','delivered','retained','discarded','rejected')",
+		},
+		{
+			name:       "legacy file constraint",
+			fileClause: "`state` in ('pending','published','collected','superseded')",
+			execClause: "`manifest_status` in ('','pending','delivered','retained','discarded','rejected')",
+			wantErr:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sqlDB, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mock.ExpectQuery("SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS").
+				WithArgs("chk_task_file_state").
+				WillReturnRows(sqlmock.NewRows([]string{"CHECK_CLAUSE"}).AddRow(tc.fileClause))
+			if !tc.wantErr {
+				mock.ExpectQuery("SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS").
+					WithArgs("chk_task_execution_manifest_status").
+					WillReturnRows(sqlmock.NewRows([]string{"CHECK_CLAUSE"}).AddRow(tc.execClause))
+			}
+
+			err = requireMySQLTaskDeliveryConstraints(db)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("constraint readiness error = %v, want_error=%v", err, tc.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("SQL expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	raw, err := os.ReadFile("main.go")
 	if err != nil {
@@ -128,9 +242,10 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	}
 	section := src[start:end]
 	readiness := strings.Index(section, "requireAgentExecutionProfileSchema(mysqlDB)")
+	deliveryReadiness := strings.Index(section, "requireTaskDeliverySchema(mysqlDB)")
 	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
-	if readiness < 0 || autoMigrate < 0 || readiness >= autoMigrate {
-		t.Fatalf("schema readiness must run before AutoMigrate: readiness=%d auto_migrate=%d", readiness, autoMigrate)
+	if readiness < 0 || deliveryReadiness < 0 || autoMigrate < 0 || readiness >= autoMigrate || deliveryReadiness >= autoMigrate {
+		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d auto_migrate=%d", readiness, deliveryReadiness, autoMigrate)
 	}
 	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
 		t.Fatal("main.go must route model migration through the tested startup helper")

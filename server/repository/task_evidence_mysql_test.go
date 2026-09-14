@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -93,5 +94,64 @@ func TestTaskEvidenceMySQLZeroChangedRowsReadback(t *testing.T) {
 func TestJSONValuesEqualRejectsTrailingValue(t *testing.T) {
 	if jsonValuesEqual(`{"success":true}`, `{"success":true} {"extra":true}`) {
 		t.Fatal("JSON comparison accepted a trailing value")
+	}
+}
+
+func TestTaskOutcomeMySQLZeroChangedRowsReadback(t *testing.T) {
+	const taskID = "task-1"
+	const executionID = "execution-1"
+	outcome := model.TaskOutcome{
+		CoreDelivery: model.TaskCoreDeliveryOutcome{Status: model.TaskCoreDeliveryComplete},
+		Visual:       model.TaskVisualOutcome{Status: model.TaskVisualPartial},
+		Review:       model.TaskReviewOutcome{Status: model.TaskReviewWarning},
+		Publication:  model.TaskPublicationOutcome{Status: model.TaskPublicationSkipped},
+		Warnings:     []model.TaskOutcomeWarning{{Code: "visual_partial", Message: "partial"}},
+	}
+	encoded, err := json.Marshal(outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicting := strings.Replace(string(encoded), `"partial"`, `"different"`, 1)
+
+	tests := []struct {
+		name         string
+		row          []driver.Value
+		wantMatched  bool
+		wantConflict bool
+	}{
+		{name: "identical", row: []driver.Value{taskID, executionID, string(encoded)}, wantMatched: true},
+		{name: "stale authority", row: []driver.Value{taskID, "execution-2", string(encoded)}},
+		{name: "conflicting outcome", row: []driver.Value{taskID, executionID, conflicting}, wantConflict: true},
+		{name: "missing task"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock := openTaskEvidenceMySQLMockDB(t)
+			t.Cleanup(func() {
+				if err := mock.ExpectationsWereMet(); err != nil {
+					t.Errorf("SQL expectations: %v", err)
+				}
+			})
+			mock.ExpectBegin()
+			mock.ExpectExec("UPDATE `tasks` SET").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectCommit()
+			rows := sqlmock.NewRows([]string{"id", "current_execution_id", "outcome"})
+			if tc.row != nil {
+				rows.AddRow(tc.row...)
+			}
+			mock.ExpectQuery("SELECT .* FROM `tasks` WHERE id = \\?").WithArgs(taskID, 1).WillReturnRows(rows)
+
+			matched, err := newTaskRepository(db).UpdateOutcomeForExecution(context.Background(), taskID, executionID, outcome)
+			if tc.wantConflict {
+				if !errors.Is(err, ErrTaskExecutionEvidenceConflict) {
+					t.Fatalf("error = %v, want outcome conflict", err)
+				}
+				return
+			}
+			if err != nil || matched != tc.wantMatched {
+				t.Fatalf("matched/error = %v/%v, want %v/nil", matched, err, tc.wantMatched)
+			}
+		})
 	}
 }

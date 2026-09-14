@@ -1879,7 +1879,7 @@ func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("seal manifest: %v", err)
 		}
-		if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
+		if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, executionID); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1887,7 +1887,7 @@ func TestUpdateTaskFileMetadataRejectsLateExecutionMutation(t *testing.T) {
 			t.Fatalf("late metadata error = %v, want ErrTaskFileManifestState", err)
 		}
 		rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
-		if err != nil || len(rows) != 1 || rows[0].State != model.TaskFileStatePublished || rows[0].MediaID != "" || rows[0].WechatURL != "" {
+		if err != nil || len(rows) != 1 || rows[0].State != model.TaskFileStateDelivered || rows[0].MediaID != "" || rows[0].WechatURL != "" {
 			t.Fatalf("published execution rows mutated: %#v, err=%v", rows, err)
 		}
 	})
@@ -2112,7 +2112,7 @@ func TestExecutionArtifactManifestStaysPendingUntilPublication(t *testing.T) {
 	if len(pending) != 1 || pending[0].State != model.TaskFileStatePending {
 		t.Fatalf("pending = %#v", pending)
 	}
-	if err := repo.TaskFiles().PublishCurrentExecution(ctx, task.ID, executionID); err != nil {
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, executionID); err != nil {
 		t.Fatal(err)
 	}
 	visible, _ = repo.TaskFiles().FindByTaskID(ctx, task.ID)

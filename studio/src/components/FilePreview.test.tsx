@@ -33,6 +33,7 @@ function fileWith(overrides: Partial<TaskFile>): TaskFile {
   return {
     id: 'file-1',
     task_id: 'task-1',
+    state: 'delivered',
     role: 'output',
     file_name: 'article.html',
     mime_type: 'text/html',

@@ -145,7 +145,7 @@ func TestReapStaleLocalExecutionsFinalizesArtifactsAndBillingReason(t *testing.T
 	if storedExecution.Status != model.TaskExecutionFailed || storedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || storedExecution.CleanupStatus != model.TaskExecutionCleanupDone || storedExecution.CompletedAt == nil {
 		t.Fatalf("reaped execution = %#v", storedExecution)
 	}
-	if len(files) != 1 || files[0].State != model.TaskFileStateCollected || storedExecution.ManifestStatus != model.TaskExecutionManifestCollected {
+	if len(files) != 1 || files[0].State != model.TaskFileStateRetained || storedExecution.ManifestStatus != model.TaskExecutionManifestRetained {
 		t.Fatalf("reaped artifacts = %#v, manifest=%q", files, storedExecution.ManifestStatus)
 	}
 }
@@ -780,16 +780,17 @@ func TestCancelLocalExecutionAtomicallyCollectsPendingArtifacts(t *testing.T) {
 	persistedExecution, _ := repo.TaskExecutions().FindByID(ctx, executionID)
 	files, _ := repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if persistedTask.Status != model.TaskStatusCancelled || persistedTask.CompletedAt == nil ||
-		persistedTask.BillingTerminalReason != model.TaskBillingTerminalUserCancelled {
+		persistedTask.BillingTerminalReason != model.TaskBillingTerminalUserCancelled ||
+		persistedTask.Outcome == nil || persistedTask.Outcome.CoreDelivery.Status != model.TaskCoreDeliveryNone {
 		t.Fatalf("cancelled task = %#v", persistedTask)
 	}
 	if persistedExecution.Status != model.TaskExecutionCancelled ||
-		persistedExecution.ManifestStatus != model.TaskExecutionManifestCollected ||
+		persistedExecution.ManifestStatus != model.TaskExecutionManifestRetained ||
 		persistedExecution.FinalizationStatus != model.TaskExecutionFinalizationDone ||
 		persistedExecution.CleanupStatus != model.TaskExecutionCleanupDone {
 		t.Fatalf("cancelled execution = %#v", persistedExecution)
 	}
-	if len(files) != 1 || files[0].State != model.TaskFileStateCollected {
+	if len(files) != 1 || files[0].State != model.TaskFileStateRetained {
 		t.Fatalf("cancelled execution files = %#v, want one collected artifact", files)
 	}
 }
@@ -881,6 +882,47 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	}
 	if got.CompletedAt == nil {
 		t.Fatalf("completed_at not set")
+	}
+}
+
+func TestCompleteLocalTaskUsesValidatedCoreArtifactsAfterProviderPolicyFailure(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, svc, repo, taskID)
+
+	err := completeLocalForCurrentExecution(ctx, svc, repo, taskID, &agent.ExecutionResult{
+		Success: false, Error: "供应商内容安全策略拒绝了本次请求。",
+		TerminalReason: model.TaskBillingTerminalProviderError,
+		ErrorCode:      "provider_policy_rejection", ProviderCode: "content_exists_risk",
+		HTTPStatus: 400, ContentDirection: "unknown", Recoverable: true,
+	})
+	if err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TaskStatusCompleted || got.Outcome == nil || got.Outcome.CoreDelivery.Status != model.TaskCoreDeliveryComplete {
+		t.Fatalf("local task outcome = %#v", got)
+	}
+	if got.Outcome.Diagnostic == nil || got.Outcome.Diagnostic.HTTPStatus != 400 {
+		t.Fatalf("local provider diagnostic = %#v", got.Outcome)
+	}
+	execution, err := repo.TaskExecutions().FindByID(ctx, *got.CurrentExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored agent.ExecutionResult
+	if err := json.Unmarshal(execution.Result, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Success || stored.ErrorCode != "provider_policy_rejection" {
+		t.Fatalf("stored provider result = %#v, want failed SDK result with preserved policy code", stored)
 	}
 }
 

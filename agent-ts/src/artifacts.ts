@@ -26,6 +26,16 @@ export interface WorkspaceArtifact {
   filename: string;
 }
 
+export interface ArtifactUploadFailure {
+  path: string;
+  reason: string;
+}
+
+export interface ArtifactUploadSummary {
+  uploaded: number;
+  failures: ArtifactUploadFailure[];
+}
+
 export type ArtifactReporter = Pick<Reporter, "progress" | "prepareArtifactUpload" | "streamArtifactContent" | "reportArtifactManifest">;
 
 interface ArtifactSnapshot {
@@ -38,7 +48,7 @@ interface ArtifactSnapshot {
   inode: number;
 }
 
-export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: BootstrapResponse, reporter: ArtifactReporter, signal?: AbortSignal): Promise<number> {
+export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: BootstrapResponse, reporter: ArtifactReporter, signal?: AbortSignal): Promise<ArtifactUploadSummary> {
   let artifacts: WorkspaceArtifact[];
   try {
     artifacts = await scanWorkspaceArtifacts(workspace, signal);
@@ -46,9 +56,17 @@ export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: Boo
     throw contextualError("scan workspace artifacts", error);
   }
   const files: ArtifactManifestFile[] = [];
+  const failures: ArtifactUploadFailure[] = [];
   for (const artifact of artifacts) {
     signal?.throwIfAborted();
-    files.push(await uploadArtifact(artifact, bootstrap.artifact_transport.mode, reporter, signal));
+    try {
+      files.push(await uploadArtifact(artifact, bootstrap.artifact_transport.mode, reporter, signal));
+    } catch (error) {
+      signal?.throwIfAborted();
+      const message = error instanceof Error ? error.message : "unknown error";
+      failures.push({ path: artifact.relativePath, reason: message.slice(0, 1000) });
+      await reporter.progress(`artifact upload failed: ${artifact.relativePath}: ${message}`, signal).catch(() => {});
+    }
   }
   try {
     await reporter.reportArtifactManifest(files, signal);
@@ -56,11 +74,11 @@ export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: Boo
     throw contextualError("report artifact manifest", error);
   }
   try {
-    if (files.length) await reporter.progress(`collected ${files.length} workspace artifact(s)`, signal);
+    if (files.length) await reporter.progress(`uploaded ${files.length} workspace artifact(s)`, signal);
   } catch {
     // The acknowledged manifest is authoritative; progress is best-effort.
   }
-  return files.length;
+  return { uploaded: files.length, failures };
 }
 
 export async function scanWorkspaceArtifacts(workspace: string, signal?: AbortSignal): Promise<WorkspaceArtifact[]> {

@@ -297,13 +297,54 @@ describe('TaskDetailPage', () => {
     })
   })
 
+  it('renders independent terminal outcome warnings and sanitized provider diagnostics', async () => {
+    mockTask(taskWith({
+      status: 'completed',
+      outcome: {
+        core_delivery: { status: 'complete' },
+        visual: { status: 'partial' },
+        review: { status: 'warning' },
+        publication: { status: 'skipped' },
+        warnings: [
+          { code: 'visual_partial', stage: 'visual', message: '请求的正文配图未全部生成。' },
+          { code: 'artifact_upload_failed', stage: 'artifact_upload', message: '文件 output/img_01.png 上传失败：HTTP 503' },
+        ],
+        diagnostic: {
+          provider: 'deepseek',
+          provider_code: 'content_exists_risk',
+          http_status: 400,
+          stage: 'writing',
+          content_direction: 'unknown',
+          recoverable: true,
+          resume_point: 'provider_request',
+          request_id: 'request-400',
+          summary: '供应商内容安全策略拒绝了请求。供应商未披露具体片段，也未说明发生在输入还是输出。',
+        },
+      },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('region', { name: '任务交付状态' })).toHaveTextContent('核心交付完整')
+    expect(screen.getByRole('region', { name: '任务交付状态' })).toHaveTextContent('视觉部分完成')
+    expect(screen.getByText('请求的正文配图未全部生成。')).toBeInTheDocument()
+    expect(screen.getByText('文件 output/img_01.png 上传失败：HTTP 503')).toBeInTheDocument()
+    const provider = screen.getByRole('region', { name: '供应商诊断' })
+    expect(provider).toHaveTextContent('deepseek')
+    expect(provider).toHaveTextContent('HTTP 400')
+    expect(provider).toHaveTextContent('content_exists_risk')
+    expect(provider).toHaveTextContent('写作')
+    expect(provider).toHaveTextContent('供应商未说明')
+    expect(provider).toHaveTextContent('请求 ID 指纹 request-400')
+    expect(provider).toHaveTextContent('供应商未披露具体片段')
+  })
+
   it('shows compact running progress and hides workflow stage grid', async () => {
     mockTask(taskWith({
       status: 'running',
       progress: 42,
       progress_log: '准备素材\nUsing tool: Read',
       latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
-      result: null,
       completed_at: '',
     }))
 
@@ -340,7 +381,6 @@ describe('TaskDetailPage', () => {
         model_usage_aliases: { 'kimi-k2.7-code': 'kimi-k2.7-code' },
       },
       agent_profile_fingerprint: 'a'.repeat(64),
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -371,7 +411,6 @@ describe('TaskDetailPage', () => {
         visual_style: '清新茶感摄影',
         image_ratio: '3:4',
       },
-      result: null,
       completed_at: '',
     }))
 
@@ -399,7 +438,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'running',
       progress_log: '已读取参考素材\n正在写作正文',
-      result: null,
       completed_at: '',
     }))
 
@@ -418,7 +456,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('opens Overview from the general More details command', async () => {
-    mockTask(taskWith({ status: 'completed', result: null }))
+    mockTask(taskWith({ status: 'completed' }))
 
     render(<TaskDetailPage />)
 
@@ -426,7 +464,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('closes task details on a route change and reopens on Overview', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'running', result: null, completed_at: '' }))
+    mockTask(taskWith({ id: 'task-1', status: 'running', completed_at: '' }))
     const view = render(<TaskDetailPage />)
 
     const context = await screen.findByRole('region', { name: '任务上下文' })
@@ -438,7 +476,6 @@ describe('TaskDetailPage', () => {
       id: 'task-2',
       title: '第二个任务',
       status: 'running',
-      result: null,
       completed_at: '',
     }))
     view.rerender(<TaskDetailPage />)
@@ -453,13 +490,11 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       title: '失败任务 A',
       status: 'failed',
-      result: null,
     })
     const taskB = taskWith({
       id: 'task-2',
       title: '失败任务 B',
       status: 'failed',
-      result: null,
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
@@ -490,14 +525,12 @@ describe('TaskDetailPage', () => {
       title: '已完成任务 A',
       prompt: '任务 A 的原始要求',
       status: 'completed',
-      result: null,
     })
     const taskB = taskWith({
       id: 'task-2',
       title: '已完成任务 B',
       prompt: '任务 B 的原始要求',
       status: 'completed',
-      result: null,
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
@@ -527,14 +560,12 @@ describe('TaskDetailPage', () => {
       title: '已完成任务 A',
       status: 'completed',
       project_id: 'ch-1',
-      result: null,
     })
     const taskB = taskWith({
       id: 'task-2',
       title: '已完成任务 B',
       status: 'completed',
       project_id: 'ch-1',
-      result: null,
     })
     const request = deferred<Task>()
     vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
@@ -562,8 +593,8 @@ describe('TaskDetailPage', () => {
   })
 
   it('ignores a late clone error after navigating away from its source task', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', project_id: 'ch-1', result: null })
-    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', project_id: 'ch-1', result: null })
+    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', project_id: 'ch-1' })
+    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', project_id: 'ch-1' })
     const request = deferred<Task>()
     vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
     const view = renderWithCachedTasks(taskA, taskB)
@@ -587,8 +618,8 @@ describe('TaskDetailPage', () => {
   })
 
   it('ignores a late resume error after navigating away from its source task', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '失败任务 A', status: 'failed', result: null })
-    const taskB = taskWith({ id: 'task-2', title: '失败任务 B', status: 'failed', result: null })
+    const taskA = taskWith({ id: 'task-1', title: '失败任务 A', status: 'failed' })
+    const taskB = taskWith({ id: 'task-2', title: '失败任务 B', status: 'failed' })
     const request = deferred<Task>()
     vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
     const view = renderWithCachedTasks(taskA, taskB)
@@ -615,8 +646,8 @@ describe('TaskDetailPage', () => {
   })
 
   it('does not navigate or abort the active task when an earlier delete settles late', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', result: null })
-    const taskB = taskWith({ id: 'task-2', title: '运行中任务 B', status: 'running', result: null })
+    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed' })
+    const taskB = taskWith({ id: 'task-2', title: '运行中任务 B', status: 'running' })
     const deleteRequest = deferred<void>()
     const streamSignals = new Map<string, AbortSignal>()
     vi.mocked(api.tasks.delete).mockReturnValue(deleteRequest.promise)
@@ -660,7 +691,6 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'running',
       progress_log: 'A 持久化日志',
-      result: null,
       completed_at: '',
     })
     const taskB = taskWith({
@@ -668,7 +698,6 @@ describe('TaskDetailPage', () => {
       title: '已完成任务 B',
       status: 'completed',
       progress_log: 'B 持久化日志',
-      result: null,
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
@@ -710,7 +739,6 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'running',
       progress_log: 'task-1 持久化日志',
-      result: null,
       completed_at: '',
     })
     const taskB = taskWith({
@@ -718,7 +746,6 @@ describe('TaskDetailPage', () => {
       title: '运行任务 B',
       status: 'running',
       progress_log: 'task-2 持久化日志',
-      result: null,
       completed_at: '',
     })
     const view = renderWithCachedTasks(taskA, taskB)
@@ -752,7 +779,6 @@ describe('TaskDetailPage', () => {
         id: 'task-1',
         status: 'running',
         progress_log: 'A 持久化日志',
-        result: null,
         completed_at: '',
       })
       const taskB = taskWith({
@@ -760,14 +786,12 @@ describe('TaskDetailPage', () => {
         title: '已完成任务 B',
         status: 'completed',
         progress_log: 'B 终态日志',
-        result: null,
       })
       const taskC = taskWith({
         id: 'task-3',
         title: '等待任务 C',
         status: 'pending',
         progress_log: 'C 等待日志',
-        result: null,
         completed_at: '',
       })
       vi.mocked(api.tasks.get).mockResolvedValue(taskA)
@@ -818,7 +842,6 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'running',
       progress_log: '第一条持久化日志\n第二条持久化日志',
-      result: null,
       completed_at: '',
     })
 
@@ -851,7 +874,6 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       status: 'running',
       progress_log: '第一条持久化日志\n第二条持久化日志',
-      result: null,
       completed_at: '',
     })
 
@@ -875,7 +897,6 @@ describe('TaskDetailPage', () => {
     const task = taskWith({
       id: 'task-1',
       status: 'running',
-      result: null,
       completed_at: '',
     })
     vi.mocked(api.tasks.get).mockResolvedValue(task)
@@ -898,7 +919,6 @@ describe('TaskDetailPage', () => {
         id: 'task-1',
         status: 'running',
         progress_log: '已有持久化日志',
-        result: null,
         completed_at: '',
       })
       vi.mocked(api.tasks.get).mockResolvedValue(task)
@@ -936,7 +956,6 @@ describe('TaskDetailPage', () => {
         writer: '真诚叙事',
         theme: '简约留白',
       },
-      result: null,
       completed_at: '',
     }))
 
@@ -971,7 +990,6 @@ describe('TaskDetailPage', () => {
       status: 'completed',
       progress: 100,
       progress_log: '[100%] 任务完成',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1001,11 +1019,11 @@ describe('TaskDetailPage', () => {
           strengths: ['结构完整'],
         },
       },
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'file-1',
       task_id: 'task-1',
+      state: 'delivered',
       role: 'output',
       file_name: 'article.html',
       mime_type: 'text/html',
@@ -1018,7 +1036,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const review = await screen.findByText('发布前检查')
-    const files = await screen.findByText('交付文件 (1)')
+    const files = await screen.findByText('交付成果 (1)')
     const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(files.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1035,12 +1053,12 @@ describe('TaskDetailPage', () => {
       status: 'completed',
       progress: 100,
       input_attachments: [{ type: 'image', file_name: 'front.png' }],
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
         id: 'file-summary',
         task_id: 'task-1',
+        state: 'retained',
         role: 'artifact',
         file_name: 'reference-usage-summary.json',
         mime_type: 'application/json',
@@ -1052,6 +1070,7 @@ describe('TaskDetailPage', () => {
       {
         id: 'file-1',
         task_id: 'task-1',
+        state: 'delivered',
         role: 'output',
         file_name: 'article.html',
         mime_type: 'text/html',
@@ -1066,7 +1085,7 @@ describe('TaskDetailPage', () => {
 
     const taskStatus = await screen.findByText('已完成')
     expect(taskStatus).toBeInTheDocument()
-    const filesHeading = await screen.findByText('交付文件 (1)')
+    const filesHeading = await screen.findByText('交付成果 (1)')
     expect(filesHeading).toBeInTheDocument()
     expect(screen.queryByText('参考素材摘要暂时无法显示')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeInTheDocument()
@@ -1074,13 +1093,12 @@ describe('TaskDetailPage', () => {
     await openTaskDetails('素材')
     expect(await screen.findByText('参考素材摘要暂时无法显示')).toBeInTheDocument()
     expect(taskStatus).toBeInTheDocument()
-    expect(screen.getByText('交付文件 (1)')).toBeInTheDocument()
+    expect(screen.getByText('交付成果 (1)')).toBeInTheDocument()
   })
 
   it('separates collected failure artifacts from generated files', async () => {
     mockTask(taskWith({
       status: 'failed',
-      result: null,
     }))
     const now = '2026-07-15T03:00:00Z'
     const files: TaskFile[] = [
@@ -1088,7 +1106,7 @@ describe('TaskDetailPage', () => {
         id: 'published-1',
         task_id: 'task-1',
         execution_id: 'execution-success',
-        state: 'published',
+        state: 'delivered',
         role: 'content',
         file_name: 'content.md',
         mime_type: 'text/markdown',
@@ -1101,7 +1119,7 @@ describe('TaskDetailPage', () => {
         id: 'collected-1',
         task_id: 'task-1',
         execution_id: 'execution-failed',
-        state: 'collected',
+        state: 'retained',
         role: 'other',
         file_name: 'failure-state.json',
         mime_type: 'application/json',
@@ -1115,8 +1133,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const generatedHeading = await screen.findByText('交付文件 (1)')
-    const failedHeading = await screen.findByText('失败执行文件 (1)')
+    const generatedHeading = await screen.findByText('交付成果 (1)')
+    const failedHeading = await screen.findByText('已保留产物 (1)')
     const generatedSection = generatedHeading.closest('[data-slot="card"]') as HTMLElement
     const failedSection = failedHeading.closest('[data-slot="card"]') as HTMLElement
     expect(within(generatedSection).getByTitle('content.md')).toBeInTheDocument()
@@ -1129,13 +1147,12 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'failed',
       error_message: 'runtime_failed',
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'prior-delivery',
       task_id: 'task-1',
       execution_id: 'prior-successful-execution',
-      state: 'published',
+      state: 'delivered',
       role: 'content',
       file_name: 'content.md',
       mime_type: 'text/markdown',
@@ -1148,21 +1165,20 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('heading', { name: '续跑失败，历史交付已保留' })).toBeInTheDocument()
-    expect(screen.getByText('最新一次继续执行未完成；下方已有交付文件仍可预览和下载。')).toBeInTheDocument()
+    expect(screen.getByText('最新一次继续执行未完成；下方已有交付成果仍可预览和下载。')).toBeInTheDocument()
     expect(screen.getByText('失败原因：runtime_failed')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /下载交付文件/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /下载交付成果/ })).toBeEnabled()
   })
 
   it('shows additional files below deliverables and keeps ZIP scoped to deliverables', async () => {
     mockTask(taskWith({
       status: 'completed',
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
         id: 'deliverable-1',
         task_id: 'task-1',
-        state: 'published',
+        state: 'delivered',
         role: 'content',
         file_name: 'content.md',
         mime_type: 'text/markdown',
@@ -1177,7 +1193,7 @@ describe('TaskDetailPage', () => {
       {
         id: 'process-1',
         task_id: 'task-1',
-        state: 'published',
+        state: 'delivered',
         role: 'review',
         file_name: 'review.json',
         mime_type: 'application/json',
@@ -1191,13 +1207,13 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const deliverables = await screen.findByRole('heading', { name: '交付文件 (1)' })
+    const deliverables = await screen.findByRole('heading', { name: '交付成果 (1)' })
     const previewOnly = await screen.findByLabelText('仅支持预览')
     expect(deliverables.compareDocumentPosition(previewOnly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '下载 review.json' })).toBeDisabled()
     expect(screen.queryByText(/过程文件/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /下载交付文件/ }))
+    fireEvent.click(screen.getByRole('button', { name: /下载交付成果/ }))
     await waitFor(() => expect(api.tasks.downloadZipBlob).toHaveBeenCalledWith('task-1'))
   })
 
@@ -1205,12 +1221,11 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'seednote',
       status: 'completed',
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'seednote-output',
       task_id: 'task-1',
-      state: 'published',
+      state: 'delivered',
       role: 'content',
       file_name: 'content.md',
       mime_type: 'text/markdown',
@@ -1222,7 +1237,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const generatedHeading = await screen.findByText('交付文件 (1)')
+    const generatedHeading = await screen.findByText('交付成果 (1)')
     const analyticsHeading = await screen.findByText('种草笔记数据')
     const context = screen.getByRole('region', { name: '任务上下文' })
     expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1233,13 +1248,12 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      result: null,
     }))
 
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'article-output',
       task_id: 'task-1',
-      state: 'published',
+      state: 'delivered',
       role: 'html',
       file_name: '05-article.html',
       mime_type: 'text/html',
@@ -1254,7 +1268,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const draftStatus = await screen.findByText('已进入草稿箱')
-    const deliveryHeading = await screen.findByText('交付文件 (1)')
+    const deliveryHeading = await screen.findByText('交付成果 (1)')
     expect(draftStatus.compareDocumentPosition(deliveryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '立即检测' })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
@@ -1264,12 +1278,11 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'ecommerce',
       status: 'completed',
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'ecommerce-output',
       task_id: 'task-1',
-      state: 'published',
+      state: 'delivered',
       role: 'copywriting',
       file_name: 'copywriting.md',
       mime_type: 'text/markdown',
@@ -1283,8 +1296,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByText('交付文件 (1)')
-    expect(screen.getAllByRole('button', { name: /下载交付文件|整包下载/ })).toHaveLength(1)
+    await screen.findByText('交付成果 (1)')
+    expect(screen.getAllByRole('button', { name: /下载交付成果|整包下载/ })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: '整包下载' })).not.toBeInTheDocument()
   })
 
@@ -1292,7 +1305,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      result: null,
     }))
     let resolveProject!: (value: typeof mockProjectDetail) => void
     vi.mocked(api.projects.get).mockImplementation(() => new Promise((resolve) => {
@@ -1312,7 +1324,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'montage',
       status: 'completed',
-      result: null,
     }))
     vi.mocked(api.channelsAnalytics.getByTask).mockResolvedValue({ series: [] })
 
@@ -1325,12 +1336,12 @@ describe('TaskDetailPage', () => {
   it('keeps completed delivery controls available without a runtime balance lock', async () => {
     mockTask(taskWith({
       status: 'completed',
-      result: null,
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
       {
         id: 'file-1',
         task_id: 'task-1',
+        state: 'delivered',
         role: 'output',
         file_name: 'article.html',
         mime_type: 'text/html',
@@ -1343,16 +1354,16 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('交付文件 (1)')).toBeInTheDocument()
+    expect(await screen.findByText('交付成果 (1)')).toBeInTheDocument()
     expect(screen.queryByText('交付已锁定')).not.toBeInTheDocument()
-    const zipButton = screen.getByRole('button', { name: /下载交付文件/ })
+    const zipButton = screen.getByRole('button', { name: /下载交付成果/ })
     expect(zipButton).toBeEnabled()
     expect(screen.getByRole('button', { name: /预览 article\.html/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /下载 article\.html/ })).toBeEnabled()
   })
 
   it('does not load shared clone-form data until a terminal task opens the clone dialog', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', project_id: 'ch-1', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'completed', project_id: 'ch-1' }))
 
     render(<TaskDetailPage />)
 
@@ -1379,7 +1390,6 @@ describe('TaskDetailPage', () => {
       project_id: 'ch-1',
       image_ratio: '16:9',
       image_capability_key: 'source-capability',
-      result: JSON.stringify({ files: null, output: '' }),
     }))
 
     render(<TaskDetailPage />)
@@ -1408,7 +1418,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('keeps Continue isolated to the prompt-only resume dialog', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'cancelled', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'cancelled' }))
 
     render(<TaskDetailPage />)
 
@@ -1420,7 +1430,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('shows only immutable-history actions for a completed task', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'completed' }))
 
     render(<TaskDetailPage />)
 
@@ -1433,7 +1443,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('keeps task feedback behind a completed-task icon and lazy-loads it on open', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'completed', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'completed' }))
 
     render(<TaskDetailPage />)
 
@@ -1448,7 +1458,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('hides the task feedback icon for non-completed tasks', async () => {
-    mockTask(taskWith({ id: 'task-1', status: 'running', result: null }))
+    mockTask(taskWith({ id: 'task-1', status: 'running' }))
 
     render(<TaskDetailPage />)
 
@@ -1458,7 +1468,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('closes feedback when a completed task leaves the completed state', async () => {
-    const task = taskWith({ id: 'task-1', status: 'completed', result: null })
+    const task = taskWith({ id: 'task-1', status: 'completed' })
     const { queryClient } = renderWithCachedTasks(task)
 
     fireEvent.click(await screen.findByRole('button', { name: '人工评价' }))
@@ -1476,7 +1486,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: null,
     }))
     vi.mocked(api.tasks.resume)
       .mockRejectedValueOnce(new Error('resume failed'))
@@ -1536,7 +1545,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1559,7 +1567,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: JSON.stringify({ files: null, output: '' }),
     }))
     const request = deferred<Task>()
     vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
@@ -1610,7 +1617,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1664,7 +1670,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'failed',
-      result: JSON.stringify({ files: null, output: '' }),
     }))
 
     render(<TaskDetailPage />)
@@ -1696,7 +1701,6 @@ describe('TaskDetailPage', () => {
       latest_progress: status === 'running'
         ? { stage: 'writing', title: '正在写作正文', percent: 42 }
         : undefined,
-      result: null,
       completed_at: '',
     }))
 
@@ -1717,7 +1721,6 @@ describe('TaskDetailPage', () => {
   it('shows visible continue, clone, and delete actions for a cancelled task', async () => {
     mockTask(taskWith({
       status: 'cancelled',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1736,7 +1739,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'failed',
       error_message: '模型超时',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1758,12 +1760,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'failed',
       error_message: '执行环境未建立，暂时无法生成或结算图片',
-      result: JSON.stringify({
-        success: false,
-        root_error_code: 'execution_identity_unavailable',
-        failure_stage: 'image_generation',
-        resume_from: 'image_generation',
-      }),
     }))
 
     render(<TaskDetailPage />)
@@ -1781,7 +1777,6 @@ describe('TaskDetailPage', () => {
   it('does not invent an interruption reason or preserved workspace when failure details are absent', async () => {
     mockTask(taskWith({
       status: 'failed',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1836,7 +1831,6 @@ describe('TaskDetailPage', () => {
           created_at: '2026-07-10T00:03:00.000Z',
         },
       ],
-      result: null,
       project_snapshot: {
         project_name: '快照项目',
         platform: 'article',
@@ -1886,7 +1880,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1920,7 +1913,6 @@ describe('TaskDetailPage', () => {
         platform: 'montage',
         image_ratio: '9:16',
       },
-      result: null,
     }))
 
     render(<TaskDetailPage />)
@@ -1940,7 +1932,6 @@ describe('TaskDetailPage', () => {
       status: 'running',
       progress: 10,
       progress_log: '## 阶段日志\n- 已完成选题\n```txt\nraw block\n```',
-      result: null,
       completed_at: '',
     }))
 

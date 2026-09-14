@@ -78,7 +78,7 @@ func setupTaskVideoOperations(t *testing.T) (*TaskVideoOperationsService, *taskV
 	videoFileKey := "tasks/" + taskID + "/output/video.mp4"
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID: videoFileID, TaskID: taskID, ExecutionID: "execution-1",
-		State: model.TaskFileStatePublished, Role: model.FileRoleOther,
+		State: model.TaskFileStateDelivered, Role: model.FileRoleOther,
 		FilePath: "output/video.mp4", FileName: "video.mp4", MimeType: "video/mp4",
 		OSSKey: videoFileKey, StorageProvider: "oss",
 	}); err != nil {

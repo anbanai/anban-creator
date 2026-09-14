@@ -139,7 +139,7 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
 	}
-	filePath, cleanup, err := s.resolveUploadPath(ctx, req)
+	taskFile, filePath, cleanup, err := s.resolveUploadPath(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -150,19 +150,29 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
 	}
+	if result == nil {
+		return nil, errors.New("upload image: provider returned no result")
+	}
+	if _, err := s.tasks.UpdateTaskFileMetadata(ctx, taskFile, taskFile.Role, result.MediaID, result.WechatURL); err != nil {
+		return nil, fmt.Errorf("persist uploaded image metadata: %w", err)
+	}
 	return result, nil
 }
 
-func (s *TaskImageOperationsService) resolveUploadPath(ctx context.Context, req UploadTaskImageRequest) (string, func(), error) {
+func (s *TaskImageOperationsService) resolveUploadPath(ctx context.Context, req UploadTaskImageRequest) (*model.TaskFile, string, func(), error) {
 	filePath := strings.TrimSpace(req.FilePath)
 	if filepath.IsAbs(filePath) {
-		return "", nil, errors.New("file_path must be a task-relative image path from the current execution")
+		return nil, "", nil, errors.New("file_path must be a task-relative image path from the current execution")
 	}
 	taskFile, cleanPath, err := s.findCurrentExecutionTaskImageFile(ctx, req.UserID, req.ExecutionID, req.ProjectID, req.TaskID, filePath)
 	if err != nil {
-		return "", nil, err
+		return nil, "", nil, err
 	}
-	return s.tasks.materializeTaskImageFile(ctx, taskFile, cleanPath, maxTaskImageReferenceBytes)
+	materializedPath, cleanup, err := s.tasks.materializeTaskImageFile(ctx, taskFile, cleanPath, maxTaskImageReferenceBytes)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return taskFile, materializedPath, cleanup, nil
 }
 
 func (s *TaskImageOperationsService) findCurrentExecutionTaskImageFile(ctx context.Context, userID, executionID, projectID, taskID, filePath string) (*model.TaskFile, string, error) {

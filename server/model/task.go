@@ -184,7 +184,8 @@ type Task struct {
 	Progress             int                                   `gorm:"default:0" json:"progress,omitempty"`
 	ProgressSequence     int                                   `gorm:"default:0" json:"-"`
 	LatestProgress       datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
-	Result               *string                               `gorm:"type:json" json:"result,omitempty"`
+	Result               *string                               `gorm:"type:json" json:"-"`
+	Outcome              *TaskOutcome                          `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
 	TerminalModelUsage   datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
 	CostStatus           string                                `gorm:"type:varchar(20);default:'';index" json:"-"`
 	BillingQuoteID       string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`

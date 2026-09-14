@@ -223,10 +223,22 @@ type CostDiagnostic struct {
 	RawModel string `json:"raw_model,omitempty"`
 }
 
+type ArtifactUploadFailure struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
 	Success           bool   `json:"success"`
 	Error             string `json:"error,omitempty"`
+	ErrorCode         string `json:"error_code,omitempty"`
+	PolicyDomain      string `json:"policy_domain,omitempty"`
+	ProviderCode      string `json:"provider_code,omitempty"`
+	HTTPStatus        int    `json:"http_status,omitempty"`
+	ContentDirection  string `json:"content_direction,omitempty"`
+	Recoverable       bool   `json:"recoverable,omitempty"`
+	RequestID         string `json:"request_id,omitempty"`
 	RootErrorCode     string `json:"root_error_code,omitempty"`
 	WorkflowErrorCode string `json:"workflow_error_code,omitempty"`
 	FailureStage      string `json:"failure_stage,omitempty"`
@@ -246,15 +258,16 @@ type ExecutionResult struct {
 	CostDiagnostics []CostDiagnostic  `json:"cost_diagnostics,omitempty"`
 
 	// Post-execution diagnostics.
-	NoOutputFiles       bool           `json:"no_output_files,omitempty"`
-	AgentLikelyFailed   bool           `json:"agent_likely_failed,omitempty"`
-	ToolUseCount        int            `json:"tool_use_count,omitempty"`
-	ToolUseSummary      map[string]int `json:"tool_use_summary,omitempty"`
-	ToolErrorCount      int            `json:"tool_error_count,omitempty"`
-	LastToolErrorTool   string         `json:"last_tool_error_tool,omitempty"`
-	LastToolError       string         `json:"last_tool_error,omitempty"`
-	Model               string         `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
-	RemoteMemoryArchive []byte         `json:"-"`
+	NoOutputFiles          bool                    `json:"no_output_files,omitempty"`
+	AgentLikelyFailed      bool                    `json:"agent_likely_failed,omitempty"`
+	ToolUseCount           int                     `json:"tool_use_count,omitempty"`
+	ToolUseSummary         map[string]int          `json:"tool_use_summary,omitempty"`
+	ToolErrorCount         int                     `json:"tool_error_count,omitempty"`
+	LastToolErrorTool      string                  `json:"last_tool_error_tool,omitempty"`
+	LastToolError          string                  `json:"last_tool_error,omitempty"`
+	Model                  string                  `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
+	RemoteMemoryArchive    []byte                  `json:"-"`
+	ArtifactUploadFailures []ArtifactUploadFailure `json:"artifact_upload_failures,omitempty"`
 }
 
 func writeMontageInputJSON(workDir string, task *model.Task) error {

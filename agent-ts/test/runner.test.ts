@@ -841,6 +841,40 @@ describe("recordAssistantToolUses", () => {
       tool_use_summary: { Agent: 2 },
     });
   });
+
+  test("treats an SDK success subtype with an API policy error as failure", () => {
+    const terminal = runner.terminalExecutionResult({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      terminal_reason: "api_error",
+      api_error_status: 400,
+      result: "API Error: 400 Content Exists Risk (request_id: req_01ABCxyz)",
+      session_id: "session-1",
+      num_turns: 8,
+      duration_ms: 100,
+      duration_api_ms: 80,
+      modelUsage: {},
+    } as Parameters<typeof runner.terminalExecutionResult>[0], "/workspace", "done", {}, {
+      tool_use_count: 2,
+      tool_use_summary: { Write: 2 },
+    });
+
+    expect(terminal).toMatchObject({
+      success: false,
+      error: "供应商内容安全策略拒绝了本次请求。",
+      terminal_reason: "provider_error",
+      error_code: "provider_policy_rejection",
+      policy_domain: "content_safety",
+      provider_code: "Content Exists Risk",
+      http_status: 400,
+      content_direction: "unknown",
+      recoverable: true,
+      request_id: "req_01ABCxyz",
+      failure_stage: "provider_request",
+      resume_from: "provider_request",
+    });
+  });
 });
 
 describe("recordTrustedToolError", () => {

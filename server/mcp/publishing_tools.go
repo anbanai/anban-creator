@@ -24,12 +24,11 @@ func registerPublishingTools(server *mcp.Server) {
 				"task_id":    map[string]any{"type": "string", "description": "Article task ID"},
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
 				"articles": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "object", "properties": map[string]any{
-					"title":              map[string]any{"type": "string", "description": "Article title"},
-					"author":             map[string]any{"type": "string", "description": "Author name (optional)"},
-					"digest":             map[string]any{"type": "string", "description": "Article digest/summary (optional)"},
-					"content":            map[string]any{"type": "string", "description": "HTML content of the article"},
-					"thumb_media_id":     map[string]any{"type": "string", "description": "Cover image media ID (optional)"},
-					"content_source_url": map[string]any{"type": "string", "description": "Original article URL (optional)"},
+					"title":          map[string]any{"type": "string", "description": "Article title"},
+					"author":         map[string]any{"type": "string", "description": "Author name (optional)"},
+					"digest":         map[string]any{"type": "string", "description": "Article digest/summary (optional)"},
+					"content":        map[string]any{"type": "string", "description": "HTML content of the article"},
+					"thumb_media_id": map[string]any{"type": "string", "description": "Cover image media ID (optional)"},
 				}, "required": []any{"title", "content"}}, "description": "Array of articles to create as a draft"},
 			},
 			"required": []any{"task_id", "project_id", "articles"},
@@ -90,6 +89,13 @@ func createDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	if projectID == "" {
 		return createDraftErrorResult(createDraftFailure{Code: "create_draft_invalid_payload", Message: "project_id is required", Hint: "Provide the Article project_id", Retryable: false}), nil
 	}
+	identity, ok := getMCPExecutionIdentity(ctx)
+	if !ok {
+		return createDraftErrorResult(createDraftFailure{Code: "create_draft_execution_required", Message: "draft creation requires the current task execution", Hint: "Create the draft from the active Article workflow", Retryable: false}), nil
+	}
+	if identity.UserID != userID || identity.ProjectID != projectID || identity.TaskID != taskID {
+		return createDraftErrorResult(createDraftFailure{Code: "create_draft_execution_mismatch", Message: "draft creation is bound to the current task execution", Hint: "Use the task and project associated with the active execution", Retryable: false}), nil
+	}
 
 	// Parse articles from JSON.
 	articlesRaw, _ := args["articles"]
@@ -106,7 +112,7 @@ func createDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		return createDraftErrorResult(createDraftFailure{Code: "create_draft_invalid_payload", Message: "exactly one article is required", Hint: "Provide one article in articles", Retryable: false}), nil
 	}
 
-	publication, err := svcs.WechatPublicationSvc.CreateDraft(ctx, userID, taskID, projectID, appwechat.DraftAddRequest{Articles: articles})
+	publication, err := svcs.WechatPublicationSvc.CreateDraft(ctx, userID, taskID, projectID, identity.ExecutionID, appwechat.DraftAddRequest{Articles: articles})
 	if err != nil {
 		return createDraftErrorResult(classifyCreateDraftFailure(err)), nil
 	}
@@ -133,10 +139,14 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 	switch {
 	case errors.Is(err, service.ErrWechatPublicationInvalidPayload):
 		return createDraftFailure{Code: "create_draft_invalid_payload", Message: "draft payload is invalid", Hint: "Provide one article with a title, content, and distinct body images", Retryable: false}
+	case errors.Is(err, service.ErrWechatPublicationMarketingBlocked):
+		return createDraftFailure{Code: "create_draft_marketing_blocked", Message: "deterministic marketing review blocked automatic draft creation", Hint: "Review marketing-scan.json, revise the flagged expression, and continue the task", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationNotFound):
 		return createDraftFailure{Code: "create_draft_not_found", Message: "task or project was not found", Hint: "Use an existing Article task and project owned by the authenticated user", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationProjectMismatch):
 		return createDraftFailure{Code: "create_draft_project_mismatch", Message: "task and project do not match", Hint: "Use the project_id associated with the task", Retryable: false}
+	case errors.Is(err, service.ErrWechatPublicationExecutionMismatch):
+		return createDraftFailure{Code: "create_draft_execution_mismatch", Message: "draft creation is bound to the current task execution", Hint: "Continue from the task's current execution", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationForbidden):
 		return createDraftFailure{Code: "create_draft_forbidden", Message: "task or project is not owned by the authenticated user", Hint: "Use resources owned by the authenticated user", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationModeConflict):

@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.25"
-	dshPluginReleaseDate = "2026-09-13"
+	dshPluginVersion     = "4.1.27"
+	dshPluginReleaseDate = "2026-09-14"
 )
 
 type dshPackageManifest struct {

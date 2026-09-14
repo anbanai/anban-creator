@@ -152,6 +152,7 @@ func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment
 	task.LastHeartbeatAt = nil
 	task.ErrorMessage = ""
 	task.Result = nil
+	task.Outcome = nil
 	task.TerminalModelUsage = datatypes.NewJSONType([]model.ModelTokenUsage{})
 	task.CostStatus = ""
 	task.Progress = 0

@@ -173,7 +173,6 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 		"anban_progress_stage",
 		"Runner Hooks",
 		"保存每次返回的 Task id",
-		"分别创建下列",
 		"对同一 Task id",
 		"该阶段交付完成后",
 		"不得省略 TaskUpdate 的 metadata",
@@ -190,12 +189,16 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 	}
 	switch pack.ID {
 	case "article":
-		for _, want := range []string{"发布前总验收、`create_draft` 成功、最终 feedback 全部结束后才完成"} {
+		for _, want := range []string{
+			"只创建 research、writing、delivery 三个正式 Task",
+			"只依赖服务端可验证的 `output/04-article-final.md` 和 `output/05-article.html`",
+			"不依赖视觉完整、审核通过或 `create_draft` 成功",
+		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing article delivery boundary %q", path, want)
 			}
 		}
-		for _, forbidden := range []string{"明确跳过发布"} {
+		for _, forbidden := range []string{"十步细粒度", "十步业务任务可以另建", "`create_draft` 成功、最终 feedback"} {
 			if strings.Contains(body, forbidden) {
 				t.Errorf("%s contains unsupported article delivery branch %q", path, forbidden)
 			}

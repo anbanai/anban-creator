@@ -152,7 +152,6 @@ const {
       plan_id: null,
       project_id: 'project-1',
       execution_profile: 'effective',
-      result: null,
       billing_price_credits: 6000,
       created_at: '2026-07-07T00:00:00.000Z',
       started_at: '',

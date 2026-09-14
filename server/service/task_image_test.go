@@ -1059,7 +1059,7 @@ func TestTaskDeleteRemovesEveryImmutableImageOperationObject(t *testing.T) {
 	}
 	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: "collected-execution",
-		State: model.TaskFileStateCollected, Role: model.FileRoleMarkdown,
+		State: model.TaskFileStateRetained, Role: model.FileRoleMarkdown,
 		FilePath: "output/collected.md", FileName: "collected.md", MimeType: "text/markdown",
 		FileSize: 9, ContentHash: strings.Repeat("a", 64), OSSKey: collectedKey,
 		CleanupOSSKey: cleanupKey, StorageProvider: "local",

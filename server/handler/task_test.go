@@ -736,8 +736,8 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusFailed)
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
-		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -760,13 +760,13 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Data) != 2 || body.Data[0].State != model.TaskFileStatePublished || body.Data[1].State != model.TaskFileStateCollected {
+	if len(body.Data) != 2 || body.Data[0].State != model.TaskFileStateDelivered || body.Data[1].State != model.TaskFileStateRetained {
 		t.Fatalf("files = %#v", body.Data)
 	}
 	if !body.Data[0].IsDeliverable || body.Data[0].DownloadURL == "" || body.Data[0].PreviewURL == "" {
 		t.Fatalf("published delivery metadata = %+v", body.Data[0])
 	}
-	if body.Data[1].IsDeliverable || body.Data[1].DownloadURL != "" || body.Data[1].URL != "" || body.Data[1].PreviewURL == "" {
+	if body.Data[1].IsDeliverable || body.Data[1].DownloadURL == "" || body.Data[1].URL != "" || body.Data[1].PreviewURL == "" {
 		t.Fatalf("collected process metadata = %+v", body.Data[1])
 	}
 }
@@ -792,7 +792,7 @@ func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
-		ID: fileID, TaskID: taskID, State: model.TaskFileStatePublished, Role: model.FileRoleHTML,
+		ID: fileID, TaskID: taskID, State: model.TaskFileStateDelivered, Role: model.FileRoleHTML,
 		FilePath: "output/review.html", FileName: `review".html`, MimeType: "text/html",
 		FileSize: upload.Size, OSSKey: upload.Key, StorageProvider: store.Name(),
 	}); err != nil {
@@ -897,7 +897,7 @@ func TestTaskFileDownloadSurfacesStorageStreamFailure(t *testing.T) {
 	}
 	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
-		ID: fileID, TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStatePublished,
+		ID: fileID, TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered,
 		Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md",
 		MimeType: "text/markdown", FileSize: 32, OSSKey: "tasks/" + taskID + "/output/content.md",
 	}); err != nil {

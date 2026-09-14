@@ -48,7 +48,7 @@ type TaskExecution struct {
 	RuntimeWorkload     string         `gorm:"column:runtime_workload;type:varchar(63);index" json:"runtime_workload,omitempty"`
 	RuntimeInstanceID   string         `gorm:"column:runtime_instance_id;type:varchar(64)" json:"runtime_instance_id,omitempty"`
 	Started             bool           `gorm:"default:false;not null" json:"started"`
-	ManifestStatus      string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','published','collected','discarded','rejected')" json:"manifest_status,omitempty"`
+	ManifestStatus      string         `gorm:"type:varchar(20);default:'';check:chk_task_execution_manifest_status,manifest_status IN ('','pending','delivered','retained','discarded','rejected')" json:"manifest_status,omitempty"`
 	ManifestSealed      bool           `gorm:"default:false;not null" json:"-"`
 	FinalizationStatus  string         `gorm:"type:varchar(20);default:'';index" json:"finalization_status,omitempty"`
 	FinalizationToken   string         `gorm:"type:char(36);default:'';index" json:"-"`
@@ -62,7 +62,7 @@ type TaskExecution struct {
 	DraftDeliveryResult datatypes.JSON `gorm:"type:json" json:"-"`
 	Result              datatypes.JSON `gorm:"type:json" json:"-"`
 	TerminalReason      string         `gorm:"type:varchar(80);default:''" json:"terminal_reason,omitempty"`
-	Diagnostics         datatypes.JSON `gorm:"type:json" json:"diagnostics,omitempty"`
+	Diagnostics         datatypes.JSON `gorm:"type:json" json:"-"`
 	LastHeartbeatAt     *time.Time     `json:"last_heartbeat_at,omitempty"`
 	StartedAt           *time.Time     `json:"started_at,omitempty"`
 	CompletedAt         *time.Time     `json:"completed_at,omitempty"`
@@ -112,16 +112,18 @@ const (
 )
 
 const (
-	TaskExecutionDraftDeliveryInFlight  = "in_flight"
-	TaskExecutionDraftDeliverySucceeded = "succeeded"
-	TaskExecutionDraftDeliverySkipped   = "skipped"
-	TaskExecutionDraftDeliveryAmbiguous = "ambiguous"
+	TaskExecutionDraftDeliveryInFlight     = "in_flight"
+	TaskExecutionDraftDeliverySucceeded    = "succeeded"
+	TaskExecutionDraftDeliverySkipped      = "skipped"
+	TaskExecutionDraftDeliveryFailed       = "failed"
+	TaskExecutionDraftDeliveryAmbiguous    = "ambiguous"
+	TaskExecutionDraftDeliveryNotRequested = "not_requested"
 )
 
 const (
 	TaskExecutionManifestPending   = "pending"
-	TaskExecutionManifestPublished = "published"
-	TaskExecutionManifestCollected = "collected"
+	TaskExecutionManifestDelivered = "delivered"
+	TaskExecutionManifestRetained  = "retained"
 	TaskExecutionManifestDiscarded = "discarded"
 	TaskExecutionManifestRejected  = "rejected"
 )

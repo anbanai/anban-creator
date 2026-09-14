@@ -10,7 +10,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import type { InputAttachment, Task, TaskFile } from '@/types'
+import type { InputAttachment, Task, TaskFile, TaskOutcome } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
@@ -53,6 +53,62 @@ const RESUME_ATTACHMENT_POLICY = {
     text: RESUME_FILE_MAX_BYTES,
   },
 } as const
+
+const outcomeLabels = {
+  core_delivery: { complete: '核心交付完整', none: '无核心交付' },
+  visual: { complete: '视觉完整', partial: '视觉部分完成', not_requested: '未请求视觉' },
+  review: { passed: '审核通过', warning: '审核有警告', unavailable: '审核不可用' },
+  publication: { succeeded: '草稿已创建', skipped: '草稿已跳过', failed: '草稿失败', ambiguous: '草稿待确认', not_requested: '未请求草稿' },
+} as const
+
+function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
+  const dimensions = [
+    outcomeLabels.core_delivery[outcome.core_delivery.status],
+    outcomeLabels.visual[outcome.visual.status],
+    outcomeLabels.review[outcome.review.status],
+    outcomeLabels.publication[outcome.publication.status],
+  ]
+  const diagnostic = outcome.diagnostic
+  const direction = diagnostic?.content_direction === 'input'
+    ? '输入'
+    : diagnostic?.content_direction === 'output' ? '输出' : '供应商未说明'
+  return (
+    <section
+      aria-label="任务交付状态"
+      className={`border-y px-4 py-4 ${outcome.warnings.length > 0 ? 'border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/20' : 'border-border'}`}
+    >
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {dimensions.map((label) => (
+          <div key={label} className="min-w-0 border-l-2 border-border pl-3 text-sm font-medium text-foreground">{label}</div>
+        ))}
+      </div>
+      {outcome.warnings.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {outcome.warnings.map((warning, index) => (
+            <div key={`${warning.code}-${index}`} className="flex items-start gap-2 text-sm text-amber-950 dark:text-amber-100">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words">{warning.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {diagnostic && (
+        <section aria-label="供应商诊断" className="mt-4 border-t border-amber-300 pt-3 text-xs text-muted-foreground dark:border-amber-800">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {diagnostic.provider && <span>供应商 {diagnostic.provider}</span>}
+            {diagnostic.http_status && <span>HTTP {diagnostic.http_status}</span>}
+            {diagnostic.provider_code && <span>错误码 {diagnostic.provider_code}</span>}
+            {diagnostic.stage && <span>阶段 {progressStageLabel[diagnostic.stage] ?? diagnostic.stage}</span>}
+            <span>方向 {direction}</span>
+            {diagnostic.request_id && <span>请求 ID 指纹 {diagnostic.request_id}</span>}
+          </div>
+          <p className="mt-2 text-foreground">{diagnostic.summary}</p>
+        </section>
+      )}
+    </section>
+  )
+}
+
 function ResumeTaskDialog({
   taskId,
   onClose,
@@ -268,10 +324,10 @@ export default function TaskDetailPage() {
     enabled: !!id && !!task && ['completed', 'failed', 'cancelled'].includes(task.status),
   })
 
-  const publishedFiles = files?.filter((file) => file.state !== 'collected') ?? []
-  const collectedFiles = files?.filter((file) => file.state === 'collected') ?? []
-  const deliverableFiles = publishedFiles.filter((file) => file.is_deliverable === true)
-  const processFiles = publishedFiles.filter((file) => file.is_deliverable !== true)
+  const deliveredFiles = files?.filter((file) => file.state === 'delivered') ?? []
+  const retainedFiles = files?.filter((file) => file.state === 'retained') ?? []
+  const deliverableFiles = deliveredFiles.filter((file) => file.is_deliverable === true)
+  const processFiles = deliveredFiles.filter((file) => file.is_deliverable !== true)
   const hasPreservedDelivery = task?.status === 'failed' && deliverableFiles.length > 0
 
   // Resolve project info for the task
@@ -599,8 +655,8 @@ export default function TaskDetailPage() {
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
   const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
-    && publishedFiles.length === 0
-    && collectedFiles.length === 0
+    && deliveredFiles.length === 0
+    && retainedFiles.length === 0
 
   function openCloneDialog() {
     cloneSourceIdentityRef.current = { routeId: id!, taskId: currentTask.id }
@@ -750,7 +806,7 @@ export default function TaskDetailPage() {
                   </h2>
                   {hasPreservedDelivery ? (
                     <>
-                      <p className="mt-1 text-sm text-muted-foreground">最新一次继续执行未完成；下方已有交付文件仍可预览和下载。</p>
+                      <p className="mt-1 text-sm text-muted-foreground">最新一次继续执行未完成；下方已有交付成果仍可预览和下载。</p>
                       {failureMessage && <p className="mt-1 break-words text-xs text-muted-foreground">失败原因：{failureMessage}</p>}
                       {failurePresentation?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failurePresentation.recovery}</p>}
                     </>
@@ -800,6 +856,8 @@ export default function TaskDetailPage() {
         <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
+      {task.outcome && <TaskOutcomeSummary outcome={task.outcome} />}
+
       <TaskDetailsSheet
         open={showTaskDetails}
         onOpenChange={setShowTaskDetails}
@@ -807,7 +865,7 @@ export default function TaskDetailPage() {
         onTabChange={setTaskDetailsTab}
         task={task}
         project={project}
-        files={publishedFiles}
+        files={deliveredFiles}
         logs={displayLogs}
         sseError={currentSseError}
         autoScrollLogs={autoScrollLogs}
@@ -842,11 +900,11 @@ export default function TaskDetailPage() {
       )}
 
       {/* Deliverables and preview-only files. */}
-      {publishedFiles.length > 0 && (
+      {deliveredFiles.length > 0 && (
         <Card>
           <div className="border-b border-border px-4 py-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-foreground">交付文件 ({deliverableFiles.length})</h2>
+              <h2 className="text-sm font-semibold text-foreground">交付成果 ({deliverableFiles.length})</h2>
             </div>
             <Button
               size="sm"
@@ -866,7 +924,7 @@ export default function TaskDetailPage() {
               }}
             >
               <Download className="h-4 w-4" />
-              下载交付文件 (ZIP)
+              下载交付成果 (ZIP)
             </Button>
           </div>
           <div className="p-4 space-y-4">
@@ -921,18 +979,36 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
-      {collectedFiles.length > 0 && (
+      {retainedFiles.length > 0 && (
         <Card>
-          <div className="flex items-start gap-3 border-b border-border px-4 py-3">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground">失败执行文件 ({collectedFiles.length})</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">诊断与阶段性产物，不包含在成功交付 ZIP 中。</p>
+          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-foreground">已保留产物 ({retainedFiles.length})</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">阶段文件不包含在正式交付 ZIP 中。</p>
+              </div>
             </div>
+            <Button size="sm" variant="secondary" onClick={async () => {
+              try {
+                const blob = await api.tasks.downloadRetainedZipBlob(task.id)
+                const url = URL.createObjectURL(blob)
+                const anchor = document.createElement('a')
+                anchor.href = url
+                anchor.download = `task_${task.id}_retained_files.zip`
+                anchor.click()
+                URL.revokeObjectURL(url)
+              } catch {
+                toast.error('下载已保留产物失败，请稍后重试')
+              }
+            }}>
+              <Download className="h-4 w-4" />
+              下载 ZIP
+            </Button>
           </div>
           <div className="flex flex-col gap-2 p-4">
             <FilePreviewGallery
-              files={collectedFiles}
+              files={retainedFiles}
               taskId={task.id}
               taskType={task.type}
             />
@@ -951,7 +1027,7 @@ export default function TaskDetailPage() {
       <TaskContextSummary
         task={task}
         project={project}
-        files={publishedFiles}
+        files={deliveredFiles}
         logs={displayLogs}
         progressDescription={progressDescription}
         sseError={currentSseError}

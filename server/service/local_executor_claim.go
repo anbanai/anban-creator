@@ -141,7 +141,7 @@ func (s *TaskService) reapStaleLocalExecution(ctx context.Context, executionID s
 			return nil
 		}
 		won, lockErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed,
-			message, taskResult, executionResult, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsCollect)
+			message, taskResult, executionResult, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsRetain)
 		if lockErr != nil || !won {
 			return lockErr
 		}
@@ -422,7 +422,7 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID, executionID
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsPublish)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, taskID, execution.ID, model.TaskStatusCompleted, "", resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsDeliver)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}
@@ -468,16 +468,14 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 			billingReason: reason, errorMessage: message,
 		}
 	}
-	if !result.Success {
-		message := strings.TrimSpace(result.Error)
-		if message == "" {
-			message = "local execution failed"
-		}
-		reason := result.TerminalReason
-		if !approvedTaskBillingTerminalReason(reason) {
-			reason = model.TaskBillingTerminalProviderError
-		}
-		return failure(reason, message), nil
+	submittedSuccess := result.Success
+	submittedMessage := strings.TrimSpace(result.Error)
+	if submittedMessage == "" {
+		submittedMessage = "local execution failed"
+	}
+	submittedReason := result.TerminalReason
+	if !approvedTaskBillingTerminalReason(submittedReason) {
+		submittedReason = model.TaskBillingTerminalProviderError
 	}
 	if agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		return failure(model.TaskBillingTerminalPlatformError, agent.NestedAgentDelegationError), nil
@@ -490,6 +488,9 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 		return nil, ErrStaleTaskExecution
 	}
 	if !execution.ManifestSealed {
+		if !submittedSuccess {
+			return failure(submittedReason, submittedMessage), nil
+		}
 		return failure(model.TaskBillingTerminalPlatformError, "artifact manifest is not sealed"), nil
 	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
@@ -501,6 +502,11 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 		validation = validateMontageCompletionArtifacts(files)
 	}
 	if !validation.Valid {
+		if !submittedSuccess {
+			outcome := failure(submittedReason, submittedMessage)
+			outcome.artifactValidation = &validation
+			return outcome, nil
+		}
 		outcome := failure(model.TaskBillingTerminalPlatformError, validation.Error())
 		outcome.artifactValidation = &validation
 		return outcome, nil
@@ -510,6 +516,11 @@ func (s *TaskService) localCompletionOutcome(ctx context.Context, task *model.Ta
 			return nil, deliveryErr
 		}
 		validation = agent.ArtifactValidation{Reason: "delivery validation failed: " + deliveryErr.Error()}
+		if !submittedSuccess {
+			outcome := failure(submittedReason, submittedMessage)
+			outcome.artifactValidation = &validation
+			return outcome, nil
+		}
 		outcome := failure(model.TaskBillingTerminalPlatformError, validation.Error())
 		outcome.artifactValidation = &validation
 		return outcome, nil
@@ -640,7 +651,7 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 		var finalizeErr error
 		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(
 			ctx, task.ID, execution.ID, model.TaskStatusCancelled, "用户取消",
-			resultJSON, executionResultJSON, nil, "", repository.LocalTaskArtifactsCollect,
+			resultJSON, executionResultJSON, nil, "", repository.LocalTaskArtifactsRetain,
 		)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
@@ -654,9 +665,7 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 		return fmt.Errorf("task is not in a cancellable state")
 	}
 	task.Status = model.TaskStatusCancelled
-	s.notifyTerminal(ctx, task, model.TaskStatusCancelled, "用户取消")
 	if s.pubsub != nil {
-		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		s.pubsub.PublishCancel(ctx, task.ID)
 	}
 	if v, ok := s.cancelFuncs.Load(task.ID); ok {
@@ -664,7 +673,12 @@ func (s *TaskService) cancelLocalExecution(ctx context.Context, task *model.Task
 			cancel()
 		}
 	}
-	return nil
+	execution.Status = model.TaskExecutionCancelled
+	execution.Target = model.ExecutionTargetLocalClaimed
+	execution.Result = []byte(executionResultJSON)
+	execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+	execution.CleanupStatus = model.TaskExecutionCleanupDone
+	return s.finalizeLocalTaskFromExecution(ctx, task, execution)
 }
 
 func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, executionID string, outcome *localCompletionOutcome) error {
@@ -689,7 +703,7 @@ func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, execu
 	var swapped bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var finalizeErr error
-		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsCollect)
+		swapped, finalizeErr = tx.Tasks().FinalizeLocalTaskWithArtifactsInTx(ctx, task.ID, execution.ID, model.TaskStatusFailed, errMsg, resultJSON, executionResultJSON, result.ModelUsage, result.CostStatus, repository.LocalTaskArtifactsRetain)
 		if finalizeErr != nil || !swapped {
 			return finalizeErr
 		}
@@ -835,6 +849,14 @@ func (s *TaskService) localFinalizationStep(task *model.Task, execution *model.T
 			return s.recordTerminalProviderCost(ctx, task, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
+		return model.TaskExecutionFinalizationDraftDelivery, func(ctx context.Context) error {
+			return s.finalizeCloudDraftDelivery(ctx, task, execution, result)
+		}, nil
+	case model.TaskExecutionFinalizationDraftDelivery:
+		return model.TaskExecutionFinalizationTask, func(ctx context.Context) error {
+			return s.finalizeCloudTaskOutcome(ctx, task, execution, result)
+		}, nil
+	case model.TaskExecutionFinalizationTask:
 		return model.TaskExecutionFinalizationSlot, func(ctx context.Context) error {
 			return s.syncCloudSlot(ctx, task)
 		}, nil

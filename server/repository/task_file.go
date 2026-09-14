@@ -220,7 +220,7 @@ func (r *taskFileRepository) UpdateRoleIfCurrent(ctx context.Context, expected *
 // FindExisting returns an existing task file record matching (taskID, filePath), or nil if none exists.
 func (r *taskFileRepository) FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error) {
 	var file model.TaskFile
-	if err := r.db.WithContext(ctx).Where("task_id = ? AND file_path = ? AND state = ?", taskID, filePath, model.TaskFileStatePublished).First(&file).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND file_path = ? AND state = ?", taskID, filePath, model.TaskFileStateDelivered).First(&file).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}
@@ -231,7 +231,7 @@ func (r *taskFileRepository) FindExisting(ctx context.Context, taskID, filePath 
 
 func (r *taskFileRepository) FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
-	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStatePublished).Find(&files).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStateDelivered).Find(&files).Error; err != nil {
 		return nil, err
 	}
 	return files, nil
@@ -245,9 +245,9 @@ func (r *taskFileRepository) FindAllByTaskID(ctx context.Context, taskID string)
 	return files, nil
 }
 
-func (r *taskFileRepository) FindCollectedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
+func (r *taskFileRepository) FindRetainedByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
-	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStateCollected).Find(&files).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND state = ?", taskID, model.TaskFileStateRetained).Find(&files).Error; err != nil {
 		return nil, err
 	}
 	return files, nil
@@ -306,10 +306,10 @@ func (r *taskFileRepository) DeleteQueuedObjectCleanup(ctx context.Context, id s
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.TaskFileObjectCleanup{}).Error
 }
 
-// PublishCurrentExecution is the guarded Task 8 publication contract. It locks
+// DeliverCurrentExecution is the guarded delivery contract. It locks
 // the execution before its task and validates the current running attempt in
-// the same transaction that swaps the published artifact set.
-func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID, executionID string) error {
+// the same transaction that swaps the delivered artifact set.
+func (r *taskFileRepository) DeliverCurrentExecution(ctx context.Context, taskID, executionID string) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return ErrTaskFileExecutionNotCurrent
 	}
@@ -318,12 +318,12 @@ func (r *taskFileRepository) PublishCurrentExecution(ctx context.Context, taskID
 		if err != nil {
 			return err
 		}
-		return publishLockedExecutionManifest(ctx, tx, task, execution)
+		return deliverLockedExecutionManifest(ctx, tx, task, execution)
 	})
 }
 
-func publishLockedExecutionManifest(ctx context.Context, db *gorm.DB, task *model.Task, execution *model.TaskExecution) error {
-	if execution.ManifestStatus == model.TaskExecutionManifestPublished {
+func deliverLockedExecutionManifest(ctx context.Context, db *gorm.DB, task *model.Task, execution *model.TaskExecution) error {
+	if execution.ManifestStatus == model.TaskExecutionManifestDelivered {
 		return nil
 	}
 	if err := requirePublishableArtifactExecution(task, execution); err != nil {
@@ -345,17 +345,17 @@ func publishLockedExecutionManifest(ctx context.Context, db *gorm.DB, task *mode
 	if pending == 0 {
 		return ErrNoPendingExecutionArtifacts
 	}
-	if err := db.WithContext(ctx).Model(&model.TaskFile{}).Where("task_id = ? AND execution_id <> ? AND state = ?", task.ID, execution.ID, model.TaskFileStatePublished).Update("state", model.TaskFileStateSuperseded).Error; err != nil {
+	if err := db.WithContext(ctx).Model(&model.TaskFile{}).Where("task_id = ? AND execution_id <> ? AND state = ?", task.ID, execution.ID, model.TaskFileStateDelivered).Update("state", model.TaskFileStateSuperseded).Error; err != nil {
 		return err
 	}
-	result := db.WithContext(ctx).Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", task.ID, execution.ID, model.TaskFileStatePending).Update("state", model.TaskFileStatePublished)
+	result := db.WithContext(ctx).Model(&model.TaskFile{}).Where("task_id = ? AND execution_id = ? AND state = ?", task.ID, execution.ID, model.TaskFileStatePending).Update("state", model.TaskFileStateDelivered)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected != pending {
-		return fmt.Errorf("%w: published %d of %d rows", ErrTaskFileManifestState, result.RowsAffected, pending)
+		return fmt.Errorf("%w: delivered %d of %d rows", ErrTaskFileManifestState, result.RowsAffected, pending)
 	}
-	statusResult := db.WithContext(ctx).Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", execution.ID, model.TaskExecutionManifestPending).Update("manifest_status", model.TaskExecutionManifestPublished)
+	statusResult := db.WithContext(ctx).Model(&model.TaskExecution{}).Where("id = ? AND manifest_status = ?", execution.ID, model.TaskExecutionManifestPending).Update("manifest_status", model.TaskExecutionManifestDelivered)
 	if statusResult.Error != nil {
 		return statusResult.Error
 	}
@@ -365,9 +365,9 @@ func publishLockedExecutionManifest(ctx context.Context, db *gorm.DB, task *mode
 	return nil
 }
 
-// CollectCurrentExecution retains a terminal failed attempt's artifacts for
-// diagnosis without replacing the successful published set.
-func (r *taskFileRepository) CollectCurrentExecution(ctx context.Context, taskID, executionID string) error {
+// RetainCurrentExecution retains a terminal failed attempt's artifacts for
+// diagnosis without replacing the successful delivered set.
+func (r *taskFileRepository) RetainCurrentExecution(ctx context.Context, taskID, executionID string) error {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return ErrTaskFileExecutionNotCurrent
 	}
@@ -376,12 +376,12 @@ func (r *taskFileRepository) CollectCurrentExecution(ctx context.Context, taskID
 		if err != nil {
 			return err
 		}
-		return collectLockedExecutionManifest(ctx, tx, execution)
+		return retainLockedExecutionManifest(ctx, tx, execution)
 	})
 }
 
-func collectLockedExecutionManifest(ctx context.Context, db *gorm.DB, execution *model.TaskExecution) error {
-	if execution.ManifestStatus == model.TaskExecutionManifestCollected {
+func retainLockedExecutionManifest(ctx context.Context, db *gorm.DB, execution *model.TaskExecution) error {
+	if execution.ManifestStatus == model.TaskExecutionManifestRetained {
 		return nil
 	}
 	if !isCollectableArtifactExecution(execution) {
@@ -392,12 +392,12 @@ func collectLockedExecutionManifest(ctx context.Context, db *gorm.DB, execution 
 	}
 	if err := db.WithContext(ctx).Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND state = ?", execution.TaskID, execution.ID, model.TaskFileStatePending).
-		Update("state", model.TaskFileStateCollected).Error; err != nil {
+		Update("state", model.TaskFileStateRetained).Error; err != nil {
 		return err
 	}
 	statusResult := db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND manifest_status = ?", execution.ID, execution.ManifestStatus).
-		Update("manifest_status", model.TaskExecutionManifestCollected)
+		Update("manifest_status", model.TaskExecutionManifestRetained)
 	if statusResult.Error != nil {
 		return statusResult.Error
 	}
@@ -414,7 +414,7 @@ func (r *taskFileRepository) DiscardCurrentExecution(ctx context.Context, taskID
 		if err != nil {
 			return err
 		}
-		if execution.ManifestStatus == model.TaskExecutionManifestPublished {
+		if execution.ManifestStatus == model.TaskExecutionManifestDelivered {
 			return ErrTaskFileManifestState
 		}
 		if execution.ManifestStatus == model.TaskExecutionManifestDiscarded {
@@ -845,10 +845,10 @@ func validateTaskFileMutation(file *model.TaskFile) error {
 		return fmt.Errorf("task file task_id is required")
 	}
 	if file.State == "" {
-		file.State = model.TaskFileStatePublished
+		file.State = model.TaskFileStateDelivered
 	}
 	switch file.State {
-	case model.TaskFileStatePending, model.TaskFileStatePublished, model.TaskFileStateCollected, model.TaskFileStateSuperseded:
+	case model.TaskFileStatePending, model.TaskFileStateDelivered, model.TaskFileStateRetained, model.TaskFileStateSuperseded:
 	default:
 		return fmt.Errorf("invalid task file state %q", file.State)
 	}
@@ -869,7 +869,7 @@ func validateTaskFileRelativePath(filePath string) error {
 
 func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.TaskFile, error) {
 	var file model.TaskFile
-	if err := r.db.WithContext(ctx).Where("id = ? AND state IN ?", id, []string{model.TaskFileStatePublished, model.TaskFileStateCollected}).First(&file).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ? AND state IN ?", id, []string{model.TaskFileStateDelivered, model.TaskFileStateRetained}).First(&file).Error; err != nil {
 		return nil, err
 	}
 	return &file, nil
@@ -898,7 +898,7 @@ func (r *taskFileRepository) FindByIDForExecution(ctx context.Context, id, taskI
 
 func (r *taskFileRepository) FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
-	if err := r.db.WithContext(ctx).Where("task_id = ? AND role = ? AND state = ?", taskID, role, model.TaskFileStatePublished).Find(&files).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND role = ? AND state = ?", taskID, role, model.TaskFileStateDelivered).Find(&files).Error; err != nil {
 		return nil, err
 	}
 	return files, nil
@@ -908,7 +908,7 @@ func (r *taskFileRepository) FindByTaskIDAndRole(ctx context.Context, taskID, ro
 func (r *taskFileRepository) FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error) {
 	var file model.TaskFile
 	if err := r.db.WithContext(ctx).
-		Where("task_id = ? AND content_hash = ? AND state = ?", taskID, contentHash, model.TaskFileStatePublished).
+		Where("task_id = ? AND content_hash = ? AND state = ?", taskID, contentHash, model.TaskFileStateDelivered).
 		First(&file).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -924,7 +924,7 @@ func (r *taskFileRepository) DeleteByTaskID(ctx context.Context, taskID string) 
 
 func (r *taskFileRepository) ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND state IN ?", fileID, taskID, []string{model.TaskFileStatePublished, model.TaskFileStateCollected}).Count(&count).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND state IN ?", fileID, taskID, []string{model.TaskFileStateDelivered, model.TaskFileStateRetained}).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil

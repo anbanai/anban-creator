@@ -47,6 +47,13 @@ func (r *wechatPublicationRepository) FindByArticleID(ctx context.Context, proje
 	return r.FindByID(ctx, binding.PublicationID)
 }
 
+func (r *wechatPublicationRepository) RebindExecution(ctx context.Context, id, expectedExecutionID, executionID string, expectedUpdatedAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("id = ? AND execution_id = ? AND updated_at = ?", id, expectedExecutionID, expectedUpdatedAt).
+		Update("execution_id", executionID)
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *wechatPublicationRepository) FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error) {
 	var publications []*model.WechatPublication
 	err := r.db.WithContext(ctx).

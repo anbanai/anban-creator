@@ -18,8 +18,11 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	_ "golang.org/x/image/webp"
+	"golang.org/x/net/html"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
@@ -34,6 +37,8 @@ var ErrTaskDeliveryObjectInvalid = errors.New("task delivery object is invalid")
 
 const maxTaskDeliveryImageBytes int64 = 25 << 20
 const maxTaskDeliveryJSONBytes int64 = 8 << 20
+const maxTaskDeliveryHTMLBytes int64 = 8 << 20
+const maxTaskDeliveryMarkdownBytes int64 = 8 << 20
 
 func normalizedMediaType(value string) string {
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
@@ -82,7 +87,7 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 	matched := 0
 	for _, file := range files {
 		if file == nil || file.TaskID != taskID || file.ExecutionID != execution.ID ||
-			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStatePublished) {
+			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
 			continue
 		}
 		spec, pathMatched := agentpack.MatchDeliverySpec(contract, file.FilePath)
@@ -109,7 +114,7 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 		var matchedFile *model.TaskFile
 		for _, file := range files {
 			if file == nil || file.TaskID != taskID || file.ExecutionID != execution.ID ||
-				(file.State != model.TaskFileStatePending && file.State != model.TaskFileStatePublished) {
+				(file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
 				continue
 			}
 			if _, ok := agentpack.MatchDeliverySpec([]agentpack.DeliverySpec{requiredDelivery}, file.FilePath); ok {
@@ -178,6 +183,12 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 	if expectedMIME == "application/json" {
 		return s.validateStoredDeliveryJSON(ctx, file, info)
 	}
+	if expectedMIME == "text/html" {
+		return s.validateStoredDeliveryHTML(ctx, file, info)
+	}
+	if expectedMIME == "text/markdown" {
+		return s.validateStoredDeliveryMarkdown(ctx, file, info)
+	}
 	if expectedMIME == "video/mp4" {
 		return s.validateStoredDeliveryMP4(ctx, file, info)
 	}
@@ -213,6 +224,245 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 		}
 	}
 	return nil
+}
+
+func (s *TaskService) validateStoredDeliveryMarkdown(ctx context.Context, file *model.TaskFile, info *storage.ObjectInfo) error {
+	if file.FileSize > maxTaskDeliveryMarkdownBytes {
+		return fmt.Errorf("%w: %s Markdown exceeds %d bytes", ErrTaskDeliveryObjectInvalid, file.FilePath, maxTaskDeliveryMarkdownBytes)
+	}
+	data, err := storage.ReadObject(ctx, s.store, file.OSSKey, maxTaskDeliveryMarkdownBytes)
+	if err != nil {
+		return fmt.Errorf("%w: %s Markdown cannot be read within limits: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	if err := validateStoredTextBytes(file, info, data); err != nil {
+		return err
+	}
+	if !utf8.Valid(data) {
+		return fmt.Errorf("%w: %s Markdown is not valid UTF-8", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	meaningful := false
+	for _, char := range string(data) {
+		if unicode.IsLetter(char) || unicode.IsNumber(char) {
+			meaningful = true
+			break
+		}
+	}
+	if !meaningful {
+		return fmt.Errorf("%w: %s Markdown has no meaningful text", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	return nil
+}
+
+func (s *TaskService) validateStoredDeliveryHTML(ctx context.Context, file *model.TaskFile, info *storage.ObjectInfo) error {
+	if file.FileSize > maxTaskDeliveryHTMLBytes {
+		return fmt.Errorf("%w: %s HTML exceeds %d bytes", ErrTaskDeliveryObjectInvalid, file.FilePath, maxTaskDeliveryHTMLBytes)
+	}
+	data, err := storage.ReadObject(ctx, s.store, file.OSSKey, maxTaskDeliveryHTMLBytes)
+	if err != nil {
+		return fmt.Errorf("%w: %s HTML cannot be read within limits: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	if err := validateStoredTextBytes(file, info, data); err != nil {
+		return err
+	}
+	if !utf8.Valid(data) {
+		return fmt.Errorf("%w: %s HTML is not valid UTF-8", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	if err := validateWechatHTMLFragment(file.FilePath, data); err != nil {
+		return err
+	}
+	document, err := html.Parse(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("%w: %s does not contain valid HTML: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	var inspect func(*html.Node) error
+	inspect = func(node *html.Node) error {
+		if node.Type == html.ElementNode {
+			if node.Namespace != "" {
+				return fmt.Errorf("%w: %s contains non-HTML namespace %s", ErrTaskDeliveryObjectInvalid, file.FilePath, node.Namespace)
+			}
+			if _, unsafe := forbiddenWechatHTMLTags[strings.ToLower(node.Data)]; unsafe {
+				return fmt.Errorf("%w: %s contains unsafe HTML tag <%s>", ErrTaskDeliveryObjectInvalid, file.FilePath, node.Data)
+			}
+			for _, attribute := range node.Attr {
+				name := strings.ToLower(attribute.Key)
+				value := compactHTMLSecurityValue(attribute.Val)
+				if strings.HasPrefix(name, "on") || name == "srcset" ||
+					(isHTMLURLAttribute(name) && hasUnsafeHTMLScheme(value)) ||
+					(name == "style" && hasUnsafeInlineCSS(value)) {
+					return fmt.Errorf("%w: %s contains unsafe HTML attribute %s", ErrTaskDeliveryObjectInvalid, file.FilePath, attribute.Key)
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if err := inspect(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := inspect(document); err != nil {
+		return err
+	}
+	return nil
+}
+
+var wechatDeliveryHTMLTags = map[string]struct{}{
+	"a": {}, "blockquote": {}, "br": {}, "code": {}, "em": {},
+	"h1": {}, "h2": {}, "h3": {}, "h4": {}, "h5": {}, "h6": {},
+	"hr": {}, "img": {}, "li": {}, "ol": {}, "p": {}, "pre": {},
+	"section": {}, "span": {}, "strong": {}, "table": {}, "tbody": {},
+	"td": {}, "th": {}, "thead": {}, "tr": {}, "ul": {},
+}
+
+var forbiddenWechatHTMLTags = map[string]struct{}{
+	"script": {}, "iframe": {}, "form": {}, "input": {}, "style": {}, "link": {},
+	"object": {}, "embed": {}, "meta": {}, "base": {}, "frame": {}, "frameset": {},
+}
+
+var wechatDeliveryHTMLAttributes = map[string]struct{}{
+	"alt": {}, "href": {}, "src": {}, "style": {},
+}
+
+func validateWechatHTMLFragment(filePath string, data []byte) error {
+	tokenizer := html.NewTokenizer(bytes.NewReader(data))
+	stack := make([]string, 0, 16)
+	hasElement := false
+	hasMeaningfulText := false
+	for {
+		tokenType := tokenizer.Next()
+		switch tokenType {
+		case html.ErrorToken:
+			if err := tokenizer.Err(); err != nil && !errors.Is(err, io.EOF) {
+				return fmt.Errorf("%w: %s HTML tokenization failed: %v", ErrTaskDeliveryObjectInvalid, filePath, err)
+			}
+			if len(stack) != 0 {
+				return fmt.Errorf("%w: %s HTML has unclosed <%s> tag", ErrTaskDeliveryObjectInvalid, filePath, stack[len(stack)-1])
+			}
+			if !hasElement {
+				return fmt.Errorf("%w: %s HTML has no explicit content elements", ErrTaskDeliveryObjectInvalid, filePath)
+			}
+			if !hasMeaningfulText {
+				return fmt.Errorf("%w: %s HTML has no meaningful text", ErrTaskDeliveryObjectInvalid, filePath)
+			}
+			return nil
+		case html.DoctypeToken:
+			return fmt.Errorf("%w: %s must be a WeChat HTML fragment", ErrTaskDeliveryObjectInvalid, filePath)
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := tokenizer.Token()
+			tag := strings.ToLower(token.Data)
+			if _, unsafe := forbiddenWechatHTMLTags[tag]; unsafe {
+				return fmt.Errorf("%w: %s contains unsafe HTML tag <%s>", ErrTaskDeliveryObjectInvalid, filePath, tag)
+			}
+			if _, allowed := wechatDeliveryHTMLTags[tag]; !allowed {
+				return fmt.Errorf("%w: %s contains unsupported HTML tag <%s>", ErrTaskDeliveryObjectInvalid, filePath, tag)
+			}
+			hasElement = true
+			for _, attribute := range token.Attr {
+				name := strings.ToLower(attribute.Key)
+				value := compactHTMLSecurityValue(attribute.Val)
+				if attribute.Namespace != "" || strings.Contains(name, ":") {
+					return fmt.Errorf("%w: %s contains namespaced HTML attribute %s", ErrTaskDeliveryObjectInvalid, filePath, attribute.Key)
+				}
+				if strings.HasPrefix(name, "on") || name == "srcset" ||
+					(isHTMLURLAttribute(name) && hasUnsafeHTMLScheme(value)) ||
+					(name == "style" && hasUnsafeInlineCSS(value)) {
+					return fmt.Errorf("%w: %s contains unsafe HTML attribute %s", ErrTaskDeliveryObjectInvalid, filePath, attribute.Key)
+				}
+				if _, allowed := wechatDeliveryHTMLAttributes[name]; !allowed {
+					return fmt.Errorf("%w: %s contains unsupported HTML attribute %s", ErrTaskDeliveryObjectInvalid, filePath, attribute.Key)
+				}
+			}
+			if tokenType == html.SelfClosingTagToken {
+				if !isVoidWechatHTMLTag(tag) {
+					return fmt.Errorf("%w: %s self-closes non-void <%s> tag", ErrTaskDeliveryObjectInvalid, filePath, tag)
+				}
+				continue
+			}
+			if !isVoidWechatHTMLTag(tag) {
+				stack = append(stack, tag)
+			}
+		case html.EndTagToken:
+			tag := strings.ToLower(tokenizer.Token().Data)
+			if _, allowed := wechatDeliveryHTMLTags[tag]; !allowed || isVoidWechatHTMLTag(tag) || len(stack) == 0 || stack[len(stack)-1] != tag {
+				return fmt.Errorf("%w: %s contains mismatched closing </%s> tag", ErrTaskDeliveryObjectInvalid, filePath, tag)
+			}
+			stack = stack[:len(stack)-1]
+		case html.TextToken:
+			for _, char := range tokenizer.Token().Data {
+				if unicode.IsLetter(char) || unicode.IsNumber(char) {
+					hasMeaningfulText = true
+					break
+				}
+			}
+		}
+	}
+}
+
+func isVoidWechatHTMLTag(tag string) bool {
+	switch tag {
+	case "br", "hr", "img":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateStoredTextBytes(file *model.TaskFile, info *storage.ObjectInfo, data []byte) error {
+	if info == nil || int64(len(data)) != info.Size {
+		return fmt.Errorf("%w: %s changed while being validated", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	if info.SHA256 != "" && !strings.EqualFold(info.SHA256, digest) {
+		return fmt.Errorf("%w: %s stored hash does not match object bytes", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	if file.ContentHash != "" && !strings.EqualFold(file.ContentHash, digest) {
+		return fmt.Errorf("%w: %s content hash does not match object bytes", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	return nil
+}
+
+func compactHTMLSecurityValue(value string) string {
+	return strings.Map(func(char rune) rune {
+		if unicode.IsSpace(char) || unicode.IsControl(char) {
+			return -1
+		}
+		return unicode.ToLower(char)
+	}, value)
+}
+
+func isHTMLURLAttribute(name string) bool {
+	switch name {
+	case "href", "src", "action", "formaction", "poster", "background", "data", "cite", "longdesc":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasUnsafeHTMLScheme(value string) bool {
+	colon := strings.IndexByte(value, ':')
+	if colon < 0 {
+		return false
+	}
+	scheme := value[:colon]
+	return scheme != "http" && scheme != "https" && scheme != "mailto" && scheme != "tel"
+}
+
+func hasOutboundHTMLLink(value string) bool {
+	if strings.Contains(value, "\\") || strings.HasPrefix(value, "//") {
+		return true
+	}
+	colon := strings.IndexByte(value, ':')
+	boundary := strings.IndexAny(value, "/?#")
+	return colon >= 0 && (boundary < 0 || colon < boundary)
+}
+
+func hasUnsafeInlineCSS(value string) bool {
+	return strings.Contains(value, "\\") || strings.Contains(value, "/*") || strings.Contains(value, "*/") ||
+		strings.Contains(value, "http:") || strings.Contains(value, "https:") || strings.Contains(value, "//") ||
+		strings.Contains(value, "expression(") || strings.Contains(value, "url(") ||
+		strings.Contains(value, "@import") || strings.Contains(value, "behavior:") ||
+		strings.Contains(value, "-moz-binding")
 }
 
 func (s *TaskService) taskDeliveryObjectKeyOwned(ctx context.Context, task *model.Task, executionID string, file *model.TaskFile) (bool, error) {
@@ -392,7 +642,7 @@ func (s *TaskService) deliveryContractsForFiles(ctx context.Context, taskID stri
 	contracts := make(map[string][]agentpack.DeliverySpec)
 	resolved := make(map[string]struct{})
 	for _, file := range files {
-		if file == nil || file.State != model.TaskFileStatePublished || file.TaskID != taskID {
+		if file == nil || file.State != model.TaskFileStateDelivered || file.TaskID != taskID {
 			continue
 		}
 		executionID := strings.TrimSpace(file.ExecutionID)
@@ -413,9 +663,9 @@ func (s *TaskService) deliveryContractsForFiles(ctx context.Context, taskID stri
 }
 
 // DeliveryMetadata computes the authoritative user-facing status for a task
-// file. Collected files from failed executions are always process artifacts.
+// file. Retained files from failed executions are always process artifacts.
 func (s *TaskService) DeliveryMetadata(ctx context.Context, taskID string, file *model.TaskFile) (string, bool, error) {
-	if file == nil || file.TaskID != taskID || file.State != model.TaskFileStatePublished {
+	if file == nil || file.TaskID != taskID || file.State != model.TaskFileStateDelivered {
 		return "", false, nil
 	}
 	contract, err := s.deliveryContractForExecution(ctx, taskID, file.ExecutionID)
@@ -430,7 +680,7 @@ func (s *TaskService) DeliveryMetadata(ctx context.Context, taskID string, file 
 }
 
 func deliveryMetadataFromContract(contract []agentpack.DeliverySpec, file *model.TaskFile) (string, bool) {
-	if file == nil || file.State != model.TaskFileStatePublished {
+	if file == nil || file.State != model.TaskFileStateDelivered {
 		return "", false
 	}
 	return agentpack.MatchDeliveryPath(contract, filepath.ToSlash(file.FilePath))
@@ -493,6 +743,11 @@ func (s *TaskService) EnrichFilesWithDeliveryMetadata(ctx context.Context, taskI
 			if directURL := taskFileDirectPreviewURL(s.store, file); directURL != "" {
 				file.PreviewURL = directURL
 			}
+		} else if file.State == model.TaskFileStateRetained {
+			file.URL = ""
+			file.DownloadURL = taskFileDownloadURL(taskID, file.ID)
+			file.MediaID = ""
+			file.WechatURL = ""
 		} else {
 			// Never expose a storage URL for process files: public/custom-domain
 			// URLs would bypass the task-scoped preview/download policy.
@@ -506,6 +761,9 @@ func (s *TaskService) EnrichFilesWithDeliveryMetadata(ctx context.Context, taskI
 }
 
 func (s *TaskService) RequireDownloadableTaskFile(ctx context.Context, taskID string, file *model.TaskFile) error {
+	if file != nil && file.TaskID == taskID && file.State == model.TaskFileStateRetained {
+		return nil
+	}
 	_, deliverable, err := s.DeliveryMetadata(ctx, taskID, file)
 	if err != nil {
 		return err

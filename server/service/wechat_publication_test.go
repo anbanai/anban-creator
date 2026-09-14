@@ -142,14 +142,15 @@ func (f *fakeWechatPublicationAPI) BatchGetFreePublishes(_ context.Context, requ
 }
 
 type publicationFixture struct {
-	svc       *WechatPublicationService
-	repo      repository.Repository
-	db        *gorm.DB
-	api       *fakeWechatPublicationAPI
-	now       time.Time
-	userID    string
-	projectID string
-	taskID    string
+	svc         *WechatPublicationService
+	repo        repository.Repository
+	db          *gorm.DB
+	api         *fakeWechatPublicationAPI
+	now         time.Time
+	userID      string
+	projectID   string
+	taskID      string
+	executionID string
 }
 
 func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
@@ -166,7 +167,7 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)
 	f := &publicationFixture{
 		repo: repo, db: db, api: &fakeWechatPublicationAPI{}, now: now,
-		userID: uuid.NewString(), projectID: uuid.NewString(), taskID: uuid.NewString(),
+		userID: uuid.NewString(), projectID: uuid.NewString(), taskID: uuid.NewString(), executionID: uuid.NewString(),
 	}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "draft-1", UpdateTime: now.Unix()}}}
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
@@ -177,7 +178,7 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret", WechatPublishMode: mode}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
@@ -292,8 +293,8 @@ func (f *publicationFixture) overridePublications(publications repository.Wechat
 func (f *publicationFixture) draftInput() appwechat.DraftAddRequest {
 	return appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
 		Title: " Durable lifecycle ", Author: "Author", Digest: "Digest", ThumbMediaID: "thumb-1",
-		Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, ContentSourceURL: "https://example.com/source",
-		ShowCoverPic: 1, NeedOpenComment: 1, OnlyFansCanComment: 1, URL: "https://example.com/article",
+		Content:      `<section><p>Hello <strong>world</strong></p></section>`,
+		ShowCoverPic: 1, NeedOpenComment: 1, OnlyFansCanComment: 1,
 	}}}
 }
 
@@ -302,11 +303,157 @@ func TestCreateDraftRejectsMultipleArticlesBeforeProviderCalls(t *testing.T) {
 	request := f.draftInput()
 	request.Articles = append(request.Articles, request.Articles[0])
 
-	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request); err == nil {
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); err == nil {
 		t.Fatal("CreateDraft accepted multiple articles")
 	}
 	if f.api.draftListCalls != 0 || f.api.addCalls != 0 {
 		t.Fatalf("provider calls: list=%d add=%d, want 0/0", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftBlocksOutboundMarketingBeforeProviderCalls(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*appwechat.DraftArticle)
+	}{
+		{name: "content source URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = "//marketing.example/join" }},
+		{name: "provider article URL", mutate: func(article *appwechat.DraftArticle) { article.URL = "http:marketing.example/join" }},
+		{name: "backslash metadata URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = `\\marketing.example/join` }},
+		{name: "protocol-relative anchor", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p><a href="//marketing.example/join">正文</a></p>`
+		}},
+		{name: "opaque HTTP anchor", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p><a href="http:marketing.example/join">正文</a></p>`
+		}},
+		{name: "mixed-slash HTTPS anchor", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p><a href="https:/\marketing.example/join">正文</a></p>`
+		}},
+		{name: "backslash-authority anchor", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p><a href="\\marketing.example/join">正文</a></p>`
+		}},
+		{name: "split private contact", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p>添加我<strong>微信</strong>即可领取资料</p>`
+		}},
+		{name: "split phone", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p>138<strong>0013</strong>8000</p>`
+		}},
+		{name: "relative anchor inside private contact", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = `<p>添加我<a href="#details">微</a>信即可领取资料</p>`
+		}},
+		{name: "zero width private contact", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>添加我微\u200b信即可领取资料</p>"
+		}},
+		{name: "zero width phone", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>138\u200b00138000</p>"
+		}},
+		{name: "variation selector private contact", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>添加我微\ufe0f信即可领取资料</p>"
+		}},
+		{name: "variation selector phone", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>138\ufe0f00138000</p>"
+		}},
+		{name: "combining grapheme joiner private contact", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>添加我微\u034f信即可领取资料</p>"
+		}},
+		{name: "combining grapheme joiner phone", mutate: func(article *appwechat.DraftArticle) {
+			article.Content = "<p>138\u034f00138000</p>"
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+			request := f.draftInput()
+			request.Articles[0].ContentSourceURL = ""
+			request.Articles[0].URL = ""
+			tt.mutate(&request.Articles[0])
+
+			if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); !errors.Is(err, ErrWechatPublicationMarketingBlocked) {
+				t.Fatalf("CreateDraft error = %v, want ErrWechatPublicationMarketingBlocked", err)
+			}
+			if f.api.draftListCalls != 0 || f.api.addCalls != 0 {
+				t.Fatalf("blocked metadata URL reached WeChat: list=%d add=%d", f.api.draftListCalls, f.api.addCalls)
+			}
+		})
+	}
+}
+
+func TestCreateDraftRejectsUnsafeHTMLBeforeProviderCalls(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "script", content: `<script>alert(1)</script><p>正文</p>`},
+		{name: "event handler", content: `<p>正文</p><img src="https://mmbiz.qpic.cn/a.png" onerror="alert(1)">`},
+		{name: "javascript link", content: `<p><a href="javascript:alert(1)">正文</a></p>`},
+		{name: "CSS escaped URL", content: `<p style="background-image:\75rl(https://marketing.example/tracker.png)">正文</p>`},
+		{name: "CSS image-set URL", content: `<p style="background-image:image-set(&quot;https://marketing.example/tracker.png&quot; 1x)">正文</p>`},
+		{name: "untrusted HTTPS image", content: `<p>正文</p><img src="https://marketing.example/tracker.png">`},
+		{name: "protocol-relative image", content: `<p>正文</p><img src="//mmbiz.qpic.cn/a.png">`},
+		{name: "insecure HTTP image", content: `<p>正文</p><img src="http://mmbiz.qpic.cn/a.png">`},
+		{name: "mailto image", content: `<p>正文</p><img src="mailto:contact@example.com">`},
+		{name: "telephone image", content: `<p>正文</p><img src="tel:13800138000">`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+			request := f.draftInput()
+			request.Articles[0].Content = tt.content
+
+			if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); !errors.Is(err, ErrWechatPublicationInvalidPayload) {
+				t.Fatalf("CreateDraft error = %v, want ErrWechatPublicationInvalidPayload", err)
+			}
+			if f.api.draftListCalls != 0 || f.api.addCalls != 0 {
+				t.Fatalf("unsafe HTML reached WeChat: list=%d add=%d", f.api.draftListCalls, f.api.addCalls)
+			}
+		})
+	}
+}
+
+func TestCreateDraftAcceptsBodyImageRegisteredByCurrentExecution(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	const imageURL = "https://wechat.example/current-image.png"
+	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, State: model.TaskFileStatePending,
+		FilePath: "output/current-image.png", FileName: "current-image.png", MimeType: "image/png",
+		WechatURL: imageURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+	request := f.draftInput()
+	request.Articles[0].Content = `<p>正文</p><img src="` + imageURL + `">`
+
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if f.api.addCalls != 1 {
+		t.Fatalf("provider add calls = %d, want 1", f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRejectsBodyImageRegisteredByEarlierExecution(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	const imageURL = "https://wechat.example/old-image.png"
+	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: uuid.NewString(), State: model.TaskFileStateRetained,
+		FilePath: "output/old-image.png", FileName: "old-image.png", MimeType: "image/png",
+		WechatURL: imageURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := f.draftInput()
+	request.Articles[0].Content = `<p>正文</p><img src="` + imageURL + `">`
+
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); !errors.Is(err, ErrWechatPublicationInvalidPayload) {
+		t.Fatalf("CreateDraft error = %v, want ErrWechatPublicationInvalidPayload", err)
+	}
+	if f.api.draftListCalls != 0 || f.api.addCalls != 0 {
+		t.Fatalf("earlier execution image reached WeChat: list=%d add=%d", f.api.draftListCalls, f.api.addCalls)
 	}
 }
 
@@ -319,12 +466,10 @@ func TestCreateDraftUsesEveryMaterialFieldForIdempotency(t *testing.T) {
 		{name: "author", mutate: func(article *appwechat.DraftArticle) { article.Author = "Different author" }},
 		{name: "digest", mutate: func(article *appwechat.DraftArticle) { article.Digest = "Different digest" }},
 		{name: "content", mutate: func(article *appwechat.DraftArticle) { article.Content = "<p>Different body</p>" }},
-		{name: "content source URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = "https://example.com/other-source" }},
 		{name: "thumb media ID", mutate: func(article *appwechat.DraftArticle) { article.ThumbMediaID = "thumb-2" }},
 		{name: "show cover pic", mutate: func(article *appwechat.DraftArticle) { article.ShowCoverPic = 0 }},
 		{name: "need open comment", mutate: func(article *appwechat.DraftArticle) { article.NeedOpenComment = 0 }},
 		{name: "only fans can comment", mutate: func(article *appwechat.DraftArticle) { article.OnlyFansCanComment = 0 }},
-		{name: "URL", mutate: func(article *appwechat.DraftArticle) { article.URL = "https://example.com/other-article" }},
 	}
 
 	for _, tt := range mutations {
@@ -333,14 +478,14 @@ func TestCreateDraftUsesEveryMaterialFieldForIdempotency(t *testing.T) {
 			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 			request := f.draftInput()
-			first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+			first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			changed := f.draftInput()
 			tt.mutate(&changed.Articles[0])
-			replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, changed)
+			replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, changed)
 			if !errors.Is(err, ErrWechatPublicationConflict) {
 				t.Fatalf("changed request returned err=%v, want conflict", err)
 			}
@@ -360,16 +505,113 @@ func TestCreateDraftExactReplayIsIdempotent(t *testing.T) {
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 	request := f.draftInput()
 
-	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
 	if err != nil || replayed.ID != first.ID || replayed.DraftMediaID != first.DraftMediaID {
 		t.Fatalf("exact replay = %#v err=%v, want publication %#v", replayed, err, first)
 	}
 	if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
 		t.Fatalf("provider calls: list=%d add=%d, want 1/1", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRejectsPublicationFromEarlierExecution(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err != nil {
+		t.Fatal(err)
+	}
+
+	newExecutionID := uuid.NewString()
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Update("current_execution_id", newExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, newExecutionID, f.draftInput()); !errors.Is(err, ErrWechatPublicationExecutionMismatch) {
+		t.Fatalf("CreateDraft error = %v, want execution mismatch", err)
+	}
+	if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
+		t.Fatalf("stale publication triggered provider calls: list=%d add=%d", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftReusesExactPublicationFromTerminalEarlierExecution(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	if err := f.repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: f.executionID, TaskID: f.taskID, Attempt: 1, Target: "test", Status: model.TaskExecutionRunning,
+		ExecutionProfile: "effective", Provider: "deepseek", ProfileEnvs: map[string]string{}, ProfileFingerprint: "fingerprint",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Model(&model.TaskExecution{}).Where("id = ?", f.executionID).Update("status", model.TaskExecutionFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	newExecutionID := uuid.NewString()
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Update("current_execution_id", newExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	reused, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, newExecutionID, f.draftInput())
+	if err != nil {
+		t.Fatalf("CreateDraft exact resumed replay: %v", err)
+	}
+	if reused.ID != first.ID || reused.ExecutionID != newExecutionID || reused.DraftMediaID != first.DraftMediaID {
+		t.Fatalf("reused publication = %#v, want rebound %#v", reused, first)
+	}
+	if f.api.draftListCalls != 1 || f.api.addCalls != 1 {
+		t.Fatalf("resumed replay triggered provider calls: list=%d add=%d", f.api.draftListCalls, f.api.addCalls)
+	}
+}
+
+func TestCreateDraftRetriesExactUnsupportedPublicationAfterExecutionHandoff(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	ctx := context.Background()
+	if err := f.repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: f.executionID, TaskID: f.taskID, Attempt: 1, Target: "test", Status: model.TaskExecutionFailed,
+		ExecutionProfile: "effective", Provider: "deepseek", ProfileEnvs: map[string]string{}, ProfileFingerprint: "fingerprint",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := f.draftInput()
+	article, err := firstDraftArticle(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, UserID: f.userID, ProjectID: f.projectID,
+		DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
+		DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: WechatContentFingerprint(article.Content),
+		DraftRequestFingerprint: wechatDraftRequestFingerprint(article), Source: model.WechatPublicationSourceAnbanAPI,
+		Status: model.WechatPublicationStatusUnsupported, WechatStatusCode: 48001,
+	}
+	if err := f.repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	newExecutionID := uuid.NewString()
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Update("current_execution_id", newExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-handoff"}
+
+	retried, err := f.svc.CreateDraft(ctx, f.userID, f.taskID, f.projectID, newExecutionID, request)
+	if err != nil {
+		t.Fatalf("CreateDraft after handoff: %v", err)
+	}
+	if retried.ExecutionID != newExecutionID || retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-handoff" {
+		t.Fatalf("retried publication = %#v", retried)
+	}
+	if f.api.addCalls != 1 {
+		t.Fatalf("AddDraft calls = %d, want 1", f.api.addCalls)
 	}
 }
 
@@ -380,7 +622,7 @@ func TestCreateDraftStartsManualReconciliationSchedule(t *testing.T) {
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,12 +643,10 @@ func TestCreateDraftRecoveryRequiresAllMaterialMetadata(t *testing.T) {
 		{name: "title", mutate: func(article *appwechat.DraftArticle) { article.Title = "Different title" }},
 		{name: "author", mutate: func(article *appwechat.DraftArticle) { article.Author = "Different author" }},
 		{name: "digest", mutate: func(article *appwechat.DraftArticle) { article.Digest = "Different digest" }},
-		{name: "content source URL", mutate: func(article *appwechat.DraftArticle) { article.ContentSourceURL = "https://example.com/other-source" }},
 		{name: "thumb media ID", mutate: func(article *appwechat.DraftArticle) { article.ThumbMediaID = "thumb-2" }},
 		{name: "show cover pic", mutate: func(article *appwechat.DraftArticle) { article.ShowCoverPic = 0 }},
 		{name: "need open comment", mutate: func(article *appwechat.DraftArticle) { article.NeedOpenComment = 0 }},
 		{name: "only fans can comment", mutate: func(article *appwechat.DraftArticle) { article.OnlyFansCanComment = 0 }},
-		{name: "URL", mutate: func(article *appwechat.DraftArticle) { article.URL = "https://example.com/other-article" }},
 	}
 
 	for _, tt := range mutations {
@@ -419,7 +659,7 @@ func TestCreateDraftRecoveryRequiresAllMaterialMetadata(t *testing.T) {
 			}}}
 			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "new-draft"}
 
-			publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+			publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -437,7 +677,7 @@ func (f *publicationFixture) seedDrafted(t *testing.T) *model.WechatPublication 
 	t.Helper()
 	created := f.now.Add(-time.Hour)
 	p := &model.WechatPublication{
-		ID: uuid.NewString(), TaskID: f.taskID, UserID: f.userID, ProjectID: f.projectID,
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, UserID: f.userID, ProjectID: f.projectID,
 		DraftMediaID: "draft-1", DraftTitle: "Durable lifecycle", DraftDigest: "Digest", DraftThumbMediaID: "thumb-1",
 		DraftContentFingerprint: WechatContentFingerprint(`<section class="body"><p>Hello <strong>world</strong></p></section>`),
 		Source:                  model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &created,
@@ -464,13 +704,13 @@ func setPublicationCandidates(t *testing.T, publication *model.WechatPublication
 func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
 	recoveredArticle := f.draftInput().Articles[0]
-	recoveredArticle.Content = `<section class="body"> <p>Hello <strong>world</strong></p> </section>`
+	recoveredArticle.Content = `<section> <p>Hello <strong>world</strong></p> </section>`
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{ItemCount: 1, Items: []appwechat.DraftBatchItem{{
 		MediaID: "recovered-media", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{recoveredArticle}},
 	}}}
 
 	first := f.draftInput()
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, first)
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, first)
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -481,7 +721,7 @@ func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 		t.Fatalf("provider calls: list=%d add=%d, want 1/0", f.api.draftListCalls, f.api.addCalls)
 	}
 
-	again, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, first)
+	again, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, first)
 	if err != nil || again.ID != publication.ID || f.api.draftListCalls != 1 || f.api.addCalls != 0 {
 		t.Fatalf("idempotent replay = %#v err=%v calls=%d/%d", again, err, f.api.draftListCalls, f.api.addCalls)
 	}
@@ -493,7 +733,7 @@ func TestCreateDraftRecoveryDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 	request := f.draftInput()
 	article := normalizeDraftArticle(request.Articles[0])
 	publication := &model.WechatPublication{
-		ID: uuid.NewString(), TaskID: f.taskID, UserID: f.userID, ProjectID: f.projectID,
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, UserID: f.userID, ProjectID: f.projectID,
 		DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
 		DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: WechatContentFingerprint(article.Content),
 		DraftRequestFingerprint: wechatDraftRequestFingerprint(article), Source: model.WechatPublicationSourceAnbanAPI,
@@ -510,7 +750,7 @@ func TestCreateDraftRecoveryDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 		WechatPublicationRepository: f.repo.WechatPublications(), db: f.db, now: f.now,
 	})
 
-	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -549,7 +789,7 @@ func TestCreateDraftResponseDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 		}
 	}
 
-	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -579,7 +819,7 @@ func TestCreateDraftRecoveryPaginatesAndRejectsUnsafeUpdateTimes(t *testing.T) {
 		}},
 	}
 
-	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +839,7 @@ func TestCreateDraftRecoveryAcceptsProviderTimestampInIntentSecond(t *testing.T)
 		MediaID: "same-second", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}},
 	}}}
 
-	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +857,7 @@ func TestCreateDraftRecoveryRejectsProviderTimestampInPriorSecond(t *testing.T) 
 	}}}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "new-draft"}
 
-	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	got, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +929,7 @@ func TestCreateDraftPersistsIntentBeforeExternalCallAndDoesNotBlindRetry(t *test
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after response")
 
-	_, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	_, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err == nil {
 		t.Fatal("CreateDraft succeeded after ambiguous provider response")
 	}
@@ -702,7 +942,7 @@ func TestCreateDraftPersistsIntentBeforeExternalCallAndDoesNotBlindRetry(t *test
 	}
 
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
-	_, err = f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	_, err = f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationPending) || f.api.draftListCalls != 2 || f.api.addCalls != 1 {
 		t.Fatalf("retry err=%v calls=%d/%d; want pending and no second add", err, f.api.draftListCalls, f.api.addCalls)
 	}
@@ -714,7 +954,7 @@ func TestCreateDraftReleasesFreshIntentAfterAPIFactoryFailure(t *testing.T) {
 		return nil, errors.New("temporary API factory failure")
 	}
 
-	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput()); err == nil {
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err == nil {
 		t.Fatal("CreateDraft error = nil, want API factory failure")
 	}
 	if _, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -724,7 +964,7 @@ func TestCreateDraftReleasesFreshIntentAfterAPIFactoryFailure(t *testing.T) {
 	f.svc.apiFactory = func(*model.Project) (WechatPublicationAPI, error) { return f.api, nil }
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-factory-recovery"}
-	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil || retried.DraftMediaID != "draft-after-factory-recovery" || f.api.addCalls != 1 {
 		t.Fatalf("retry = %#v err=%v addCalls=%d", retried, err, f.api.addCalls)
 	}
@@ -734,7 +974,7 @@ func TestCreateDraftReleasesFreshIntentAfterReadOnlyPreflightFailure(t *testing.
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
 	f.api.draftListError = errors.New("temporary draft-list failure")
 
-	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput()); err == nil {
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err == nil {
 		t.Fatal("CreateDraft error = nil, want draft-list failure")
 	}
 	if _, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -747,7 +987,7 @@ func TestCreateDraftReleasesFreshIntentAfterReadOnlyPreflightFailure(t *testing.
 	f.api.draftListError = nil
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-list-recovery"}
-	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil || retried.DraftMediaID != "draft-after-list-recovery" || f.api.addCalls != 1 {
 		t.Fatalf("retry = %#v err=%v addCalls=%d", retried, err, f.api.addCalls)
 	}
@@ -764,6 +1004,7 @@ func TestCreateDraftReclaimsStaleUnattemptedIntentAfterCrash(t *testing.T) {
 	intent := &model.WechatPublication{
 		ID:                      uuid.NewString(),
 		TaskID:                  f.taskID,
+		ExecutionID:             f.executionID,
 		UserID:                  f.userID,
 		ProjectID:               f.projectID,
 		DraftTitle:              article.Title,
@@ -784,7 +1025,7 @@ func TestCreateDraftReclaimsStaleUnattemptedIntentAfterCrash(t *testing.T) {
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-crash"}
 
-	recovered, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, request)
+	recovered, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
 	if err != nil {
 		t.Fatalf("CreateDraft after crash: %v", err)
 	}
@@ -801,7 +1042,7 @@ func TestDraftRetryPreflightFailurePreservesAmbiguousAddEvidence(t *testing.T) {
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after WeChat may have accepted draft")
 
-	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err == nil || first.Status != model.WechatPublicationStatusDrafting || f.api.addCalls != 1 {
 		t.Fatalf("ambiguous AddDraft = %#v err=%v addCalls=%d", first, err, f.api.addCalls)
 	}
@@ -819,7 +1060,7 @@ func TestDraftRetryPreflightFailurePreservesAmbiguousAddEvidence(t *testing.T) {
 
 	f.now = f.now.Add(time.Hour)
 	f.api.draftListError = errors.New("temporary draft-list failure after permission repair")
-	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput()); err == nil {
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err == nil {
 		t.Fatal("retry preflight error = nil")
 	}
 	preserved, err := f.repo.WechatPublications().FindByID(context.Background(), originalID)
@@ -832,7 +1073,7 @@ func TestDraftRetryPreflightFailurePreservesAmbiguousAddEvidence(t *testing.T) {
 	f.api.addError = nil
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "unexpected-duplicate-draft"}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
-	pending, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	pending, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationPending) || pending.ID != originalID || f.api.addCalls != 1 {
 		t.Fatalf("empty-list retry = %#v err=%v addCalls=%d; want reconciliation without another AddDraft", pending, err, f.api.addCalls)
 	}
@@ -842,7 +1083,7 @@ func TestDraftRetryPreflightFailurePreservesAmbiguousAddEvidence(t *testing.T) {
 		MediaID: "original-ambiguous-draft", UpdateTime: originalDraftCreatedAt.Add(time.Minute).Unix(),
 		Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}},
 	}}}
-	recovered, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	recovered, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil || recovered.ID != originalID || recovered.DraftMediaID != "original-ambiguous-draft" || f.api.addCalls != 1 {
 		t.Fatalf("recovered = %#v err=%v addCalls=%d", recovered, err, f.api.addCalls)
 	}
@@ -852,7 +1093,7 @@ func TestCreateDraftRetriesDefinitive48001AfterPermissionRepair(t *testing.T) {
 	f := newPublicationFixture(t, model.WechatPublishModeManual)
 	f.api.draftListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
-	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationDraftUnsupported) || first.Status != model.WechatPublicationStatusUnsupported {
 		t.Fatalf("first CreateDraft = %#v, %v", first, err)
 	}
@@ -860,7 +1101,7 @@ func TestCreateDraftRetriesDefinitive48001AfterPermissionRepair(t *testing.T) {
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-repair"}
 
-	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("retried CreateDraft: %v", err)
 	}
@@ -874,7 +1115,7 @@ func TestCreateDraftRetriesDefinitive40164AfterIPAllowlistRepair(t *testing.T) {
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"}
 
-	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationDraftRejected) {
 		t.Fatalf("first CreateDraft = %#v err=%v, want definitive rejection", first, err)
 	}
@@ -884,7 +1125,7 @@ func TestCreateDraftRetriesDefinitive40164AfterIPAllowlistRepair(t *testing.T) {
 
 	f.api.addError = nil
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-allowlist-repair"}
-	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("retried CreateDraft: %v", err)
 	}
@@ -898,14 +1139,14 @@ func TestDefinitiveDraftRetryPreflightFailurePreservesOriginalCode(t *testing.T)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"}
 
-	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationDraftRejected) || first.WechatStatusCode != 40164 {
 		t.Fatalf("first CreateDraft = %#v err=%v", first, err)
 	}
 
 	f.api.addError = nil
 	f.api.draftListError = errors.New("temporary draft-list failure after allowlist repair")
-	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput()); err == nil {
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err == nil {
 		t.Fatal("retry preflight error = nil")
 	}
 	preserved, err := f.repo.WechatPublications().FindByID(context.Background(), first.ID)
@@ -915,7 +1156,7 @@ func TestDefinitiveDraftRetryPreflightFailurePreservesOriginalCode(t *testing.T)
 
 	f.api.draftListError = nil
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-transient-preflight"}
-	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil || retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-transient-preflight" {
 		t.Fatalf("retried = %#v err=%v", retried, err)
 	}
@@ -928,7 +1169,7 @@ func TestAmbiguousDraftAddSchedulesExactBatchRecoveryWithoutResubmission(t *test
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after WeChat accepted the draft")
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err == nil {
 		t.Fatal("CreateDraft error = nil, want ambiguous provider failure")
 	}
@@ -961,7 +1202,7 @@ func TestAmbiguousDraftRecoveryReturnsTerminalFailureAfterPermissionRepairAnd72H
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after request write")
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err == nil {
 		t.Fatal("CreateDraft error = nil, want ambiguous provider failure")
 	}
@@ -974,7 +1215,7 @@ func TestAmbiguousDraftRecoveryReturnsTerminalFailureAfterPermissionRepairAnd72H
 	f.api.draftListError = nil
 	f.api.addError = nil
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "unexpected-duplicate-draft"}
-	terminal, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	terminal, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationDraftFailed) {
 		t.Fatalf("expired retry = %#v err=%v, want terminal draft failure", terminal, err)
 	}
@@ -989,7 +1230,7 @@ func TestAmbiguousDraftRecoveryReturnsTerminalFailureAfterPermissionRepairAnd72H
 		t.Fatalf("draft/add calls = %d, want exactly 1", f.api.addCalls)
 	}
 
-	replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	replayed, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if !errors.Is(err, ErrWechatPublicationDraftFailed) || replayed.ID != publication.ID {
 		t.Fatalf("terminal replay = %#v err=%v, want same terminal draft failure", replayed, err)
 	}
@@ -1063,7 +1304,7 @@ func TestAPIConfirmedModeAutomaticallyPublishesAfterDraftCreation(t *testing.T) 
 	}
 	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "auto-publish"}
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -1245,7 +1486,7 @@ func TestAutomaticDraftCreationPreservesDraftSuccessWhenFormalPublishIsTemporari
 	}
 	f.api.publishedListError = errors.New("temporary published-list failure")
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -1267,7 +1508,7 @@ func TestAutomaticDraftCreationDoesNotPersistProviderURLSecrets(t *testing.T) {
 	}
 	f.api.publishedListError = errors.New("Post https://api.weixin.qq.com/cgi-bin/freepublish/batchget?access_token=secret-token: connection reset")
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
@@ -1429,7 +1670,7 @@ func TestManualDraftAndImmediateReconciliationDoNotRequireEnqueuer(t *testing.T)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "manual-draft"}
 
-	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.draftInput())
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
 	if err != nil || publication.DraftMediaID != "manual-draft" {
 		t.Fatalf("CreateDraft = %#v, %v", publication, err)
 	}

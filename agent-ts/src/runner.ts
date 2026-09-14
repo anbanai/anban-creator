@@ -574,9 +574,68 @@ export function recordAssistantToolUses(content: ReadonlyArray<{ type: string; n
 }
 
 export function terminalExecutionResult(message: Extract<SDKMessage, { type: "result" }>, cwd: string, logText: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"], toolUseDiagnostics: ToolUseDiagnostics): ExecutionResult {
-  const error = message.subtype === "success" ? undefined : message.errors.map(compactDiagnostic).filter(Boolean).join("; ") || undefined;
+  const terminal = classifyTerminalMessage(message);
   const usage = terminalModelUsage(message.modelUsage ?? {}, aliases);
-  return { success: message.subtype === "success", error, work_dir: cwd, session_id: message.session_id, result_subtype: message.subtype, num_turns: message.num_turns, duration_ms: message.duration_ms, duration_api_ms: message.duration_api_ms, log_text: logText, model_usage: usage.usage, cost_status: usage.cost_status, cost_diagnostics: usage.cost_diagnostics, ...toolUseDiagnostics };
+  return { ...terminal, work_dir: cwd, session_id: message.session_id, result_subtype: message.subtype, num_turns: message.num_turns, duration_ms: message.duration_ms, duration_api_ms: message.duration_api_ms, log_text: logText, model_usage: usage.usage, cost_status: usage.cost_status, cost_diagnostics: usage.cost_diagnostics, ...toolUseDiagnostics };
+}
+
+function classifyTerminalMessage(message: Extract<SDKMessage, { type: "result" }>): ExecutionResult {
+  const isAPIFailure = message.is_error === true
+    || message.terminal_reason === "api_error"
+    || ("api_error_status" in message && typeof message.api_error_status === "number");
+  if (!isAPIFailure && message.subtype === "success") return { success: true };
+
+  const providerText = message.subtype === "success"
+    ? message.result
+    : message.errors.map(compactDiagnostic).filter(Boolean).join("; ");
+  const httpStatus = "api_error_status" in message && typeof message.api_error_status === "number"
+    ? message.api_error_status
+    : undefined;
+  const requestID = providerRequestID(providerText);
+  const providerCode = providerPolicyCode(providerText, httpStatus);
+  if (providerCode) {
+    return {
+      success: false,
+      error: "供应商内容安全策略拒绝了本次请求。",
+      terminal_reason: "provider_error",
+      error_code: "provider_policy_rejection",
+      policy_domain: "content_safety",
+      provider_code: providerCode,
+      http_status: httpStatus,
+      content_direction: "unknown",
+      recoverable: true,
+      request_id: requestID,
+      failure_stage: "provider_request",
+      resume_from: "provider_request",
+    };
+  }
+  if (isAPIFailure) {
+    return {
+      success: false,
+      error: "供应商请求失败。",
+      terminal_reason: "provider_error",
+      error_code: "provider_api_error",
+      http_status: httpStatus,
+      content_direction: "unknown",
+      recoverable: httpStatus === 408 || httpStatus === 409 || httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500),
+      request_id: requestID,
+      failure_stage: "provider_request",
+      resume_from: "provider_request",
+    };
+  }
+  const error = message.subtype === "success"
+    ? undefined
+    : message.errors.map(compactDiagnostic).filter(Boolean).join("; ") || undefined;
+  return { success: false, error };
+}
+
+function providerPolicyCode(text: string, httpStatus: number | undefined): string | undefined {
+  if (httpStatus !== 400) return undefined;
+  return text.match(/\bcontent[ _-]+exists[ _-]+risk\b/i)?.[0];
+}
+
+function providerRequestID(text: string): string | undefined {
+  return text.match(/\brequest[ _-]?id\s*[:=]\s*["']?([a-z0-9][a-z0-9._:-]{2,127})/i)?.[1];
 }
 
 export function terminalModelUsage(modelUsage: Record<string, unknown>, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): { usage: Array<Record<string, string | number>>; cost_status: "reconciled" | "unreconciled"; cost_diagnostics: Array<{ code: string; raw_model?: string }> } {

@@ -180,7 +180,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_task",
-		Description: "Get detailed information about a specific task including status, progress log, and result.",
+		Description: "Get detailed information about a specific task including status, progress log, and sanitized outcome.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -229,7 +229,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_task_files",
-		Description: "List terminal task files owned by the authenticated user. Returns the latest successful published deliverables followed by collected files retained from failed attempts, including names, roles, states, sizes, and download URLs. This is a post-run inspection and recovery query, not a live workspace listing or upload-completion check; pending and superseded files are excluded.",
+		Description: "List terminal task files owned by the authenticated user. Returns the current delivered artifacts followed by retained artifacts from unsuccessful attempts, including names, roles, states, sizes, and download URLs. This is a post-run inspection and recovery query, not a live workspace listing or upload-completion check; pending and superseded files are excluded.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -373,10 +373,6 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	if task.UserID != userID {
 		return errorResult("task not found"), nil
 	}
-	var result any
-	if task.Result != nil && *task.Result != "" {
-		_ = json.Unmarshal([]byte(*task.Result), &result)
-	}
 	resp := map[string]any{
 		"id":            task.ID,
 		"type":          task.Type,
@@ -384,7 +380,7 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"prompt":        task.Prompt,
 		"agent_input":   task.AgentInput.Data(),
 		"progress_log":  task.ProgressLog,
-		"result":        result,
+		"outcome":       task.Outcome,
 		"error_message": task.ErrorMessage,
 		"retry_count":   task.RetryCount,
 		"created_at":    task.CreatedAt,

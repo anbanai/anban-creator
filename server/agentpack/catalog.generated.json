@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
@@ -67,8 +67,7 @@
           "complete_percent": 100,
           "required_artifacts": [
             "output/04-article-final.md",
-            "output/05-article.html",
-            "output/final-review.md"
+            "output/05-article.html"
           ]
         }
       ],
@@ -89,7 +88,19 @@
           "role": "review",
           "path": "output/final-review.md",
           "mime_type": "text/markdown",
-          "required": true
+          "required": false
+        },
+        {
+          "role": "review",
+          "path": "output/marketing-scan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "other",
+          "path": "output/draft-result.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -117,7 +128,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "bed9cb76610530eb9c040ea1ad0a8c3c9fe5bdeb6d20ca71e671e342fd13da3a"
+      "digest": "c3f8b6e5531c1fc0c1ce45d05a0470fb41328dfa4b0fd61b1dfd654e7521c01b"
     },
     {
       "id": "ecommerce",
@@ -758,7 +769,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "fd069fc5b585c530ee5f89b9f637dd63c104fc51e748ade97adf97e503d4bedd"
+      "digest": "bce196b8240d230120ed19033b89a9ad0a1dc02ae656ca573ce94ee3721413c8"
     }
   ]
 }

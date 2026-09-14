@@ -2,13 +2,13 @@ import { pathToFileURL } from "node:url";
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 
-import { uploadWorkspaceArtifacts, type ArtifactReporter } from "./artifacts.js";
+import { uploadWorkspaceArtifacts, type ArtifactReporter, type ArtifactUploadSummary } from "./artifacts.js";
 import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { CompletionReportError, exitCodeForError } from "./errors.js";
-import { evaluateCompletionMetadata } from "./completion-evaluator.js";
 import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
+import { runWithProviderPolicyRecovery } from "./policy-recovery.js";
 import { runClaude, type RunnerReporter } from "./runner.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
 
@@ -36,7 +36,7 @@ export interface RunJobDependencies {
   createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "execution_id" | "task_id">): JobReporter;
   startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
   runClaude(config: JobConfig, data: ResolvedBootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
-  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<number>;
+  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<ArtifactUploadSummary>;
   subscribeShutdown(onSignal: () => void): () => void;
 }
 
@@ -113,11 +113,19 @@ export async function runJob(
     const reporter = dependencies.createReporter(config, data);
     stopHeartbeat = dependencies.startHeartbeat(reporter, stderr, shutdown.signal);
     let result: ExecutionResult;
-    try {
-      result = await dependencies.runClaude(config, data, reporter, shutdown.signal);
-    } catch (error) {
-      result = failure(config.workspace, error);
-    }
+    result = await runWithProviderPolicyRecovery(
+      config.workspace,
+      data,
+      async (sessionData) => {
+        try {
+          return await dependencies.runClaude(config, sessionData, reporter, shutdown.signal);
+        } catch (error) {
+          return failure(config.workspace, error);
+        }
+      },
+      (message) => reporter.progress(message, shutdown.signal),
+      shutdown.signal,
+    );
     result = await applyFailureState(config.workspace, result);
     if (shutdown.signal.aborted && !result.success && !result.error) result.error = "agent shutdown: received termination signal";
 
@@ -126,8 +134,9 @@ export async function runJob(
     const artifactAbort = abortAfter(timeouts.artifact, shutdown.signal);
     try {
       stderr.write(`artifact finalization started: timeout_ms=${timeouts.artifact}\n`);
-      const count = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal);
-      stderr.write(`artifact finalization completed: files=${count} duration_ms=${Date.now() - artifactStartedAt}\n`);
+      const summary = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal);
+      if (summary.failures.length > 0) result = { ...result, artifact_upload_failures: summary.failures };
+      stderr.write(`artifact finalization completed: files=${summary.uploaded} failures=${summary.failures.length} duration_ms=${Date.now() - artifactStartedAt}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "artifact finalization failed";
       stderr.write(`artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} error=${message}\n`);
@@ -143,7 +152,6 @@ export async function runJob(
     try {
       stderr.write(`completion report started: timeout_ms=${timeouts.completion}\n`);
       try {
-        await evaluateCompletionMetadata(config.workspace, data.execution_profile, completionAbort.signal);
         const metadata = JSON.parse(await readFile(`${config.workspace}/output/completion-metadata.json`, "utf8"));
         await reporter.submitCompletionMetadata(metadata, completionAbort.signal);
       } catch (metadataError) {

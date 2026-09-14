@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+	"golang.org/x/text/unicode/norm"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -27,12 +30,14 @@ var (
 	ErrWechatPublicationNotFound             = errors.New("WeChat publication not found")
 	ErrWechatPublicationForbidden            = errors.New("WeChat publication does not belong to user")
 	ErrWechatPublicationProjectMismatch      = errors.New("WeChat publication task and project do not match")
+	ErrWechatPublicationExecutionMismatch    = errors.New("WeChat publication does not belong to the current task execution")
 	ErrWechatPublicationConflict             = errors.New("WeChat publication state changed concurrently")
 	ErrWechatPublicationModeConflict         = errors.New("WeChat publication action is not allowed by project mode")
 	ErrWechatPublicationPending              = errors.New("WeChat publication outcome is pending reconciliation")
 	ErrWechatPublicationRateLimited          = errors.New("WeChat publication reconciliation is rate limited")
 	ErrWechatPublicationArticleNotFound      = errors.New("published article was not found in the configured WeChat account")
 	ErrWechatPublicationInvalidPayload       = errors.New("invalid WeChat draft payload")
+	ErrWechatPublicationMarketingBlocked     = errors.New("WeChat draft blocked by deterministic marketing review")
 	ErrWechatPublicationDraftUnsupported     = errors.New("WeChat account does not support the draft API")
 	ErrWechatPublicationDraftRejected        = errors.New("WeChat definitively rejected draft creation")
 	ErrWechatPublicationDraftFailed          = errors.New("WeChat draft outcome could not be confirmed")
@@ -228,10 +233,193 @@ func firstDraftArticle(request appwechat.DraftAddRequest) (appwechat.DraftArticl
 	if article.Title == "" || strings.TrimSpace(article.Content) == "" {
 		return article, fmt.Errorf("%w: draft title and content are required", ErrWechatPublicationInvalidPayload)
 	}
+	if err := validateWechatHTMLFragment("draft article content", []byte(article.Content)); err != nil {
+		return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+	}
 	if err := validateContentImageDiversity(article.Content); err != nil {
 		return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
 	}
 	return article, nil
+}
+
+var wechatPublicationMarketingBlockRules = []struct {
+	id      string
+	pattern *regexp.Regexp
+}{
+	{id: "external_url", pattern: regexp.MustCompile(`(?i)https?://[^\s]+`)},
+	{id: "contact_phone", pattern: regexp.MustCompile(`(^|[^0-9])1[3-9][0-9]{9}([^0-9]|$)`)},
+	{id: "qr_code", pattern: regexp.MustCompile(`二维码|扫码(添加|加群|进群|联系|领取)`)},
+	{id: "private_contact", pattern: regexp.MustCompile(`(加|添加)(我)?微信|私信我|联系我|进群|加群`)},
+	{id: "keyword_reward", pattern: regexp.MustCompile(`回复(关键词|“[^”]+”|「[^」]+」|[^\s]{1,12})(即可|可)?(领|领取|获取|获得|下载)|(关注|点赞|留言|评论|转发|分享).{0,12}(领|领取|获取|获得|赠送)`)},
+	{id: "false_promise", pattern: regexp.MustCompile(`保证(赚钱|盈利|见效)|稳赚不赔|零风险(收益|赚钱)|永久有效`)},
+	{id: "medical_efficacy", pattern: regexp.MustCompile(`(根治|治愈|治疗)(癌症|糖尿病|高血压|失眠|抑郁|疾病)|替代(药物|就医|治疗)`)},
+}
+
+func wechatPublicationMarketingBlocks(article appwechat.DraftArticle) []string {
+	contentText, outboundContent := publicationMarketingScanContent(article.Content)
+	scanText := stripPublicationMarketingFormatCharacters(strings.Join([]string{
+		article.Title,
+		article.Author,
+		article.Digest,
+		article.ContentSourceURL,
+		article.URL,
+		contentText,
+	}, "\n"))
+	blocked := make([]string, 0, len(wechatPublicationMarketingBlockRules))
+	seen := make(map[string]struct{}, len(wechatPublicationMarketingBlockRules))
+	if outboundContent || strings.TrimSpace(article.ContentSourceURL) != "" || strings.TrimSpace(article.URL) != "" {
+		blocked = append(blocked, "external_url")
+		seen["external_url"] = struct{}{}
+	}
+	for _, rule := range wechatPublicationMarketingBlockRules {
+		if _, exists := seen[rule.id]; !exists && rule.pattern.MatchString(scanText) {
+			blocked = append(blocked, rule.id)
+			seen[rule.id] = struct{}{}
+		}
+	}
+	return blocked
+}
+
+func stripPublicationMarketingFormatCharacters(value string) string {
+	value = norm.NFKC.String(value)
+	return strings.Map(func(char rune) rune {
+		if unicode.Is(unicode.Cf, char) ||
+			unicode.Is(unicode.Properties["Other_Default_Ignorable_Code_Point"], char) ||
+			unicode.Is(unicode.Properties["Variation_Selector"], char) {
+			return -1
+		}
+		return char
+	}, value)
+}
+
+func publicationMarketingScanContent(content string) (string, bool) {
+	nodes, err := html.ParseFragment(strings.NewReader(content), &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
+	if err != nil {
+		return content, true
+	}
+	var text strings.Builder
+	var attributeEvidence []string
+	lastWasBreak := true
+	appendText := func(value string) {
+		if value == "" {
+			return
+		}
+		text.WriteString(value)
+		lastWasBreak = false
+	}
+	appendBreak := func() {
+		if text.Len() > 0 && !lastWasBreak {
+			text.WriteByte('\n')
+			lastWasBreak = true
+		}
+	}
+	outboundContent := false
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		switch node.Type {
+		case html.TextNode:
+			appendText(node.Data)
+		case html.ElementNode:
+			block := isPublicationMarketingBlockElement(node.Data)
+			if block {
+				appendBreak()
+			}
+			for _, attribute := range node.Attr {
+				name := strings.ToLower(attribute.Key)
+				if node.DataAtom == atom.A && name == "href" {
+					if value := strings.TrimSpace(attribute.Val); value != "" {
+						attributeEvidence = append(attributeEvidence, value)
+					}
+					if hasOutboundHTMLLink(compactHTMLSecurityValue(attribute.Val)) {
+						outboundContent = true
+					}
+				} else if name == "alt" {
+					appendText(attribute.Val)
+				} else if name == "style" && hasUnsafeInlineCSS(compactHTMLSecurityValue(attribute.Val)) {
+					outboundContent = true
+				}
+			}
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+			if block {
+				appendBreak()
+			}
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	for _, node := range nodes {
+		walk(node)
+	}
+	return strings.Join(append([]string{text.String()}, attributeEvidence...), "\n"), outboundContent
+}
+
+func (s *WechatPublicationService) validateDraftImageSources(ctx context.Context, task *model.Task, content string) error {
+	nodes, err := html.ParseFragment(strings.NewReader(content), &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
+	if err != nil {
+		return fmt.Errorf("%w: parse draft image sources", ErrWechatPublicationInvalidPayload)
+	}
+	var sources []string
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node.Type == html.ElementNode && node.DataAtom == atom.Img {
+			for _, attribute := range node.Attr {
+				if strings.EqualFold(attribute.Key, "src") {
+					sources = append(sources, strings.TrimSpace(attribute.Val))
+					break
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	for _, node := range nodes {
+		walk(node)
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+
+	registered := make(map[string]struct{})
+	if task != nil && task.CurrentExecutionID != nil && strings.TrimSpace(*task.CurrentExecutionID) != "" {
+		files, err := s.repo.TaskFiles().FindByExecutionID(ctx, *task.CurrentExecutionID)
+		if err != nil {
+			return fmt.Errorf("list current execution images: %w", err)
+		}
+		for _, file := range files {
+			if file != nil && file.TaskID == task.ID && strings.TrimSpace(file.WechatURL) != "" {
+				registered[strings.TrimSpace(file.WechatURL)] = struct{}{}
+			}
+		}
+	}
+
+	for _, source := range sources {
+		parsed, err := url.Parse(source)
+		if err != nil || !parsed.IsAbs() || !strings.EqualFold(parsed.Scheme, "https") ||
+			parsed.Host == "" || parsed.User != nil {
+			return fmt.Errorf("%w: body image source must be an absolute HTTPS URL", ErrWechatPublicationInvalidPayload)
+		}
+		trustedCDN := strings.EqualFold(parsed.Hostname(), "mmbiz.qpic.cn") && parsed.Port() == ""
+		_, uploadedByExecution := registered[source]
+		if !trustedCDN && !uploadedByExecution {
+			return fmt.Errorf("%w: body image source is not a trusted WeChat upload", ErrWechatPublicationInvalidPayload)
+		}
+	}
+	return nil
+}
+
+func isPublicationMarketingBlockElement(tag string) bool {
+	switch strings.ToLower(tag) {
+	case "address", "article", "aside", "blockquote", "br", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+		"header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody", "td", "th", "thead", "tr", "ul":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeDraftArticle(article appwechat.DraftArticle) appwechat.DraftArticle {
@@ -252,7 +440,7 @@ func wechatDraftRequestFingerprint(article appwechat.DraftArticle) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID string, request appwechat.DraftAddRequest) (*model.WechatPublication, error) {
+func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID, executionID string, request appwechat.DraftAddRequest) (*model.WechatPublication, error) {
 	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
@@ -260,12 +448,22 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	if project.ID != projectID {
 		return nil, ErrWechatPublicationProjectMismatch
 	}
+	executionID = strings.TrimSpace(executionID)
+	if executionID == "" || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID {
+		return nil, ErrWechatPublicationExecutionMismatch
+	}
 	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
 		return nil, ErrWechatPublicationModeConflict
 	}
 	article, err := firstDraftArticle(request)
 	if err != nil {
 		return nil, err
+	}
+	if err := s.validateDraftImageSources(ctx, task, article.Content); err != nil {
+		return nil, err
+	}
+	if blocked := wechatPublicationMarketingBlocks(article); len(blocked) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrWechatPublicationMarketingBlocked, strings.Join(blocked, ","))
 	}
 	request.Articles[0] = article
 	fingerprint := WechatContentFingerprint(article.Content)
@@ -279,6 +477,33 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		return nil, findErr
 	}
 	if !fresh {
+		if existing.ExecutionID != executionID {
+			if existing.DraftContentFingerprint != fingerprint || existing.DraftRequestFingerprint != requestFingerprint {
+				return existing, ErrWechatPublicationExecutionMismatch
+			}
+			priorExecution, executionErr := s.repo.TaskExecutions().FindByID(ctx, existing.ExecutionID)
+			if executionErr != nil {
+				if errors.Is(executionErr, gorm.ErrRecordNotFound) {
+					return existing, ErrWechatPublicationExecutionMismatch
+				}
+				return existing, executionErr
+			}
+			if !isTerminalExecution(priorExecution.Status) {
+				return existing, ErrWechatPublicationExecutionMismatch
+			}
+			_, rebindErr := s.repo.WechatPublications().RebindExecution(ctx, existing.ID, existing.ExecutionID, executionID, existing.UpdatedAt)
+			if rebindErr != nil {
+				return existing, rebindErr
+			}
+			latest, latestErr := s.repo.WechatPublications().FindByID(ctx, existing.ID)
+			if latestErr != nil {
+				return existing, latestErr
+			}
+			if latest.ExecutionID != executionID || latest.DraftContentFingerprint != fingerprint || latest.DraftRequestFingerprint != requestFingerprint {
+				return latest, ErrWechatPublicationExecutionMismatch
+			}
+			existing = latest
+		}
 		if existing.DraftContentFingerprint != fingerprint || existing.DraftRequestFingerprint != requestFingerprint {
 			return existing, ErrWechatPublicationConflict
 		}
@@ -307,7 +532,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	} else {
 		now := s.now()
 		existing = &model.WechatPublication{
-			ID: uuid.NewString(), TaskID: task.ID, UserID: userID, ProjectID: project.ID,
+			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, UserID: userID, ProjectID: project.ID,
 			DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
 			DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: fingerprint, DraftRequestFingerprint: requestFingerprint,
 			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,

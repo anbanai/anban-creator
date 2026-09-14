@@ -654,7 +654,7 @@ func (s *TaskService) uploadContentAddressedTaskFile(
 
 		// A key may outlive the row that once owned it while durable cleanup is
 		// pending. Never reuse such a key: otherwise a delayed delete can remove a
-		// newly published object with identical content.
+		// newly finalized object with identical content.
 		ossKey = objectKeyPrefix + "-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ext
 		uploaded, err := s.store.Upload(ctx, ossKey, bytes.NewReader(payload), mimeType)
 		if err != nil {
@@ -977,28 +977,51 @@ func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (io.ReadCl
 		return nil, "", ErrNoDownloadableDeliveryFiles
 	}
 
-	var firstStream io.ReadCloser
-	firstIndex := -1
-	for index, file := range files {
-		firstStream, err = storage.OpenObject(ctx, s.store, file.OSSKey)
-		if err != nil {
-			s.logger.Warn().Err(err).
-				Str("file_name", file.FileName).
-				Str("oss_key", file.OSSKey).
-				Msg("failed to open file for zip, skipping")
-			continue
-		}
-		firstIndex = index
-		break
+	return s.downloadTaskFileSet(ctx, taskID, "delivered", files)
+}
+
+// DownloadRetainedZip streams only artifacts retained from unsuccessful or
+// superseded execution attempts.
+func (s *TaskService) DownloadRetainedZip(ctx context.Context, taskID string) (io.ReadCloser, string, error) {
+	files, err := s.repo.TaskFiles().FindRetainedByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, "", fmt.Errorf("find retained task files: %w", err)
 	}
-	if firstIndex < 0 {
+	if len(files) == 0 {
 		return nil, "", ErrNoDownloadableDeliveryFiles
+	}
+	return s.downloadTaskFileSet(ctx, taskID, "retained", files)
+}
+
+func (s *TaskService) downloadTaskFileSet(ctx context.Context, taskID, scope string, files []*model.TaskFile) (io.ReadCloser, string, error) {
+	statProvider, ok := s.store.(storage.ObjectStatProvider)
+	if !ok {
+		return nil, "", fmt.Errorf("verify %s ZIP artifacts: %w", scope, storage.ErrObjectStatUnsupported)
+	}
+	for _, file := range files {
+		if file == nil || strings.TrimSpace(file.OSSKey) == "" {
+			return nil, "", fmt.Errorf("verify %s ZIP artifacts: file object is unavailable", scope)
+		}
+		info, err := statProvider.StatObject(ctx, file.OSSKey)
+		if err != nil {
+			return nil, "", fmt.Errorf("verify %s ZIP artifact %s: %w", scope, file.FileName, err)
+		}
+		if info == nil || (file.FileSize > 0 && info.Size != file.FileSize) {
+			return nil, "", fmt.Errorf("verify %s ZIP artifact %s: stored object changed", scope, file.FileName)
+		}
+	}
+	firstStream, err := storage.OpenObject(ctx, s.store, files[0].OSSKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s ZIP artifact %s: %w", scope, files[0].FileName, err)
 	}
 
 	reader, writer := io.Pipe()
-	go s.writeTaskZipStream(ctx, writer, files[firstIndex:], firstStream)
+	go s.writeTaskZipStream(ctx, writer, files, firstStream)
 
-	zipName := fmt.Sprintf("task_%s_files.zip", taskID)
+	zipName := fmt.Sprintf("task_%s_%s_files.zip", taskID, scope)
+	if scope == "delivered" {
+		zipName = fmt.Sprintf("task_%s_files.zip", taskID)
+	}
 	return reader, zipName, nil
 }
 
@@ -1011,11 +1034,8 @@ func (s *TaskService) writeTaskZipStream(ctx context.Context, pipeWriter *io.Pip
 			var err error
 			stream, err = storage.OpenObject(ctx, s.store, file.OSSKey)
 			if err != nil {
-				s.logger.Warn().Err(err).
-					Str("file_name", file.FileName).
-					Str("oss_key", file.OSSKey).
-					Msg("failed to open file for zip, skipping")
-				continue
+				_ = pipeWriter.CloseWithError(fmt.Errorf("open zip entry %s: %w", file.FileName, err))
+				return
 			}
 		}
 

@@ -2,9 +2,12 @@ package model
 
 import (
 	"database/sql"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -98,5 +101,21 @@ func TestRuntimeIdentityCarriesProviderNeutralValues(t *testing.T) {
 	identity := RuntimeIdentity{Scope: "docker", Workload: "creator-agent-exec-1", InstanceID: "container-1"}
 	if identity.Scope != "docker" || identity.Workload != "creator-agent-exec-1" || identity.InstanceID != "container-1" {
 		t.Fatalf("runtime identity = %+v", identity)
+	}
+}
+
+func TestTaskExecutionPublicJSONHidesRawDiagnostics(t *testing.T) {
+	execution := TaskExecution{
+		ID: "execution-1", Diagnostics: datatypes.JSON(`{"provider_body":"sensitive"}`),
+		Result: datatypes.JSON(`{"log_text":"internal"}`),
+	}
+	raw, err := json.Marshal(execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"diagnostics", "provider_body", "sensitive", "log_text", "internal"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("public execution JSON exposed %q: %s", forbidden, raw)
+		}
 	}
 }

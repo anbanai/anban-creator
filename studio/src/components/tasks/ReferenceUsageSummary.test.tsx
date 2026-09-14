@@ -56,7 +56,6 @@ const seednoteTask: Task = {
   plan_id: null,
   project_id: 'project-1',
   execution_profile: 'effective',
-  result: null,
   billing_price_credits: 5000,
   created_at: '2026-07-10T00:00:00.000Z',
   started_at: '2026-07-10T00:00:01.000Z',
@@ -66,6 +65,7 @@ const seednoteTask: Task = {
 const summaryTaskFile: TaskFile = {
   id: 'file-summary',
   task_id: 'task-1',
+  state: 'retained',
   role: 'artifact',
   file_name: 'reference-usage-summary.json',
   mime_type: 'application/json',

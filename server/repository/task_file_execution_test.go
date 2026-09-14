@@ -82,7 +82,7 @@ func TestTaskFileRepositoryPublishMySQLLockOrderContract(t *testing.T) {
 	mock.ExpectExec("UPDATE `task_executions` SET .*manifest_status.*WHERE id = \\?").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := New(db).TaskFiles().PublishCurrentExecution(context.Background(), "t1", "e1"); err != nil {
+	if err := New(db).TaskFiles().DeliverCurrentExecution(context.Background(), "t1", "e1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -153,7 +153,7 @@ func TestTaskFileRepositoryPublishesExecutionAtomicallyAndIdempotently(t *testin
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
 	rows := []*model.TaskFile{
-		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
+		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
 		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 	}
 	if err := repo.TaskFiles().BatchCreate(ctx, rows); err != nil {
@@ -164,7 +164,7 @@ func TestTaskFileRepositoryPublishesExecutionAtomicallyAndIdempotently(t *testin
 	if err != nil || len(visible) != 1 || visible[0].ExecutionID != "e1" {
 		t.Fatalf("visible before publish = %#v, %v", visible, err)
 	}
-	if err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e2"); err != nil {
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e2"); err != nil {
 		t.Fatal(err)
 	}
 	task, err := repo.Tasks().FindByID(ctx, "t1")
@@ -178,7 +178,7 @@ func TestTaskFileRepositoryPublishesExecutionAtomicallyAndIdempotently(t *testin
 	if changed, err := repo.TaskExecutions().Transition(ctx, "e2", []string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded, model.ExecutionTransition{}); err != nil || !changed {
 		t.Fatalf("terminal transition = %v, %v", changed, err)
 	}
-	if err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e2"); err != nil {
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e2"); err != nil {
 		t.Fatalf("idempotent retry: %v", err)
 	}
 	visible, err = repo.TaskFiles().FindByTaskID(ctx, "t1")
@@ -195,11 +195,11 @@ func TestTaskFileRepositoryPublishWithNoTargetRowsPreservesPublishedSet(t *testi
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
-	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"}); err != nil {
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"}); err != nil {
 		t.Fatal(err)
 	}
 	sealCurrentTaskArtifacts(t, repo, "t1", "e2")
-	err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e2")
+	err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e2")
 	if !errors.Is(err, ErrNoPendingExecutionArtifacts) {
 		t.Fatalf("error = %v, want ErrNoPendingExecutionArtifacts", err)
 	}
@@ -214,12 +214,12 @@ func TestTaskFileRepositoryRejectsStaleExecutionWithoutChangingPublishedSet(t *t
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "current.md", FileName: "current.md"},
+		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "current.md", FileName: "current.md"},
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "stale.md", FileName: "stale.md"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1")
+	err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e1")
 	if !errors.Is(err, ErrTaskFileExecutionNotCurrent) {
 		t.Fatalf("error = %v, want stale execution", err)
 	}
@@ -235,7 +235,7 @@ func TestTaskFileRepositoryPublishRollbackPreservesOldSet(t *testing.T) {
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
+		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
 		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 	}); err != nil {
 		t.Fatal(err)
@@ -244,11 +244,11 @@ func TestTaskFileRepositoryPublishRollbackPreservesOldSet(t *testing.T) {
 	if err := db.Exec(`CREATE TRIGGER fail_publish BEFORE UPDATE ON task_files WHEN OLD.execution_id = 'e2' BEGIN SELECT RAISE(ABORT, 'forced publish failure'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e2"); err == nil {
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e2"); err == nil {
 		t.Fatal("forced publication failure unexpectedly succeeded")
 	}
 	visible, _ := repo.TaskFiles().FindByTaskID(ctx, "t1")
-	if len(visible) != 1 || visible[0].ExecutionID != "e1" || visible[0].State != model.TaskFileStatePublished {
+	if len(visible) != 1 || visible[0].ExecutionID != "e1" || visible[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("rollback visible set = %#v", visible)
 	}
 }
@@ -265,7 +265,7 @@ func TestTaskFileRepositoryPublishRejectsStoppedTask(t *testing.T) {
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "a.md", FileName: "a.md"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1"); !errors.Is(err, ErrTaskFileTaskNotRunning) {
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e1"); !errors.Is(err, ErrTaskFileTaskNotRunning) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestTaskFileRepositoryConcurrentAttemptsOnlyCurrentPublishes(t *testing.T) 
 		go func(i int, executionID string) {
 			defer wg.Done()
 			<-start
-			errs[i] = repo.TaskFiles().PublishCurrentExecution(ctx, "t1", executionID)
+			errs[i] = repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", executionID)
 		}(i, executionID)
 	}
 	close(start)
@@ -321,7 +321,7 @@ func TestTaskFileRepositoryPublishRacingReplacementHasNoLatePendingRows(t *testi
 	sealCurrentTaskArtifacts(t, repo, "t1", "e1")
 	replacement := []*model.TaskFile{{Role: model.FileRoleOther, FilePath: "replacement.md", FileName: "replacement.md"}}
 	publishErr, replaceErr := runArtifactMutationRace(
-		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
+		func() error { return repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e1") },
 		func() error { return repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", replacement) },
 	)
 	if publishErr != nil {
@@ -333,7 +333,7 @@ func TestTaskFileRepositoryPublishRacingReplacementHasNoLatePendingRows(t *testi
 	rows, _ := repo.TaskFiles().FindByExecutionID(ctx, "e1")
 	visible, pending := 0, 0
 	for _, row := range rows {
-		if row.State == model.TaskFileStatePublished {
+		if row.State == model.TaskFileStateDelivered {
 			visible++
 		}
 		if row.State == model.TaskFileStatePending {
@@ -350,14 +350,14 @@ func TestTaskFileRepositoryPublishRacingDiscardPreservesVisibleSet(t *testing.T)
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{TaskID: "t1", ExecutionID: "older", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
+		{TaskID: "t1", ExecutionID: "older", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "old.md", FileName: "old.md"},
 		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "new.md", FileName: "new.md"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	sealCurrentTaskArtifacts(t, repo, "t1", "e1")
 	publishErr, discardErr := runArtifactMutationRace(
-		func() error { return repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1") },
+		func() error { return repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e1") },
 		func() error { return repo.TaskFiles().DiscardCurrentExecution(ctx, "t1", "e1") },
 	)
 	if publishErr != nil && !errors.Is(publishErr, ErrTaskFileManifestState) {
@@ -463,7 +463,7 @@ func TestTaskFileRepositoryCollectsFailedExecutionWithoutReplacingPublishedSet(t
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e2")
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{TaskID: "t1", ExecutionID: "e1", State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
 		{TaskID: "t1", ExecutionID: "e2", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 	}); err != nil {
 		t.Fatal(err)
@@ -472,7 +472,7 @@ func TestTaskFileRepositoryCollectsFailedExecutionWithoutReplacingPublishedSet(t
 	if err != nil || !changed {
 		t.Fatalf("mark execution failed: changed=%v err=%v", changed, err)
 	}
-	if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e2"); err != nil {
+	if err := repo.TaskFiles().RetainCurrentExecution(ctx, "t1", "e2"); err != nil {
 		t.Fatalf("collect failed execution: %v", err)
 	}
 	published, err := repo.TaskFiles().FindByTaskID(ctx, "t1")
@@ -480,16 +480,16 @@ func TestTaskFileRepositoryCollectsFailedExecutionWithoutReplacingPublishedSet(t
 		t.Fatalf("published files = %#v, err=%v", published, err)
 	}
 	failedFiles, err := repo.TaskFiles().FindByExecutionID(ctx, "e2")
-	if err != nil || len(failedFiles) != 1 || failedFiles[0].State != "collected" {
+	if err != nil || len(failedFiles) != 1 || failedFiles[0].State != "retained" {
 		t.Fatalf("failed execution files = %#v, err=%v", failedFiles, err)
 	}
 	execution, err := repo.TaskExecutions().FindByID(ctx, "e2")
-	if err != nil || execution.ManifestStatus != "collected" {
+	if err != nil || execution.ManifestStatus != "retained" {
 		t.Fatalf("execution = %#v, err=%v", execution, err)
 	}
 }
 
-func TestTaskFileRepositoryCollectCurrentExecutionIsIdempotent(t *testing.T) {
+func TestTaskFileRepositoryRetainCurrentExecutionIsIdempotent(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
@@ -504,12 +504,12 @@ func TestTaskFileRepositoryCollectCurrentExecutionIsIdempotent(t *testing.T) {
 		t.Fatalf("mark execution failed: changed=%v err=%v", changed, err)
 	}
 	for range 2 {
-		if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e1"); err != nil {
+		if err := repo.TaskFiles().RetainCurrentExecution(ctx, "t1", "e1"); err != nil {
 			t.Fatalf("collect failed execution: %v", err)
 		}
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
-	if err != nil || len(rows) != 1 || rows[0].State != "collected" {
+	if err != nil || len(rows) != 1 || rows[0].State != "retained" {
 		t.Fatalf("collected rows = %#v, err=%v", rows, err)
 	}
 }
@@ -532,7 +532,7 @@ func TestFinalizeCloudTaskWithArtifactsRejectsTaskStatusThatContradictsExecution
 	err = repo.WithTx(ctx, func(tx Repository) error {
 		_, finalizeErr := tx.Tasks().FinalizeCloudTaskWithArtifactsInTx(
 			ctx, "t1", "e1", model.TaskStatusCancelled, "failed", `{"success":false}`,
-			nil, "unreconciled", CloudTaskArtifactsCollect,
+			nil, "unreconciled", CloudTaskArtifactsRetain,
 		)
 		return finalizeErr
 	})
@@ -564,7 +564,7 @@ func TestTaskFileRepositoryCollectRejectsStaleExecution(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskFiles().CollectCurrentExecution(ctx, "t1", "e1"); !errors.Is(err, ErrTaskFileExecutionNotCurrent) {
+	if err := repo.TaskFiles().RetainCurrentExecution(ctx, "t1", "e1"); !errors.Is(err, ErrTaskFileExecutionNotCurrent) {
 		t.Fatalf("collect stale execution error = %v", err)
 	}
 	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
@@ -598,7 +598,7 @@ func TestTaskFileRepositoryReplacePendingExecutionForcesDeclaredScope(t *testing
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
-	files := []*model.TaskFile{{TaskID: "foreign", ExecutionID: "foreign", State: model.TaskFileStatePublished, Role: model.FileRoleOther, FilePath: "output/a.md", FileName: "a.md"}}
+	files := []*model.TaskFile{{TaskID: "foreign", ExecutionID: "foreign", State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "output/a.md", FileName: "a.md"}}
 	if err := repo.TaskFiles().ReplacePendingCurrentExecution(ctx, "t1", "e1", files); err != nil {
 		t.Fatal(err)
 	}
@@ -1105,7 +1105,7 @@ func TestTaskFileMutationRacingLocalCompletionLeavesLegalTerminalState(t *testin
 					}})
 					return
 				}
-				mutated <- repo.TaskFiles().PublishCurrentExecution(ctx, "t1", "e1")
+				mutated <- repo.TaskFiles().DeliverCurrentExecution(ctx, "t1", "e1")
 			}()
 			close(start)
 
@@ -1136,7 +1136,7 @@ func TestTaskFileMutationRacingLocalCompletionLeavesLegalTerminalState(t *testin
 			if mutationErr == nil && mutation == "manifest" && (rows[0].FilePath != "output/final.md" || !execution.ManifestSealed) {
 				t.Fatalf("successful manifest was not committed before completion: row=%#v execution=%#v", rows[0], execution)
 			}
-			if mutationErr == nil && mutation == "publish" && (rows[0].State != model.TaskFileStatePublished || execution.ManifestStatus != model.TaskExecutionManifestPublished) {
+			if mutationErr == nil && mutation == "publish" && (rows[0].State != model.TaskFileStateDelivered || execution.ManifestStatus != model.TaskExecutionManifestDelivered) {
 				t.Fatalf("successful publish was not committed before completion: row=%#v execution=%#v", rows[0], execution)
 			}
 		})

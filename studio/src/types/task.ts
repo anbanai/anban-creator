@@ -17,6 +17,25 @@ export interface EcommerceTaskConfig {
 }
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
+export interface TaskOutcome {
+  core_delivery: { status: 'complete' | 'none' }
+  visual: { status: 'complete' | 'partial' | 'not_requested' }
+  review: { status: 'passed' | 'warning' | 'unavailable' }
+  publication: { status: 'succeeded' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested' }
+  warnings: Array<{ code: string; message: string; stage?: string }>
+  diagnostic?: {
+    provider?: string
+    provider_code?: string
+    http_status?: number
+    stage?: string
+    content_direction?: 'input' | 'output' | 'unknown'
+    recoverable: boolean
+    resume_point?: string
+    request_id?: string
+    summary: string
+  }
+}
+
 // Legacy per-task overrides kept for older rows. New tasks use project_snapshot.
 export interface StyleOverrides {
   visual_style?: string
@@ -79,7 +98,7 @@ export interface Task {
   execution_profile: AgentExecutionProfileID
   agent_profile_snapshot?: AgentProfileSnapshot
   agent_profile_fingerprint?: string
-  result?: string | null
+  outcome?: TaskOutcome
   workflow_status?: WorkflowStatus | string | null
   overrides?: StyleOverrides
   project_snapshot?: ProjectSnapshot
@@ -171,7 +190,7 @@ export interface TaskFile {
   id: string
   task_id: string
   execution_id?: string
-  state?: 'published' | 'collected'
+  state: 'delivered' | 'retained'
   role: string
   file_name: string
   mime_type: string

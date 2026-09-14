@@ -351,14 +351,14 @@ func (r *taskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context,
 		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
 	}
 	switch artifactAction {
-	case LocalTaskArtifactsPublish:
+	case LocalTaskArtifactsDeliver:
 		if status != model.TaskStatusCompleted {
 			return false, fmt.Errorf("publishing local artifacts requires completed task status")
 		}
-		if err := publishLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
+		if err := deliverLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
 			return false, err
 		}
-	case LocalTaskArtifactsCollect:
+	case LocalTaskArtifactsRetain:
 		if status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
 			return false, fmt.Errorf("collecting local artifacts requires failed or cancelled task status")
 		}
@@ -370,12 +370,12 @@ func (r *taskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context,
 	if err != nil || !won {
 		return won, err
 	}
-	if artifactAction == LocalTaskArtifactsCollect {
+	if artifactAction == LocalTaskArtifactsRetain {
 		execution.Status = model.TaskExecutionFailed
 		if status == model.TaskStatusCancelled {
 			execution.Status = model.TaskExecutionCancelled
 		}
-		if err := collectLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
+		if err := retainLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
 			return false, err
 		}
 	}
@@ -407,21 +407,21 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 	}
 
 	switch artifactAction {
-	case CloudTaskArtifactsPublish:
+	case CloudTaskArtifactsDeliver:
 		if status != model.TaskStatusCompleted || execution.Status != model.TaskExecutionSucceeded {
 			return false, fmt.Errorf("publishing cloud artifacts requires succeeded execution and completed task status")
 		}
-		if err := publishLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
+		if err := deliverLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
 			return false, err
 		}
-	case CloudTaskArtifactsCollect:
+	case CloudTaskArtifactsRetain:
 		if status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
 			return false, fmt.Errorf("collecting cloud artifacts requires failed or cancelled task status")
 		}
 		if !isCollectableArtifactExecution(execution) {
 			return false, fmt.Errorf("collecting cloud artifacts requires failed, cancelled, or timed out execution")
 		}
-		if err := collectLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
+		if err := retainLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
 			return false, err
 		}
 	default:
@@ -464,10 +464,10 @@ func cloudTaskTerminalStateMatches(task *model.Task, execution *model.TaskExecut
 		return false
 	}
 	switch artifactAction {
-	case CloudTaskArtifactsPublish:
-		return execution.Status == model.TaskExecutionSucceeded && execution.ManifestStatus == model.TaskExecutionManifestPublished
-	case CloudTaskArtifactsCollect:
-		return isCollectableArtifactExecution(execution) && execution.ManifestStatus == model.TaskExecutionManifestCollected
+	case CloudTaskArtifactsDeliver:
+		return execution.Status == model.TaskExecutionSucceeded && execution.ManifestStatus == model.TaskExecutionManifestDelivered
+	case CloudTaskArtifactsRetain:
+		return isCollectableArtifactExecution(execution) && execution.ManifestStatus == model.TaskExecutionManifestRetained
 	default:
 		return false
 	}
@@ -509,15 +509,11 @@ func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executio
 		executionStatus = model.TaskExecutionCancelled
 	}
 	fullExecutionResult := datatypes.JSON([]byte(executionResult))
-	finalizationStatus := model.TaskExecutionFinalizationTerminal
-	if status == model.TaskStatusCancelled {
-		finalizationStatus = model.TaskExecutionFinalizationDone
-	}
 	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
 		Updates(map[string]any{
 			"status": executionStatus, "terminal_reason": errorMsg, "result": fullExecutionResult,
-			"completed_at": now, "finalization_status": finalizationStatus,
+			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationTerminal,
 			"cleanup_status": model.TaskExecutionCleanupDone,
 		})
 	if execRes.Error != nil {
@@ -923,6 +919,7 @@ func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID
 			"last_heartbeat_at":    nil,
 			"error_message":        "",
 			"result":               nil,
+			"outcome":              nil,
 			"terminal_model_usage": datatypes.NewJSONType([]model.ModelTokenUsage{}),
 			"cost_status":          "",
 			"progress":             0,
@@ -942,6 +939,44 @@ func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID
 
 func (r *taskRepository) UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("workflow_status", workflowStatus).Error
+}
+
+func (r *taskRepository) UpdateOutcomeForExecution(ctx context.Context, id, executionID string, outcome model.TaskOutcome) (bool, error) {
+	encoded, err := json.Marshal(outcome)
+	if err != nil {
+		return false, fmt.Errorf("marshal task outcome: %w", err)
+	}
+	result := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND current_execution_id = ?", id, executionID).
+		Update("outcome", datatypes.JSON(encoded))
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 1 {
+		return true, nil
+	}
+	var persisted struct {
+		ID                 string
+		CurrentExecutionID *string
+		Outcome            datatypes.JSON
+	}
+	err = r.db.WithContext(ctx).Table("tasks").
+		Select("id", "current_execution_id", "outcome").
+		Where("id = ?", id).
+		Take(&persisted).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read back unchanged task outcome: %w", err)
+	}
+	if persisted.CurrentExecutionID == nil || *persisted.CurrentExecutionID != executionID {
+		return false, nil
+	}
+	if jsonValuesEqual(string(persisted.Outcome), string(encoded)) {
+		return true, nil
+	}
+	return false, ErrTaskExecutionEvidenceConflict
 }
 
 func (r *taskRepository) Delete(ctx context.Context, id string) error {

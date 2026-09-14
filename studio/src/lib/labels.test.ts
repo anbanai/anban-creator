@@ -50,15 +50,9 @@ describe('taskFailurePresentation', () => {
     })
   })
 
-  it('uses the structured terminal result when error_message is user-facing text', () => {
+  it('maps a known public error without reading internal execution evidence', () => {
     expect(taskFailurePresentation({
       error_message: '执行环境未建立，暂时无法生成或结算图片',
-      result: JSON.stringify({
-        success: false,
-        root_error_code: 'execution_identity_unavailable',
-        failure_stage: 'image_generation',
-        resume_from: 'image_generation',
-      }),
     })).toMatchObject({
       code: 'execution_identity_unavailable',
       title: '执行环境未建立',

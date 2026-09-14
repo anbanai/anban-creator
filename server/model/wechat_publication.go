@@ -42,10 +42,11 @@ func IsWechatPublicationStatus(value string) bool {
 // Draft delivery is tracked separately on TaskExecution; formal publication is
 // represented only by this one-per-task record.
 type WechatPublication struct {
-	ID        string `gorm:"type:char(36);primaryKey;not null" json:"id"`
-	TaskID    string `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
-	UserID    string `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID string `gorm:"type:char(36);index;not null" json:"project_id"`
+	ID          string `gorm:"type:char(36);primaryKey;not null" json:"id"`
+	TaskID      string `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
+	ExecutionID string `gorm:"type:char(36);index;not null;default:''" json:"execution_id"`
+	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID   string `gorm:"type:char(36);index;not null" json:"project_id"`
 
 	DraftMediaID            string `gorm:"type:varchar(191);not null;default:'';index" json:"draft_media_id,omitempty"`
 	DraftTitle              string `gorm:"type:varchar(500);not null;default:''" json:"draft_title,omitempty"`

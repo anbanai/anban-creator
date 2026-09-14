@@ -105,6 +105,9 @@ func main() {
 		if err := requireAgentExecutionProfileSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Agent execution profiles")
 		}
+		if err := requireTaskDeliverySchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for reliable task delivery")
+		}
 		if _, err := service.MigrateImageCapabilities(context.Background(), mysqlDB, cfg.ModelRoutes.ImageGeneration.DefaultCapability, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate image capabilities")
 		}
@@ -969,6 +972,84 @@ func requireAgentExecutionProfileSchema(db *gorm.DB) error {
 	for _, item := range required {
 		if !db.Migrator().HasTable(item.model) || !db.Migrator().HasColumn(item.model, item.column) {
 			return fmt.Errorf("existing database requires server/migrations/20260728_agent_execution_profiles.sql before startup (missing %T.%s)", item.model, item.column)
+		}
+	}
+	return nil
+}
+
+func requireTaskDeliverySchema(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	hasTasks := db.Migrator().HasTable(&model.Task{})
+	hasFiles := db.Migrator().HasTable(&model.TaskFile{})
+	hasExecutions := db.Migrator().HasTable(&model.TaskExecution{})
+	if !hasTasks && !hasFiles && !hasExecutions {
+		return nil
+	}
+	if !hasTasks || !db.Migrator().HasColumn(&model.Task{}, "Outcome") {
+		return fmt.Errorf("existing database requires server/migrations/20260914_task_outcome.sql before startup")
+	}
+	if !hasFiles || !db.Migrator().HasColumn(&model.TaskFile{}, "State") ||
+		!hasExecutions || !db.Migrator().HasColumn(&model.TaskExecution{}, "ManifestStatus") {
+		return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup")
+	}
+
+	var invalidFiles int64
+	if err := db.Model(&model.TaskFile{}).
+		Where("state NOT IN ?", []string{
+			model.TaskFileStatePending, model.TaskFileStateDelivered,
+			model.TaskFileStateRetained, model.TaskFileStateSuperseded,
+		}).Count(&invalidFiles).Error; err != nil {
+		return fmt.Errorf("inspect task file delivery states: %w", err)
+	}
+	var invalidExecutions int64
+	if err := db.Model(&model.TaskExecution{}).
+		Where("manifest_status NOT IN ?", []string{
+			"", model.TaskExecutionManifestPending, model.TaskExecutionManifestDelivered,
+			model.TaskExecutionManifestRetained, model.TaskExecutionManifestDiscarded,
+			model.TaskExecutionManifestRejected,
+		}).Count(&invalidExecutions).Error; err != nil {
+		return fmt.Errorf("inspect task execution manifest states: %w", err)
+	}
+	if invalidFiles > 0 || invalidExecutions > 0 {
+		return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup (legacy states remain)")
+	}
+	if !db.Migrator().HasTable(&model.WechatPublication{}) ||
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "ExecutionID") {
+		return fmt.Errorf("existing database requires server/migrations/20260914_task_outcome.sql before startup")
+	}
+	if db.Dialector.Name() == "mysql" {
+		return requireMySQLTaskDeliveryConstraints(db)
+	}
+	return nil
+}
+
+func requireMySQLTaskDeliveryConstraints(db *gorm.DB) error {
+	checks := []struct {
+		name     string
+		required []string
+	}{
+		{name: "chk_task_file_state", required: []string{"'pending'", "'delivered'", "'retained'", "'superseded'"}},
+		{name: "chk_task_execution_manifest_status", required: []string{"'pending'", "'delivered'", "'retained'", "'discarded'", "'rejected'"}},
+	}
+	for _, check := range checks {
+		var clause string
+		row := db.Raw(
+			"SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ?",
+			check.name,
+		).Row()
+		if err := row.Scan(&clause); err != nil {
+			return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup (constraint %s is unavailable)", check.name)
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(clause), ""))
+		for _, required := range check.required {
+			if !strings.Contains(normalized, required) {
+				return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup (constraint %s is outdated)", check.name)
+			}
+		}
+		if strings.Contains(normalized, "'published'") || strings.Contains(normalized, "'collected'") {
+			return fmt.Errorf("existing database requires server/migrations/20260914_task_delivery_states.sql before startup (constraint %s still permits legacy states)", check.name)
 		}
 	}
 	return nil

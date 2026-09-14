@@ -195,7 +195,7 @@ func TestCompleteCloudExecutionPublishesSeednoteDeliverables(t *testing.T) {
 	if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 		t.Fatal(err)
 	}
-	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStatePublished)
+	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStateDelivered)
 }
 
 func TestCompleteCloudExecutionRejectsDeliveryImageWithForgedMIME(t *testing.T) {
@@ -221,7 +221,7 @@ func TestCompleteCloudExecutionRejectsDeliveryImageWithForgedMIME(t *testing.T) 
 	if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 		t.Fatal(err)
 	}
-	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateRetained)
 }
 
 func TestCompleteCloudExecutionFinalizesMontageDeliverables(t *testing.T) {
@@ -234,7 +234,7 @@ func TestCompleteCloudExecutionFinalizesMontageDeliverables(t *testing.T) {
 	if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 		t.Fatal(err)
 	}
-	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStatePublished)
+	f.assertTerminal(t, model.TaskStatusCompleted, model.TaskExecutionSucceeded, model.TaskFileStateDelivered)
 }
 
 func TestManagedCompletionRejectsMissingMontageDeliverables(t *testing.T) {
@@ -267,7 +267,7 @@ func TestManagedCompletionRejectsMissingMontageDeliverables(t *testing.T) {
 			if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 				t.Fatal(err)
 			}
-			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateRetained)
 			found, err := f.repo.Tasks().FindByID(context.Background(), f.task.ID)
 			if err != nil || !strings.Contains(found.ErrorMessage, test.missing) {
 				t.Fatalf("failure task=%#v err=%v", found, err)
@@ -286,7 +286,7 @@ func TestCompleteCloudExecutionRejectsForgedMontageMP4(t *testing.T) {
 	if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 		t.Fatal(err)
 	}
-	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateRetained)
 }
 
 func TestCompleteCloudExecutionRejectsInvalidMontageJSON(t *testing.T) {
@@ -315,17 +315,17 @@ func TestCompleteCloudExecutionRejectsInvalidMontageJSON(t *testing.T) {
 			if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
 				t.Fatal(err)
 			}
-			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+			f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateRetained)
 		})
 	}
 }
 
 func TestValidateMontageCompletionArtifactsRejectsStaleRequiredFiles(t *testing.T) {
-	for _, staleState := range []string{model.TaskFileStateCollected, model.TaskFileStateSuperseded} {
+	for _, staleState := range []string{model.TaskFileStateRetained, model.TaskFileStateSuperseded} {
 		t.Run(staleState, func(t *testing.T) {
 			files := []*model.TaskFile{
 				{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},
-				{State: model.TaskFileStatePublished, FilePath: "output/montage-project.json", FileSize: 1},
+				{State: model.TaskFileStateDelivered, FilePath: "output/montage-project.json", FileSize: 1},
 				{State: staleState, FilePath: "output/cover.png", FileSize: 1},
 				{State: model.TaskFileStatePending, FilePath: "output/delivery-manifest.json", FileSize: 1},
 			}
@@ -361,7 +361,7 @@ func TestCompleteCloudExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
 	if err := f.complete(t, result); err != nil {
 		t.Fatal(err)
 	}
-	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateCollected)
+	f.assertTerminal(t, model.TaskStatusFailed, model.TaskExecutionFailed, model.TaskFileStateRetained)
 	found, err := f.repo.Tasks().FindByID(context.Background(), f.task.ID)
 	if err != nil || found.ErrorMessage != agent.NestedAgentDelegationError {
 		t.Fatalf("nested-agent failure task=%#v err=%v", found, err)
@@ -425,7 +425,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 				t.Fatalf("durable output reversal=%#v err=%v, want not found", settlement, settlementErr)
 			}
 			files, err := billing.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
-			if err != nil || len(files) != 1 || files[0].State != model.TaskFileStateCollected {
+			if err != nil || len(files) != 1 || files[0].State != model.TaskFileStateRetained {
 				t.Fatalf("managed durable files=%#v err=%v", files, err)
 			}
 			if account := billing.account(t, billingWalletUserID); account.PaidCredits != 500 {
@@ -505,7 +505,7 @@ func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t 
 		ID: "prior-successful-execution", TaskID: task.ID, Attempt: 1,
 		Target: "managed-test", Status: model.TaskExecutionSucceeded, Started: true,
 		StartedAt: &time.Time{}, CompletedAt: &time.Time{}, ManifestSealed: true,
-		ManifestStatus:     model.TaskExecutionManifestPublished,
+		ManifestStatus:     model.TaskExecutionManifestDelivered,
 		FinalizationStatus: model.TaskExecutionFinalizationDone,
 	}
 	if err := applyAgentPackIdentity(priorExecution, task.Type); err != nil {
@@ -545,7 +545,7 @@ func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t 
 		t.Fatalf("prior published delivery allowed task charge reversal: %v", err)
 	}
 	files, err := billing.repo.TaskFiles().FindByTaskID(ctx, task.ID)
-	if err != nil || len(files) != 3 || files[0].State != model.TaskFileStatePublished {
+	if err != nil || len(files) != 3 || files[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("prior published delivery=%#v err=%v", files, err)
 	}
 }

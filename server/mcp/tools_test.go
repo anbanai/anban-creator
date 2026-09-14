@@ -200,8 +200,8 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 		t.Fatalf("set current execution = %v, %v", ok, err)
 	}
 	if err := repo.TaskFiles().BatchCreate(context.Background(), []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStatePublished, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
-		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md"},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "running", State: model.TaskFileStatePending, Role: model.FileRoleOther, FilePath: "output/pending.md", FileName: "pending.md"},
 		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "old", State: model.TaskFileStateSuperseded, Role: model.FileRoleOther, FilePath: "output/old.md", FileName: "old.md"},
 	}); err != nil {
@@ -217,7 +217,7 @@ func TestListTaskFilesReturnsCollectedFiles(t *testing.T) {
 		t.Fatalf("files = %#v", data["files"])
 	}
 	states := []any{files[0].(map[string]any)["state"], files[1].(map[string]any)["state"]}
-	if states[0] != model.TaskFileStatePublished || states[1] != model.TaskFileStateCollected {
+	if states[0] != model.TaskFileStateDelivered || states[1] != model.TaskFileStateRetained {
 		t.Fatalf("states = %#v", states)
 	}
 	for _, raw := range files {
@@ -235,7 +235,7 @@ func TestListTaskFilesRejectsForeignTask(t *testing.T) {
 	project := createAccountInfoProject(t, repo, ownerID, "")
 	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
 	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
-		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateCollected,
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: "failed", State: model.TaskFileStateRetained,
 		Role: model.FileRoleOther, FilePath: "output/failure-state.json", FileName: "failure-state.json",
 	}); err != nil {
 		t.Fatal(err)
@@ -367,6 +367,39 @@ func TestTaskGetHandlerExposesAgentInput(t *testing.T) {
 	input, ok := response["agent_input"].(map[string]any)
 	if !ok || input["format"] != "brief" {
 		t.Fatalf("agent_input = %#v, want task extension payload", response["agent_input"])
+	}
+}
+
+func TestTaskGetHandlerHidesInternalResultAndExposesOutcome(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	userID := uuid.NewString()
+	project := createAccountInfoProject(t, repo, userID, "")
+	task := createAccountInfoTask(t, repo, userID, project.ID, "")
+	rawResult := `{"success":false,"error":"provider secret"}`
+	task.Result = &rawResult
+	task.Outcome = &model.TaskOutcome{
+		CoreDelivery: model.TaskCoreDeliveryOutcome{Status: model.TaskCoreDeliveryComplete},
+		Visual:       model.TaskVisualOutcome{Status: model.TaskVisualNotRequested},
+		Review:       model.TaskReviewOutcome{Status: model.TaskReviewUnavailable},
+		Publication:  model.TaskPublicationOutcome{Status: model.TaskPublicationNotRequested},
+	}
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := taskGetHandler(withMCPUserID(context.Background(), userID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatalf("taskGetHandler: %v", err)
+	}
+	response := decodeMCPMap(t, result)
+	if _, exposed := response["result"]; exposed {
+		t.Fatalf("internal result leaked through task_get: %#v", response["result"])
+	}
+	outcome, ok := response["outcome"].(map[string]any)
+	if !ok || outcome["core_delivery"].(map[string]any)["status"] != string(model.TaskCoreDeliveryComplete) {
+		t.Fatalf("outcome = %#v, want sanitized task outcome", response["outcome"])
 	}
 }
 

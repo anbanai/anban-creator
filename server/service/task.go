@@ -1320,15 +1320,15 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 // GetVisibleFiles returns successful delivery files followed by retained files
 // from failed attempts. Delivery and workflow code must continue using GetFiles.
 func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
-	published, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	delivered, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("get published task files: %w", err)
+		return nil, fmt.Errorf("get delivered task files: %w", err)
 	}
-	collected, err := s.repo.TaskFiles().FindCollectedByTaskID(ctx, taskID)
+	retained, err := s.repo.TaskFiles().FindRetainedByTaskID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("get collected task files: %w", err)
+		return nil, fmt.Errorf("get retained task files: %w", err)
 	}
-	files := append(published, collected...)
+	files := append(delivered, retained...)
 	s.EnrichFilesWithURLs(ctx, files)
 	if err := s.EnrichFilesWithDeliveryMetadata(ctx, taskID, files); err != nil {
 		return nil, fmt.Errorf("enrich task file delivery metadata: %w", err)

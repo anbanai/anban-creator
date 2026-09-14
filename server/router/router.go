@@ -335,6 +335,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
+		apiV1.Get("/tasks/:id/files/retained/zip", svc.TaskHandler.DownloadRetainedZip)
 		apiV1.Get("/tasks/:id/files/:fileId/preview", svc.TaskHandler.PreviewFile)
 		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
 		apiV1.Get("/usage/stats", svc.TaskHandler.UsageStats)

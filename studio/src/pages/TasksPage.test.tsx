@@ -64,7 +64,6 @@ const fixtures = vi.hoisted(() => {
     plan_id: null,
     project_id: project.id,
     execution_profile: 'effective',
-    result: null,
     billing_price_credits: 6000,
     created_at: '2026-07-06T01:00:00.000Z',
     started_at: '',
@@ -80,7 +79,6 @@ const fixtures = vi.hoisted(() => {
     plan_id: null,
     project_id: project.id,
     execution_profile: 'effective',
-    result: null,
     billing_price_credits: 6000,
     workflow_status: {
       version: 'creation_workflow_v1',

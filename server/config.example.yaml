@@ -256,6 +256,8 @@ claude:
         CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         ENABLE_TOOL_SEARCH: "true"
         CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-flash"
+      model_usage_aliases:
+        "deepseek-flash[1m]": "deepseek-flash"
     balanced:
       description: "兼顾复杂任务质量、速度和成本"
       provider: "zhipu"
