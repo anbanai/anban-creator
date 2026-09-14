@@ -3,6 +3,7 @@ import type { InputAttachment, InputAttachmentType } from '@/types/input-attachm
 
 export type DirectUploadPurpose =
   | 'project_reference'
+  | 'project_portrait_reference'
   | 'task_reference'
   | 'ecommerce_product_photo'
   | 'ai_entry_attachment'

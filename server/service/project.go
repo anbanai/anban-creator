@@ -311,6 +311,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.ReferenceImageSet {
 		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
 	}
+	if ch.PortraitReferenceImageSet {
+		existing.PortraitReferenceImageAssetID = ch.PortraitReferenceImageAssetID
+	}
 	// Empty update input preserves the persisted value for image-capable
 	// platforms. Platforms without image settings always keep the field empty.
 	supportedImageRatios := model.SupportedImageRatios(existing.Platform)

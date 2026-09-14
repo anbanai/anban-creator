@@ -81,6 +81,7 @@ func projectStyleReferenceAssetID(task *model.Task) string {
 func resolveTaskReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
 	return resolveOwnedReferenceAsset(ctx, repo, task, taskReferenceAssetID(task), []string{
 		DirectUploadPurposeTaskReference,
+		DirectUploadPurposeProjectPortraitReference,
 		DirectUploadPurposeAIEntryAttachment,
 	}, "task reference")
 }

@@ -64,13 +64,16 @@ type Project struct {
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
 	// Author is the 作者（署名）— the published author name, passed to create_draft.
-	Author                string        `gorm:"column:author;type:varchar(50)" json:"author"`
-	ReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
-	ReferenceImage        *AssetView    `gorm:"-" json:"reference_image,omitempty"`
-	ReferenceImageSet     bool          `gorm:"-" json:"-"`
-	ImageRatio            string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
-	MaxConcurrentTasks    int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
-	Config                ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置
+	Author                        string        `gorm:"column:author;type:varchar(50)" json:"author"`
+	ReferenceImageAssetID         string        `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage                *AssetView    `gorm:"-" json:"reference_image,omitempty"`
+	ReferenceImageSet             bool          `gorm:"-" json:"-"`
+	PortraitReferenceImageAssetID string        `gorm:"type:char(36);index" json:"-"`
+	PortraitReferenceImage        *AssetView    `gorm:"-" json:"portrait_reference_image,omitempty"`
+	PortraitReferenceImageSet     bool          `gorm:"-" json:"-"`
+	ImageRatio                    string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
+	MaxConcurrentTasks            int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
+	Config                        ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`

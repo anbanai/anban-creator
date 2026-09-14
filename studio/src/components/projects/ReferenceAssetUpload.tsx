@@ -7,13 +7,14 @@ import type { ReferenceImageSelection, ReferenceImageValue } from '@/types/asset
 
 type ReferenceUploadPurpose = Extract<
   DirectUploadPurpose,
-  'project_reference' | 'task_reference'
+  'project_reference' | 'project_portrait_reference' | 'task_reference'
 >
 
 interface ReferenceAssetUploadProps {
   value: ReferenceImageValue | null
   onChange: (value: ReferenceImageSelection | null) => void
   purpose: ReferenceUploadPurpose
+  ariaLabel?: string
   onUploadingChange?: (uploading: boolean) => void
   onUploadedPreview?: (previewUrl: string) => void
 }
@@ -32,6 +33,7 @@ export function ReferenceAssetUpload({
   value,
   onChange,
   purpose,
+  ariaLabel = '参考图文件',
   onUploadingChange,
   onUploadedPreview,
 }: ReferenceAssetUploadProps) {
@@ -239,7 +241,7 @@ export function ReferenceAssetUpload({
         ref={fileInputRef}
         type="file"
         accept={ACCEPTED_IMAGE_TYPES}
-        aria-label="参考图文件"
+        aria-label={ariaLabel}
         onChange={handleFileChange}
         disabled={uploading}
         className="hidden"

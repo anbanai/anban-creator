@@ -167,7 +167,7 @@ func (s *TaskService) materializeProjectStyleReferenceAsset(ctx context.Context,
 	if assetID == "" {
 		return "", nil, errors.New("task has no project style reference image")
 	}
-	asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeProjectReference})
+	asset, err := NewReferenceAssetService(s.repo, nil, nil).RequireOwned(ctx, task.UserID, assetID, []string{DirectUploadPurposeProjectReference, DirectUploadPurposeProjectPortraitReference})
 	if err != nil {
 		return "", nil, fmt.Errorf("authorize project style reference image: %w", err)
 	}

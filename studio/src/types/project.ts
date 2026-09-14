@@ -28,6 +28,7 @@ export interface Project {
   theme: string
   author: string
   reference_image?: ReferenceAssetView | null
+  portrait_reference_image?: ReferenceAssetView | null
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
@@ -84,6 +85,7 @@ export interface CreateProjectRequest {
   theme?: string
   author?: string
   reference_image?: ReferenceImageSelection | null
+  portrait_reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults

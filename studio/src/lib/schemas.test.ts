@@ -123,18 +123,16 @@ describe('createTaskSchema', () => {
     }).success).toBe(true)
   })
 
-  it('requires both an enabled cover and an uploaded image for article portraits', () => {
+  it('accepts the article portrait toggle without embedding an upload', () => {
     const base = {
       project_id: 'ch-1',
       type: 'article',
       prompt: '测试主题',
-      article_use_portrait: true,
-      reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' },
+      use_portrait_reference: true,
     }
 
     expect(createTaskSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(true)
-    expect(createTaskSchema.safeParse({ ...base, article_with_cover: false }).success).toBe(false)
-    expect(createTaskSchema.safeParse({ ...base, article_with_cover: true, reference_image: null }).success).toBe(false)
+    expect(createTaskSchema.safeParse({ ...base, article_with_cover: false }).success).toBe(true)
   })
 
   it('rejects missing project_id', () => {
@@ -440,17 +438,15 @@ describe('planSchema', () => {
     }).success).toBe(true)
   })
 
-  it('requires both an enabled cover and an uploaded image for plan portraits', () => {
+  it('accepts the plan portrait toggle without embedding an upload', () => {
     const base = {
       type: 'article',
       cron_expr: '0 9 * * 1',
-      article_use_portrait: true,
-      reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' },
+      use_portrait_reference: true,
     }
 
     expect(planSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(true)
-    expect(planSchema.safeParse({ ...base, article_with_cover: false }).success).toBe(false)
-    expect(planSchema.safeParse({ ...base, article_with_cover: true, reference_image: null }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, article_with_cover: false }).success).toBe(true)
   })
 
   it('accepts optional prompt', () => {

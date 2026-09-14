@@ -14,7 +14,6 @@ import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachm
 import { Button } from '@/components/common/button'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
-import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -97,7 +96,6 @@ export function TaskFormDialog({
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
   const [montageUploading, setMontageUploading] = useState(false)
-  const [portraitUploading, setPortraitUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
@@ -170,7 +168,7 @@ export function TaskFormDialog({
   const hasTailImage = useWatch({ control: form.control, name: 'has_tail_image' }) ?? false
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
   const articleWithContentImages = useWatch({ control: form.control, name: 'article_with_content_images' }) ?? true
-  const articleUsePortrait = useWatch({ control: form.control, name: 'article_use_portrait' }) ?? false
+  const usePortraitReference = useWatch({ control: form.control, name: 'use_portrait_reference' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
@@ -245,7 +243,6 @@ export function TaskFormDialog({
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
-    setPortraitUploading(false)
     setShowDirtyDialog(false)
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
@@ -299,7 +296,6 @@ export function TaskFormDialog({
     form.reset(createTaskFormDefaults())
     attachmentController.clear()
     setMontageUploading(false)
-    setPortraitUploading(false)
     setShowDirtyDialog(false)
     onOpenChange(false)
   }
@@ -345,7 +341,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && montageUploading)) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
       event?.preventDefault()
       return
     }
@@ -385,7 +381,7 @@ export function TaskFormDialog({
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-                : watchedType === 'article' && articleUsePortrait && explicitlyRejectsReferenceImages(selectedImageCapability)
+                : watchedType === 'article' && usePortraitReference && explicitlyRejectsReferenceImages(selectedImageCapability)
                   ? { message: '当前图像能力不支持人物参考，请更换图像能力。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
                     ? { message: '电商出图需要先上传产品图。', href: '' }
@@ -616,8 +612,7 @@ export function TaskFormDialog({
                         <Switch aria-label="生成封面图" checked={articleWithCover} onCheckedChange={(checked) => {
                           setFormValue('article_with_cover', checked)
                           if (!checked) {
-                            setFormValue('article_use_portrait', false)
-                            setFormValue('reference_image', null)
+                            setFormValue('use_portrait_reference', false)
                           }
                         }} />
                       </div>
@@ -626,35 +621,30 @@ export function TaskFormDialog({
                           <div className="flex min-w-0 items-start gap-2">
                             <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                             <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">使用人物图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">仅用于封面人物身份参考，不传给正文配图</p>
+                            <p className="text-sm font-medium text-foreground">使用人物</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">使用项目设置中的默认人物，仅用于封面</p>
                             </div>
                           </div>
                           <Switch
                             aria-label="使用人物图"
-                            checked={articleUsePortrait}
-                            disabled={!articleWithCover}
+                            checked={usePortraitReference}
+                            disabled={!articleWithCover || !selectedProject?.portrait_reference_image}
                             onCheckedChange={(checked) => {
-                              setFormValue('article_use_portrait', checked)
-                              if (!checked) setFormValue('reference_image', null)
+                              setFormValue('use_portrait_reference', checked)
                             }}
                           />
                         </div>
-                        {articleUsePortrait ? (
-                          <FormField control={form.control} name="reference_image" render={({ field }) => (
-                            <FormItem className="mt-3">
-                              <div className="flex justify-end">
-                                <ReferenceAssetUpload
-                                  value={field.value ?? null}
-                                  onChange={field.onChange}
-                                  purpose="task_reference"
-                                  onUploadingChange={setPortraitUploading}
-                                />
-                              </div>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                        ) : null}
+                        {selectedProject?.portrait_reference_image ? (
+                          <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 p-2">
+                            <img src={selectedProject.portrait_reference_image.download_url} alt="项目人物参考" className="h-14 w-14 rounded-md border object-cover" />
+                            <span className="text-xs text-muted-foreground">{usePortraitReference ? '已选择项目人物' : '可用于封面的人物'}</span>
+                          </div>
+                        ) : (
+                          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">
+                            <span>项目尚未设置人物参考图</span>
+                            <Link className="text-primary hover:underline" to={`/projects?edit=${selectedProject?.id ?? ''}`}>去设置</Link>
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center justify-between py-2">
                         <div className="min-w-0">

@@ -108,6 +108,21 @@ func (h *ProjectHandler) resolveProjectReference(ctx context.Context, userID str
 	return nil
 }
 
+func (h *ProjectHandler) resolveProjectPortraitReference(ctx context.Context, userID string, req *projectRequest) error {
+	if req == nil || !req.PortraitReferenceImageSet || req.PortraitReferenceImage == nil {
+		return nil
+	}
+	if h.referenceAssets == nil {
+		return service.ErrReferenceAssetUnavailable
+	}
+	assetID, err := h.referenceAssets.ResolveSelection(ctx, userID, *req.PortraitReferenceImage, []string{service.DirectUploadPurposeProjectPortraitReference})
+	if err != nil {
+		return err
+	}
+	req.PortraitReferenceImageAssetID = assetID
+	return nil
+}
+
 func (h *ProjectHandler) presentProjectReference(ctx context.Context, userID string, ch *model.Project) error {
 	if ch == nil {
 		return nil
@@ -117,6 +132,11 @@ func (h *ProjectHandler) presentProjectReference(ctx context.Context, userID str
 		return err
 	}
 	ch.ReferenceImage = view
+	portraitView, err := h.projectPortraitReferenceView(ctx, userID, ch.PortraitReferenceImageAssetID)
+	if err != nil {
+		return err
+	}
+	ch.PortraitReferenceImage = portraitView
 	return nil
 }
 
@@ -128,6 +148,16 @@ func (h *ProjectHandler) projectReferenceView(ctx context.Context, userID, asset
 		return nil, service.ErrReferenceAssetUnavailable
 	}
 	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectReference})
+}
+
+func (h *ProjectHandler) projectPortraitReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
+	if h.referenceAssets == nil {
+		if assetID == "" {
+			return nil, nil
+		}
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	return h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectPortraitReference})
 }
 
 func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string, err error) error {
@@ -175,27 +205,30 @@ func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
 
 // projectRequest is the shared request body for creating and updating a project.
 type projectRequest struct {
-	Platform              string                           `json:"platform"`
-	Name                  string                           `json:"name"`
-	ProfileURL            string                           `json:"profile_url"`
-	AvatarURL             string                           `json:"avatar_url"`
-	Positioning           string                           `json:"positioning"`
-	Keywords              string                           `json:"keywords"`
-	VisualStyle           string                           `json:"visual_style"`
-	Writer                string                           `json:"writer"`
-	Theme                 string                           `json:"theme"`
-	Author                string                           `json:"author"`
-	ReferenceImage        *service.ReferenceImageSelection `json:"reference_image"`
-	ReferenceImageSet     bool                             `json:"-"`
-	ReferenceImageAssetID string                           `json:"-"`
-	ImageRatio            string                           `json:"image_ratio"`
-	MaxConcurrentTasks    int                              `json:"max_concurrent_tasks"`
-	Instructions          string                           `json:"instructions"`
-	InstructionsSet       bool                             `json:"-"`
-	EcommerceDefaults     *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
-	MontageDefaults       *model.MontageDefaults           `json:"montage_defaults,omitempty"`
-	AgentConfig           map[string]any                   `json:"agent_config,omitempty"`
-	AgentConfigSet        bool                             `json:"-"`
+	Platform                      string                           `json:"platform"`
+	Name                          string                           `json:"name"`
+	ProfileURL                    string                           `json:"profile_url"`
+	AvatarURL                     string                           `json:"avatar_url"`
+	Positioning                   string                           `json:"positioning"`
+	Keywords                      string                           `json:"keywords"`
+	VisualStyle                   string                           `json:"visual_style"`
+	Writer                        string                           `json:"writer"`
+	Theme                         string                           `json:"theme"`
+	Author                        string                           `json:"author"`
+	ReferenceImage                *service.ReferenceImageSelection `json:"reference_image"`
+	ReferenceImageSet             bool                             `json:"-"`
+	ReferenceImageAssetID         string                           `json:"-"`
+	PortraitReferenceImage        *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	PortraitReferenceImageSet     bool                             `json:"-"`
+	PortraitReferenceImageAssetID string                           `json:"-"`
+	ImageRatio                    string                           `json:"image_ratio"`
+	MaxConcurrentTasks            int                              `json:"max_concurrent_tasks"`
+	Instructions                  string                           `json:"instructions"`
+	InstructionsSet               bool                             `json:"-"`
+	EcommerceDefaults             *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults               *model.MontageDefaults           `json:"montage_defaults,omitempty"`
+	AgentConfig                   map[string]any                   `json:"agent_config,omitempty"`
+	AgentConfigSet                bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
 	WechatAppID       string `json:"wechat_app_id"`
 	WechatSecret      string `json:"wechat_secret"`
@@ -220,22 +253,24 @@ func (req *projectRequest) toProject() *model.Project {
 		instructionsSet = true
 	}
 	p := &model.Project{
-		Platform:              req.Platform,
-		Name:                  req.Name,
-		ProfileURL:            req.ProfileURL,
-		AvatarURL:             req.AvatarURL,
-		Keywords:              req.Keywords,
-		VisualStyle:           req.VisualStyle,
-		Writer:                req.Writer,
-		Theme:                 req.Theme,
-		Author:                req.Author,
-		ReferenceImageAssetID: req.ReferenceImageAssetID,
-		ReferenceImageSet:     req.ReferenceImageSet,
-		ImageRatio:            req.ImageRatio,
-		MaxConcurrentTasks:    req.MaxConcurrentTasks,
-		Instructions:          instructions,
-		InstructionsSet:       instructionsSet,
-		Config:                model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret, WechatPublishMode: req.WechatPublishMode},
+		Platform:                      req.Platform,
+		Name:                          req.Name,
+		ProfileURL:                    req.ProfileURL,
+		AvatarURL:                     req.AvatarURL,
+		Keywords:                      req.Keywords,
+		VisualStyle:                   req.VisualStyle,
+		Writer:                        req.Writer,
+		Theme:                         req.Theme,
+		Author:                        req.Author,
+		ReferenceImageAssetID:         req.ReferenceImageAssetID,
+		ReferenceImageSet:             req.ReferenceImageSet,
+		PortraitReferenceImageAssetID: req.PortraitReferenceImageAssetID,
+		PortraitReferenceImageSet:     req.PortraitReferenceImageSet,
+		ImageRatio:                    req.ImageRatio,
+		MaxConcurrentTasks:            req.MaxConcurrentTasks,
+		Instructions:                  instructions,
+		InstructionsSet:               instructionsSet,
+		Config:                        model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret, WechatPublishMode: req.WechatPublishMode},
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -355,6 +390,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
 	if req.Platform == "" {
@@ -390,11 +426,18 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := h.resolveProjectPortraitReference(c.Context(), userID, &req); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid ecommerce image capability")
 	}
 	ch := req.toProject()
 	referenceView, err := h.projectReferenceView(c.Context(), userID, ch.ReferenceImageAssetID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	portraitReferenceView, err := h.projectPortraitReferenceView(c.Context(), userID, ch.PortraitReferenceImageAssetID)
 	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
@@ -426,6 +469,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	h.service.SanitizeProjectForResponse(created)
 	h.signProjectURLs(c.Context(), created)
 	created.ReferenceImage = referenceView
+	created.PortraitReferenceImage = portraitReferenceView
 
 	// For Seednote projects, include recommended templates.
 	recommended := []templateResponse{}
@@ -508,6 +552,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 	if !projectPlatformIsVisibleToUser(c, req.Platform) {
 		return Forbidden(c, "project platform is currently available to administrators only")
@@ -533,7 +578,11 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	targetReferenceAssetID := current.ReferenceImageAssetID
+	targetPortraitReferenceAssetID := current.PortraitReferenceImageAssetID
 	if err := h.resolveProjectReference(c.Context(), userID, &req); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if err := h.resolveProjectPortraitReference(c.Context(), userID, &req); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	if err := h.validateProjectImageCapability(c.Context(), userID, &req); err != nil {
@@ -542,11 +591,16 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if req.ReferenceImageSet {
 		targetReferenceAssetID = req.ReferenceImageAssetID
 	}
+	if req.PortraitReferenceImageSet {
+		targetPortraitReferenceAssetID = req.PortraitReferenceImageAssetID
+	}
 	referenceView, err := h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
 	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	ch := req.toProject()
+	ch.PortraitReferenceImageAssetID = targetPortraitReferenceAssetID
+	ch.PortraitReferenceImageSet = req.PortraitReferenceImageSet
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
@@ -575,6 +629,8 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 				break
 			}
 			targetReferenceAssetID = current.ReferenceImageAssetID
+			targetPortraitReferenceAssetID = current.PortraitReferenceImageAssetID
+			ch.PortraitReferenceImageAssetID = targetPortraitReferenceAssetID
 			referenceView, err = h.projectReferenceView(c.Context(), userID, targetReferenceAssetID)
 			if err != nil {
 				return respondReferenceAssetError(c, h.logger, err)
@@ -588,6 +644,10 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	h.service.SanitizeProjectForResponse(updated)
 	h.signProjectURLs(c.Context(), updated)
 	updated.ReferenceImage = referenceView
+	updated.PortraitReferenceImage, err = h.projectPortraitReferenceView(c.Context(), userID, updated.PortraitReferenceImageAssetID)
+	if err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	return Success(c, updated)
 }
 
