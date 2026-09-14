@@ -37,6 +37,28 @@ spec:
         version: ${version_switch}
     spec:
       serviceAccountName: creator-server
+      initContainers:
+        - name: project-memory-init
+          image: ${image_repo}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /memory/projects
+              chown 1000:1000 /memory /memory/projects
+              chmod 0750 /memory /memory/projects
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+          volumeMounts:
+            - mountPath: /memory
+              name: project-memory
       containers:
         - env:
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore

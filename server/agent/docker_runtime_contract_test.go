@@ -421,6 +421,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
 		"addgroup -S -g 1000 anban",
 		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
+		"/app/data/project-memory/projects",
 		"chown -R 1000:1000 /app/data",
 		"USER 1000:1000",
 		`CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]`,

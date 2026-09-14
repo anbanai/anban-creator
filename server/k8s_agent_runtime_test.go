@@ -35,7 +35,27 @@ type deploymentDoc struct {
 		Template struct {
 			Spec struct {
 				ServiceAccountName string `yaml:"serviceAccountName"`
-				Containers         []struct {
+				InitContainers     []struct {
+					Name         string   `yaml:"name"`
+					Image        string   `yaml:"image"`
+					Command      []string `yaml:"command"`
+					Args         []string `yaml:"args"`
+					VolumeMounts []struct {
+						Name      string `yaml:"name"`
+						MountPath string `yaml:"mountPath"`
+					} `yaml:"volumeMounts"`
+					SecurityContext struct {
+						RunAsUser                int64 `yaml:"runAsUser"`
+						RunAsGroup               int64 `yaml:"runAsGroup"`
+						AllowPrivilegeEscalation bool  `yaml:"allowPrivilegeEscalation"`
+						ReadOnlyRootFilesystem   bool  `yaml:"readOnlyRootFilesystem"`
+						Capabilities             struct {
+							Drop []string `yaml:"drop"`
+							Add  []string `yaml:"add"`
+						} `yaml:"capabilities"`
+					} `yaml:"securityContext"`
+				} `yaml:"initContainers"`
+				Containers []struct {
 					Name string `yaml:"name"`
 					Env  []struct {
 						Name      string `yaml:"name"`
@@ -166,6 +186,28 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "creator-server" {
 		t.Fatalf("server serviceAccountName = %q, want creator-server", got)
+	}
+	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("server initContainers = %#v, want one project-memory initializer", deployment.Spec.Template.Spec.InitContainers)
+	}
+	memoryInit := deployment.Spec.Template.Spec.InitContainers[0]
+	if memoryInit.Name != "project-memory-init" || memoryInit.Image != "${image_repo}" {
+		t.Fatalf("project memory initializer identity = %#v", memoryInit)
+	}
+	initScript := strings.Join(append(memoryInit.Command, memoryInit.Args...), " ")
+	for _, want := range []string{"mkdir -p /memory/projects", "chown 1000:1000 /memory /memory/projects", "chmod 0750 /memory /memory/projects"} {
+		if !strings.Contains(initScript, want) {
+			t.Fatalf("project memory initializer script %q missing %q", initScript, want)
+		}
+	}
+	if memoryInit.SecurityContext.RunAsUser != 0 || memoryInit.SecurityContext.RunAsGroup != 0 || memoryInit.SecurityContext.AllowPrivilegeEscalation || !memoryInit.SecurityContext.ReadOnlyRootFilesystem {
+		t.Fatalf("project memory initializer security context = %#v", memoryInit.SecurityContext)
+	}
+	if !containsString(memoryInit.SecurityContext.Capabilities.Drop, "ALL") || !containsString(memoryInit.SecurityContext.Capabilities.Add, "CHOWN") {
+		t.Fatalf("project memory initializer capabilities = %#v", memoryInit.SecurityContext.Capabilities)
+	}
+	if len(memoryInit.VolumeMounts) != 1 || memoryInit.VolumeMounts[0].Name != "project-memory" || memoryInit.VolumeMounts[0].MountPath != "/memory" {
+		t.Fatalf("project memory initializer mounts = %#v", memoryInit.VolumeMounts)
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{

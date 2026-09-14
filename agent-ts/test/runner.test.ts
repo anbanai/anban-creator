@@ -320,7 +320,7 @@ describe("buildQueryOptions", () => {
     const data = { ...validBootstrap(), task_type: "montage", runtime_adapter: "openmontage", auto_memory_directory: ".claude/memory" };
     const options = runner.buildQueryOptions(data, "/tasks/task-1");
     expect(options.settingSources).toEqual(["user", "project"]);
-    expect(options.settings).toEqual({ autoMemoryDirectory: ".claude/memory" });
+    expect(options.settings).toEqual({ autoMemoryDirectory: "/tasks/task-1/.claude/memory" });
     expect(options.env?.ANBAN_MONTAGE_SUBMODULE_PATH).toBe("/tasks/task-1/openmontage");
   });
 

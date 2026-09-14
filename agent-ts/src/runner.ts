@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
@@ -306,7 +307,7 @@ export function buildQueryOptions(
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
     env: buildExecutionEnvironment(process.env, data, serverURL, token, workspace),
-    settings: data.auto_memory_directory ? { autoMemoryDirectory: data.auto_memory_directory } : undefined,
+    settings: data.auto_memory_directory ? { autoMemoryDirectory: resolve(workspace, data.auto_memory_directory) } : undefined,
     settingSources: ["user", "project"],
     includePartialMessages: false,
     stderr: (line) => void reporter.progress(line.trim()),

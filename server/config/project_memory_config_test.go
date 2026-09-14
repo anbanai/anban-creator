@@ -57,7 +57,12 @@ func TestProjectMemoryConfigRejectsUnsafeOrIncompleteValues(t *testing.T) {
 	}{
 		{name: "relative root", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.RootDir = "data/memory" }, wantErr: "claude.project_memory.root_dir"},
 		{name: "zero quota", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxProjectBytes = -1 }, wantErr: "max_project_bytes"},
+		{name: "project quota too large", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxProjectBytes = 16*1024*1024 + 1 }, wantErr: "max_project_bytes"},
 		{name: "preview exceeds quota", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxPreviewBytes = 32 * 1024 * 1024 }, wantErr: "max_preview_bytes"},
+		{name: "too many preview files", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxFiles = 65 }, wantErr: "max_files"},
+		{name: "preview too deep", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxDepth = 5 }, wantErr: "max_depth"},
+		{name: "preview file too large", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxFileBytes = 64*1024 + 1 }, wantErr: "max_file_bytes"},
+		{name: "preview response too large", mutate: func(cfg *Config) { cfg.Claude.ProjectMemory.MaxPreviewBytes = 256*1024 + 1 }, wantErr: "max_preview_bytes"},
 		{name: "missing Docker volume", mutate: func(cfg *Config) { cfg.Claude.Docker.ProjectMemoryVolume = "" }, wantErr: "project_memory_volume"},
 		{name: "missing Kubernetes claim", mutate: func(cfg *Config) { cfg.Claude.Executor = "kubernetes"; cfg.Claude.Kubernetes.ProjectMemoryClaim = "" }, wantErr: "project_memory_claim"},
 	}

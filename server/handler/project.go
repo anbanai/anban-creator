@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -26,6 +27,8 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
+
+const projectMemoryMaxResponseBytes = 256 << 10
 
 // ProjectHandler handles project-related HTTP endpoints.
 type ProjectHandler struct {
@@ -568,7 +571,46 @@ func (h *ProjectHandler) Memory(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("read project memory failed")
 		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
 	}
-	return Success(c, view)
+	body, err := marshalBoundedProjectMemoryResponse(view)
+	if err != nil {
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("encode project memory failed")
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSONCharsetUTF8)
+	return c.Send(body)
+}
+
+func marshalBoundedProjectMemoryResponse(view projectmemory.ProjectView) ([]byte, error) {
+	marshal := func() ([]byte, error) {
+		return json.Marshal(Response{Code: 0, Msg: "success", Data: view})
+	}
+	body, err := marshal()
+	if err != nil || len(body) <= projectMemoryMaxResponseBytes {
+		return body, err
+	}
+
+	view.Partial = true
+	for index := len(view.Files) - 1; index >= 0 && len(body) > projectMemoryMaxResponseBytes; index-- {
+		content := view.Files[index].Content
+		if content == "" {
+			continue
+		}
+		removeBytes := min(len(content), len(body)-projectMemoryMaxResponseBytes)
+		keepBytes := len(content) - removeBytes
+		for keepBytes > 0 && !utf8.ValidString(content[:keepBytes]) {
+			keepBytes--
+		}
+		view.Files[index].Content = content[:keepBytes]
+		view.Files[index].Truncated = true
+		body, err = marshal()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(body) > projectMemoryMaxResponseBytes {
+		return nil, fmt.Errorf("project memory response metadata exceeds %d bytes", projectMemoryMaxResponseBytes)
+	}
+	return body, nil
 }
 
 // Update handles PUT /projects/:id.

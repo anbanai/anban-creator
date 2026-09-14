@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1312,5 +1313,54 @@ func TestProjectHandlerMemoryPreviewRequiresOwnershipAndDoesNotCache(t *testing.
 	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", uuid.NewString(), nil)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("foreign preview status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestProjectHandlerMemoryPreviewBoundsSerializedResponse(t *testing.T) {
+	_, repo, _ := setupProjectHandlerTest(t)
+	ctx := context.Background()
+	ownerID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformArticle, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	memoryStore, err := projectmemory.NewFilesystemStore(root, projectmemory.Limits{MaxProjectBytes: 1 << 20, MaxFiles: 64, MaxDepth: 4, MaxFileBytes: 64 << 10, MaxPreviewBytes: 256 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.EnsureProject(ctx, projectID); err != nil {
+		t.Fatal(err)
+	}
+	for index := range 4 {
+		name := fmt.Sprintf("memory-%d.md", index)
+		if err := os.WriteFile(filepath.Join(root, "projects", projectID, name), []byte(strings.Repeat("\n", 64<<10)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewProjectHandler(service.NewProjectService(repo, &logger), &logger)
+	h.SetProjectMemoryStore(memoryStore)
+	app := fiber.New()
+	app.Get("/api/v1/projects/:id/memory", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return h.Memory(c)
+	})
+
+	resp := doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", ownerID, nil)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > projectMemoryMaxResponseBytes {
+		t.Fatalf("serialized memory response = %d bytes, want at most %d", len(body), projectMemoryMaxResponseBytes)
+	}
+	var envelope Response
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(envelope.Data)
+	if err != nil || !strings.Contains(string(encoded), `"partial":true`) || !strings.Contains(string(encoded), `"truncated":true`) {
+		t.Fatalf("bounded response must disclose truncation: data=%s err=%v", encoded, err)
 	}
 }

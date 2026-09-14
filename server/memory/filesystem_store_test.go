@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +67,29 @@ func TestFilesystemStoreRejectsProjectOverQuota(t *testing.T) {
 
 	if err := store.RequireProject(context.Background(), projectID); !errors.Is(err, ErrProjectMemoryQuotaExceeded) {
 		t.Fatalf("RequireProject() error = %v, want ErrProjectMemoryQuotaExceeded", err)
+	}
+}
+
+func TestFilesystemStoreRejectsTooManyEntriesEvenWhenTheyAreEmpty(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewFilesystemStore(root, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	if err := store.EnsureProject(context.Background(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := filepath.Join(root, "projects", projectID)
+	for index := 0; index <= maxScanEntries; index++ {
+		path := filepath.Join(projectDir, fmt.Sprintf("entry-%04d", index))
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.RequireProject(context.Background(), projectID); !errors.Is(err, ErrProjectMemoryTooManyEntries) {
+		t.Fatalf("RequireProject() error = %v, want ErrProjectMemoryTooManyEntries", err)
 	}
 }
 
@@ -166,6 +190,32 @@ func TestFilesystemStoreDoesNotTurnTruncatedInvalidUTF8IntoContent(t *testing.T)
 	}
 	if view.Status != StatusEmpty || len(view.Files) != 0 || !view.Partial {
 		t.Fatalf("invalid UTF-8 view = %#v", view)
+	}
+}
+
+func TestReadMarkdownFileDoesNotFollowIntermediateDirectorySymlinks(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project")
+	outsideDir := filepath.Join(root, "outside")
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.md"), []byte("outside secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(projectDir, "notes")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, ok, err := readMarkdownFileInProject(projectDir, "notes/secret.md", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("readMarkdownFileInProject followed an intermediate directory symlink")
 	}
 }
 

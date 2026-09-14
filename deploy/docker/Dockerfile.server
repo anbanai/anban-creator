@@ -17,7 +17,8 @@ RUN set -eux; \
     mkdir -p \
       /app/data/files \
       /app/data/workspace \
-      /app/data/logs/tasks; \
+      /app/data/logs/tasks \
+      /app/data/project-memory/projects; \
     chown -R 1000:1000 /app/data
 
 COPY --from=builder /anban-creator-server /app/anban-creator-server

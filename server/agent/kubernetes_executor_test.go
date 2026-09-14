@@ -102,12 +102,10 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if init.SecurityContext.Capabilities == nil || !slices.Contains(init.SecurityContext.Capabilities.Drop, corev1.Capability("ALL")) || !slices.Equal(init.SecurityContext.Capabilities.Add, []corev1.Capability{"CHOWN", "FOWNER", "DAC_OVERRIDE"}) {
 		t.Fatalf("workspace initializer capabilities = %#v, want only filesystem ownership capabilities", init.SecurityContext.Capabilities)
 	}
-	if got := strings.Join(append(init.Command, init.Args...), " "); !strings.Contains(got, "chown 1000:1000 /workspace") || !strings.Contains(got, kubernetesRuntimeHomePath) || !strings.Contains(got, kubernetesMemoryMountPath) {
+	if got := strings.Join(append(init.Command, init.Args...), " "); !strings.Contains(got, "chown 1000:1000 /workspace") || !strings.Contains(got, kubernetesRuntimeHomePath) {
 		t.Fatalf("workspace initializer command = %q", got)
 	}
 	assertMount(t, init, kubernetesWorkspaceMountName, "/workspace", false)
-	assertMount(t, init, kubernetesMemoryMountName, kubernetesMemoryMountPath, false)
-	assertMountSubPath(t, init, kubernetesMemoryMountName, "projects/"+testTask().ProjectID)
 
 	c := spec.Containers[0]
 	if c.Name != "creator-agent" {
@@ -190,9 +188,22 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 }
 
+func TestKubernetesWorkspaceInitPreservesServerOwnedProjectMemoryPermissions(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	init := job.Spec.Template.Spec.InitContainers[0]
+	if strings.Contains(kubernetesWorkspaceInitScript("standard"), kubernetesMemoryMountPath) {
+		t.Fatal("workspace init script must not chmod or chown the Server-owned project memory directory")
+	}
+	for _, mount := range init.VolumeMounts {
+		if mount.Name == kubernetesMemoryMountName {
+			t.Fatal("workspace init container must not mount project memory")
+		}
+	}
+}
+
 func TestWorkspaceInitScript(t *testing.T) {
 	content := kubernetesWorkspaceInitScript(agentpack.AdapterStandard)
-	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, kubernetesMemoryMountPath, "/workspace/output"} {
+	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, "/workspace/output"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content init script missing %q: %s", want, content)
 		}

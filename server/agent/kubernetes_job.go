@@ -111,7 +111,6 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
-							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath, SubPath: "projects/" + projectID(task)},
 						},
 					}},
 					Containers: []corev1.Container{{
@@ -190,7 +189,6 @@ func kubernetesWorkspaceInitScript(runtimeAdapter string) string {
 		`if [ -L "$output" ] || { [ -e "$output" ] && [ ! -d "$output" ]; }; then echo "runtime output must be a real directory" >&2; exit 1; fi`,
 		`install -d -m 0750 -o 1000 -g 1000 "$output"`,
 		"install -d -m 0700 -o 1000 -g 1000 " + kubernetesRuntimeHomePath,
-		"install -d -m 0770 -o 1000 -g 1000 " + kubernetesMemoryMountPath,
 	}
 	if strings.TrimSpace(runtimeAdapter) != agentpack.AdapterOpenMontage {
 		return strings.Join(lines, "\n")

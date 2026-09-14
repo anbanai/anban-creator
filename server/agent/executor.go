@@ -266,7 +266,6 @@ type ExecutionResult struct {
 	LastToolErrorTool      string                  `json:"last_tool_error_tool,omitempty"`
 	LastToolError          string                  `json:"last_tool_error,omitempty"`
 	Model                  string                  `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
-	RemoteMemoryArchive    []byte                  `json:"-"`
 	ArtifactUploadFailures []ArtifactUploadFailure `json:"artifact_upload_failures,omitempty"`
 }
 

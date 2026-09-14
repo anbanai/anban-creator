@@ -23,10 +23,12 @@ const (
 )
 
 var (
-	ErrInvalidProjectID           = errors.New("project ID must be a canonical UUID")
-	ErrProjectMemoryMissing       = errors.New("project memory directory is missing")
-	ErrProjectMemoryQuotaExceeded = errors.New("project memory quota exceeded")
-	errFileChanged                = errors.New("project memory file changed while reading")
+	ErrInvalidProjectID            = errors.New("project ID must be a canonical UUID")
+	ErrProjectMemoryMissing        = errors.New("project memory directory is missing")
+	ErrProjectMemoryQuotaExceeded  = errors.New("project memory quota exceeded")
+	ErrProjectMemoryTooManyEntries = errors.New("project memory contains too many entries")
+	errFileChanged                 = errors.New("project memory file changed while reading")
+	errUnsafePath                  = errors.New("project memory path contains a symbolic link")
 )
 
 type Limits struct {
@@ -138,53 +140,34 @@ func (s *FilesystemStore) ReadProject(ctx context.Context, projectID string) (Pr
 		return empty, err
 	}
 
-	type candidate struct {
-		path string
-		rel  string
-	}
+	type candidate struct{ rel string }
 	var candidates []candidate
 	partial := false
-	err = filepath.WalkDir(projectDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if path == projectDir {
-			return nil
-		}
-		rel, err := filepath.Rel(projectDir, path)
-		if err != nil {
-			return err
-		}
+	limitReached, err := walkProjectEntries(ctx, projectDir, maxScanEntries, func(rel string, entry fs.DirEntry) (bool, error) {
 		depth := strings.Count(filepath.ToSlash(rel), "/") + 1
 		if entry.IsDir() && depth >= s.limits.MaxDepth {
 			partial = true
-			return filepath.SkipDir
+			return true, nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
 			if entry.Type()&os.ModeSymlink != 0 {
 				partial = true
 			}
-			return nil
+			return false, nil
 		}
 		if depth > s.limits.MaxDepth || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
 			if depth > s.limits.MaxDepth {
 				partial = true
 			}
-			return nil
+			return false, nil
 		}
-		if len(candidates) >= maxScanEntries {
-			partial = true
-			return nil
-		}
-		candidates = append(candidates, candidate{path: path, rel: filepath.ToSlash(rel)})
-		return nil
+		candidates = append(candidates, candidate{rel: filepath.ToSlash(rel)})
+		return false, nil
 	})
 	if err != nil {
 		return empty, fmt.Errorf("scan project memory: %w", err)
 	}
+	partial = partial || limitReached
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].rel == "MEMORY.md" {
 			return candidates[j].rel != "MEMORY.md"
@@ -210,7 +193,7 @@ func (s *FilesystemStore) ReadProject(ctx context.Context, projectID string) (Pr
 			break
 		}
 		maxBytes := min(s.limits.MaxFileBytes, remaining)
-		file, ok, err := readMarkdownFile(item.path, maxBytes)
+		file, ok, err := readMarkdownFileInProject(projectDir, item.rel, maxBytes)
 		if err != nil {
 			return empty, fmt.Errorf("read project memory file %q: %w", item.rel, err)
 		}
@@ -273,51 +256,112 @@ func (s *FilesystemStore) requireDirectory(projectDir string) error {
 
 func (s *FilesystemStore) checkQuota(ctx context.Context, projectDir string) error {
 	var total int64
-	err := filepath.WalkDir(projectDir, func(_ string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+	limitReached, err := walkProjectEntries(ctx, projectDir, maxScanEntries, func(_ string, entry fs.DirEntry) (bool, error) {
 		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			return nil
+			return false, nil
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return err
+			return false, err
 		}
 		if info.Mode().IsRegular() {
 			total += info.Size()
 		}
 		if total > s.limits.MaxProjectBytes {
-			return ErrProjectMemoryQuotaExceeded
+			return false, ErrProjectMemoryQuotaExceeded
 		}
-		return nil
+		return false, nil
 	})
+	if limitReached {
+		return ErrProjectMemoryTooManyEntries
+	}
 	return err
 }
 
-func readMarkdownFile(path string, maxBytes int64) (FileView, bool, error) {
+type projectEntryVisitor func(relativePath string, entry fs.DirEntry) (skipDir bool, err error)
+
+// walkProjectEntries reads directories in bounded batches. filepath.WalkDir
+// sorts an entire directory before visiting it, which defeats an entry limit
+// when a single directory contains a very large number of files.
+func walkProjectEntries(ctx context.Context, projectDir string, maxEntries int, visit projectEntryVisitor) (bool, error) {
+	const readBatchSize = 128
+	type pendingDirectory struct{ relativePath string }
+	pending := []pendingDirectory{{}}
+	entriesSeen := 0
+
+	for len(pending) > 0 {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		dir, err := openProjectDirectoryNoSymlinks(projectDir, current.relativePath)
+		if err != nil {
+			return false, err
+		}
+		var children []pendingDirectory
+		for {
+			remaining := maxEntries - entriesSeen
+			if remaining < 0 {
+				_ = dir.Close()
+				return true, nil
+			}
+			readSize := min(readBatchSize, remaining+1)
+			entries, readErr := dir.ReadDir(readSize)
+			for _, entry := range entries {
+				if err := ctx.Err(); err != nil {
+					return false, errors.Join(err, dir.Close())
+				}
+				entriesSeen++
+				if entriesSeen > maxEntries {
+					_ = dir.Close()
+					return true, nil
+				}
+				relativePath := entry.Name()
+				if current.relativePath != "" {
+					relativePath = filepath.Join(current.relativePath, entry.Name())
+				}
+				skipDir, err := visit(filepath.ToSlash(relativePath), entry)
+				if err != nil {
+					return false, errors.Join(err, dir.Close())
+				}
+				if entry.IsDir() && !skipDir {
+					children = append(children, pendingDirectory{relativePath: relativePath})
+				}
+			}
+			if readErr != nil {
+				if !errors.Is(readErr, io.EOF) {
+					return false, errors.Join(readErr, dir.Close())
+				}
+				break
+			}
+		}
+		if err := dir.Close(); err != nil {
+			return false, err
+		}
+		for index := len(children) - 1; index >= 0; index-- {
+			pending = append(pending, children[index])
+		}
+	}
+	return false, nil
+}
+
+func readMarkdownFileInProject(projectDir, relativePath string, maxBytes int64) (FileView, bool, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		view, ok, err := readMarkdownFileOnce(path, maxBytes)
+		view, ok, err := readMarkdownFileInProjectOnce(projectDir, relativePath, maxBytes)
 		if !errors.Is(err, errFileChanged) {
 			return view, ok, err
 		}
 	}
-	return FileView{}, false, errFileChanged
+	return FileView{}, false, nil
 }
 
-func readMarkdownFileOnce(path string, maxBytes int64) (FileView, bool, error) {
-	before, err := os.Lstat(path)
+func readMarkdownFileInProjectOnce(projectDir, relativePath string, maxBytes int64) (FileView, bool, error) {
+	f, err := openProjectFileNoSymlinks(projectDir, relativePath)
 	if err != nil {
-		return FileView{}, false, err
-	}
-	if !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 {
-		return FileView{}, false, nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errUnsafePath) {
+			return FileView{}, false, errFileChanged
+		}
 		return FileView{}, false, err
 	}
 	defer f.Close()
@@ -325,14 +369,14 @@ func readMarkdownFileOnce(path string, maxBytes int64) (FileView, bool, error) {
 	if err != nil {
 		return FileView{}, false, err
 	}
-	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+	if !opened.Mode().IsRegular() {
 		return FileView{}, false, nil
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
 		return FileView{}, false, err
 	}
-	truncated := int64(len(data)) > maxBytes || before.Size() > maxBytes
+	truncated := int64(len(data)) > maxBytes || opened.Size() > maxBytes
 	if int64(len(data)) > maxBytes {
 		data = data[:maxBytes]
 	}
@@ -342,12 +386,27 @@ func readMarkdownFileOnce(path string, maxBytes int64) (FileView, bool, error) {
 	if !utf8.Valid(data) {
 		return FileView{}, false, nil
 	}
-	after, err := os.Lstat(path)
+	after, err := f.Stat()
 	if err != nil {
 		return FileView{}, false, err
 	}
-	if after.Mode()&os.ModeSymlink != 0 || !os.SameFile(opened, after) || opened.Size() != after.Size() || !opened.ModTime().Equal(after.ModTime()) {
+	if opened.Size() != after.Size() || !opened.ModTime().Equal(after.ModTime()) {
 		return FileView{}, false, errFileChanged
 	}
-	return FileView{Content: string(data), SizeBytes: before.Size(), ModifiedAt: before.ModTime().UTC(), Truncated: truncated}, true, nil
+	current, err := openProjectFileNoSymlinks(projectDir, relativePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errUnsafePath) {
+			return FileView{}, false, errFileChanged
+		}
+		return FileView{}, false, err
+	}
+	currentInfo, statErr := current.Stat()
+	closeErr := current.Close()
+	if statErr != nil || closeErr != nil {
+		return FileView{}, false, errors.Join(statErr, closeErr)
+	}
+	if !os.SameFile(opened, currentInfo) {
+		return FileView{}, false, errFileChanged
+	}
+	return FileView{Content: string(data), SizeBytes: opened.Size(), ModifiedAt: opened.ModTime().UTC(), Truncated: truncated}, true, nil
 }

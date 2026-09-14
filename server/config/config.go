@@ -1593,9 +1593,23 @@ func (c *Config) Validate() error {
 	}
 	if pm.MaxProjectBytes <= 0 {
 		errs = append(errs, "claude.project_memory.max_project_bytes must be positive")
+	} else if pm.MaxProjectBytes > 16*1024*1024 {
+		errs = append(errs, "claude.project_memory.max_project_bytes must not exceed 16777216")
 	}
 	if pm.MaxFiles <= 0 || pm.MaxDepth <= 0 || pm.MaxFileBytes <= 0 || pm.MaxPreviewBytes <= 0 {
 		errs = append(errs, "claude.project_memory preview limits must be positive")
+	}
+	if pm.MaxFiles > 64 {
+		errs = append(errs, "claude.project_memory.max_files must not exceed 64")
+	}
+	if pm.MaxDepth > 4 {
+		errs = append(errs, "claude.project_memory.max_depth must not exceed 4")
+	}
+	if pm.MaxFileBytes > 64*1024 {
+		errs = append(errs, "claude.project_memory.max_file_bytes must not exceed 65536")
+	}
+	if pm.MaxPreviewBytes > 256*1024 {
+		errs = append(errs, "claude.project_memory.max_preview_bytes must not exceed 262144")
 	}
 	if pm.MaxPreviewBytes > pm.MaxProjectBytes {
 		errs = append(errs, "claude.project_memory.max_preview_bytes must not exceed max_project_bytes")
