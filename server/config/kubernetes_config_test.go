@@ -23,11 +23,11 @@ func baseKubernetesConfigForTest() Config {
 		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
 	}
 	claude.Kubernetes = KubernetesConfig{
-		Namespace:         "anbanai-prod",
-		ServiceAccount:    "creator-agent-runner",
-		NASStorageClass:   "nas-sc-creator",
-		ProjectMemorySize: "1Gi",
-		TaskWorkspaceSize: "10Gi",
+		Namespace:          "anbanai-prod",
+		ServiceAccount:     "creator-agent-runner",
+		NASStorageClass:    "nas-sc-creator",
+		ProjectMemoryClaim: "creator-project-memory",
+		TaskWorkspaceSize:  "10Gi",
 	}
 	cfg := Config{
 		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
@@ -126,8 +126,8 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.ServerCASecret != "anban-internal-ca" {
 		t.Fatalf("server CA secret = %q, want anban-internal-ca", cfg.Claude.Kubernetes.ServerCASecret)
 	}
-	if cfg.Claude.Kubernetes.ProjectMemorySize != "1Gi" {
-		t.Fatalf("project memory size = %q, want 1Gi", cfg.Claude.Kubernetes.ProjectMemorySize)
+	if cfg.Claude.Kubernetes.ProjectMemoryClaim != "creator-project-memory" {
+		t.Fatalf("project memory claim = %q, want creator-project-memory", cfg.Claude.Kubernetes.ProjectMemoryClaim)
 	}
 	if cfg.Claude.Kubernetes.TaskWorkspaceSize != "10Gi" {
 		t.Fatalf("task workspace size = %q, want 10Gi", cfg.Claude.Kubernetes.TaskWorkspaceSize)
@@ -228,7 +228,7 @@ claude:
   kubernetes:
     service_account: "creator-agent-runner"
     nas_storage_class: "nas-sc-creator"
-    project_memory_size: "1Gi"
+    project_memory_claim: "creator-project-memory"
     task_workspace_size: "10Gi"
     completion_grace_seconds: 0
     pre_start_retry_limit: 0
@@ -323,27 +323,6 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 				cfg.Claude.Kubernetes.NASStorageClass = ""
 			},
 			wantErr: "claude.kubernetes.nas_storage_class is required",
-		},
-		{
-			name: "invalid project memory size",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ProjectMemorySize = "not-a-quantity"
-			},
-			wantErr: "claude.kubernetes.project_memory_size must be a valid Kubernetes quantity",
-		},
-		{
-			name: "zero project memory size",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ProjectMemorySize = "0"
-			},
-			wantErr: "claude.kubernetes.project_memory_size must be positive",
-		},
-		{
-			name: "negative project memory size",
-			mutate: func(cfg *Config) {
-				cfg.Claude.Kubernetes.ProjectMemorySize = "-1Gi"
-			},
-			wantErr: "claude.kubernetes.project_memory_size must be positive",
 		},
 		{
 			name: "invalid task workspace size",

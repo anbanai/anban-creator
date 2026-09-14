@@ -183,24 +183,6 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
-// BuildAutoMemorySettingsJSON returns a Claude Code settings JSON document that
-// points auto memory at the task-local runtime memory directory.
-func BuildAutoMemorySettingsJSON(autoMemoryDir string) (string, error) {
-	return buildAutoMemorySettingsJSON(autoMemoryDir)
-}
-
-func buildAutoMemorySettingsJSON(autoMemoryDir string) (string, error) {
-	autoMemoryDir = strings.TrimSpace(autoMemoryDir)
-	if autoMemoryDir == "" {
-		return "", nil
-	}
-	data, err := json.Marshal(map[string]string{"autoMemoryDirectory": autoMemoryDir})
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 // writeProjectCLAUDEMD writes a project's positioning into a fixed CLAUDE.md
 // template in the workspace root. Claude Code loads CLAUDE.md from the cwd as
 // project memory, so all skills/sub-agents in the session receive the same

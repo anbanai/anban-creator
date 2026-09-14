@@ -357,6 +357,7 @@ type CreateManualParams struct {
 	frozenImageCapabilitySnapshot *model.ImageCapabilitySnapshot
 	SkipRefImage                  *bool
 	ReferenceImageAssetID         string
+	UsePortraitReference          *bool
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -438,7 +439,7 @@ func validateTaskCreationProject(project *model.Project, userID, projectID strin
 }
 
 func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID, taskAssetID string, project *model.Project, snapshot *model.ProjectSnapshot) error {
-	taskAssetPurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	taskAssetPurposes := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeProjectPortraitReference, DirectUploadPurposeAIEntryAttachment}
 	checks := []struct {
 		assetID string
 		allowed []string
@@ -450,11 +451,19 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 			assetID string
 			allowed []string
 		}{assetID: snapshot.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: snapshot.PortraitReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectPortraitReference}})
 	} else if project != nil {
 		checks = append(checks, struct {
 			assetID string
 			allowed []string
 		}{assetID: project.ReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectReference}})
+		checks = append(checks, struct {
+			assetID string
+			allowed []string
+		}{assetID: project.PortraitReferenceImageAssetID, allowed: []string{DirectUploadPurposeProjectPortraitReference}})
 	}
 	for _, check := range checks {
 		if check.assetID == "" {
@@ -509,11 +518,18 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
 	}
-	if err := s.validateTaskCreationReferences(ctx, p.UserID, p.ReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+	taskType := project.Platform
+	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
+	if taskType == model.PlatformArticle && p.UsePortraitReference != nil && *p.UsePortraitReference {
+		effectiveReferenceImageAssetID = project.PortraitReferenceImageAssetID
+		if effectiveReferenceImageAssetID == "" {
+			return nil, fmt.Errorf("公众号项目未配置人物参考图，请先在项目设置中上传")
+		}
+	}
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
 		return nil, err
 	}
 
-	taskType := project.Platform
 	if p.RequestedTaskType == model.TaskTypeViralAnalysis {
 		if project.Platform != model.PlatformSeednote {
 			return nil, ErrViralAnalysisRequiresSeednoteProject
@@ -675,7 +691,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Prompt:                   taskPrompt,
 			ImageRatio:               effectiveImageRatio,
 			ImageCapabilityKey:       effectiveImageCapabilityKey,
-			ReferenceImageAssetID:    p.ReferenceImageAssetID,
+			ReferenceImageAssetID:    effectiveReferenceImageAssetID,
 			InputSourceTaskID:        p.InputSourceTaskID,
 			InputSourceProjectID:     p.InputSourceProjectID,
 			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
@@ -950,7 +966,14 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if project != nil && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
 		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
 	}
-	if err := s.validateTaskCreationReferences(ctx, plan.UserID, plan.ReferenceImageAssetID, project, nil); err != nil {
+	effectiveReferenceImageAssetID := plan.ReferenceImageAssetID
+	if taskType == model.PlatformArticle && plan.UsePortraitReference {
+		if project == nil || project.PortraitReferenceImageAssetID == "" {
+			return nil, fmt.Errorf("公众号项目未配置人物参考图，请先在项目设置中上传")
+		}
+		effectiveReferenceImageAssetID = project.PortraitReferenceImageAssetID
+	}
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, nil); err != nil {
 		return nil, err
 	}
 	effectiveImageCapabilityKey := strings.TrimSpace(plan.ImageCapabilityKey)
@@ -995,7 +1018,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Prompt:                   prompt,
 		ImageCapabilityKey:       effectiveImageCapabilityKey,
 		ImageRatio:               effectiveImageRatio,
-		ReferenceImageAssetID:    plan.ReferenceImageAssetID,
+		ReferenceImageAssetID:    effectiveReferenceImageAssetID,
 		SkipReferenceImage:       plan.SkipReferenceImage,
 		Watermark:                plan.Watermark,
 		HasContentImage:          plan.HasContentImage,

@@ -25,7 +25,7 @@ type blockingProjectMemoryLifecycle struct {
 	release chan struct{}
 }
 
-func (m *blockingProjectMemoryLifecycle) DeleteProjectMemory(ctx context.Context, _ string) error {
+func (m *blockingProjectMemoryLifecycle) DeleteProject(ctx context.Context, _ string) error {
 	close(m.entered)
 	select {
 	case <-m.release:
@@ -90,7 +90,7 @@ func (r projectCASRepositoryOverride) Projects() repository.ProjectRepository {
 	return r.projects
 }
 
-func (f *projectMemoryLifecycleFake) DeleteProjectMemory(_ context.Context, projectID string) error {
+func (f *projectMemoryLifecycleFake) DeleteProject(_ context.Context, projectID string) error {
 	f.ids = append(f.ids, projectID)
 	return f.err
 }

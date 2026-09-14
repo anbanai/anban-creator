@@ -76,6 +76,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   writer: '',
   theme: '',
   author: '',
+  portrait_reference_image: null,
   ecommerce_default_selected_modules: {},
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
@@ -140,6 +141,7 @@ function projectToForm(ch: Project): ProjectFormValues {
       delivery_targets: ch.montage_defaults?.delivery_targets || [],
     },
     reference_image: ch.reference_image ?? null,
+    portrait_reference_image: ch.portrait_reference_image ?? null,
     image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || 'auto',
     wechat_publish_mode: ch.config?.wechat_publish_mode ?? 'manual',
   }
@@ -189,6 +191,7 @@ export default function ProjectsPage() {
   const publishMode = useWatch({ control: form.control, name: 'wechat_publish_mode' })
   const enablePublishing = publishMode !== 'disabled'
   const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
+  const portraitReferenceImage = useWatch({ control: form.control, name: 'portrait_reference_image' })
   const authorValue = useWatch({ control: form.control, name: 'author' })
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
@@ -349,6 +352,13 @@ export default function ProjectsPage() {
     enabled: visibleProjects.length > 0,
   })
 
+  useEffect(() => {
+    const editID = searchParams.get('edit')
+    if (!editID || modalOpen) return
+    const project = visibleProjects.find((item) => item.id === editID)
+    if (project) openEdit(project)
+  }, [modalOpen, searchParams, visibleProjects])
+
   const createMutation = useMutation({
     mutationFn: (data: CreateProjectRequest) => api.projects.create(data),
     onSuccess: (created) => {
@@ -458,6 +468,10 @@ export default function ProjectsPage() {
     form.reset(CHANNEL_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
+    } else if (searchParams.has('edit')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('edit')
+      setSearchParams(next, { replace: true })
     }
   }
 
@@ -518,13 +532,21 @@ export default function ProjectsPage() {
       }
     }
     const referenceImage = referenceSelectionFromValue(values.reference_image)
+    const portraitReferenceImage = referenceSelectionFromValue(values.portrait_reference_image)
+    if (values.platform === 'article') payload.portrait_reference_image = portraitReferenceImage
     if (editingProject) {
-      const updatePayload = form.formState.dirtyFields.reference_image
-        ? { ...payload, reference_image: referenceImage }
-        : payload
+      const updatePayload = {
+        ...payload,
+        ...(form.formState.dirtyFields.reference_image ? { reference_image: referenceImage } : {}),
+        ...(form.formState.dirtyFields.portrait_reference_image ? { portrait_reference_image: portraitReferenceImage } : {}),
+      }
       await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload })).catch(() => {})
     } else {
-      const createPayload = referenceImage ? { ...payload, reference_image: referenceImage } : payload
+      const createPayload = {
+        ...payload,
+        ...(referenceImage ? { reference_image: referenceImage } : {}),
+        ...(portraitReferenceImage ? { portrait_reference_image: portraitReferenceImage } : {}),
+      }
       await submit(async () => createMutation.mutateAsync(createPayload)).catch(() => {})
     }
   }
@@ -840,6 +862,24 @@ export default function ProjectsPage() {
                       purpose="project_reference"
                       onUploadingChange={setReferenceUploading}
                       onUploadedPreview={setReferenceAnalysisUrl}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {isWechat && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">默认人物参考</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">公众号封面需要人物出镜时，任务和计划可直接使用这张图。</p>
+                    </div>
+                    <ReferenceAssetUpload
+                      value={portraitReferenceImage ?? null}
+                      onChange={(value) => form.setValue('portrait_reference_image', value, { shouldDirty: true, shouldValidate: true })}
+                      purpose="project_portrait_reference"
+                      ariaLabel="人物参考图文件"
+                      onUploadingChange={setReferenceUploading}
                     />
                   </div>
                 </div>

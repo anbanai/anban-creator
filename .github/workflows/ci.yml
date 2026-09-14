@@ -106,6 +106,8 @@ jobs:
     defaults:
       run:
         working-directory: harness
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -130,17 +132,21 @@ jobs:
       - name: Check DSH plugin
         run: pnpm run check
 
+      - name: Read DSH plugin version
+        id: version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
       - name: Pack exact DSH Desktop acceptance artifact
         run: |
           node -e "require('node:fs').mkdirSync('../release/dsh',{recursive:true})"
           pnpm pack --json --pack-destination ../release/dsh > ../release/dsh/pack.json
-          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json 4.1.27
+          node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "${{ steps.version.outputs.version }}"
 
       - name: Upload exact DSH Desktop acceptance artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: anban-dsh-plugin
-          path: release/dsh/anban-dsh-plugin-4.1.27.tgz
+          path: release/dsh/anban-dsh-plugin-${{ steps.version.outputs.version }}.tgz
           if-no-files-found: error
           retention-days: 1
 
@@ -208,7 +214,7 @@ jobs:
         env:
           DSH_DESKTOP_ROOT: ${{ github.workspace }}/_dsh-desktop
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-4.1.27.tgz
+          DSH_PLUGIN_TARBALL: ${{ github.workspace }}/release/dsh/anban-dsh-plugin-${{ needs.dsh-plugin.outputs.version }}.tgz
         run: node scripts/dsh-desktop-acceptance.mjs install anban-dsh-plugin
 
       - name: Launch packaged DSH Desktop application
@@ -221,7 +227,7 @@ jobs:
       - name: Validate packaged Desktop profile exports and Skill catalogs
         env:
           DSH_HOME: ${{ runner.temp }}/anban-dsh-desktop-home
-        run: node harness/dsh/scripts/smoke-profile.mjs --existing-profile desktop 4.1.27
+        run: node harness/dsh/scripts/smoke-profile.mjs --existing-profile desktop "${{ needs.dsh-plugin.outputs.version }}"
 
       - name: Run portable profile command tests
         working-directory: harness

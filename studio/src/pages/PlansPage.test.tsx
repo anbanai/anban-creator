@@ -168,6 +168,14 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       writer: '',
       theme: '',
       author: '作者',
+      portrait_reference_image: {
+        asset_id: '22222222-2222-4222-8222-222222222222',
+        file_name: 'portrait.png',
+        content_type: 'image/png',
+        size: 8,
+        download_url: 'https://cdn.example/portrait.png',
+        download_expires_at: '2026-09-13T12:00:00Z',
+      },
 
       image_ratio: '16:9',
       max_concurrent_tasks: 2,
@@ -189,43 +197,28 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
   })
 
-  it('keeps the article plan portrait opt-in and submits the uploaded reference', async () => {
-    uploadToOSSMock.mockResolvedValueOnce({
-      uploadSessionId: '22222222-2222-4222-8222-222222222222',
-      uploadId: 'plan-portrait-upload',
-      key: 'uploads/pending/plan-portrait.png',
-      publicUrl: '',
-      previewUrl: '',
-      contentType: 'image/png',
-      size: 8,
-    })
+  it('keeps the article plan portrait choice project-owned', async () => {
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('switch', { name: '使用人物图' }))
-    fireEvent.change(within(dialog).getByLabelText('参考图文件'), {
-      target: { files: [new File(['portrait'], 'plan-portrait.png', { type: 'image/png' })] },
-    })
-    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'task_reference' })))
     fireEvent.submit(document.getElementById('plan-form')!)
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      reference_image: { upload_session_id: '22222222-2222-4222-8222-222222222222' },
+      use_portrait_reference: true,
     })))
   })
 
-  it('shows a field error when a plan portrait is enabled without an upload', async () => {
+  it('disables a plan portrait when the project has no configured image', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'ch-1', user_id: '1', platform: 'article', name: '测试项目', avatar_url: '', profile_url: '', instructions: '测试定位', keywords: '测试', visual_style: '', writer: '', theme: '', author: '作者', image_ratio: '16:9', max_concurrent_tasks: 2, config: { wechat_app_id: 'wx123' }, status: 'active', created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', portrait_reference_image: null,
+    } as Project])
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(within(dialog).getByRole('switch', { name: '使用人物图' }))
-    fireEvent.submit(document.getElementById('plan-form')!)
-
-    expect(await within(dialog).findByText('请上传封面人物图')).toBeInTheDocument()
-    expect(api.plans.create).not.toHaveBeenCalled()
+    expect(within(dialog).getByRole('switch', { name: '使用人物图' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {

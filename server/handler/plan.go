@@ -122,15 +122,16 @@ func validAttachmentURL(url string) bool {
 // Request types.
 
 type createPlanRequest struct {
-	ProjectID          string                           `json:"project_id"`
-	ExecutionProfile   string                           `json:"execution_profile"`
-	CronExpr           string                           `json:"cron_expr"`
-	Prompt             string                           `json:"prompt"`
-	ImageCapabilityKey string                           `json:"image_capability_key"`
-	ImageRatio         string                           `json:"image_ratio"`
-	SkipReferenceImage *bool                            `json:"skip_reference_image"`
-	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
-	Watermark          *bool                            `json:"watermark"`
+	ProjectID            string                           `json:"project_id"`
+	ExecutionProfile     string                           `json:"execution_profile"`
+	CronExpr             string                           `json:"cron_expr"`
+	Prompt               string                           `json:"prompt"`
+	ImageCapabilityKey   string                           `json:"image_capability_key"`
+	ImageRatio           string                           `json:"image_ratio"`
+	SkipReferenceImage   *bool                            `json:"skip_reference_image"`
+	ReferenceImage       *service.ReferenceImageSelection `json:"reference_image"`
+	UsePortraitReference bool                             `json:"use_portrait_reference,omitempty"`
+	Watermark            *bool                            `json:"watermark"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off).
 	HasContentImage *bool `json:"has_content_image,omitempty"`
@@ -151,6 +152,7 @@ type updatePlanRequest struct {
 	ImageCapabilityKey       *string                          `json:"image_capability_key"`
 	ImageRatio               *string                          `json:"image_ratio"`
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
+	UsePortraitReference     *bool                            `json:"use_portrait_reference,omitempty"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet        bool                             `json:"-"`
 	Watermark                *bool                            `json:"watermark"`
@@ -247,6 +249,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ImageRatio:               req.ImageRatio,
 		SkipReferenceImage:       req.SkipReferenceImage,
 		ReferenceImageAssetID:    referenceAssetID,
+		UsePortraitReference:     req.UsePortraitReference,
 		Watermark:                req.Watermark,
 		HasContentImage:          req.HasContentImage,
 		HasTailImage:             req.HasTailImage,
@@ -447,6 +450,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ImageCapabilityKey:       req.ImageCapabilityKey,
 		ImageRatio:               req.ImageRatio,
 		SkipReferenceImage:       req.SkipReferenceImage,
+		UsePortraitReference:     req.UsePortraitReference,
 		ReferenceImageAssetID:    referenceAssetID,
 		Watermark:                req.Watermark,
 		HasContentImage:          req.HasContentImage,
@@ -496,6 +500,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrPlanUpdateConflict) {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
+		}
+		if errors.Is(err, service.ErrPlanPortraitReference) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		if errors.Is(err, service.ErrMontageInput) {

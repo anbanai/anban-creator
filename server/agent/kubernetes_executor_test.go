@@ -107,6 +107,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 	assertMount(t, init, kubernetesWorkspaceMountName, "/workspace", false)
 	assertMount(t, init, kubernetesMemoryMountName, kubernetesMemoryMountPath, false)
+	assertMountSubPath(t, init, kubernetesMemoryMountName, "projects/"+testTask().ProjectID)
 
 	c := spec.Containers[0]
 	if c.Name != "creator-agent" {
@@ -135,6 +136,11 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 	assertMount(t, c, kubernetesWorkspaceMountName, "/workspace", false)
 	assertMount(t, c, kubernetesMemoryMountName, "/workspace/.claude/memory", false)
+	assertMountSubPath(t, c, kubernetesMemoryMountName, "projects/"+testTask().ProjectID)
+	memoryVolume := requireTestVolume(t, job, kubernetesMemoryMountName)
+	if memoryVolume.PersistentVolumeClaim == nil || memoryVolume.PersistentVolumeClaim.ClaimName != "creator-project-memory" {
+		t.Fatalf("memory volume = %#v, want fixed shared PVC", memoryVolume)
+	}
 	workspaceVolume := requireTestVolume(t, job, kubernetesWorkspaceMountName)
 	if workspaceVolume.PersistentVolumeClaim == nil || workspaceVolume.PersistentVolumeClaim.ClaimName != kubernetesTaskWorkspacePVCName("task-1") {
 		t.Fatalf("workspace volume = %#v, want task-scoped PVC", workspaceVolume)
@@ -369,19 +375,6 @@ func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
 	}
 }
 
-func TestBuildProjectMemoryPVCUsesNASStorageClass(t *testing.T) {
-	pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
-	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "nas-sc-creator" {
-		t.Fatalf("storage class = %#v, want nas-sc-creator", pvc.Spec.StorageClassName)
-	}
-	if !slices.Contains(pvc.Spec.AccessModes, corev1.ReadWriteMany) {
-		t.Fatalf("access modes = %#v, want RWX", pvc.Spec.AccessModes)
-	}
-	if pvc.Spec.Resources.Requests.Storage().String() != "1Gi" {
-		t.Fatalf("storage request = %s, want 1Gi", pvc.Spec.Resources.Requests.Storage().String())
-	}
-}
-
 func TestBuildTaskWorkspacePVCUsesTaskIdentityAndNASStorageClass(t *testing.T) {
 	pvc := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	if pvc.Name != kubernetesTaskWorkspacePVCName("task-1") || pvc.Labels[kubernetesTaskIDLabel] != "task-1" || pvc.Labels[kubernetesProjectIDLabel] != "project-1" || pvc.Labels[kubernetesUserIDLabel] != "user-1" {
@@ -467,11 +460,8 @@ func TestKubernetesDispatcherValidatesPersistedRuntimeIdentity(t *testing.T) {
 		execution.RuntimeProfile = model.PlatformMontage
 		execution.RuntimeImage = "registry.example.com/montage@sha256:parent"
 		cfg := testJobConfig()
-		client := fake.NewSimpleClientset(
-			buildProjectMemoryPVC(cfg, testTask().ProjectID),
-			buildTaskWorkspacePVC(cfg, testTask()),
-		)
-		dispatcher := &kubernetesJobDispatcher{config: cfg, kube: client}
+		client := fake.NewSimpleClientset(buildTaskWorkspacePVC(cfg, testTask()))
+		dispatcher := &kubernetesJobDispatcher{config: cfg, kube: client, memory: &testProjectMemoryStore{}}
 		if _, err := dispatcher.Prepare(context.Background(), execution, testTask()); err != nil {
 			t.Fatalf("Dispatch resumed persisted runtime: %v", err)
 		}
@@ -491,7 +481,6 @@ func TestKubernetesJobAndPVCNamesAreDeterministicDNSSafeAndCollisionAware(t *tes
 		build func(string) string
 	}{
 		{nameA: "Execution_With.Mixed/Unsafe_Chars", nameB: "Execution-With.Mixed/Unsafe-Chars", build: kubernetesJobName},
-		{nameA: "Project_With.Mixed/Unsafe_Chars", nameB: "Project-With.Mixed/Unsafe-Chars", build: kubernetesProjectMemoryPVCName},
 		{nameA: "Task_With.Mixed/Unsafe_Chars", nameB: "Task-With.Mixed/Unsafe-Chars", build: kubernetesTaskWorkspacePVCName},
 	} {
 		first := tc.build(tc.nameA)
@@ -563,8 +552,8 @@ func TestKubernetesDispatcherPreparesAndActivatesExactJob(t *testing.T) {
 		t.Fatalf("jobs = %#v, err = %v, want one", jobs.Items, err)
 	}
 	pvcs, err := client.CoreV1().PersistentVolumeClaims("anban").List(ctx, metav1.ListOptions{})
-	if err != nil || len(pvcs.Items) != 2 {
-		t.Fatalf("PVCs = %#v, err = %v, want project memory and task workspace", pvcs.Items, err)
+	if err != nil || len(pvcs.Items) != 1 {
+		t.Fatalf("PVCs = %#v, err = %v, want only task workspace", pvcs.Items, err)
 	}
 }
 
@@ -622,8 +611,7 @@ func TestKubernetesDispatcherResumeRequiresOriginalPersistentState(t *testing.T)
 	execution := testExecution()
 	execution.ParentExecutionID = "previous-execution"
 
-	projectMemory := buildProjectMemoryPVC(testJobConfig(), task.ProjectID)
-	client := fake.NewSimpleClientset(projectMemory)
+	client := fake.NewSimpleClientset()
 	_, err := testDispatcher(client).Prepare(ctx, execution, task)
 	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "original execution state cannot be resumed") {
 		t.Fatalf("Dispatch error = %v, want permanent missing workspace error", err)
@@ -633,7 +621,7 @@ func TestKubernetesDispatcherResumeRequiresOriginalPersistentState(t *testing.T)
 		t.Fatalf("jobs = %#v, err = %v, want none", jobs.Items, listErr)
 	}
 	pvcs, listErr := client.CoreV1().PersistentVolumeClaims("anban").List(ctx, metav1.ListOptions{})
-	if listErr != nil || len(pvcs.Items) != 1 {
+	if listErr != nil || len(pvcs.Items) != 0 {
 		t.Fatalf("PVCs = %#v, err = %v, resume must not synthesize missing state", pvcs.Items, listErr)
 	}
 }
@@ -909,16 +897,16 @@ func TestVerifyKubernetesJobReportsDifferingFields(t *testing.T) {
 	}
 }
 
-func TestVerifyProjectMemoryPVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.T) {
-	desired := buildProjectMemoryPVC(testJobConfig(), "project-1")
+func TestVerifyTaskWorkspacePVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.T) {
+	desired := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	for _, tc := range []struct {
 		name    string
 		size    string
 		wantErr bool
 	}{
-		{name: "equal", size: "1Gi"},
-		{name: "larger", size: "2Gi"},
-		{name: "smaller", size: "512Mi", wantErr: true},
+		{name: "equal", size: "10Gi"},
+		{name: "larger", size: "20Gi"},
+		{name: "smaller", size: "5Gi", wantErr: true},
 		{name: "missing", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -928,7 +916,7 @@ func TestVerifyProjectMemoryPVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.
 			} else {
 				existing.Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse(tc.size)
 			}
-			err := verifyPVC(existing, desired, "project memory", "project-1")
+			err := verifyPVC(existing, desired, "task workspace", testTask().ID)
 			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "expand")) {
 				t.Fatalf("verifyPVC error = %v, want actionable expansion error", err)
 			}
@@ -942,7 +930,7 @@ func TestVerifyProjectMemoryPVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.
 func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing.T) {
 	ctx := context.Background()
 	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
-	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	for _, object := range []struct {
 		name   string
 		labels map[string]string
@@ -1031,7 +1019,7 @@ func TestKubernetesDispatcherClassifiesAPIErrors(t *testing.T) {
 				client := fake.NewSimpleClientset()
 				if operation.resource == "jobs" {
 					if _, err := client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
-						buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{}); err != nil {
+						buildTaskWorkspacePVC(testJobConfig(), testTask()), metav1.CreateOptions{}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -1054,7 +1042,7 @@ func TestKubernetesDispatcherClassifiesAPIErrors(t *testing.T) {
 			client := fake.NewSimpleClientset()
 			if resourceName == "jobs" {
 				_, _ = client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
-					buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{})
+					buildTaskWorkspacePVC(testJobConfig(), testTask()), metav1.CreateOptions{})
 			}
 			client.PrependReactor("create", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
 				return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: resourceName}, "anban")
@@ -1073,7 +1061,7 @@ func TestKubernetesDispatcherLeavesPostAlreadyExistsNotFoundRetryable(t *testing
 			client := fake.NewSimpleClientset()
 			if resourceName == "jobs" {
 				_, _ = client.CoreV1().PersistentVolumeClaims("anban").Create(context.Background(),
-					buildProjectMemoryPVC(testJobConfig(), "project-1"), metav1.CreateOptions{})
+					buildTaskWorkspacePVC(testJobConfig(), testTask()), metav1.CreateOptions{})
 			}
 			client.PrependReactor("get", resourceName, func(ktesting.Action) (bool, runtime.Object, error) {
 				return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: resourceName}, "object-1")
@@ -1150,49 +1138,6 @@ func TestKubernetesDispatcherDeleteRejectsEmptyRuntimeIdentity(t *testing.T) {
 	err := testDispatcher(fake.NewSimpleClientset()).Delete(context.Background(), execution)
 	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "identity") {
 		t.Fatalf("Delete error = %v, want permanent incomplete identity error", err)
-	}
-}
-
-func TestKubernetesDispatcherDeleteProjectMemoryIsGuardedAndIdempotent(t *testing.T) {
-	ctx := context.Background()
-	pvc := buildProjectMemoryPVC(testJobConfig(), "project-1")
-	pvc.UID = types.UID("pvc-uid-1")
-	client := fake.NewSimpleClientset(pvc)
-	d := testDispatcher(client)
-	if err := d.DeleteProjectMemory(ctx, "project-1"); err != nil {
-		t.Fatalf("DeleteProjectMemory: %v", err)
-	}
-	deleteAction, ok := client.Actions()[len(client.Actions())-1].(ktesting.DeleteAction)
-	if !ok {
-		t.Fatalf("last action = %T, want DeleteAction", client.Actions()[len(client.Actions())-1])
-	}
-	if got := deleteAction.GetDeleteOptions().Preconditions; got == nil || got.UID == nil || *got.UID != pvc.UID {
-		t.Fatalf("preconditions = %#v, want UID %q", got, pvc.UID)
-	}
-	if err := d.DeleteProjectMemory(ctx, "project-1"); err != nil {
-		t.Fatalf("idempotent DeleteProjectMemory: %v", err)
-	}
-
-	mismatch := buildProjectMemoryPVC(testJobConfig(), "project-1")
-	mismatch.Labels[kubernetesProjectIDLabel] = "project-2"
-	client = fake.NewSimpleClientset(mismatch)
-	err := testDispatcher(client).DeleteProjectMemory(ctx, "project-1")
-	if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
-		t.Fatalf("mismatched DeleteProjectMemory error = %v, want identity mismatch", err)
-	}
-	if _, getErr := client.CoreV1().PersistentVolumeClaims("anban").Get(ctx, mismatch.Name, metav1.GetOptions{}); getErr != nil {
-		t.Fatalf("mismatched PVC was deleted: %v", getErr)
-	}
-
-	missingOwnership := buildProjectMemoryPVC(testJobConfig(), "project-1")
-	delete(missingOwnership.Labels, "app.kubernetes.io/component")
-	client = fake.NewSimpleClientset(missingOwnership)
-	err = testDispatcher(client).DeleteProjectMemory(ctx, "project-1")
-	if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
-		t.Fatalf("unowned DeleteProjectMemory error = %v, want identity mismatch", err)
-	}
-	if _, getErr := client.CoreV1().PersistentVolumeClaims("anban").Get(ctx, missingOwnership.Name, metav1.GetOptions{}); getErr != nil {
-		t.Fatalf("unowned PVC was deleted: %v", getErr)
 	}
 }
 
@@ -1644,7 +1589,7 @@ func TestKubernetesDispatcherStopsWhenPVCProvisioningFails(t *testing.T) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "persistentvolumeclaims"}, "memory", nil)
 	})
 	_, err := testDispatcher(client).Prepare(context.Background(), testExecution(), testTask())
-	if err == nil || !strings.Contains(err.Error(), "create project memory PVC") {
+	if err == nil || !strings.Contains(err.Error(), "create task workspace PVC") {
 		t.Fatalf("Dispatch error = %v, want PVC creation error", err)
 	}
 	jobs, listErr := client.BatchV1().Jobs("anban").List(context.Background(), metav1.ListOptions{})
@@ -1654,7 +1599,7 @@ func TestKubernetesDispatcherStopsWhenPVCProvisioningFails(t *testing.T) {
 }
 
 func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T) {
-	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	client := fake.NewSimpleClientset(desiredJob)
 	gets := 0
@@ -1683,7 +1628,7 @@ func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T
 }
 
 func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T) {
-	desiredPVC := buildProjectMemoryPVC(testJobConfig(), "project-1")
+	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	client := fake.NewSimpleClientset(desiredPVC)
 	gets := 0
@@ -1713,7 +1658,7 @@ func testJobConfig() kubernetesJobConfig {
 			ImagePullSecret:         "acr-secret",
 			ServerCASecret:          "anban-server-tls",
 			NASStorageClass:         "nas-sc-creator",
-			ProjectMemorySize:       "1Gi",
+			ProjectMemoryClaim:      "creator-project-memory",
 			TaskWorkspaceSize:       "10Gi",
 			ActiveDeadlineSeconds:   900,
 			TTLSecondsAfterFinished: 120,
@@ -1752,7 +1697,7 @@ func testTask() *model.Task {
 }
 
 func testDispatcher(client kubeclient.Interface) *kubernetesJobDispatcher {
-	return &kubernetesJobDispatcher{config: testJobConfig(), kube: client}
+	return &kubernetesJobDispatcher{config: testJobConfig(), kube: client, memory: &testProjectMemoryStore{}}
 }
 
 func assertMount(t *testing.T, container corev1.Container, name, mountPath string, readOnly bool) {
@@ -1763,6 +1708,16 @@ func assertMount(t *testing.T, container corev1.Container, name, mountPath strin
 		}
 	}
 	t.Fatalf("mount %q at %q readOnly=%t not found in %#v", name, mountPath, readOnly, container.VolumeMounts)
+}
+
+func assertMountSubPath(t *testing.T, container corev1.Container, name, subPath string) {
+	t.Helper()
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == name && mount.SubPath == subPath {
+			return
+		}
+	}
+	t.Fatalf("mount %q subPath = %q not found in %#v", name, subPath, container.VolumeMounts)
 }
 
 func assertProjectedAudience(t *testing.T, volumes []corev1.Volume, audience string) {

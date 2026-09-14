@@ -115,19 +115,20 @@ type StyleOverrides struct {
 // creation time. Runtime surfaces (MCP/settings/UI) read this when present so
 // later project edits do not change an already-created task.
 type ProjectSnapshot struct {
-	ProjectName           string                   `json:"project_name,omitempty"`
-	Platform              string                   `json:"platform,omitempty"`
-	Instructions          string                   `json:"instructions,omitempty"`
-	Keywords              string                   `json:"keywords,omitempty"`
-	VisualStyle           string                   `json:"visual_style,omitempty"`
-	ReferenceImageAssetID string                   `json:"reference_image_asset_id,omitempty"`
-	ImageRatio            string                   `json:"image_ratio,omitempty"`
-	Writer                string                   `json:"writer,omitempty"`
-	Theme                 string                   `json:"theme,omitempty"`
-	Author                string                   `json:"author,omitempty"`
-	EcommerceDefaults     EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	MontageDefaults       MontageDefaults          `json:"montage_defaults,omitempty"`
-	AgentConfig           map[string]any           `json:"agent_config,omitempty"`
+	ProjectName                   string                   `json:"project_name,omitempty"`
+	Platform                      string                   `json:"platform,omitempty"`
+	Instructions                  string                   `json:"instructions,omitempty"`
+	Keywords                      string                   `json:"keywords,omitempty"`
+	VisualStyle                   string                   `json:"visual_style,omitempty"`
+	ReferenceImageAssetID         string                   `json:"reference_image_asset_id,omitempty"`
+	PortraitReferenceImageAssetID string                   `json:"portrait_reference_image_asset_id,omitempty"`
+	ImageRatio                    string                   `json:"image_ratio,omitempty"`
+	Writer                        string                   `json:"writer,omitempty"`
+	Theme                         string                   `json:"theme,omitempty"`
+	Author                        string                   `json:"author,omitempty"`
+	EcommerceDefaults             EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
+	AgentConfig                   map[string]any           `json:"agent_config,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -295,19 +296,20 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		return ProjectSnapshot{}
 	}
 	return ProjectSnapshot{
-		ProjectName:           p.Name,
-		Platform:              p.Platform,
-		Instructions:          p.Instructions,
-		Keywords:              p.Keywords,
-		VisualStyle:           p.VisualStyle,
-		ReferenceImageAssetID: p.ReferenceImageAssetID,
-		ImageRatio:            p.ImageRatio,
-		Writer:                p.Writer,
-		Theme:                 p.Theme,
-		Author:                p.Author,
-		EcommerceDefaults:     p.EcommerceDefaults.Data(),
-		MontageDefaults:       p.MontageDefaults.Data(),
-		AgentConfig:           cloneAgentExtensionMap(p.AgentConfig.Data()),
+		ProjectName:                   p.Name,
+		Platform:                      p.Platform,
+		Instructions:                  p.Instructions,
+		Keywords:                      p.Keywords,
+		VisualStyle:                   p.VisualStyle,
+		ReferenceImageAssetID:         p.ReferenceImageAssetID,
+		PortraitReferenceImageAssetID: p.PortraitReferenceImageAssetID,
+		ImageRatio:                    p.ImageRatio,
+		Writer:                        p.Writer,
+		Theme:                         p.Theme,
+		Author:                        p.Author,
+		EcommerceDefaults:             p.EcommerceDefaults.Data(),
+		MontageDefaults:               p.MontageDefaults.Data(),
+		AgentConfig:                   cloneAgentExtensionMap(p.AgentConfig.Data()),
 	}
 }
 
@@ -327,6 +329,7 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Keywords = snap.Keywords
 	p.VisualStyle = snap.VisualStyle
 	p.ReferenceImageAssetID = snap.ReferenceImageAssetID
+	p.PortraitReferenceImageAssetID = snap.PortraitReferenceImageAssetID
 	p.ImageRatio = snap.ImageRatio
 	p.Writer = snap.Writer
 	p.Theme = snap.Theme

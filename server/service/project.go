@@ -98,7 +98,7 @@ type ProjectService struct {
 }
 
 type ProjectMemoryLifecycle interface {
-	DeleteProjectMemory(context.Context, string) error
+	DeleteProject(context.Context, string) error
 }
 
 // NewProjectService creates a new ProjectService.
@@ -311,6 +311,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.ReferenceImageSet {
 		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
 	}
+	if ch.PortraitReferenceImageSet {
+		existing.PortraitReferenceImageAssetID = ch.PortraitReferenceImageAssetID
+	}
 	// Empty update input preserves the persisted value for image-capable
 	// platforms. Platforms without image settings always keep the field empty.
 	supportedImageRatios := model.SupportedImageRatios(existing.Platform)
@@ -446,7 +449,7 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 	}
 
 	if s.memory != nil {
-		if err := s.memory.DeleteProjectMemory(ctx, projectID); err != nil {
+		if err := s.memory.DeleteProject(ctx, projectID); err != nil {
 			return fmt.Errorf("delete project memory: %w", err)
 		}
 	}

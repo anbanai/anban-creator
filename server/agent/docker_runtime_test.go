@@ -37,7 +37,7 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	cfg := dockerRuntimeConfig{
 		DockerConfig: srvconfig.DockerConfig{
-			Network: " anban ", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600,
+			Network: " anban ", ProjectMemoryVolume: "creator-project-memory", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600,
 		},
 		ServerURL:   "http://server:8080/",
 		ImageID:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -55,9 +55,6 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	if spec.NetworkName != "anban" {
 		t.Fatalf("network name = %q, want trimmed configured network identity", spec.NetworkName)
-	}
-	if spec.ProjectVolume.Name != dockerProjectMemoryVolumeName(task.ProjectID) {
-		t.Fatalf("project volume name = %q, want deterministic project name", spec.ProjectVolume.Name)
 	}
 	if spec.TaskVolume.Name != dockerTaskWorkspaceVolumeName(task.ID) {
 		t.Fatalf("task volume name = %q, want deterministic task name", spec.TaskVolume.Name)
@@ -97,7 +94,7 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	wantMounts := []mount.Mount{
 		{Type: mount.TypeVolume, Source: spec.TaskVolume.Name, Target: dockerTaskWorkspaceMountPath},
-		{Type: mount.TypeVolume, Source: spec.ProjectVolume.Name, Target: dockerProjectMemoryMountPath},
+		{Type: mount.TypeVolume, Source: "creator-project-memory", Target: dockerProjectMemoryMountPath, VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + task.ProjectID}},
 	}
 	if !reflect.DeepEqual(spec.HostConfig.Mounts, wantMounts) {
 		t.Fatalf("mounts = %#v, want exactly named workspace mounts %#v", spec.HostConfig.Mounts, wantMounts)
@@ -157,12 +154,6 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	if spec.ContainerConfig.WorkingDir != dockerTaskWorkspaceMountPath {
 		t.Fatalf("working directory = %q, want %q", spec.ContainerConfig.WorkingDir, dockerTaskWorkspaceMountPath)
-	}
-	if !maps.Equal(spec.ProjectVolume.Labels, map[string]string{
-		dockerProjectIDLabel: task.ProjectID,
-		dockerUserIDLabel:    task.UserID,
-	}) {
-		t.Fatalf("project volume labels = %#v", spec.ProjectVolume.Labels)
 	}
 	if !maps.Equal(spec.TaskVolume.Labels, map[string]string{
 		dockerTaskIDLabel:    task.ID,
@@ -436,7 +427,7 @@ func TestVerifyDockerContainerAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 
 func TestVerifyDockerVolumeAcceptsExactSpecAndRejectsDrift(t *testing.T) {
 	spec := testDockerRuntimeSpec()
-	for _, desired := range []volume.CreateOptions{spec.ProjectVolume, spec.TaskVolume} {
+	for _, desired := range []volume.CreateOptions{spec.TaskVolume} {
 		if err := verifyDockerVolume(testDockerVolume(desired), desired); err != nil {
 			t.Fatalf("exact volume spec rejected: %v", err)
 		}
@@ -466,7 +457,6 @@ func TestDockerRuntimeNamesAreStableCollisionResistantAndLengthSafe(t *testing.T
 		build func(string) string
 	}{
 		{name: "container", build: dockerRuntimeContainerName},
-		{name: "project volume", build: dockerProjectMemoryVolumeName},
 		{name: "task volume", build: dockerTaskWorkspaceVolumeName},
 	}
 	dockerName := regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]+$`)
@@ -490,7 +480,6 @@ func TestDockerRuntimeNamesAreStableCollisionResistantAndLengthSafe(t *testing.T
 		})
 	}
 	if dockerRuntimeContainerName("execution-a") == dockerRuntimeContainerName("execution-b") ||
-		dockerProjectMemoryVolumeName("project-a") == dockerProjectMemoryVolumeName("project-b") ||
 		dockerTaskWorkspaceVolumeName("task-a") == dockerTaskWorkspaceVolumeName("task-b") {
 		t.Fatal("different runtime identities must produce distinct names")
 	}
@@ -498,7 +487,7 @@ func TestDockerRuntimeNamesAreStableCollisionResistantAndLengthSafe(t *testing.T
 
 func testDockerRuntimeSpec() dockerRuntimeSpec {
 	return buildDockerRuntimeSpec(dockerRuntimeConfig{
-		DockerConfig: srvconfig.DockerConfig{Network: "anban", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600},
+		DockerConfig: srvconfig.DockerConfig{Network: "anban", ProjectMemoryVolume: "creator-project-memory", CPUCores: 2, MemoryMB: 4096, PidsLimit: 256, TimeoutSec: 3600},
 		ServerURL:    "http://server:8080",
 		ImageID:      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ImageConfig: &containertypes.Config{

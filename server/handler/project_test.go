@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/seednote"
@@ -32,7 +34,7 @@ type projectMemoryDeleteFake struct {
 	err error
 }
 
-func (f projectMemoryDeleteFake) DeleteProjectMemory(context.Context, string) error {
+func (f projectMemoryDeleteFake) DeleteProject(context.Context, string) error {
 	return f.err
 }
 
@@ -1261,5 +1263,54 @@ func TestProjectHandler_DeleteDoesNotExposeMemoryProviderFailure(t *testing.T) {
 	}
 	if _, err := repo.Projects().FindByID(ctx, projectID); err != nil {
 		t.Fatalf("project authority removed after provider failure: %v", err)
+	}
+}
+
+func TestProjectHandlerMemoryPreviewRequiresOwnershipAndDoesNotCache(t *testing.T) {
+	_, repo, _ := setupProjectHandlerTest(t)
+	ctx := context.Background()
+	ownerID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformArticle, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	memoryStore, err := projectmemory.NewFilesystemStore(root, projectmemory.Limits{MaxProjectBytes: 1 << 20, MaxFiles: 64, MaxDepth: 4, MaxFileBytes: 64 << 10, MaxPreviewBytes: 256 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewProjectHandler(service.NewProjectService(repo, &logger), &logger)
+	h.SetProjectMemoryStore(memoryStore)
+	app := fiber.New()
+	app.Get("/api/v1/projects/:id/memory", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return h.Memory(c)
+	})
+
+	resp := doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", ownerID, nil)
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("empty memory status/cache = %d/%q", resp.StatusCode, resp.Header.Get("Cache-Control"))
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	if data["status"] != projectmemory.StatusEmpty {
+		t.Fatalf("empty memory = %#v", data)
+	}
+
+	if err := memoryStore.EnsureProject(ctx, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "projects", projectID, "MEMORY.md"), []byte("# Remember me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", ownerID, nil)
+	data = decodeBody(t, resp)["data"].(map[string]any)
+	if data["status"] != projectmemory.StatusReady || len(data["files"].([]any)) != 1 {
+		t.Fatalf("ready memory = %#v", data)
+	}
+
+	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", uuid.NewString(), nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign preview status = %d, want 403", resp.StatusCode)
 	}
 }

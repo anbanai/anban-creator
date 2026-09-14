@@ -31,13 +31,14 @@ func (d *kubernetesJobDispatcher) ResolveRuntime(taskType string) srvconfig.Runt
 type kubernetesJobDispatcher struct {
 	config kubernetesJobConfig
 	kube   kubernetes.Interface
+	memory ProjectMemoryStore
 }
 
 var _ RuntimeDispatcher = (*kubernetesJobDispatcher)(nil)
 
 func (*kubernetesJobDispatcher) Scope() string { return "kubernetes" }
 
-func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string) (RuntimeDispatcher, error) {
+func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, memory ProjectMemoryStore) (RuntimeDispatcher, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes in-cluster config: %w", err)
@@ -46,15 +47,15 @@ func NewKubernetesDispatcher(cfg srvconfig.KubernetesConfig, runtimeImages srvco
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes client: %w", err)
 	}
-	return NewKubernetesDispatcherWithClient(cfg, runtimeImages, serverURL, client)
+	return NewKubernetesDispatcherWithClient(cfg, runtimeImages, serverURL, client, memory)
 }
 
-func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, client kubernetes.Interface) (RuntimeDispatcher, error) {
-	if client == nil {
-		return nil, fmt.Errorf("kubernetes client is required")
+func NewKubernetesDispatcherWithClient(cfg srvconfig.KubernetesConfig, runtimeImages srvconfig.RuntimeImages, serverURL string, client kubernetes.Interface, memory ProjectMemoryStore) (RuntimeDispatcher, error) {
+	if client == nil || memory == nil {
+		return nil, fmt.Errorf("kubernetes client and project memory store are required")
 	}
 	jobCfg := kubernetesJobConfig{KubernetesConfig: cfg, RuntimeImages: runtimeImages, ServerURL: serverURL}
-	return &kubernetesJobDispatcher{config: jobCfg, kube: client}, nil
+	return &kubernetesJobDispatcher{config: jobCfg, kube: client, memory: memory}, nil
 }
 
 func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
@@ -73,11 +74,12 @@ func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.
 	if err := d.validateRuntime(execution, task); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
+	resume := execution.Attempt > 1 || strings.TrimSpace(execution.ParentExecutionID) != "" || strings.TrimSpace(execution.RuntimeInstanceID) != ""
+	if err := prepareProjectMemory(ctx, d.memory, task.ProjectID, resume); err != nil {
+		return nil, fmt.Errorf("prepare Kubernetes project memory: %w", err)
+	}
 
 	allowPVCCreation := execution.ParentExecutionID == ""
-	if err := d.ensurePVC(ctx, buildProjectMemoryPVC(d.config, task.ProjectID), "project memory", task.ProjectID, allowPVCCreation); err != nil {
-		return nil, err
-	}
 	if err := d.ensurePVC(ctx, buildTaskWorkspacePVC(d.config, task), "task workspace", task.ID, allowPVCCreation); err != nil {
 		return nil, err
 	}
@@ -289,32 +291,6 @@ func (d *kubernetesJobDispatcher) Delete(ctx context.Context, execution *model.T
 	}
 	if err != nil {
 		return fmt.Errorf("delete Kubernetes Job %q: %w", name, err)
-	}
-	return nil
-}
-
-func (d *kubernetesJobDispatcher) DeleteProjectMemory(ctx context.Context, projectID string) error {
-	if d == nil || d.kube == nil {
-		return fmt.Errorf("kubernetes dispatcher is not configured")
-	}
-	if strings.TrimSpace(projectID) == "" {
-		return fmt.Errorf("project ID is required")
-	}
-	name := kubernetesProjectMemoryPVCName(projectID)
-	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
-	pvc, err := pvcs.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("get project memory PVC %q: %w", name, err)
-	}
-	desired := buildProjectMemoryPVC(d.config, projectID)
-	if err := verifyRequiredLabels(pvc.Labels, desired.Labels); err != nil {
-		return fmt.Errorf("project memory PVC %q identity mismatch: %w", name, err)
-	}
-	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pvc.UID}}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete project memory PVC %q: %w", name, err)
 	}
 	return nil
 }

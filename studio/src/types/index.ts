@@ -23,6 +23,8 @@ export type {
   Project,
   ProjectStats,
   ProjectDetail,
+  ProjectMemory,
+  ProjectMemoryFile,
   CreateProjectRequest,
   CreateProjectResponse,
   PlatformFieldConfig,

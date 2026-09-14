@@ -51,6 +51,7 @@ export interface ProjectSnapshot {
   keywords?: string
   visual_style?: string
   reference_image_asset_id?: string
+  portrait_reference_image_asset_id?: string
   image_ratio?: string
   writer?: string
   theme?: string
@@ -83,6 +84,7 @@ export interface Task {
   image_capability_key?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
+  use_portrait_reference?: boolean
   input_attachments?: InputAttachment[]
   watermark?: boolean
   // Seednote image composition persisted with the task.
@@ -216,6 +218,7 @@ export interface CreateTaskRequest {
   image_capability_key?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
+  use_portrait_reference?: boolean
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean

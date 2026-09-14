@@ -1,0 +1,46 @@
+# Apply this optional rule in clusters running Prometheus Operator and kubelet
+# volume metrics. The core Server deployment does not depend on this CRD.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: creator-project-memory
+  namespace: ${namespace}
+  labels:
+    app: creator-server
+    app.kubernetes.io/component: project-memory
+spec:
+  groups:
+    - name: creator-project-memory.capacity
+      rules:
+        - alert: CreatorProjectMemoryUsageHigh
+          expr: |
+            100 * max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_used_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) / max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_capacity_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) >= 70
+            and
+            100 * max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_used_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) / max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_capacity_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) < 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Claude project memory PVC usage is above 70%
+            description: Expand creator-project-memory before new project tasks reach the storage limit.
+        - alert: CreatorProjectMemoryUsageCritical
+          expr: |
+            100 * max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_used_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) / max by (namespace, persistentvolumeclaim) (
+              kubelet_volume_stats_capacity_bytes{namespace="${namespace}", persistentvolumeclaim="creator-project-memory"}
+            ) >= 85
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Claude project memory PVC usage is above 85%
+            description: Expand creator-project-memory immediately; new managed tasks may soon be rejected.

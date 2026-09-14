@@ -359,12 +359,20 @@ claude:
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"
+  project_memory:
+    root_dir: "/app/data/project-memory"
+    max_project_bytes: 16777216
+    max_files: 64
+    max_depth: 4
+    max_file_bytes: 65536
+    max_preview_bytes: 262144
   max_turns:
     article: 10
     seednote: 10
     montage: 10
   docker:
     network: "${ANBAN_RUNTIME_SMOKE_NETWORK}"
+    project_memory_volume: "${COMPOSE_PROJECT}-project-memory"
     cpu_cores: 1
     memory_mb: 4096
     pids_limit: 512
@@ -374,8 +382,6 @@ asynq:
   content_generate_timeout: 15m
   persist_timeout: 2m
 invitation:
-  enabled: false
-memory:
   enabled: false
 ilink:
   enabled: false
@@ -425,6 +431,7 @@ services:
     volumes:
       - "$CONFIG_FILE:/app/conf/config.yaml:ro"
       - runtime-files:/app/data/files
+      - runtime-memory:/app/data/project-memory
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
       - "$DOCKER_SOCKET_GID"
@@ -432,6 +439,10 @@ services:
       anban.ai/runtime-smoke-project: "$COMPOSE_PROJECT"
 volumes:
   runtime-files:
+    labels:
+      anban.ai/runtime-smoke-project: "$COMPOSE_PROJECT"
+  runtime-memory:
+    name: "${COMPOSE_PROJECT}-project-memory"
     labels:
       anban.ai/runtime-smoke-project: "$COMPOSE_PROJECT"
 networks:

@@ -89,6 +89,9 @@ func (h *TaskHandler) presentTaskReference(ctx context.Context, userID string, t
 	}
 	assetID := task.ReferenceImageAssetID
 	allowed := []string{service.DirectUploadPurposeTaskReference, service.DirectUploadPurposeAIEntryAttachment}
+	if portraitID := task.ProjectSnapshot.Data().PortraitReferenceImageAssetID; assetID == portraitID && portraitID != "" {
+		allowed = []string{service.DirectUploadPurposeProjectPortraitReference}
+	}
 	if assetID == "" && !task.SkipReferenceImage {
 		assetID = task.ProjectSnapshot.Data().ReferenceImageAssetID
 		allowed = []string{service.DirectUploadPurposeProjectReference}
@@ -139,18 +142,19 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 // Request types.
 
 type createTaskRequest struct {
-	ProjectID          string                           `json:"project_id"`
-	Type               string                           `json:"type"`
-	ExecutionProfile   string                           `json:"execution_profile"`
-	Prompt             string                           `json:"prompt"`
-	Quantity           int                              `json:"quantity"`
-	ImageRatio         string                           `json:"image_ratio"`
-	ImageCapabilityKey string                           `json:"image_capability_key"`
-	SkipReferenceImage *bool                            `json:"skip_reference_image"`
-	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
-	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
-	AgentInput         map[string]any                   `json:"agent_input,omitempty"`
-	Watermark          *bool                            `json:"watermark"`
+	ProjectID            string                           `json:"project_id"`
+	Type                 string                           `json:"type"`
+	ExecutionProfile     string                           `json:"execution_profile"`
+	Prompt               string                           `json:"prompt"`
+	Quantity             int                              `json:"quantity"`
+	ImageRatio           string                           `json:"image_ratio"`
+	ImageCapabilityKey   string                           `json:"image_capability_key"`
+	SkipReferenceImage   *bool                            `json:"skip_reference_image"`
+	UsePortraitReference *bool                            `json:"use_portrait_reference,omitempty"`
+	ReferenceImage       *service.ReferenceImageSelection `json:"reference_image"`
+	InputAttachments     []model.EntryAttachment          `json:"input_attachments,omitempty"`
+	AgentInput           map[string]any                   `json:"agent_input,omitempty"`
+	Watermark            *bool                            `json:"watermark"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -464,6 +468,20 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			return nil, respondReferenceAssetError(c, h.logger, err)
 		}
 	}
+	if project.Platform == model.PlatformArticle && req.UsePortraitReference != nil && *req.UsePortraitReference {
+		if project.PortraitReferenceImageAssetID == "" {
+			return nil, Error(c, fiber.StatusBadRequest, "公众号项目未配置人物参考图，请先在项目设置中上传")
+		}
+		if h.referenceAssets == nil {
+			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+		}
+		referenceAssetID = project.PortraitReferenceImageAssetID
+		var presentErr error
+		referenceView, presentErr = h.referenceAssets.Present(c.Context(), userID, referenceAssetID, []string{service.DirectUploadPurposeProjectPortraitReference})
+		if presentErr != nil {
+			return nil, respondReferenceAssetError(c, h.logger, presentErr)
+		}
+	}
 	if referenceView == nil && (req.SkipReferenceImage == nil || !*req.SkipReferenceImage) && project.ReferenceImageAssetID != "" {
 		if h.referenceAssets == nil {
 			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
@@ -584,6 +602,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			ImageRatio:               req.ImageRatio,
 			ImageCapabilityKey:       req.ImageCapabilityKey,
 			SkipRefImage:             req.SkipReferenceImage,
+			UsePortraitReference:     req.UsePortraitReference,
 			ReferenceImageAssetID:    referenceAssetID,
 			ProjectSnapshot:          &projectSnapshot,
 			InputAttachments:         req.InputAttachments,

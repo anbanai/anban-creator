@@ -46,6 +46,14 @@ const fixtures = vi.hoisted(() => {
     writer: 'concise',
     theme: 'clean',
     author: 'Anban',
+    portrait_reference_image: {
+      asset_id: '11111111-1111-4111-8111-111111111111',
+      file_name: 'portrait.png',
+      content_type: 'image/png',
+      size: 8,
+      download_url: 'https://cdn.example/portrait.png',
+      download_expires_at: '2026-09-13T12:00:00Z',
+    },
 
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
@@ -284,48 +292,28 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
   })
 
-  it('keeps the article portrait opt-in and submits the uploaded reference', async () => {
-    uploadToOSSMock.mockResolvedValueOnce({
-      uploadSessionId: '11111111-1111-4111-8111-111111111111',
-      uploadId: 'portrait-upload',
-      key: 'uploads/pending/portrait.png',
-      publicUrl: '',
-      previewUrl: '',
-      contentType: 'image/png',
-      size: 8,
-    })
+  it('keeps the article portrait opt-in and submits the project reference choice', async () => {
     renderDialog()
 
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
-    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
-    fireEvent.click(portraitSwitch)
-    fireEvent.change(within(dialog).getByLabelText('参考图文件'), {
-      target: { files: [new File(['portrait'], 'portrait.png', { type: 'image/png' })] },
-    })
-    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'task_reference' })))
+    expect(portraitSwitch).toHaveAttribute('aria-checked', 'true')
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '使用作者人物图生成文章封面' },
     })
     fireEvent.submit(document.getElementById('task-create-form')!)
 
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      reference_image: { upload_session_id: '11111111-1111-4111-8111-111111111111' },
+      use_portrait_reference: true,
     })))
   })
 
-  it('shows a field error when an article portrait is enabled without an upload', async () => {
+  it('disables article portrait when the project has no configured image', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, portrait_reference_image: null }])
     renderDialog()
 
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    fireEvent.click(await within(dialog).findByRole('switch', { name: '使用人物图' }))
-    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
-      target: { value: '使用作者人物图生成文章封面' },
-    })
-    fireEvent.submit(document.getElementById('task-create-form')!)
-
-    expect(await within(dialog).findByText('请上传封面人物图')).toBeInTheDocument()
-    expect(api.tasks.create).not.toHaveBeenCalled()
+    expect(await within(dialog).findByRole('switch', { name: '使用人物图' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('clears the article portrait when cover generation is turned off', async () => {
@@ -333,15 +321,11 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
 
-    expect(portraitSwitch).toHaveAttribute('aria-checked', 'false')
-    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
-    fireEvent.click(portraitSwitch)
-    expect(within(dialog).getByLabelText('参考图文件')).toBeInTheDocument()
+    expect(portraitSwitch).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
 
     expect(portraitSwitch).toHaveAttribute('aria-disabled', 'true')
     expect(portraitSwitch).toHaveAttribute('aria-checked', 'false')
-    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
   })
 
   it('blocks an article portrait when the selected image capability has no reference slots', async () => {
@@ -359,7 +343,9 @@ describe('TaskFormDialog', () => {
     renderDialog()
 
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    fireEvent.click(await within(dialog).findByRole('switch', { name: '使用人物图' }))
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
+    fireEvent.click(portraitSwitch)
+    fireEvent.click(portraitSwitch)
 
     expect(within(dialog).getByText('当前图像能力不支持人物参考，请更换图像能力。')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()

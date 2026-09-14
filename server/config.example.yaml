@@ -327,8 +327,16 @@ claude:
   sandbox: true
   # Agent 插件目录，必须包含 agents/、skills/ 等分发资产。
   plugin_dir: "/anbanai"
+  project_memory:
+    root_dir: "/app/data/project-memory"
+    max_project_bytes: 16777216
+    max_files: 64
+    max_depth: 4
+    max_file_bytes: 65536
+    max_preview_bytes: 262144
   docker:
     network: "${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}"
+    project_memory_volume: "${ANBAN_AGENT_PROJECT_MEMORY_VOLUME:-creator-project-memory}"
     cpu_cores: 2
     memory_mb: 4096
     pids_limit: 512
@@ -344,9 +352,9 @@ claude:
     # Agent Job 中的 Go 与 Node/Claude Code TLS 客户端校验 Server 使用的签发 CA Secret，仅挂载 ca.crt。
     # 不要指向保存叶子证书 tls.crt/tls.key 的 anban-server-tls。
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"
-    # 项目记忆与任务工作区 PVC 使用的 RWX NAS 存储类及各自容量。
+    # 任务工作区 PVC 使用的 RWX NAS 存储类；项目记忆使用预创建的共享 PVC。
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
-    project_memory_size: "${ANBAN_AGENT_PROJECT_MEMORY_SIZE:-1Gi}"
+    project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
     task_workspace_size: "${ANBAN_AGENT_TASK_WORKSPACE_SIZE:-10Gi}"
     # Job 执行截止时间，单位秒。
     active_deadline_seconds: 3600

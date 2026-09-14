@@ -22,6 +22,7 @@ export interface Plan {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
+  use_portrait_reference?: boolean
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
@@ -46,6 +47,7 @@ export interface CreatePlanRequest {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
+  use_portrait_reference?: boolean
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean
@@ -67,6 +69,7 @@ export interface UpdatePlanRequest {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
+  use_portrait_reference?: boolean
   input_attachments?: InputAttachment[]
   agent_input?: Record<string, unknown>
   watermark?: boolean

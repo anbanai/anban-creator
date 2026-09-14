@@ -535,10 +535,6 @@ func (d *dispatchTestDispatcher) Delete(context.Context, *model.TaskExecution) e
 	return nil
 }
 
-func (d *dispatchTestDispatcher) DeleteProjectMemory(context.Context, string) error {
-	return nil
-}
-
 func (d *dispatchTestDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
 	return nil, nil
 }

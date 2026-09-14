@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,8 +17,14 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	pluginRoot := filepath.Join(root, "harness")
 
 	for _, legacy := range []string{"claudecode", "codex"} {
-		if _, err := os.Stat(filepath.Join(root, legacy)); !os.IsNotExist(err) {
-			t.Fatalf("legacy plugin root %q must not exist: %v", legacy, err)
+		cmd := exec.Command("git", "ls-files", "--", legacy)
+		cmd.Dir = root
+		tracked, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("inspect tracked legacy plugin root %q: %v", legacy, err)
+		}
+		if strings.TrimSpace(string(tracked)) != "" {
+			t.Fatalf("legacy plugin root %q must not be tracked", legacy)
 		}
 	}
 	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))

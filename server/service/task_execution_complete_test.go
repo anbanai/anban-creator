@@ -1166,7 +1166,6 @@ func (d *cancelOrderingDispatcher) Delete(_ context.Context, execution *model.Ta
 	d.deletedIdentity = model.RuntimeIdentity{Scope: execution.RuntimeScope, Workload: execution.RuntimeWorkload, InstanceID: execution.RuntimeInstanceID}
 	return d.deleteErr
 }
-func (*cancelOrderingDispatcher) DeleteProjectMemory(context.Context, string) error { return nil }
 func (*cancelOrderingDispatcher) Inspect(context.Context, *model.TaskExecution) (*agent.RuntimeExecutionState, error) {
 	return nil, nil
 }

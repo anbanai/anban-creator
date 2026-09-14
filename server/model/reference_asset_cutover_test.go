@@ -88,13 +88,13 @@ func TestPlanTaskAndSnapshotSerializeOnlyTransientReferenceView(t *testing.T) {
 }
 
 func TestSnapshotProjectCopiesReferenceImageAssetID(t *testing.T) {
-	project := &Project{Platform: PlatformArticle, ReferenceImageAssetID: "asset-project"}
+	project := &Project{Platform: PlatformArticle, ReferenceImageAssetID: "asset-project", PortraitReferenceImageAssetID: "asset-portrait"}
 	snapshot := SnapshotProject(project)
-	if snapshot.ReferenceImageAssetID != "asset-project" {
-		t.Fatalf("snapshot reference = %#v, want asset-project only", snapshot)
+	if snapshot.ReferenceImageAssetID != "asset-project" || snapshot.PortraitReferenceImageAssetID != "asset-portrait" {
+		t.Fatalf("snapshot references = %#v/%#v, want asset-project/asset-portrait", snapshot.ReferenceImageAssetID, snapshot.PortraitReferenceImageAssetID)
 	}
 	restored := ProjectFromSnapshot(&Project{}, snapshot)
-	if restored.ReferenceImageAssetID != "asset-project" {
-		t.Fatalf("restored project reference = %#v, want asset-project only", restored)
+	if restored.ReferenceImageAssetID != "asset-project" || restored.PortraitReferenceImageAssetID != "asset-portrait" {
+		t.Fatalf("restored references = %#v/%#v, want asset-project/asset-portrait", restored.ReferenceImageAssetID, restored.PortraitReferenceImageAssetID)
 	}
 }

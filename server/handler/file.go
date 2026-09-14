@@ -103,6 +103,7 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey string) error {
 	key, err := service.ValidateUploadSessionURL(c.Context(), h.uploadSessions, userID, []string{
 		service.DirectUploadPurposeProjectReference,
+		service.DirectUploadPurposeProjectPortraitReference,
 		service.DirectUploadPurposeTaskReference,
 		service.DirectUploadPurposeEcommercePhoto,
 		service.DirectUploadPurposeMontageAsset,

@@ -46,7 +46,6 @@ type dockerRuntimeSpec struct {
 	ContainerName   string
 	NetworkName     string
 	ImageID         string
-	ProjectVolume   volume.CreateOptions
 	TaskVolume      volume.CreateOptions
 	ContainerConfig *containertypes.Config
 	HostConfig      *containertypes.HostConfig
@@ -80,14 +79,6 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	containerConfig.Labels[dockerTaskIDLabel] = taskID(task)
 	containerConfig.Labels[dockerProjectIDLabel] = projectID(task)
 	containerConfig.Labels[dockerUserIDLabel] = dockerTaskUserID(task)
-	projectVolume := volume.CreateOptions{
-		Name:   dockerProjectMemoryVolumeName(projectID(task)),
-		Driver: dockerVolumeDriver,
-		Labels: map[string]string{
-			dockerProjectIDLabel: projectID(task),
-			dockerUserIDLabel:    dockerTaskUserID(task),
-		},
-	}
 	taskVolume := volume.CreateOptions{
 		Name:   dockerTaskWorkspaceVolumeName(taskID(task)),
 		Driver: dockerVolumeDriver,
@@ -101,7 +92,6 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 		ContainerName:   dockerRuntimeContainerName(executionID(execution)),
 		NetworkName:     networkName,
 		ImageID:         cfg.ImageID,
-		ProjectVolume:   projectVolume,
 		TaskVolume:      taskVolume,
 		ContainerConfig: containerConfig,
 		HostConfig: &containertypes.HostConfig{
@@ -127,7 +117,7 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 			},
 			Mounts: []mount.Mount{
 				{Type: mount.TypeVolume, Source: taskVolume.Name, Target: dockerTaskWorkspaceMountPath},
-				{Type: mount.TypeVolume, Source: projectVolume.Name, Target: dockerProjectMemoryMountPath},
+				{Type: mount.TypeVolume, Source: cfg.ProjectMemoryVolume, Target: dockerProjectMemoryMountPath, VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + projectID(task)}},
 			},
 		},
 		Timeout: time.Duration(cfg.TimeoutSec) * time.Second,

@@ -23,13 +23,14 @@ import (
 )
 
 const (
-	DirectUploadPurposeProjectReference  = "project_reference"
-	DirectUploadPurposeTaskReference     = "task_reference"
-	DirectUploadPurposeEcommercePhoto    = "ecommerce_product_photo"
-	DirectUploadPurposeMontageAsset      = "montage_asset"
-	DirectUploadPurposeAIEntryAttachment = "ai_entry_attachment"
-	DirectUploadPurposeTaskArtifact      = "task_artifact"
-	DirectUploadPurposeSeednoteImport    = "seednote_analytics_import"
+	DirectUploadPurposeProjectReference         = "project_reference"
+	DirectUploadPurposeProjectPortraitReference = "project_portrait_reference"
+	DirectUploadPurposeTaskReference            = "task_reference"
+	DirectUploadPurposeEcommercePhoto           = "ecommerce_product_photo"
+	DirectUploadPurposeMontageAsset             = "montage_asset"
+	DirectUploadPurposeAIEntryAttachment        = "ai_entry_attachment"
+	DirectUploadPurposeTaskArtifact             = "task_artifact"
+	DirectUploadPurposeSeednoteImport           = "seednote_analytics_import"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
 	uploadSessionCleanupLease     = 5 * time.Minute
@@ -152,12 +153,13 @@ type directUploadPurposePolicy struct {
 }
 
 var directUploadPolicies = map[string]directUploadPurposePolicy{
-	DirectUploadPurposeProjectReference:  {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
-	DirectUploadPurposeTaskReference:     {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
-	DirectUploadPurposeEcommercePhoto:    {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
-	DirectUploadPurposeMontageAsset:      {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
-	DirectUploadPurposeAIEntryAttachment: {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
-	DirectUploadPurposeSeednoteImport:    {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},
+	DirectUploadPurposeProjectReference:         {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeProjectPortraitReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeTaskReference:            {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeEcommercePhoto:           {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeMontageAsset:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
+	DirectUploadPurposeAIEntryAttachment:        {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
+	DirectUploadPurposeSeednoteImport:           {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},
 }
 
 const maxUploadImageBytes = 10 * 1024 * 1024

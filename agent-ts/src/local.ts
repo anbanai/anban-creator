@@ -29,7 +29,6 @@ export interface LocalConfig {
   agentFlag: string;
   maxTurns: number;
   model?: string;
-  autoMemoryDirectory?: string;
   artifactUploadMode: "direct" | "stream";
   hasContentImage: boolean;
   hasTailImage: boolean;
@@ -59,7 +58,7 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     if (!value || value.startsWith("--")) throw new Error(`${flag} is required`);
     index += 1;
     if (flag === "--model-usage-alias") aliases.push(value);
-    else if (["--server-url", "--task-id", "--execution-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--auto-memory-directory", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
+    else if (["--server-url", "--task-id", "--execution-id", "--task-type", "--agent-pack-id", "--agent-pack-version", "--agent-pack-digest", "--runtime-adapter", "--runtime-profile", "--topic", "--workspace", "--agent-flag", "--artifact-upload-mode", "--max-turns", "--model"].includes(flag)) values.set(flag, value.trim());
     else throw new Error(`unknown argument ${flag}`);
   }
 
@@ -107,7 +106,6 @@ export async function parseLocalConfig(args: string[], env: NodeJS.ProcessEnv = 
     agentFlag: values.get("--agent-flag") || `anban:${pack.agent.name}`,
     maxTurns,
     model: values.get("--model") || undefined,
-    autoMemoryDirectory: values.get("--auto-memory-directory") || undefined,
     artifactUploadMode,
     hasContentImage: booleans.get("--has-content-image") ?? true,
     hasTailImage: booleans.get("--has-tail-image") ?? false,
@@ -213,7 +211,6 @@ function localBootstrap(config: LocalConfig): ResolvedBootstrapResponse {
     },
     max_turns: config.maxTurns,
     agent_flag: config.agentFlag,
-    auto_memory_directory: config.autoMemoryDirectory,
     artifact_transport: { mode: "stream" },
     resolved_agent_pack: config.agentPack,
   };

@@ -28,6 +28,7 @@ export interface Project {
   theme: string
   author: string
   reference_image?: ReferenceAssetView | null
+  portrait_reference_image?: ReferenceAssetView | null
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
@@ -70,6 +71,21 @@ export interface ProjectDetail {
   stats: ProjectStats
 }
 
+export interface ProjectMemoryFile {
+  path: string
+  content: string
+  size_bytes: number
+  modified_at: string
+  truncated: boolean
+}
+
+export interface ProjectMemory {
+  status: 'empty' | 'ready'
+  updated_at: string | null
+  partial: boolean
+  files: ProjectMemoryFile[]
+}
+
 export interface CreateProjectRequest {
   platform: string
   name?: string
@@ -84,6 +100,7 @@ export interface CreateProjectRequest {
   theme?: string
   author?: string
   reference_image?: ReferenceImageSelection | null
+  portrait_reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
   montage_defaults?: MontageProjectDefaults
