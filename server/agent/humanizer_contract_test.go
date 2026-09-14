@@ -103,7 +103,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 
 	rootScript := readRepoFile(t, filepath.Join(root, "scripts", "update-humanizer.sh"))
 	for _, want := range []string{
-		`git -C "$repo_root" submodule update --init --depth 1 -- harness`,
+		`git -C "$repo_root" submodule update --init --recursive -- harness`,
 		`exec "$plugin_script"`,
 	} {
 		if !strings.Contains(rootScript, want) {

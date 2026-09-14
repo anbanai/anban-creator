@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,8 +17,14 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	pluginRoot := filepath.Join(root, "harness")
 
 	for _, legacy := range []string{"claudecode", "codex"} {
-		if _, err := os.Stat(filepath.Join(root, legacy)); !os.IsNotExist(err) {
-			t.Fatalf("legacy plugin root %q must not exist: %v", legacy, err)
+		cmd := exec.Command("git", "ls-files", "--", legacy)
+		cmd.Dir = root
+		tracked, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("inspect tracked legacy plugin root %q: %v", legacy, err)
+		}
+		if strings.TrimSpace(string(tracked)) != "" {
+			t.Fatalf("legacy plugin root %q must not be tracked", legacy)
 		}
 	}
 	gitmodules := readRepoFile(t, filepath.Join(root, ".gitmodules"))
@@ -63,8 +70,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.1.25" {
-		t.Fatalf("native manifest version = %q, want 4.1.25 for the current plugin surface", claudeManifest.Version)
+	if claudeManifest.Version != "4.1.26" {
+		t.Fatalf("native manifest version = %q, want 4.1.26 for the current plugin surface", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")

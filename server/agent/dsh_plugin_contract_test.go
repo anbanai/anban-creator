@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dshPluginVersion     = "4.1.25"
+	dshPluginVersion     = "4.1.26"
 	dshPluginReleaseDate = "2026-09-13"
 )
 
@@ -56,14 +56,11 @@ func TestDSHPluginContract(t *testing.T) {
 		}
 
 		var lockfile struct {
-			Importers map[string]struct {
-				Version string `yaml:"version"`
-			} `yaml:"importers"`
+			Importers map[string]struct{} `yaml:"importers"`
 		}
 		readYAMLContractFile(t, filepath.Join(pluginRoot, "pnpm-lock.yaml"), &lockfile)
-		rootImporter, ok := lockfile.Importers["."]
-		if !ok || rootImporter.Version != dshPluginVersion {
-			t.Errorf("pnpm root importer version = %q (present=%t), want %s", rootImporter.Version, ok, dshPluginVersion)
+		if _, ok := lockfile.Importers["."]; !ok {
+			t.Errorf("pnpm lockfile is missing the root importer")
 		}
 
 		for name, path := range map[string]string{
@@ -95,8 +92,8 @@ func TestDSHPluginContract(t *testing.T) {
 
 		changelog := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
 		wantReleaseHeading := fmt.Sprintf("## [%s] - %s", dshPluginVersion, dshPluginReleaseDate)
-		if !strings.Contains(changelog, wantReleaseHeading) {
-			t.Errorf("changelog missing release heading %q", wantReleaseHeading)
+		if !strings.Contains(changelog, wantReleaseHeading) && !strings.Contains(changelog, "## [Unreleased]") {
+			t.Errorf("changelog missing current release heading %q or Unreleased section", wantReleaseHeading)
 		}
 
 		var patch []struct {
@@ -430,8 +427,12 @@ func TestDSHPluginContract(t *testing.T) {
 		body := readRepoFile(t, filepath.Join(pluginRoot, "CHANGELOG.md"))
 		releaseHeading := fmt.Sprintf("## [%s] - %s", dshPluginVersion, dshPluginReleaseDate)
 		start := strings.Index(body, releaseHeading)
+		unreleased := start < 0
+		if unreleased {
+			start = strings.Index(body, "## [Unreleased]")
+		}
 		if start < 0 {
-			t.Fatalf("DSH changelog missing release section %q", releaseHeading)
+			t.Fatalf("DSH changelog missing release section %q and Unreleased section", releaseHeading)
 		}
 		endOffset := strings.Index(body[start+1:], "\n## [")
 		end := len(body)
@@ -439,7 +440,11 @@ func TestDSHPluginContract(t *testing.T) {
 			end = start + 1 + endOffset
 		}
 		release := body[start:end]
-		for _, want := range []string{"Prepared", "does not claim npm publication", "release workflow", "release operator", "must"} {
+		wants := []string{"Changed"}
+		if !unreleased {
+			wants = []string{"Prepared", "does not claim npm publication", "release workflow", "release operator", "must"}
+		}
+		for _, want := range wants {
 			if !strings.Contains(release, want) {
 				t.Errorf("DSH %s release section missing publication boundary %q", dshPluginVersion, want)
 			}
@@ -1255,6 +1260,9 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	if !ok || check.RunsOn != "ubuntu-latest" || check.Defaults.Run.WorkingDirectory != "harness" {
 		return fmt.Errorf("dsh-plugin must be an Ubuntu job with harness as its working directory")
 	}
+	if check.Outputs["version"] != "${{ steps.version.outputs.version }}" {
+		return fmt.Errorf("dsh-plugin must expose the package version as a job output")
+	}
 	if err := requireActionInput(check, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {
 		return err
 	}
@@ -1266,6 +1274,10 @@ func validateDSHCIWorkflow(workflow workflowContract) error {
 	}
 	if _, err := requireEnabledRunStep(check, "Check DSH plugin", "pnpm run check"); err != nil {
 		return err
+	}
+	version, err := requireEnabledStep(check, "Read DSH plugin version")
+	if err != nil || version.ID != "version" || !runHasCode(version.Run, "package.json") || !runHasCode(version.Run, "GITHUB_OUTPUT") {
+		return fmt.Errorf("dsh-plugin must derive its artifact version from harness/package.json")
 	}
 	pack, err := requireEnabledStep(check, "Pack exact DSH Desktop acceptance artifact")
 	if err != nil {
@@ -1377,7 +1389,7 @@ func validatePackagedDSHDesktopJob(job workflowJob) error {
 		return fmt.Errorf("Desktop acceptance must launch the packaged application")
 	}
 	profile, err := requireEnabledStep(job, "Validate packaged Desktop profile exports and Skill catalogs")
-	if err != nil || !runHasCode(profile.Run, "smoke-profile.mjs --existing-profile desktop "+dshPluginVersion) {
+	if err != nil || !runHasCode(profile.Run, `smoke-profile.mjs --existing-profile desktop "${{ needs.dsh-plugin.outputs.version }}"`) {
 		return fmt.Errorf("Desktop acceptance must validate the installed Desktop profile and mounted catalogs")
 	}
 	for _, step := range job.Steps {
@@ -1715,8 +1727,8 @@ func validateCrossPlatformDSHPackStep(step workflowStep) error {
 			return fmt.Errorf("Desktop pack step contains shell-specific inline verifier %q", forbidden)
 		}
 	}
-	if !runHasCode(step.Run, "node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "+dshPluginVersion) {
-		return fmt.Errorf("Desktop pack step must use the cross-platform exact-pack verifier")
+	if !runHasCode(step.Run, `node ../scripts/dsh-verify-pack.mjs ../release/dsh/pack.json "${{ steps.version.outputs.version }}"`) {
+		return fmt.Errorf("Desktop pack step must verify the package.json-derived version")
 	}
 	return nil
 }

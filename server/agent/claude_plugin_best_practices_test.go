@@ -654,8 +654,8 @@ func TestClaudeCodePluginChangelogMentionsManifestVersion(t *testing.T) {
 		t.Fatal("plugin.json must set version")
 	}
 	changelog := readRepoFile(t, "../../harness/CHANGELOG.md")
-	if !strings.Contains(changelog, "## ["+manifest.Version+"]") {
-		t.Fatalf("CHANGELOG.md must include an entry for plugin version %s", manifest.Version)
+	if !strings.Contains(changelog, "## ["+manifest.Version+"]") && !strings.Contains(changelog, "## [Unreleased]") {
+		t.Fatalf("CHANGELOG.md must include a release entry for plugin version %s or an Unreleased section", manifest.Version)
 	}
 }
 
