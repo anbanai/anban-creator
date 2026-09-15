@@ -16,7 +16,7 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 1;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 2;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "project_id", "prompt",
@@ -431,9 +431,8 @@ function validateClaudeProfileEnvs(input: unknown): Record<string, string> {
   for (const key of ["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "CLAUDE_CODE_DISABLE_THINKING", "CLAUDE_CODE_DISABLE_1M_CONTEXT", "ENABLE_TOOL_SEARCH"]) {
     if (envs[key] !== undefined && envs[key] !== "true" && envs[key] !== "false") throw new Error("bootstrap execution profile environment is invalid");
   }
-  for (const key of ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]) {
-    if (envs[key] !== undefined && envs[key] !== "0" && envs[key] !== "1") throw new Error("bootstrap execution profile environment is invalid");
-  }
+  if (envs.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== undefined && envs.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== "0" && envs.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== "1") throw new Error("bootstrap execution profile environment is invalid");
+  if (envs.CLAUDE_CODE_DISABLE_AUTO_MEMORY !== undefined && envs.CLAUDE_CODE_DISABLE_AUTO_MEMORY !== "0") throw new Error("bootstrap execution profile environment is invalid");
   for (const key of ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"]) {
     if (envs[key] !== undefined && !validUnsignedInteger(envs[key], false)) throw new Error("bootstrap execution profile environment is invalid");
   }

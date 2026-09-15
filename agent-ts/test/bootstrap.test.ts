@@ -91,7 +91,7 @@ describe("validateBootstrapResponse", () => {
         allowHTTPServer: false,
       };
       await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("1");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("2");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -371,6 +371,14 @@ describe("validateBootstrapResponse", () => {
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0",
     });
+  });
+
+  test("rejects an execution profile that disables managed auto memory", () => {
+    const response = validResponse();
+    response.execution_profile.envs.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+    response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
+
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow("environment");
   });
 
   test("uses the Server value-only byte limit for Claude profile envs", () => {

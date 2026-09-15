@@ -483,7 +483,7 @@ type agentCompleteRequest struct {
 }
 
 const agentPackContractVersion = 3
-const agentRuntimeContractVersion = 1
+const agentRuntimeContractVersion = 2
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
 // executor_info is an opaque JSON blob (desktop hostname/version) recorded for

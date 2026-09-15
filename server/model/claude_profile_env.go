@@ -145,13 +145,11 @@ func ValidateClaudeProfileEnvs(envs map[string]string, requireAuthToken bool) er
 			return fmt.Errorf("claude profile env %s must be true or false", key)
 		}
 	}
-	for _, key := range []string{
-		claudeEnvDisableNonessentialTraffic,
-		claudeEnvDisableAutoMemory,
-	} {
-		if value, exists := envs[key]; exists && value != "0" && value != "1" {
-			return fmt.Errorf("claude profile env %s must be 0 or 1", key)
-		}
+	if value, exists := envs[claudeEnvDisableNonessentialTraffic]; exists && value != "0" && value != "1" {
+		return fmt.Errorf("claude profile env %s must be 0 or 1", claudeEnvDisableNonessentialTraffic)
+	}
+	if value, exists := envs[claudeEnvDisableAutoMemory]; exists && value != "0" {
+		return fmt.Errorf("claude profile env %s must be 0 for managed project memory", claudeEnvDisableAutoMemory)
 	}
 	for _, key := range []string{
 		claudeEnvMaxContextTokens,

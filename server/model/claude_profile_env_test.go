@@ -172,15 +172,10 @@ func TestValidateClaudeProfileEnvsStrictTypedValues(t *testing.T) {
 			}
 		}
 	}
-	for _, key := range []string{
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-		"CLAUDE_CODE_DISABLE_AUTO_MEMORY",
-	} {
-		envs := validClaudeProfileEnvs()
-		envs[key] = "true"
-		if err := ValidateClaudeProfileEnvs(envs, false); err == nil || !strings.Contains(err.Error(), "must be 0 or 1") {
-			t.Fatalf("%s accepted invalid Claude switch value: %v", key, err)
-		}
+	envs := validClaudeProfileEnvs()
+	envs["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "true"
+	if err := ValidateClaudeProfileEnvs(envs, false); err == nil || !strings.Contains(err.Error(), "must be 0 or 1") {
+		t.Fatalf("accepted invalid Claude traffic switch value: %v", err)
 	}
 }
 
@@ -206,6 +201,16 @@ func TestValidateClaudeProfileEnvsBaseURL(t *testing.T) {
 				t.Fatalf("ValidateClaudeProfileEnvs(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateClaudeProfileEnvsRejectsDisabledManagedAutoMemory(t *testing.T) {
+	for _, value := range []string{"1", "true"} {
+		envs := validClaudeProfileEnvs()
+		envs["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = value
+		if err := ValidateClaudeProfileEnvs(envs, false); err == nil || !strings.Contains(err.Error(), "must be 0") {
+			t.Fatalf("disabled managed auto memory value %q error = %v, want must be 0", value, err)
+		}
 	}
 }
 
