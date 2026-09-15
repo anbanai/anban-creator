@@ -70,6 +70,33 @@ func TestArticleAgentKeepsDraftPublicationIndependent(t *testing.T) {
 	}
 }
 
+func TestArticleDraftRetryIsBoundedByStructuredFailure(t *testing.T) {
+	for _, path := range []string{
+		"../../harness/packs/article/agent.claude.md",
+		"../../harness/packs/article/agent.codex.toml",
+		"../../harness/packs/article/agent.dsh.yml",
+		"../../harness/skills/article-publishing/SKILL.md",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract := string(raw)
+		for _, required := range []string{
+			"`retryable=true`",
+			"完全相同",
+			"最多重试一次",
+			"`retryable=false`",
+			"结果不明确",
+			"不得重试",
+		} {
+			if !strings.Contains(contract, required) {
+				t.Errorf("%s missing bounded create_draft retry rule %q", path, required)
+			}
+		}
+	}
+}
+
 func TestArticleAgentKeepsVisualFailuresIndependent(t *testing.T) {
 	for _, path := range []string{
 		"../../harness/packs/article/agent.claude.md",

@@ -440,7 +440,7 @@ func wechatDraftRequestFingerprint(article appwechat.DraftArticle) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID, executionID string, request appwechat.DraftAddRequest) (*model.WechatPublication, error) {
+func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID, executionID string, request appwechat.DraftAddRequest) (publication *model.WechatPublication, resultErr error) {
 	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
@@ -454,6 +454,17 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	}
 	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
 		return nil, ErrWechatPublicationModeConflict
+	}
+	draftDeliveryAttempt, draftDeliveryStarted, err := s.beginDraftDelivery(ctx, executionID)
+	if err != nil {
+		return nil, err
+	}
+	if draftDeliveryStarted {
+		defer func() {
+			if err := s.finishDraftDelivery(context.WithoutCancel(ctx), executionID, draftDeliveryAttempt, publication, resultErr); err != nil && s.logger != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Str("execution_id", executionID).Msg("record WeChat draft delivery result")
+			}
+		}()
 	}
 	article, err := firstDraftArticle(request)
 	if err != nil {
@@ -649,7 +660,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 			}
 			return existing, errors.Join(ErrWechatPublicationDraftRejected, err)
 		}
-		return existing, err
+		return existing, errors.Join(ErrWechatPublicationPending, err)
 	}
 	if response == nil || strings.TrimSpace(response.MediaID) == "" {
 		existing.LastError = "WeChat draft response omitted media_id"
@@ -678,6 +689,115 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	existing.ClaimToken, existing.ClaimedAt = "", nil
 	s.enqueueReconcile(existing.ProjectID, existing.NextCheckAt)
 	return s.autoPublishDraft(ctx, userID, taskID, project, existing)
+}
+
+type draftDeliveryEvidence struct {
+	Source  string `json:"source"`
+	Status  string `json:"status"`
+	Code    string `json:"code,omitempty"`
+	Attempt int    `json:"attempt,omitempty"`
+}
+
+func (s *WechatPublicationService) beginDraftDelivery(ctx context.Context, executionID string) (int, bool, error) {
+	evidence, err := json.Marshal(draftDeliveryEvidence{Source: "create_draft", Status: model.TaskExecutionDraftDeliveryInFlight, Attempt: 1})
+	if err != nil {
+		return 0, false, err
+	}
+	started, err := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, executionID, "", model.TaskExecutionDraftDeliveryInFlight, evidence)
+	if err != nil || started {
+		return 1, started, err
+	}
+	current, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, ErrWechatPublicationExecutionMismatch
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	switch current.DraftDeliveryStatus {
+	case model.TaskExecutionDraftDeliverySucceeded:
+		return 0, false, nil
+	case model.TaskExecutionDraftDeliveryInFlight, model.TaskExecutionDraftDeliveryAmbiguous:
+		return 0, false, ErrWechatPublicationPending
+	case model.TaskExecutionDraftDeliveryFailed:
+		var previous draftDeliveryEvidence
+		if json.Unmarshal(current.DraftDeliveryResult, &previous) != nil ||
+			previous.Code != "create_draft_provider_failure" || previous.Attempt >= 2 {
+			return 0, false, ErrWechatPublicationConflict
+		}
+	default:
+		return 0, false, ErrWechatPublicationConflict
+	}
+	evidence, err = json.Marshal(draftDeliveryEvidence{Source: "create_draft", Status: model.TaskExecutionDraftDeliveryInFlight, Attempt: 2})
+	if err != nil {
+		return 0, false, err
+	}
+	started, err = s.repo.TaskExecutions().TransitionDraftDelivery(ctx, executionID, model.TaskExecutionDraftDeliveryFailed, model.TaskExecutionDraftDeliveryInFlight, evidence)
+	if err != nil {
+		return 0, false, err
+	}
+	if !started {
+		return 0, false, ErrWechatPublicationPending
+	}
+	return 2, true, nil
+}
+
+func (s *WechatPublicationService) finishDraftDelivery(ctx context.Context, executionID string, attempt int, publication *model.WechatPublication, cause error) error {
+	status := model.TaskExecutionDraftDeliveryFailed
+	code := wechatDraftDeliveryFailureCode(cause)
+	if cause == nil || publication != nil && publication.DraftMediaID != "" {
+		status = model.TaskExecutionDraftDeliverySucceeded
+		code = ""
+	} else if errors.Is(cause, ErrWechatPublicationPending) {
+		status = model.TaskExecutionDraftDeliveryAmbiguous
+	}
+	evidence, err := json.Marshal(draftDeliveryEvidence{
+		Source:  "create_draft",
+		Status:  status,
+		Code:    code,
+		Attempt: attempt,
+	})
+	if err != nil {
+		return err
+	}
+	won, err := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, executionID, model.TaskExecutionDraftDeliveryInFlight, status, evidence)
+	if err != nil || won {
+		return err
+	}
+	return fmt.Errorf("record draft delivery result: state changed concurrently")
+}
+
+func wechatDraftDeliveryFailureCode(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrWechatPublicationInvalidPayload):
+		return "create_draft_invalid_payload"
+	case errors.Is(err, ErrWechatPublicationMarketingBlocked):
+		return "create_draft_marketing_blocked"
+	case errors.Is(err, ErrWechatPublicationNotFound):
+		return "create_draft_not_found"
+	case errors.Is(err, ErrWechatPublicationProjectMismatch):
+		return "create_draft_project_mismatch"
+	case errors.Is(err, ErrWechatPublicationExecutionMismatch):
+		return "create_draft_execution_mismatch"
+	case errors.Is(err, ErrWechatPublicationForbidden):
+		return "create_draft_forbidden"
+	case errors.Is(err, ErrWechatPublicationModeConflict):
+		return "create_draft_disabled"
+	case errors.Is(err, ErrWechatPublicationDraftUnsupported):
+		return "create_draft_unsupported"
+	case errors.Is(err, ErrWechatPublicationDraftRejected):
+		return "create_draft_rejected"
+	case errors.Is(err, ErrWechatPublicationDraftFailed):
+		return "create_draft_reconciliation_failed"
+	case errors.Is(err, ErrWechatPublicationConflict):
+		return "create_draft_conflict"
+	case errors.Is(err, ErrWechatPublicationPending):
+		return "create_draft_pending_reconciliation"
+	default:
+		return "create_draft_provider_failure"
+	}
 }
 
 func (s *WechatPublicationService) resolveReadOnlyDraftClaimFailure(ctx context.Context, publication *model.WechatPublication, cause error, fresh bool, retryWechatStatusCode int) error {

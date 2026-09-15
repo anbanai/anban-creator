@@ -30,6 +30,7 @@ import {
 import { api } from "@/lib/api";
 import type {
   ProjectConfig,
+  TaskOutcome,
   WechatAnalytics,
   WechatPublication,
   WechatPublishMode,
@@ -73,9 +74,11 @@ const notifyFormalPublishResult = (publication: WechatPublication) => {
 export default function WechatAnalyticsPanel({
   taskId,
   projectConfig,
+  taskOutcome,
 }: {
   taskId: string;
   projectConfig?: ProjectConfig;
+  taskOutcome?: TaskOutcome;
 }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -139,13 +142,7 @@ export default function WechatAnalyticsPanel({
     publicationQuery.error as { response?: { status?: number } } | null
   )?.response?.status;
   if (publicationQuery.isError && publicationErrorStatus === 404)
-    return (
-      <Card>
-        <CardContent className="text-sm text-muted-foreground">
-          该任务尚未创建公众号草稿。
-        </CardContent>
-      </Card>
-    );
+    return <MissingPublicationState mode={mode} outcome={taskOutcome} />;
   if (publicationQuery.isError)
     return (
       <Card>
@@ -155,13 +152,7 @@ export default function WechatAnalyticsPanel({
       </Card>
     );
   if (!publication)
-    return (
-      <Card>
-        <CardContent className="text-sm text-muted-foreground">
-          该任务尚未创建公众号草稿。
-        </CardContent>
-      </Card>
-    );
+    return <MissingPublicationState mode={mode} outcome={taskOutcome} />;
   const mutationFailed = reconcile.isError || publish.isError || retryPublish.isError || select.isError;
   return (
     <div className="space-y-4">
@@ -214,6 +205,73 @@ export default function WechatAnalyticsPanel({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function MissingPublicationState({
+  mode,
+  outcome,
+}: {
+  mode: WechatPublishMode;
+  outcome?: TaskOutcome;
+}) {
+  const status = outcome?.publication.status;
+  if (!status || status === "not_requested") {
+    return (
+      <Card>
+        <CardContent className="text-sm text-muted-foreground">
+          {outcome ? "本次任务没有发起公众号投递。" : "该任务尚未创建公众号草稿。"}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const ambiguous = status === "ambiguous";
+  const succeeded = status === "succeeded";
+  const automatic = mode === "api_confirmed";
+  const title = succeeded
+    ? "公众号草稿已创建。"
+    : ambiguous
+    ? "微信是否收到草稿请求暂时无法确认。"
+    : automatic
+      ? "本次未创建公众号草稿，自动发布没有启动。"
+      : "本次未创建公众号草稿。";
+  const detail = succeeded
+    ? "草稿详情暂时无法加载，请稍后刷新。"
+    : ambiguous
+    ? "为避免重复投稿，系统不会再次提交；请先到公众号后台核对草稿箱。"
+    : outcome.publication.message || (status === "skipped"
+      ? "发布前检查阻止了公众号投递，请根据任务警告修改文章后重新执行。"
+      : "请根据任务警告修复问题后重新执行。"
+    );
+  const StateIcon = succeeded ? CheckCircle2 : AlertTriangle;
+
+  return (
+    <Card className={succeeded ? "border-emerald-300 dark:border-emerald-800" : "border-amber-300 dark:border-amber-800"}>
+      <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle className="flex items-start gap-2 text-base">
+            <StateIcon className={succeeded
+              ? "mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400"
+              : "mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400"
+            } />
+            <span>{title}</span>
+          </CardTitle>
+          <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
+        </div>
+        {ambiguous && (
+          <Button
+            size="sm"
+            variant="outline"
+            nativeButton={false}
+            render={<a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer" />}
+          >
+            <ExternalLink className="h-4 w-4" />
+            打开公众号后台
+          </Button>
+        )}
+      </CardHeader>
+    </Card>
   );
 }
 

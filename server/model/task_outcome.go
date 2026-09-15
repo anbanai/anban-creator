@@ -28,7 +28,9 @@ type TaskReviewOutcome struct {
 }
 
 type TaskPublicationOutcome struct {
-	Status TaskPublicationStatus `json:"status"`
+	Status  TaskPublicationStatus `json:"status"`
+	Code    string                `json:"code,omitempty"`
+	Message string                `json:"message,omitempty"`
 }
 
 type TaskOutcomeWarning struct {

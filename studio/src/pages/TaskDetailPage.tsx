@@ -58,7 +58,7 @@ const outcomeLabels = {
   core_delivery: { complete: '核心交付完整', none: '无核心交付' },
   visual: { complete: '视觉完整', partial: '视觉部分完成', not_requested: '未请求视觉' },
   review: { passed: '审核通过', warning: '审核有警告', unavailable: '审核不可用' },
-  publication: { succeeded: '草稿已创建', skipped: '草稿已跳过', failed: '草稿失败', ambiguous: '草稿待确认', not_requested: '未请求草稿' },
+  publication: { succeeded: '草稿已创建', skipped: '草稿未投递', failed: '草稿创建失败', ambiguous: '草稿结果未确认', not_requested: '未请求草稿' },
 } as const
 
 function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
@@ -87,7 +87,11 @@ function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
           {outcome.warnings.map((warning, index) => (
             <div key={`${warning.code}-${index}`} className="flex items-start gap-2 text-sm text-amber-950 dark:text-amber-100">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span className="break-words">{warning.message}</span>
+              <span className="break-words">
+                {warning.code === 'publication_ambiguous'
+                  ? outcome.publication.message || '微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。'
+                  : warning.message}
+              </span>
             </div>
           ))}
         </div>
@@ -885,7 +889,7 @@ export default function TaskDetailPage() {
       />
 
       {task.type === 'article' && task.status === 'completed' && project && (
-        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} />
+        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} taskOutcome={task.outcome} />
       )}
 
       {showPendingResultDestination && (

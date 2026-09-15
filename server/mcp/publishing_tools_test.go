@@ -55,6 +55,7 @@ func (*mcpWechatPublicationAPI) BatchGetFreePublishes(context.Context, appwechat
 
 type publishingToolFixture struct {
 	repo        repository.Repository
+	db          *gorm.DB
 	api         *mcpWechatPublicationAPI
 	userID      string
 	projectID   string
@@ -74,7 +75,7 @@ func newPublishingToolFixture(t *testing.T) *publishingToolFixture {
 	repo := repository.New(db)
 	t.Cleanup(func() { _ = repo.Close() })
 	f := &publishingToolFixture{
-		repo: repo, api: &mcpWechatPublicationAPI{},
+		repo: repo, db: db, api: &mcpWechatPublicationAPI{},
 		userID: uuid.NewString(), projectID: uuid.NewString(), taskID: uuid.NewString(), executionID: uuid.NewString(),
 	}
 	ctx := context.Background()
@@ -85,6 +86,12 @@ func newPublishingToolFixture(t *testing.T) *publishingToolFixture {
 		t.Fatal(err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: f.executionID, TaskID: f.taskID, Attempt: 1, Target: "test", Status: model.TaskExecutionRunning,
+		ExecutionProfile: "effective", Provider: "deepseek", ProfileEnvs: map[string]string{}, ProfileFingerprint: "fingerprint",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.New(io.Discard)
@@ -457,7 +464,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		failure := decodeCreateDraftToolFailure(t, result)
-		if failure.Code != "create_draft_pending_reconciliation" || !failure.Retryable {
+		if failure.Code != "create_draft_pending_reconciliation" || failure.Retryable {
 			t.Fatalf("failure = %#v", failure)
 		}
 	})
@@ -470,7 +477,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		failure := decodeCreateDraftToolFailure(t, result)
-		if failure.Code != "create_draft_provider_failure" || !failure.Retryable {
+		if failure.Code != "create_draft_pending_reconciliation" || failure.Retryable {
 			t.Fatalf("failure = %#v", failure)
 		}
 		if strings.Contains(failure.Message, "secret token") || strings.Contains(failure.Hint, "secret token") {
@@ -495,6 +502,20 @@ func TestCreateDraftHandlerRetriesUnsupportedCapabilityAfterRepair(t *testing.T)
 	firstAddCalls, firstListCalls := f.api.addCalls, f.api.draftListCalls
 
 	f.api.addError = nil
+	if err := f.db.Model(&model.TaskExecution{}).Where("id = ?", f.executionID).Update("status", model.TaskExecutionFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	newExecutionID := uuid.NewString()
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Update("current_execution_id", newExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: newExecutionID, TaskID: f.taskID, Attempt: 2, Target: "test", Status: model.TaskExecutionRunning,
+		ExecutionProfile: "effective", Provider: "deepseek", ProfileEnvs: map[string]string{}, ProfileFingerprint: "fingerprint",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx = withMCPExecutionIdentity(withMCPUserID(context.Background(), f.userID), f.userID, f.projectID, f.taskID, newExecutionID)
 	result, err = createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
 	if err != nil {
 		t.Fatal(err)

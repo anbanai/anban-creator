@@ -460,11 +460,13 @@ func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *mode
 		model.TaskExecutionDraftDeliveryFailed, model.TaskExecutionDraftDeliveryAmbiguous,
 		model.TaskExecutionDraftDeliveryNotRequested:
 		execution.DraftDeliveryStatus = latestExecution.DraftDeliveryStatus
+		execution.DraftDeliveryResult = latestExecution.DraftDeliveryResult
 		return nil
 	case model.TaskExecutionDraftDeliveryInFlight:
+		evidence := []byte(`{"source":"durable_publication","reason":"completion_observed_in_flight"}`)
 		won, transitionErr := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID,
 			model.TaskExecutionDraftDeliveryInFlight, model.TaskExecutionDraftDeliveryAmbiguous,
-			[]byte(`{"source":"durable_publication","reason":"completion_observed_in_flight"}`))
+			evidence)
 		if transitionErr != nil {
 			return transitionErr
 		}
@@ -472,6 +474,7 @@ func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *mode
 			return fmt.Errorf("record ambiguous draft delivery: state changed concurrently")
 		}
 		execution.DraftDeliveryStatus = model.TaskExecutionDraftDeliveryAmbiguous
+		execution.DraftDeliveryResult = evidence
 		return nil
 	}
 	status, evidence, err := s.resolveCloudDraftDelivery(ctx, task, execution)
@@ -486,12 +489,14 @@ func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *mode
 		return fmt.Errorf("record draft delivery: state changed concurrently")
 	}
 	execution.DraftDeliveryStatus = status
+	execution.DraftDeliveryResult = evidence
 	return nil
 }
 
 type articleStatusArtifact struct {
 	Status      string `json:"status"`
 	ContentHash string `json:"content_hash"`
+	Code        string `json:"code,omitempty"`
 }
 
 func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
@@ -536,7 +541,9 @@ func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model
 		case string(model.TaskPublicationNotRequested):
 			status = model.TaskExecutionDraftDeliveryNotRequested
 		}
-		evidence, _ := json.Marshal(map[string]string{"source": "draft_result", "status": draftResult.Status})
+		evidence, _ := json.Marshal(map[string]string{
+			"source": "draft_result", "status": draftResult.Status, "code": strings.TrimSpace(draftResult.Code),
+		})
 		return status, evidence, nil
 	}
 
@@ -644,7 +651,7 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 		CoreDelivery: model.TaskCoreDeliveryOutcome{Status: model.TaskCoreDeliveryNone},
 		Visual:       model.TaskVisualOutcome{Status: model.TaskVisualNotRequested},
 		Review:       model.TaskReviewOutcome{Status: model.TaskReviewUnavailable},
-		Publication:  model.TaskPublicationOutcome{Status: publicationOutcomeStatus(execution.DraftDeliveryStatus)},
+		Publication:  publicationTaskOutcome(execution),
 		Warnings:     []model.TaskOutcomeWarning{},
 	}
 	if task.Status == model.TaskStatusCompleted {
@@ -691,9 +698,17 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 	case model.TaskPublicationSkipped:
 		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_skipped", Stage: "publication", Message: "公众号草稿创建已跳过。"})
 	case model.TaskPublicationFailed:
-		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_failed", Stage: "publication", Message: "公众号草稿创建失败，文章交付不受影响。"})
+		message := outcome.Publication.Message
+		if message == "" {
+			message = "公众号草稿创建失败，文章交付不受影响。"
+		}
+		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_failed", Stage: "publication", Message: message})
 	case model.TaskPublicationAmbiguous:
-		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_ambiguous", Stage: "publication", Message: "公众号草稿结果暂时无法确认，需要对账。"})
+		message := outcome.Publication.Message
+		if message == "" {
+			message = "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"
+		}
+		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_ambiguous", Stage: "publication", Message: message})
 	}
 
 	if diagnostic := publicExecutionDiagnostic(execution, result); diagnostic != nil {
@@ -759,6 +774,70 @@ func publicationOutcomeStatus(status string) model.TaskPublicationStatus {
 	default:
 		return model.TaskPublicationNotRequested
 	}
+}
+
+func publicationTaskOutcome(execution *model.TaskExecution) model.TaskPublicationOutcome {
+	if execution == nil {
+		return model.TaskPublicationOutcome{Status: model.TaskPublicationNotRequested}
+	}
+	outcome := model.TaskPublicationOutcome{Status: publicationOutcomeStatus(execution.DraftDeliveryStatus)}
+	var evidence struct {
+		Code string `json:"code"`
+	}
+	if len(execution.DraftDeliveryResult) > 0 && json.Unmarshal(execution.DraftDeliveryResult, &evidence) == nil {
+		outcome.Code = safePublicationOutcomeCode(evidence.Code)
+	}
+	outcome.Message = publicationOutcomeMessage(outcome.Status, outcome.Code)
+	return outcome
+}
+
+func safePublicationOutcomeCode(code string) string {
+	switch strings.TrimSpace(code) {
+	case "create_draft_invalid_payload",
+		"create_draft_marketing_blocked",
+		"create_draft_not_found",
+		"create_draft_project_mismatch",
+		"create_draft_execution_mismatch",
+		"create_draft_execution_required",
+		"create_draft_forbidden",
+		"create_draft_disabled",
+		"create_draft_unsupported",
+		"create_draft_rejected",
+		"create_draft_reconciliation_failed",
+		"create_draft_conflict",
+		"create_draft_pending_reconciliation",
+		"create_draft_provider_failure":
+		return strings.TrimSpace(code)
+	default:
+		return ""
+	}
+}
+
+func publicationOutcomeMessage(status model.TaskPublicationStatus, code string) string {
+	switch code {
+	case "create_draft_invalid_payload":
+		return "草稿内容或图片不符合公众号投递要求。"
+	case "create_draft_marketing_blocked":
+		return "发布前检查发现不适合自动投递的内容，本次没有提交到微信。"
+	case "create_draft_execution_mismatch", "create_draft_execution_required":
+		return "任务执行状态不匹配，本次没有提交到微信。"
+	case "create_draft_disabled":
+		return "该项目未启用公众号投递，本次没有提交到微信。"
+	case "create_draft_unsupported":
+		return "当前公众号没有草稿接口权限，本次没有创建草稿。"
+	case "create_draft_rejected":
+		return "微信拒绝创建草稿，请检查公众号凭据或 IP 白名单。"
+	case "create_draft_conflict":
+		return "该任务已有另一份草稿请求，本次没有重复提交。"
+	case "create_draft_pending_reconciliation":
+		return "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"
+	case "create_draft_provider_failure", "create_draft_reconciliation_failed":
+		return "创建公众号草稿时服务异常，本次自动发布没有启动。"
+	}
+	if status == model.TaskPublicationAmbiguous {
+		return "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"
+	}
+	return ""
 }
 
 func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.ExecutionResult) *model.ExecutionDiagnostic {

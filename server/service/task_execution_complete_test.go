@@ -300,6 +300,65 @@ func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
 	}
 }
 
+func TestCompleteCloudExecutionExposesRecordedDraftFailure(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	evidence := []byte(`{"source":"create_draft","status":"failed","code":"create_draft_invalid_payload"}`)
+	won, err := repo.TaskExecutions().TransitionDraftDelivery(
+		context.Background(), execution.ID, "", model.TaskExecutionDraftDeliveryFailed, evidence,
+	)
+	if err != nil || !won {
+		t.Fatalf("record draft failure: won=%v err=%v", won, err)
+	}
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Outcome == nil {
+		t.Fatal("task outcome was not persisted")
+	}
+	if found.Outcome.Publication.Status != model.TaskPublicationFailed ||
+		found.Outcome.Publication.Code != "create_draft_invalid_payload" ||
+		found.Outcome.Publication.Message != "草稿内容或图片不符合公众号投递要求。" {
+		t.Fatalf("publication outcome = %#v", found.Outcome.Publication)
+	}
+}
+
+func TestCompleteCloudExecutionPreservesDraftArtifactFailureCode(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	draftBody, _ := json.Marshal(map[string]string{
+		"status": "failed", "code": "create_draft_execution_mismatch", "content_hash": cloudArticleFixtureHash(),
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft-result.json", "application/json", draftBody)
+
+	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationFailed ||
+		found.Outcome.Publication.Code != "create_draft_execution_mismatch" ||
+		found.Outcome.Publication.Message != "任务执行状态不匹配，本次没有提交到微信。" {
+		t.Fatalf("publication outcome = %#v", found.Outcome)
+	}
+}
+
+func TestPublicationTaskOutcomeDropsUnknownArtifactCode(t *testing.T) {
+	execution := &model.TaskExecution{
+		DraftDeliveryStatus: model.TaskExecutionDraftDeliveryFailed,
+		DraftDeliveryResult: []byte(`{"status":"failed","code":"<script>alert(1)</script>"}`),
+	}
+	outcome := publicationTaskOutcome(execution)
+	if outcome.Code != "" || outcome.Message != "" {
+		t.Fatalf("publication outcome = %#v, want unknown code omitted", outcome)
+	}
+}
+
 func TestCompleteCloudExecutionDoesNotTrustStaleArticleStatusArtifacts(t *testing.T) {
 	for _, tt := range []struct {
 		name            string

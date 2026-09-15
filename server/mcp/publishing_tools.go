@@ -160,7 +160,7 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 	case errors.Is(err, service.ErrWechatPublicationConflict):
 		return createDraftFailure{Code: "create_draft_conflict", Message: "a different draft request already exists for this task", Hint: "Replay the original request or use a new task", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationPending):
-		return createDraftFailure{Code: "create_draft_pending_reconciliation", Message: "the previous WeChat draft outcome is still being reconciled", Hint: "Retry after reconciliation completes; do not submit another draft", Retryable: true}
+		return createDraftFailure{Code: "create_draft_pending_reconciliation", Message: "the previous WeChat draft outcome is still being reconciled", Hint: "Wait for server reconciliation; do not submit another draft", Retryable: false}
 	default:
 		if strings.Contains(err.Error(), "draft title and content are required") || strings.Contains(err.Error(), "exactly one draft article is required") || strings.Contains(err.Error(), "内容配图重复") {
 			return createDraftFailure{Code: "create_draft_invalid_payload", Message: "draft article payload is invalid", Hint: "Provide one article with a title, content, and distinct content image URLs", Retryable: false}

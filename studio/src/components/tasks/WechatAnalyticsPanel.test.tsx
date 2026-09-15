@@ -75,6 +75,75 @@ describe('WechatAnalyticsPanel', () => {
     expect(screen.queryByText('公众号发布状态暂时无法加载，请稍后重试。')).not.toBeInTheDocument()
   })
 
+  it('explains that automatic publishing never started when draft creation failed', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
+
+    render(
+      <WechatAnalyticsPanel
+        taskId="task-1"
+        projectConfig={{ wechat_publish_mode: 'api_confirmed' }}
+        taskOutcome={{
+          core_delivery: { status: 'complete' },
+          visual: { status: 'complete' },
+          review: { status: 'passed' },
+          publication: {
+            status: 'failed',
+            code: 'create_draft_invalid_payload',
+            message: '草稿内容或图片不符合公众号投递要求。',
+          },
+          warnings: [],
+        }}
+      />,
+    )
+
+    expect(await screen.findByText('本次未创建公众号草稿，自动发布没有启动。')).toBeInTheDocument()
+    expect(screen.getByText('草稿内容或图片不符合公众号投递要求。')).toBeInTheDocument()
+    expect(screen.queryByText('该任务尚未创建公众号草稿。')).not.toBeInTheDocument()
+  })
+
+  it('does not invite a duplicate submission while an automatic draft result is uncertain', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
+
+    render(
+      <WechatAnalyticsPanel
+        taskId="task-1"
+        projectConfig={{ wechat_publish_mode: 'api_confirmed' }}
+        taskOutcome={{
+          core_delivery: { status: 'complete' },
+          visual: { status: 'complete' },
+          review: { status: 'passed' },
+          publication: { status: 'ambiguous' },
+          warnings: [],
+        }}
+      />,
+    )
+
+    expect(await screen.findByText('微信是否收到草稿请求暂时无法确认。')).toBeInTheDocument()
+    expect(screen.getByText('为避免重复投稿，系统不会再次提交；请先到公众号后台核对草稿箱。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开公众号后台' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/')
+  })
+
+  it('does not describe a successful draft outcome as missing when lifecycle details return 404', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
+
+    render(
+      <WechatAnalyticsPanel
+        taskId="task-1"
+        taskOutcome={{
+          core_delivery: { status: 'complete' },
+          visual: { status: 'complete' },
+          review: { status: 'passed' },
+          publication: { status: 'succeeded' },
+          warnings: [],
+        }}
+      />,
+    )
+
+    expect(await screen.findByText('公众号草稿已创建。')).toBeInTheDocument()
+    expect(screen.getByText('草稿详情暂时无法加载，请稍后刷新。')).toBeInTheDocument()
+    expect(screen.queryByText('本次未创建公众号草稿。')).not.toBeInTheDocument()
+  })
+
   it('polls nonterminal lifecycle state until it becomes terminal', async () => {
     vi.useFakeTimers()
     vi.mocked(api.tasks.getWechatPublication)

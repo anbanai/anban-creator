@@ -21,7 +21,11 @@ export interface TaskOutcome {
   core_delivery: { status: 'complete' | 'none' }
   visual: { status: 'complete' | 'partial' | 'not_requested' }
   review: { status: 'passed' | 'warning' | 'unavailable' }
-  publication: { status: 'succeeded' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested' }
+  publication: {
+    status: 'succeeded' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested'
+    code?: string
+    message?: string
+  }
   warnings: Array<{ code: string; message: string; stage?: string }>
   diagnostic?: {
     provider?: string
