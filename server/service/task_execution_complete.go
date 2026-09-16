@@ -605,30 +605,51 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		return "", nil, err
 	}
 	byPath := make(map[string]*model.TaskFile, len(files))
+	allowedImageURLs := make(map[string]struct{})
+	coverImageURLs := make(map[string]struct{})
 	contentImageURLs := make(map[string]struct{})
-	var coverMediaID string
-	hasContentImage := false
+	coverMediaIDs := make(map[string]struct{})
+	coverMediaIDsByURL := make(map[string]map[string]struct{})
 	for _, file := range files {
 		if file == nil || file.ExecutionID != execution.ID || file.TaskID != task.ID {
 			continue
 		}
 		byPath[file.FilePath] = file
-		if file.State == model.TaskFileStateDelivered &&
-			(file.Role == model.FileRoleCover || strings.HasPrefix(strings.ToLower(file.FileName), "cover")) {
-			coverMediaID = strings.TrimSpace(file.MediaID)
-		} else if file.State == model.TaskFileStateDelivered &&
-			(file.Role == model.FileRoleImage || strings.HasPrefix(file.MimeType, "image/")) &&
-			strings.TrimSpace(file.WechatURL) != "" {
-			hasContentImage = true
-			contentImageURLs[strings.TrimSpace(file.WechatURL)] = struct{}{}
+		if file.State != model.TaskFileStateDelivered {
+			continue
 		}
+		isCover := file.Role == model.FileRoleCover || strings.HasPrefix(strings.ToLower(file.FileName), "cover")
+		isImage := isCover || file.Role == model.FileRoleImage || strings.HasPrefix(file.MimeType, "image/")
+		wechatURL := strings.TrimSpace(file.WechatURL)
+		if isCover {
+			if mediaID := strings.TrimSpace(file.MediaID); mediaID != "" {
+				coverMediaIDs[mediaID] = struct{}{}
+				if wechatURL != "" {
+					if coverMediaIDsByURL[wechatURL] == nil {
+						coverMediaIDsByURL[wechatURL] = make(map[string]struct{})
+					}
+					coverMediaIDsByURL[wechatURL][mediaID] = struct{}{}
+				}
+			}
+		}
+		if isImage && wechatURL != "" {
+			allowedImageURLs[wechatURL] = struct{}{}
+			if isCover {
+				coverImageURLs[wechatURL] = struct{}{}
+			} else {
+				contentImageURLs[wechatURL] = struct{}{}
+			}
+		}
+	}
+	for coverURL := range coverImageURLs {
+		delete(contentImageURLs, coverURL)
 	}
 	coverRequested := task.ArticleWithCover == nil || *task.ArticleWithCover
 	contentImagesRequested := task.ArticleWithContentImages == nil || *task.ArticleWithContentImages
-	if coverRequested && coverMediaID == "" {
+	if coverRequested && len(coverMediaIDs) == 0 {
 		return block("cover_media_missing", "retry_visuals")
 	}
-	if contentImagesRequested && !hasContentImage {
+	if contentImagesRequested && len(contentImageURLs) == 0 {
 		return block("content_images_missing", "retry_visuals")
 	}
 
@@ -697,10 +718,35 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	if contentImagesRequested && len(imageSources) == 0 {
 		return block("content_images_missing", "retry_visuals")
 	}
-	for _, source := range imageSources {
-		if _, ok := contentImageURLs[source]; !ok {
+	hasRenderedContentImage := false
+	for index, source := range imageSources {
+		if _, ok := allowedImageURLs[source]; !ok {
 			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "content_image_source_invalid", false, "review_content"), nil
 		}
+		if _, isCover := coverImageURLs[source]; isCover && index != 0 {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "content_image_source_invalid", false, "review_content"), nil
+		}
+		if _, ok := contentImageURLs[source]; ok {
+			hasRenderedContentImage = true
+		}
+	}
+	if contentImagesRequested && !hasRenderedContentImage {
+		return block("content_images_missing", "retry_visuals")
+	}
+	selectedCoverMediaIDs := coverMediaIDs
+	if len(imageSources) > 0 {
+		if _, heroIsCover := coverImageURLs[imageSources[0]]; heroIsCover {
+			selectedCoverMediaIDs = coverMediaIDsByURL[imageSources[0]]
+		}
+	}
+	coverMediaID := ""
+	if len(selectedCoverMediaIDs) == 1 {
+		for mediaID := range selectedCoverMediaIDs {
+			coverMediaID = mediaID
+		}
+	}
+	if coverRequested && coverMediaID == "" {
+		return block("cover_media_missing", "retry_visuals")
 	}
 	var scan articleStatusArtifact
 	found, err = s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/marketing-scan.json", &scan)

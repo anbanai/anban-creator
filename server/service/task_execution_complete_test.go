@@ -590,6 +590,225 @@ func TestFinalizeArticlePublicationRejectsBodyImageOutsideCurrentExecution(t *te
 	}
 }
 
+func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withVisuals := true
+	task.ArticleWithCover = &withVisuals
+	task.ArticleWithContentImages = &withVisuals
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	coverURL := "https://mmbiz.qpic.cn/current-cover.png"
+	contentURL := "https://mmbiz.qpic.cn/current-content.png"
+	htmlBody := []byte(`<section><img src="` + coverURL + `"><p>Final article</p><img src="` + contentURL + `"></section>`)
+	htmlHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	packageBody, _ := json.Marshal(map[string]any{
+		"schema_version": "1.0",
+		"article": map[string]string{
+			"title": "Server owned draft", "digest": "A deterministic package",
+			"content_path": "output/05-article.html", "content_sha256": htmlHash,
+		},
+		"readiness": map[string]any{
+			"status": "ready", "code": "",
+			"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+	})
+	scanBody, _ := json.Marshal(map[string]any{
+		"version": "1.0", "status": "passed", "content_hash": cloudArticleFixtureHash(), "findings": []any{},
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/05-article.html", "text/html", htmlBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft.json", "application/json", packageBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("unuploaded-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-exact.png", "image/png", []byte("selected-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-alternative.png", "image/png", []byte("alternative-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-exact.png").
+		Updates(map[string]any{
+			"role": model.FileRoleCover, "media_id": "cover-media-id", "wechat_url": coverURL,
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-alternative.png").
+		Updates(map[string]any{
+			"role": model.FileRoleCover, "media_id": "alternative-cover-media-id",
+			"wechat_url": "https://mmbiz.qpic.cn/alternative-cover.png",
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
+		Updates(map[string]any{
+			"role": model.FileRoleImage, "wechat_url": contentURL,
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "draft-media-id"},
+	}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliverySucceeded || result.Code != "" || !result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 1 {
+		t.Fatalf("draft/add calls = %d, want 1", api.addCalls)
+	}
+	publication, err := repo.WechatPublications().FindByTaskID(ctx, task.ID)
+	if err != nil || publication.DraftThumbMediaID != "cover-media-id" {
+		t.Fatalf("publication = %#v err=%v, want hero-paired cover media", publication, err)
+	}
+}
+
+func TestFinalizeArticlePublicationRequiresContentImageInFinalHTML(t *testing.T) {
+	assertArticlePublicationVisualHTML(t, func(coverURL, _ string) []byte {
+		return []byte(`<section><img src="` + coverURL + `"><p>Final article without its generated body image.</p></section>`)
+	}, model.TaskExecutionDraftDeliveryBlocked, "content_images_missing")
+}
+
+func TestFinalizeArticlePublicationRejectsCoverOutsideHeroPosition(t *testing.T) {
+	assertArticlePublicationVisualHTML(t, func(coverURL, contentURL string) []byte {
+		return []byte(`<section><img src="` + contentURL + `"><p>Final article</p><img src="` + coverURL + `"></section>`)
+	}, model.TaskExecutionDraftDeliveryFailed, "content_image_source_invalid")
+}
+
+func assertArticlePublicationVisualHTML(
+	t *testing.T,
+	html func(coverURL, contentURL string) []byte,
+	wantStatus, wantCode string,
+) {
+	t.Helper()
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withVisuals := true
+	task.ArticleWithCover = &withVisuals
+	task.ArticleWithContentImages = &withVisuals
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	coverURL := "https://mmbiz.qpic.cn/current-cover.png"
+	contentURL := "https://mmbiz.qpic.cn/current-content.png"
+	htmlBody := html(coverURL, contentURL)
+	htmlHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	packageBody, _ := json.Marshal(map[string]any{
+		"schema_version": "1.0",
+		"article": map[string]string{
+			"title": "Server owned draft", "digest": "A deterministic package",
+			"content_path": "output/05-article.html", "content_sha256": htmlHash,
+		},
+		"readiness": map[string]any{
+			"status": "ready", "code": "",
+			"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+	})
+	scanBody, _ := json.Marshal(map[string]any{
+		"version": "1.0", "status": "passed", "content_hash": cloudArticleFixtureHash(), "findings": []any{},
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/05-article.html", "text/html", htmlBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft.json", "application/json", packageBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover.png").
+		Updates(map[string]any{
+			"role": model.FileRoleCover, "media_id": "cover-media-id", "wechat_url": coverURL,
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
+		Updates(map[string]any{
+			"role": model.FileRoleImage, "wechat_url": contentURL,
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	api := &fakeWechatPublicationAPI{}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != wantStatus || result.Code != wantCode || result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 0 {
+		t.Fatalf("draft/add calls = %d, want 0", api.addCalls)
+	}
+}
+
+func TestFinalizeArticlePublicationDoesNotCountCoverAsContentImage(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withVisuals := true
+	task.ArticleWithCover = &withVisuals
+	task.ArticleWithContentImages = &withVisuals
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("cover-image"))
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover.png").
+		Updates(map[string]any{
+			"role": model.FileRoleCover, "media_id": "cover-media-id",
+			"wechat_url": "https://mmbiz.qpic.cn/current-cover.png",
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "content_images_missing" || result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+}
+
 func TestFinalizeArticlePublicationRejectsContradictoryReadinessContract(t *testing.T) {
 	tests := []struct {
 		name          string

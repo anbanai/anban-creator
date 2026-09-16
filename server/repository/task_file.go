@@ -592,6 +592,11 @@ func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context,
 			return fmt.Errorf("task file is required")
 		}
 		file.TaskID, file.ExecutionID, file.State = taskID, executionID, model.TaskFileStatePending
+		if preserveMCPArtifacts {
+			// Workspace manifests describe file delivery only. WeChat metadata is
+			// server-owned and may be carried forward solely by content identity.
+			file.MediaID, file.WechatURL = "", ""
+		}
 		if err := validateTaskFileMutation(file); err != nil {
 			return err
 		}
@@ -642,6 +647,14 @@ func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context,
 			seenPaths[pendingFile.FilePath] = struct{}{}
 			incomingPaths = append(incomingPaths, pendingFile.FilePath)
 			effectiveFiles = append(effectiveFiles, pendingFile)
+		}
+		if preserveMCPArtifacts {
+			for _, file := range effectiveFiles {
+				if persisted := pendingByPath[file.FilePath]; canPreserveWechatImageMetadata(persisted, file) {
+					file.MediaID = persisted.MediaID
+					file.WechatURL = persisted.WechatURL
+				}
+			}
 		}
 		if execution.ManifestSealed {
 			if taskFileManifestEqual(pendingFiles, effectiveFiles) {
@@ -708,6 +721,12 @@ func (r *taskFileRepository) replacePendingCurrentExecution(ctx context.Context,
 		}
 		return nil
 	})
+}
+
+func canPreserveWechatImageMetadata(persisted, incoming *model.TaskFile) bool {
+	return persisted != nil && incoming != nil &&
+		persisted.ContentHash != "" && persisted.ContentHash == incoming.ContentHash &&
+		strings.HasPrefix(persisted.MimeType, "image/") && strings.HasPrefix(incoming.MimeType, "image/")
 }
 
 func taskExecutionMCPArtifactPrefix(task *model.Task, executionID string) string {

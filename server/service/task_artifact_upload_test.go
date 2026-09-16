@@ -1553,6 +1553,56 @@ func TestFinalizeTaskArtifactManifestPreservesExecutionMCPArtifacts(t *testing.T
 	}
 }
 
+func TestFinalizeTaskArtifactManifestPreservesWechatMetadataForIdenticalWorkspaceImage(t *testing.T) {
+	svc, repo, store, task := newTaskArtifactTestService(t)
+	ctx := context.Background()
+	executionID := startTaskArtifactExecution(t, repo, task)
+	original, err := svc.UploadExecutionTaskFileFromReader(
+		ctx, task.ID, task.UserID, executionID,
+		"output/cover.png", strings.NewReader("image"), "image/png", 5,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateTaskFileMetadata(
+		ctx, original, model.FileRoleCover, "cover-media-id", "https://mmbiz.qpic.cn/cover.png",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaceKey := expectedTaskArtifactFinalKey(task, executionID, original.ContentHash, original.FilePath)
+	store.stats = map[string]*storage.ObjectInfo{
+		workspaceKey: {
+			Key: workspaceKey, Size: original.FileSize,
+			ContentType: original.MimeType, SHA256: original.ContentHash,
+		},
+	}
+	manifest := TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{{
+			RelativePath: original.FilePath, ObjectKey: workspaceKey,
+			ContentType: original.MimeType, Size: original.FileSize,
+			SHA256: original.ContentHash, Role: model.FileRoleCover,
+		}},
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatalf("identical manifest replay: %v", err)
+	}
+
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("execution rows = %#v, err=%v", rows, err)
+	}
+	got := rows[0]
+	if got.ID != original.ID || got.OSSKey != workspaceKey || got.Role != model.FileRoleCover ||
+		got.MediaID != "cover-media-id" || got.WechatURL != "https://mmbiz.qpic.cn/cover.png" {
+		t.Fatalf("finalized cover = %#v, want workspace delivery with preserved WeChat metadata", got)
+	}
+}
+
 func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(t *testing.T) {
 	repo, db := newBillingServiceRepositoryWithDB(t)
 	fixture := newBillingWalletFixtureWithRepository(t, repo, 500, 0, 0)

@@ -814,7 +814,44 @@ func TestTaskFileRepositoryReplacePendingExecutionEmptyManifestPreservesLockedMC
 	}
 }
 
-func TestTaskFileRepositoryWorkspaceManifestRejectsLateMCPUpsertForCollidingPath(t *testing.T) {
+func TestTaskFileRepositoryWorkspaceManifestPreservesWechatMetadataForIdenticalMCPImage(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := context.Background()
+	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
+	original, err := repo.TaskFiles().UpsertPendingCurrentExecution(ctx, "t1", "e1", &model.TaskFile{
+		Role: model.FileRoleImage, FilePath: "output/cover.png", FileName: "mcp-cover.png",
+		MimeType: "image/png", FileSize: 11, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/mcp/output/cover.png",
+		OSSURL: "https://mcp.example/cover.png", StorageProvider: "oss",
+		MediaID: "mcp-media", WechatURL: "https://mcp.example/wechat",
+	})
+	if err != nil {
+		t.Fatalf("initial MCP upsert: %v", err)
+	}
+	workspace := &model.TaskFile{
+		Role: model.FileRoleCover, FilePath: "output/cover.png", FileName: "cover.png",
+		MimeType: "image/png", FileSize: 11, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/cover.png",
+		OSSURL: "https://workspace.example/cover.png", StorageProvider: "oss",
+		MediaID: "untrusted-media", WechatURL: "https://untrusted.example/wechat",
+	}
+	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{workspace}); err != nil {
+		t.Fatalf("workspace replacement: %v", err)
+	}
+
+	rows, err := repo.TaskFiles().FindByExecutionID(ctx, "e1")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("execution rows = %#v, err=%v", rows, err)
+	}
+	got := rows[0]
+	if got.ID != original.ID || got.Role != workspace.Role || got.FileName != workspace.FileName ||
+		got.ContentHash != workspace.ContentHash || got.OSSKey != workspace.OSSKey ||
+		got.MediaID != "mcp-media" || got.WechatURL != "https://mcp.example/wechat" {
+		t.Fatalf("workspace artifact = %#v, want workspace delivery with preserved WeChat metadata", got)
+	}
+}
+
+func TestTaskFileRepositoryWorkspaceManifestInvalidatesWechatMetadataWhenContentChanges(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()
 	seedCurrentTaskForArtifacts(t, repo, "t1", "e1")
@@ -833,7 +870,7 @@ func TestTaskFileRepositoryWorkspaceManifestRejectsLateMCPUpsertForCollidingPath
 		MimeType: "image/webp", FileSize: 22, ContentHash: strings.Repeat("b", 64),
 		OSSKey: "uploads/users/u-t1/projects/p-t1/tasks/t1/executions/e1/artifacts/output/cover.png",
 		OSSURL: "https://workspace.example/cover.webp", StorageProvider: "oss",
-		MediaID: "workspace-media", WechatURL: "https://workspace.example/wechat",
+		MediaID: "untrusted-media", WechatURL: "https://untrusted.example/wechat",
 	}
 	if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx, "t1", "e1", []*model.TaskFile{workspace}); err != nil {
 		t.Fatalf("workspace replacement: %v", err)
@@ -857,7 +894,7 @@ func TestTaskFileRepositoryWorkspaceManifestRejectsLateMCPUpsertForCollidingPath
 	if got.ID != original.ID || got.Role != workspace.Role || got.FileName != workspace.FileName ||
 		got.MimeType != workspace.MimeType || got.FileSize != workspace.FileSize || got.ContentHash != workspace.ContentHash ||
 		got.OSSKey != workspace.OSSKey || got.OSSURL != workspace.OSSURL || got.StorageProvider != workspace.StorageProvider ||
-		got.MediaID != workspace.MediaID || got.WechatURL != workspace.WechatURL {
+		got.MediaID != "" || got.WechatURL != "" {
 		t.Fatalf("workspace artifact changed after late MCP upsert: %#v", got)
 	}
 }
