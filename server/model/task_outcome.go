@@ -28,9 +28,12 @@ type TaskReviewOutcome struct {
 }
 
 type TaskPublicationOutcome struct {
-	Status  TaskPublicationStatus `json:"status"`
-	Code    string                `json:"code,omitempty"`
-	Message string                `json:"message,omitempty"`
+	Status     TaskPublicationStatus `json:"status"`
+	Code       string                `json:"code,omitempty"`
+	Message    string                `json:"message,omitempty"`
+	Attempted  bool                  `json:"attempted"`
+	Action     string                `json:"action,omitempty"`
+	OccurredAt string                `json:"occurred_at,omitempty"`
 }
 
 type TaskOutcomeWarning struct {
@@ -66,6 +69,7 @@ const (
 	TaskReviewUnavailable TaskReviewStatus = "unavailable"
 
 	TaskPublicationSucceeded    TaskPublicationStatus = "succeeded"
+	TaskPublicationBlocked      TaskPublicationStatus = "blocked"
 	TaskPublicationSkipped      TaskPublicationStatus = "skipped"
 	TaskPublicationFailed       TaskPublicationStatus = "failed"
 	TaskPublicationAmbiguous    TaskPublicationStatus = "ambiguous"

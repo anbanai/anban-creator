@@ -69,11 +69,27 @@ export interface BootstrapFile {
   path: string;
   text?: string;
   download_url?: string;
+  content_sha256?: string;
   mode: number;
   expected_size?: number;
   max_bytes?: number;
   replace_existing?: boolean;
 }
+
+const PUBLICATION_RECOVERY_REPLACE_PATHS = new Set([
+  "output/04-article-final.md",
+  "output/content-quality-report.md",
+  "output/marketing-scan.json",
+  "output/seo-result.md",
+  "output/visual-rhythm-plan.md",
+  "output/cover-plan.md",
+  "output/cover-prompt.md",
+  "output/image-plan.md",
+  "output/05-article.html",
+  "output/final-review.md",
+  "output/viral-audit.md",
+  "output/draft.json",
+]);
 
 export interface ExecutionProfile {
   profile_id: "effective" | "balanced" | "quality";
@@ -467,6 +483,7 @@ export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[]
   for (const file of files) {
     if (!isRecord(file) || !hasOnlyKeys(file, [
       "path", "text", "download_url", "mode", "expected_size", "max_bytes", "replace_existing",
+      "content_sha256",
     ])) throw new Error("bootstrap file contains unknown fields");
     if (file.replace_existing !== undefined && typeof file.replace_existing !== "boolean") {
       throw new Error("bootstrap file replace_existing must be boolean");
@@ -479,6 +496,11 @@ export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[]
     const inline = file.text !== undefined;
     const remote = cleanString(file.download_url ?? "");
     if (inline === remote) throw new Error(`bootstrap file ${relative} must have exactly one content source`);
+    if (file.content_sha256 !== undefined && !/^[0-9a-f]{64}$/.test(file.content_sha256)) throw new Error(`bootstrap file ${relative} has invalid content SHA-256`);
+    if (file.replace_existing && key !== ".anban-creator/settings.json"
+      && (!PUBLICATION_RECOVERY_REPLACE_PATHS.has(key) || !remote || !file.content_sha256)) {
+      throw new Error(`bootstrap file ${relative} cannot replace existing workspace content`);
+    }
     const maxBytes = file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES;
     if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BOOTSTRAP_FILE_BYTES || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
     if (!Number.isInteger(file.mode) || ![0o600, 0o644].includes(file.mode)) throw new Error(`unsafe bootstrap file mode ${file.mode}`);

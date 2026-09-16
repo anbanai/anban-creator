@@ -79,14 +79,21 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 	containerConfig.Labels[dockerTaskIDLabel] = taskID(task)
 	containerConfig.Labels[dockerProjectIDLabel] = projectID(task)
 	containerConfig.Labels[dockerUserIDLabel] = dockerTaskUserID(task)
+	workspaceVolumeName := dockerTaskWorkspaceVolumeName(taskID(task))
+	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+		workspaceVolumeName = dockerTaskWorkspaceVolumeName(taskID(task) + "-publication-recovery-" + executionID(execution))
+	}
 	taskVolume := volume.CreateOptions{
-		Name:   dockerTaskWorkspaceVolumeName(taskID(task)),
+		Name:   workspaceVolumeName,
 		Driver: dockerVolumeDriver,
 		Labels: map[string]string{
 			dockerTaskIDLabel:    taskID(task),
 			dockerProjectIDLabel: projectID(task),
 			dockerUserIDLabel:    dockerTaskUserID(task),
 		},
+	}
+	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+		taskVolume.Labels[dockerExecutionIDLabel] = executionID(execution)
 	}
 	return dockerRuntimeSpec{
 		ContainerName:   dockerRuntimeContainerName(executionID(execution)),

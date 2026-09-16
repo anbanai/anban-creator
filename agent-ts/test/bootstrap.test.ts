@@ -347,6 +347,10 @@ describe("validateBootstrapResponse", () => {
     rejected.files = [{ path: ".anban-creator/settings.json", text: "new", mode: 0o600 }];
     (rejected.files[0] as unknown as Record<string, unknown>).replace_existing = "true";
     expect(() => validateBootstrapResponse("execution-1", rejected)).toThrow("replace_existing");
+
+    const arbitrary = validResponse();
+    arbitrary.files = [{ path: "output/arbitrary.txt", download_url: "https://bootstrap.example/file", content_sha256: "a".repeat(64), mode: 0o644, replace_existing: true }];
+    expect(() => validateBootstrapResponse("execution-1", arbitrary)).toThrow("cannot replace existing workspace content");
   });
 
   test("requires an execution-scoped resume context path", () => {

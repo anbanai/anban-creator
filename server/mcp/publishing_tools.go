@@ -89,12 +89,8 @@ func createDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	if projectID == "" {
 		return createDraftErrorResult(createDraftFailure{Code: "create_draft_invalid_payload", Message: "project_id is required", Hint: "Provide the Article project_id", Retryable: false}), nil
 	}
-	identity, ok := getMCPExecutionIdentity(ctx)
-	if !ok {
-		return createDraftErrorResult(createDraftFailure{Code: "create_draft_execution_required", Message: "draft creation requires the current task execution", Hint: "Create the draft from the active Article workflow", Retryable: false}), nil
-	}
-	if identity.UserID != userID || identity.ProjectID != projectID || identity.TaskID != taskID {
-		return createDraftErrorResult(createDraftFailure{Code: "create_draft_execution_mismatch", Message: "draft creation is bound to the current task execution", Hint: "Use the task and project associated with the active execution", Retryable: false}), nil
+	if _, managedExecution := getMCPExecutionIdentity(ctx); managedExecution || hasMCPScope(ctx, "managed") {
+		return createDraftErrorResult(createDraftFailure{Code: "create_draft_managed_forbidden", Message: "managed executions cannot create WeChat drafts directly", Hint: "Complete the Article workflow so the Server finalizer can validate and publish it", Retryable: false}), nil
 	}
 
 	// Parse articles from JSON.
@@ -112,7 +108,7 @@ func createDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		return createDraftErrorResult(createDraftFailure{Code: "create_draft_invalid_payload", Message: "exactly one article is required", Hint: "Provide one article in articles", Retryable: false}), nil
 	}
 
-	publication, err := svcs.WechatPublicationSvc.CreateDraft(ctx, userID, taskID, projectID, identity.ExecutionID, appwechat.DraftAddRequest{Articles: articles})
+	publication, err := svcs.WechatPublicationSvc.CreateDraftInteractive(ctx, userID, taskID, projectID, appwechat.DraftAddRequest{Articles: articles})
 	if err != nil {
 		return createDraftErrorResult(classifyCreateDraftFailure(err)), nil
 	}

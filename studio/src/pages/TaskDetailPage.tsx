@@ -58,7 +58,7 @@ const outcomeLabels = {
   core_delivery: { complete: '核心交付完整', none: '无核心交付' },
   visual: { complete: '视觉完整', partial: '视觉部分完成', not_requested: '未请求视觉' },
   review: { passed: '审核通过', warning: '审核有警告', unavailable: '审核不可用' },
-  publication: { succeeded: '草稿已创建', skipped: '草稿未投递', failed: '草稿创建失败', ambiguous: '草稿结果未确认', not_requested: '未请求草稿' },
+  publication: { succeeded: '草稿已进入草稿箱', blocked: '发布待处理', skipped: '草稿未投递', failed: '草稿创建失败', ambiguous: '草稿状态待核对', not_requested: '未请求草稿' },
 } as const
 
 function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
@@ -88,7 +88,7 @@ function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
             <div key={`${warning.code}-${index}`} className="flex items-start gap-2 text-sm text-amber-950 dark:text-amber-100">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span className="break-words">
-                {warning.code === 'publication_ambiguous'
+                {warning.code.startsWith('publication_')
                   ? outcome.publication.message || '微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。'
                   : warning.message}
               </span>
@@ -651,6 +651,10 @@ export default function TaskDetailPage() {
 	const canCancel = task.status === 'pending' || task.status === 'running'
 	const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
 	const canResume = task.status === 'failed' || task.status === 'cancelled'
+  const publicationNeedsAttention = task.status === 'completed'
+    && task.outcome !== undefined
+    && task.outcome.publication.status !== 'succeeded'
+    && task.outcome.publication.status !== 'not_requested'
   const failurePresentation = taskFailurePresentation(task)
   const failureMessage = failurePresentation?.message || taskFailureMessage(task)
   const currentTask = task
@@ -687,7 +691,8 @@ export default function TaskDetailPage() {
     <div className="space-y-6">
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {task?.status === 'completed' && '任务已完成'}
+        {publicationNeedsAttention && '内容已完成，发布待处理'}
+        {task.status === 'completed' && !publicationNeedsAttention && '任务已完成'}
         {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '任务失败')}
         {task?.status === 'cancelled' && '任务已取消'}
       </div>
@@ -714,7 +719,9 @@ export default function TaskDetailPage() {
                 {renderPlatformIcon(task.type)}
                 {contentTypeLabel[task.type] || task.type}
               </Badge>
-            <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
+            <Badge variant={statusBadgeVariant(task.status)}>
+              {publicationNeedsAttention ? '内容已完成，发布待处理' : taskStatusLabel[task.status] || task.status}
+            </Badge>
             {project && (
               <button
                 type="button"

@@ -23,8 +23,11 @@ func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
 	if strings.Contains(pack, "path: output/final-review.md, mime_type: text/markdown, required: true") {
 		t.Fatal("final review must be optional")
 	}
-	if got := strings.Count(pack, "required: true"); got != 2 {
-		t.Fatalf("required artifacts = %d, want exactly 2", got)
+	if !strings.Contains(pack, "path: output/draft.json, mime_type: application/json, required: true") {
+		t.Fatal("article pack must require the Server publication package")
+	}
+	if got := strings.Count(pack, "required: true"); got != 3 {
+		t.Fatalf("required artifacts = %d, want exactly 3", got)
 	}
 }
 
@@ -57,12 +60,15 @@ func TestArticleAgentKeepsDraftPublicationIndependent(t *testing.T) {
 			t.Fatal(err)
 		}
 		agent := string(raw)
+		if strings.Contains(agent, "create_draft") || strings.Contains(agent, "draft-result.json") {
+			t.Fatalf("%s still contains an Agent-owned publication call/result", path)
+		}
 		if strings.Contains(agent, "`create_draft` 成功、最终 feedback") ||
 			strings.Contains(agent, "草稿创建成功，可通过公众号后台查看") ||
 			strings.Contains(agent, "create_draft` 实际调用失败立即写") {
 			t.Fatalf("%s still makes draft publication part of core delivery success", path)
 		}
-		for _, required := range []string{"output/draft-result.json", "草稿创建失败不影响 Markdown/HTML 交付", "marketing-scan.json.status=block_publish"} {
+		for _, required := range []string{"output/draft.json", "Server", "readiness"} {
 			if !strings.Contains(agent, required) {
 				t.Fatalf("%s missing independent publication rule %q", path, required)
 			}
@@ -70,29 +76,37 @@ func TestArticleAgentKeepsDraftPublicationIndependent(t *testing.T) {
 	}
 }
 
-func TestArticleDraftRetryIsBoundedByStructuredFailure(t *testing.T) {
+func TestArticleDraftRetryIsServerOwned(t *testing.T) {
+	raw, err := os.ReadFile("../../harness/skills/article-publishing/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(raw)
+	for _, required := range []string{
+		"显式交互式发布工作流",
+		"调用一次 `create_draft",
+		"调用后不在 Agent 侧重试",
+		"幂等、安全重试、对账和终态均由 Server 负责",
+	} {
+		if !strings.Contains(contract, required) {
+			t.Errorf("article-publishing skill missing Server-owned retry rule %q", required)
+		}
+	}
+	if strings.Contains(contract, "`retryable=true`") {
+		t.Fatal("article-publishing skill still delegates create_draft retries to the Agent")
+	}
+
 	for _, path := range []string{
 		"../../harness/packs/article/agent.claude.md",
 		"../../harness/packs/article/agent.codex.toml",
 		"../../harness/packs/article/agent.dsh.yml",
-		"../../harness/skills/article-publishing/SKILL.md",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		contract := string(raw)
-		for _, required := range []string{
-			"`retryable=true`",
-			"完全相同",
-			"最多重试一次",
-			"`retryable=false`",
-			"结果不明确",
-			"不得重试",
-		} {
-			if !strings.Contains(contract, required) {
-				t.Errorf("%s missing bounded create_draft retry rule %q", path, required)
-			}
+		if strings.Contains(string(raw), "create_draft") {
+			t.Fatalf("managed Article path %s still invokes create_draft", path)
 		}
 	}
 }

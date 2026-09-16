@@ -118,9 +118,12 @@ func validCreateDraftArgs(f *publishingToolFixture) map[string]any {
 	}
 }
 
+func interactivePublishingContext(f *publishingToolFixture) context.Context {
+	return withMCPUserID(context.Background(), f.userID)
+}
+
 func managedPublishingContext(f *publishingToolFixture) context.Context {
-	ctx := withMCPUserID(context.Background(), f.userID)
-	return withMCPExecutionIdentity(ctx, f.userID, f.projectID, f.taskID, f.executionID)
+	return withMCPExecutionIdentity(interactivePublishingContext(f), f.userID, f.projectID, f.taskID, f.executionID)
 }
 
 type createDraftToolFailure struct {
@@ -228,7 +231,7 @@ func TestCreateDraftHandlerRequiresAuthenticatedIDsAndArticle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			if tt.user != "" {
-				ctx = managedPublishingContext(f)
+				ctx = interactivePublishingContext(f)
 			}
 			result, err := createDraftHandler(ctx, createDraftToolRequest(t, tt.args))
 			if err != nil {
@@ -245,18 +248,32 @@ func TestCreateDraftHandlerRequiresAuthenticatedIDsAndArticle(t *testing.T) {
 	}
 }
 
-func TestCreateDraftHandlerRequiresExecutionIdentity(t *testing.T) {
+func TestCreateDraftHandlerAllowsExplicitInteractiveUser(t *testing.T) {
 	f := newPublishingToolFixture(t)
-	result, err := createDraftHandler(withMCPUserID(context.Background(), f.userID), createDraftToolRequest(t, validCreateDraftArgs(f)))
+	result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("interactive create_draft = %#v, want success", result)
+	}
+	if f.api.addCalls != 1 {
+		t.Fatalf("interactive draft/add calls = %d, want 1", f.api.addCalls)
+	}
+}
+
+func TestCreateDraftHandlerRejectsManagedExecutionAuthority(t *testing.T) {
+	f := newPublishingToolFixture(t)
+	result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	failure := decodeCreateDraftToolFailure(t, result)
-	if failure.Code != "create_draft_execution_required" || failure.Retryable {
-		t.Fatalf("failure = %#v, want execution identity requirement", failure)
+	if failure.Code != "create_draft_managed_forbidden" || failure.Retryable {
+		t.Fatalf("failure = %#v, want managed authority rejection", failure)
 	}
 	if f.api.addCalls != 0 || f.api.draftListCalls != 0 {
-		t.Fatalf("unscoped draft request reached WeChat: add=%d list=%d", f.api.addCalls, f.api.draftListCalls)
+		t.Fatalf("managed draft request reached WeChat: add=%d list=%d", f.api.addCalls, f.api.draftListCalls)
 	}
 }
 
@@ -267,7 +284,7 @@ func TestCreateDraftHandlerBlocksMarketingRiskBeforeWechat(t *testing.T) {
 		"title":   "添加我微信即可领取资料",
 		"content": `<p>正文内容。</p>`,
 	}}
-	result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, args))
+	result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, args))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +304,7 @@ func TestCreateDraftHandlerAllowsBodyImageURLsAndWarningOnlyClaims(t *testing.T)
 		"title":   "Title",
 		"content": `<p>这款茶被称为全网第一，仍需读者自行判断。</p><img src="https://mmbiz.qpic.cn/example.png" alt="春茶茶园">`,
 	}}
-	result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, args))
+	result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, args))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +347,6 @@ func TestCreateDraftHandlerRejectsOwnershipAndProjectMismatchBeforeWechat(t *tes
 			args["task_id"] = tt.taskID
 			args["project_id"] = tt.projectID
 			ctx := withMCPUserID(context.Background(), tt.user)
-			ctx = withMCPExecutionIdentity(ctx, tt.user, tt.projectID, tt.taskID, "execution-1")
 			result, err := createDraftHandler(ctx, createDraftToolRequest(t, args))
 			if err != nil {
 				t.Fatal(err)
@@ -353,7 +369,7 @@ func TestCreateDraftHandlerRejectsDuplicateContentImagesBeforeWechat(t *testing.
 		"title":   "Title",
 		"content": `<p>Body</p><img src="https://cdn/same.png"><img src="https://cdn/same.png">`,
 	}}
-	result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, args))
+	result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, args))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +418,6 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 		args := validCreateDraftArgs(f)
 		args["task_id"] = uuid.NewString()
 		ctx := withMCPUserID(context.Background(), f.userID)
-		ctx = withMCPExecutionIdentity(ctx, f.userID, f.projectID, args["task_id"].(string), "execution-1")
 		result, err := createDraftHandler(ctx, createDraftToolRequest(t, args))
 		if err != nil {
 			t.Fatal(err)
@@ -423,7 +438,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 		if err := f.repo.Projects().Update(context.Background(), project); err != nil {
 			t.Fatal(err)
 		}
-		result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
+		result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -435,7 +450,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 
 	t.Run("request conflict", func(t *testing.T) {
 		f := newPublishingToolFixture(t)
-		ctx := managedPublishingContext(f)
+		ctx := interactivePublishingContext(f)
 		if result, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f))); err != nil || result.IsError {
 			t.Fatalf("first create = %#v err=%v", result, err)
 		}
@@ -453,7 +468,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 
 	t.Run("pending reconciliation", func(t *testing.T) {
 		f := newPublishingToolFixture(t)
-		ctx := managedPublishingContext(f)
+		ctx := interactivePublishingContext(f)
 		f.api.addError = errors.New("ambiguous provider response")
 		if _, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f))); err != nil {
 			t.Fatal(err)
@@ -472,7 +487,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 	t.Run("provider failure is sanitized", func(t *testing.T) {
 		f := newPublishingToolFixture(t)
 		f.api.addError = errors.New("provider secret token abc")
-		result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
+		result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +503,7 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 
 func TestCreateDraftHandlerRetriesUnsupportedCapabilityAfterRepair(t *testing.T) {
 	f := newPublishingToolFixture(t)
-	ctx := managedPublishingContext(f)
+	ctx := interactivePublishingContext(f)
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
 	result, err := createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
@@ -515,7 +530,7 @@ func TestCreateDraftHandlerRetriesUnsupportedCapabilityAfterRepair(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ctx = withMCPExecutionIdentity(withMCPUserID(context.Background(), f.userID), f.userID, f.projectID, f.taskID, newExecutionID)
+	ctx = interactivePublishingContext(f)
 	result, err = createDraftHandler(ctx, createDraftToolRequest(t, validCreateDraftArgs(f)))
 	if err != nil {
 		t.Fatal(err)
@@ -534,7 +549,7 @@ func TestCreateDraftHandlerRetriesUnsupportedCapabilityAfterRepair(t *testing.T)
 
 func TestCreateDraftHandlerReturnsOnlyLifecycleDraftFields(t *testing.T) {
 	f := newPublishingToolFixture(t)
-	result, err := createDraftHandler(managedPublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
+	result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
 	if err != nil {
 		t.Fatal(err)
 	}

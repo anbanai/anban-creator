@@ -17,6 +17,13 @@ The `app/` directory is a **library** (no `main.go`) providing content creation 
 
 Claude Code and Codex share one repository-owned plugin source at `harness/`. Third-party dependencies remain submodules and should be initialized before Docker builds. The `sidecar-ilink` image used by the iLink WeChat assistant channel is fetched from `lich0821/wcfLink` by `deploy/docker/Dockerfile.sidecar-ilink` at build time.
 
+## Server / Harness / MCP Boundary
+
+- Harness (the managed Agent and its Skills) owns non-deterministic content and image generation, semantic quality judgments, and file-backed artifacts. It never decides or triggers automatic WeChat draft publication.
+- Server owns identity and frozen project facts, publication policy, state transitions, credentials, external side effects, idempotency, retries, billing, persistence, reconciliation, and user-visible outcomes. Automatic article publication is initiated only by the Server finalizer.
+- MCP is a stateless atomic capability transport. An MCP handler authenticates and validates one capability, then returns its result; it does not orchestrate a workflow or own the terminal publication state. The interactive `create_draft` capability remains available only for explicit interactive calls.
+- `output/draft.json` is a versioned handoff package. Agent-provided author, cover media IDs, publication results, logs, or ambiguous states are not authoritative; Server derives author from the frozen project snapshot and cover media from current execution files.
+
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
 - **Language**: Go 1.26.0 (Server + app library), TypeScript (Agent + Studio + miniapp), Rust (desktop Tauri core)
@@ -246,7 +253,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 8. **修改插件/Skill 必须更新版本号**：每次修改 `harness/` 下的运行资产（agents、skills/`SKILL.md`、hooks、themes、writers、manifest、安装脚本或会影响插件运行/发布的文档）时，必须在同一次变更中同步更新 `.claude-plugin/plugin.json` 与 `.codex-plugin/plugin.json` 的 `version`。默认 bump patch，除非变更范围需要 minor/major。
 9. **优先基于 Claude Code / Agentic-first 思想设计**：所有面向 Claude Code 的功能、插件、Agent、Skill、Hook、MCP 接入和执行流程，都必须优先站在 Claude Code 官方能力与约定之上进行拓展，充分利用 Claude Code 已提供的 Agent、Skill、Hook、MCP、配置、权限、上下文管理、工具调用和工作流能力。系统级功能（server、agent runner、scheduler、task execution、Studio workflow、人机协作入口等）也遵循同一原则：优先参考 AI 时代 Claude Code 体现的 agentic 前卫思想来设计，把复杂工作交给具备上下文、工具调用、计划执行、可观察进度和可恢复性的 Agent 工作流承载，而不是退回传统的硬编码流程或封闭式表单向导。不要在仓库内自造一套重复的调度、插件、工具发现、上下文注入或执行框架；只有在官方能力无法满足当前产品需求、且已有方案经过明确评估后，才允许实现必要的最小补充，并在代码或文档中说明原因。
 10. **网络失败时使用本地代理重试**：执行依赖下载、Git、`curl` 或其他联网命令时，如果直连网络不可用，使用 `HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897` 为该命令临时设置代理后重试；不要因此永久修改仓库或系统的全局代理配置。
-11. **MCP 只承载原子能力**：MCP is a stateless capability transport. Agents and Skills own business workflow orchestration，包括调用顺序、重试、质量闸门和停止/继续决策。MCP handler 只允许完成身份解析、协议与安全校验、调用 one application capability，并编码结果；禁止组合多个领域 Service 或按结果继续调用另一能力。需要保持一致性的持久化与结算必须封装在应用 Service 的原子操作中。
+11. **MCP 只承载原子能力**：MCP is a stateless capability transport. Agents and Skills 只拥有非确定性创作流程的编排，包括创作步骤、供应商重试、语义质量闸门和停止/继续决策；确定性业务状态、外部副作用、幂等、对账和恢复重试属于 Server。MCP handler 只允许完成身份解析、协议与安全校验、调用 one application capability，并编码结果；禁止组合多个领域 Service 或按结果继续调用另一能力。需要保持一致性的持久化与结算必须封装在应用 Service 的原子操作中。
 
 ## Development Patterns
 

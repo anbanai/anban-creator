@@ -20,6 +20,13 @@ Plugin assets have one canonical source at `harness/`:
 - `agents/*.md` are Claude Code Agents; `agents/*.toml` are Codex subagents.
 - `.mcp.json`/`hooks/hooks.json` are Claude adapters; Codex MCP and subagents are registered through `install/`, with completion checks embedded in TOML instructions.
 
+## Server / Harness / MCP Boundary
+
+- Harness owns non-deterministic content/image generation, semantic review, and file artifacts only. Managed Article Agents must hand off `output/draft.json` and must not trigger automatic WeChat draft publication.
+- Server owns identity, frozen snapshots, publication readiness policy, external WeChat calls, state machines, idempotency, retries, billing, persistence, reconciliation, and public outcomes. Only the Server finalizer may automatically create or formally publish a WeChat article.
+- MCP is an atomic, stateless transport layer. It may authenticate, validate, invoke one capability, and encode its result, but it must not compose workflow steps or decide the final publication state. Explicit interactive draft creation remains an independent MCP capability.
+- Never treat Agent logs or legacy result files as evidence that WeChat received a request. `ambiguous` is valid only when durable publication evidence records a `DraftAddAttemptedAt`.
+
 ## Build And Test Commands
 
 ### Go
@@ -210,7 +217,7 @@ Before claiming completion, run fresh verification that matches the changed surf
 
 - Prefer current project patterns over introducing new frameworks.
 - For Claude Code-facing features and system-level workflows, design agentic-first: build on official Claude Code capabilities and conventions such as Agents, Skills, Hooks, MCP, configuration, permissions, context management, tool calls, observable progress, and recoverable workflows. Let complex work live in agent workflows instead of duplicating scheduling, plugin discovery, context injection, tool execution, or closed form-wizard frameworks inside the repository. Add custom infrastructure only when official capabilities cannot meet the product need, and document the reason.
-- MCP is a stateless capability transport. Agents and Skills own business workflow orchestration, including sequencing, retries, quality gates, and stop/continue decisions. An MCP handler may authenticate, validate protocol and security constraints, invoke one application capability, and encode its result. It must not compose multiple domain services or conditionally run another capability. Atomic persistence and settlement belong in the application service.
+- MCP is a stateless capability transport. Agents and Skills own orchestration only within non-deterministic generation workflows, including creative sequencing, provider retries, semantic quality gates, and stop/continue decisions. Deterministic business state, external side effects, idempotency, reconciliation, and recovery retries belong to the Server. An MCP handler may authenticate, validate protocol and security constraints, invoke one application capability, and encode its result. It must not compose multiple domain services or conditionally run another capability. Atomic persistence and settlement belong in the application service.
 - Keep behavior changes covered by tests.
 - Do not preserve obsolete compatibility paths in this new project unless a current product path depends on them.
 - Do not revert user or submodule changes you did not make.

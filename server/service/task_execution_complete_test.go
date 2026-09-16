@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	appwechat "github.com/anbanai/anban-creator/app/wechat"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -67,6 +68,9 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
+	visualsDisabled := false
+	task.ArticleWithCover = &visualsDisabled
+	task.ArticleWithContentImages = &visualsDisabled
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -116,6 +120,9 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		if err := repo.TaskFiles().BatchCreate(context.Background(), files); err != nil {
 			t.Fatal(err)
 		}
+		addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", validTaskDeliveryFixtureBody("output/marketing-scan.json", "application/json"))
+		addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPASS\n"))
+		addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPASS\n"))
 		if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(context.Background(), task.ID, execution.ID, nil); err != nil {
 			t.Fatalf("seal cloud execution manifest: %v", err)
 		}
@@ -189,7 +196,7 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 2 {
+	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 6 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
 	}
 }
@@ -222,8 +229,8 @@ func TestCompleteCloudExecutionUsesValidatedCoreArtifactsAfterProviderPolicyFail
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 2 {
-		t.Fatalf("delivered files=%d, want 2", len(files))
+	if len(files) != 6 {
+		t.Fatalf("delivered files=%d, want 6", len(files))
 	}
 	var stored agent.ExecutionResult
 	if err := json.Unmarshal(foundExecution.Result, &stored); err != nil {
@@ -278,7 +285,8 @@ func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
 	if outcome.CoreDelivery.Status != model.TaskCoreDeliveryComplete ||
 		outcome.Visual.Status != model.TaskVisualPartial ||
 		outcome.Review.Status != model.TaskReviewWarning ||
-		outcome.Publication.Status != model.TaskPublicationSkipped {
+		outcome.Publication.Status != model.TaskPublicationBlocked ||
+		outcome.Publication.Code != "cover_media_missing" || outcome.Publication.Attempted {
 		t.Fatalf("outcome dimensions = %#v", outcome)
 	}
 	if outcome.Diagnostic == nil || outcome.Diagnostic.Provider != execution.Provider ||
@@ -293,7 +301,7 @@ func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
 	for _, warning := range outcome.Warnings {
 		warningCodes[warning.Code] = true
 	}
-	for _, code := range []string{"provider_policy_rejection", "visual_partial", "review_warning", "publication_skipped", "artifact_upload_failed"} {
+	for _, code := range []string{"provider_policy_rejection", "visual_partial", "review_warning", "artifact_upload_failed"} {
 		if !warningCodes[code] {
 			t.Fatalf("missing warning %q in %#v", code, outcome.Warnings)
 		}
@@ -327,7 +335,7 @@ func TestCompleteCloudExecutionExposesRecordedDraftFailure(t *testing.T) {
 	}
 }
 
-func TestCompleteCloudExecutionPreservesDraftArtifactFailureCode(t *testing.T) {
+func TestCompleteCloudExecutionIgnoresLegacyDraftResultArtifact(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	draftBody, _ := json.Marshal(map[string]string{
 		"status": "failed", "code": "create_draft_execution_mismatch", "content_hash": cloudArticleFixtureHash(),
@@ -341,9 +349,8 @@ func TestCompleteCloudExecutionPreservesDraftArtifactFailureCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationFailed ||
-		found.Outcome.Publication.Code != "create_draft_execution_mismatch" ||
-		found.Outcome.Publication.Message != "任务执行状态不匹配，本次没有提交到微信。" {
+	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationBlocked ||
+		found.Outcome.Publication.Code != "publication_service_unavailable" || found.Outcome.Publication.Attempted {
 		t.Fatalf("publication outcome = %#v", found.Outcome)
 	}
 }
@@ -359,6 +366,18 @@ func TestPublicationTaskOutcomeDropsUnknownArtifactCode(t *testing.T) {
 	}
 }
 
+func TestPublicationTaskOutcomeKeepsManagedImageProvenanceFailure(t *testing.T) {
+	execution := &model.TaskExecution{
+		DraftDeliveryStatus: model.TaskExecutionDraftDeliveryFailed,
+		DraftDeliveryResult: []byte(`{"status":"failed","code":"content_image_source_invalid","attempted":false,"action":"review_content"}`),
+	}
+	outcome := publicationTaskOutcome(execution)
+	if outcome.Code != "content_image_source_invalid" || outcome.Attempted || outcome.Action != "review_content" ||
+		outcome.Message != "正文图片不属于当前任务执行，微信尚未收到请求。" {
+		t.Fatalf("publication outcome = %#v", outcome)
+	}
+}
+
 func TestCompleteCloudExecutionDoesNotTrustStaleArticleStatusArtifacts(t *testing.T) {
 	for _, tt := range []struct {
 		name            string
@@ -368,9 +387,9 @@ func TestCompleteCloudExecutionDoesNotTrustStaleArticleStatusArtifacts(t *testin
 		wantDraft       string
 		wantPublication model.TaskPublicationStatus
 	}{
-		{name: "marketing scan missing hash", path: "output/marketing-scan.json", status: "block_publish", wantDraft: model.TaskExecutionDraftDeliveryNotRequested, wantPublication: model.TaskPublicationNotRequested},
-		{name: "marketing scan mismatched hash", path: "output/marketing-scan.json", status: "block_publish", contentHash: strings.Repeat("a", 64), wantDraft: model.TaskExecutionDraftDeliveryNotRequested, wantPublication: model.TaskPublicationNotRequested},
-		{name: "draft result mismatched hash", path: "output/draft-result.json", status: "skipped", contentHash: strings.Repeat("b", 64), wantDraft: model.TaskExecutionDraftDeliveryAmbiguous, wantPublication: model.TaskPublicationAmbiguous},
+		{name: "marketing scan missing hash", path: "output/marketing-scan.json", status: "block_publish", wantDraft: model.TaskExecutionDraftDeliveryBlocked, wantPublication: model.TaskPublicationBlocked},
+		{name: "marketing scan mismatched hash", path: "output/marketing-scan.json", status: "block_publish", contentHash: strings.Repeat("a", 64), wantDraft: model.TaskExecutionDraftDeliveryBlocked, wantPublication: model.TaskPublicationBlocked},
+		{name: "legacy draft result is ignored", path: "output/draft-result.json", status: "skipped", contentHash: strings.Repeat("b", 64), wantDraft: model.TaskExecutionDraftDeliveryBlocked, wantPublication: model.TaskPublicationBlocked},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, repo, task, execution := setupCloudCompletionTest(t, true)
@@ -383,10 +402,369 @@ func TestCompleteCloudExecutionDoesNotTrustStaleArticleStatusArtifacts(t *testin
 			foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 			foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 			if foundExecution.DraftDeliveryStatus != tt.wantDraft || foundTask.Outcome == nil ||
-				foundTask.Outcome.Publication.Status != tt.wantPublication || foundTask.Outcome.Review.Status != model.TaskReviewUnavailable {
+				foundTask.Outcome.Publication.Status != tt.wantPublication {
 				t.Fatalf("draft=%q outcome=%#v", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
 			}
 		})
+	}
+}
+
+func TestCompleteCloudExecutionBlocksArticlePublicationBeforeWechatWhenPackageMissing(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/draft.json").
+		Delete(&model.TaskFile{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "publication_package_missing" || result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 0 || api.draftListCalls != 0 {
+		t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+	}
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication intent unexpectedly exists: %v", err)
+	}
+}
+
+func TestResolveCloudDraftDeliveryDoesNotPublishFailedExecution(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).
+		Update("status", model.TaskExecutionFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	execution.Status = model.TaskExecutionFailed
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "must-not-publish"},
+	}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.resolveCloudDraftDelivery(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryNotRequested || result.Code != "execution_not_succeeded" || result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 0 || api.draftListCalls != 0 {
+		t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+	}
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication intent unexpectedly exists: %v", err)
+	}
+}
+
+func TestCompleteCloudExecutionBlocksWhenRequestedContentImageIsNotInFinalHTML(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withContentImages := true
+	withoutCover := false
+	task.ArticleWithContentImages = &withContentImages
+	task.ArticleWithCover = &withoutCover
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", tinyImagePNG(t))
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
+		Updates(map[string]any{
+			"role": model.FileRoleImage, "wechat_url": "https://mmbiz.qpic.cn/current-execution.png",
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationBlocked ||
+		found.Outcome.Publication.Code != "content_images_missing" || found.Outcome.Publication.Attempted {
+		t.Fatalf("publication outcome = %#v", found.Outcome)
+	}
+	if api.addCalls != 0 || api.draftListCalls != 0 {
+		t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+	}
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication intent unexpectedly exists: %v", err)
+	}
+}
+
+func TestFinalizeArticlePublicationRejectsBodyImageOutsideCurrentExecution(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withContentImages := true
+	withoutCover := false
+	task.ArticleWithContentImages = &withContentImages
+	task.ArticleWithCover = &withoutCover
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	htmlBody := []byte(`<p>Final article</p><img src="https://mmbiz.qpic.cn/not-this-execution.png">`)
+	htmlHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	packageBody, _ := json.Marshal(map[string]any{
+		"schema_version": "1.0",
+		"article": map[string]string{
+			"title": "Server owned draft", "digest": "A deterministic package",
+			"content_path": "output/05-article.html", "content_sha256": htmlHash,
+		},
+		"readiness": map[string]any{
+			"status": "ready", "code": "",
+			"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+	})
+	scanBody, _ := json.Marshal(map[string]any{
+		"version": "1.0", "status": "passed", "content_hash": cloudArticleFixtureHash(), "findings": []any{},
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/05-article.html", "text/html", htmlBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft.json", "application/json", packageBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
+	if err := db.Model(&model.TaskFile{}).
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
+		Updates(map[string]any{
+			"role": model.FileRoleImage, "wechat_url": "https://mmbiz.qpic.cn/current-execution.png",
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryFailed || result.Code != "content_image_source_invalid" || result.Attempted {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 0 || api.draftListCalls != 0 {
+		t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+	}
+}
+
+func TestFinalizeArticlePublicationRejectsContradictoryReadinessContract(t *testing.T) {
+	tests := []struct {
+		name          string
+		code          string
+		evidencePaths []string
+	}{
+		{
+			name: "ready with blocking code", code: "cover_generation_failed",
+			evidencePaths: []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+		{
+			name:          "duplicate evidence",
+			evidencePaths: []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md", "output/viral-audit.md"},
+		},
+		{
+			name:          "extra evidence",
+			evidencePaths: []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md", "output/untrusted.json"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+			ctx := context.Background()
+			files, err := repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := svc.store.(*fakeTaskStorage)
+			var htmlBody []byte
+			for _, file := range files {
+				if file.FilePath == "output/05-article.html" {
+					htmlBody = store.files[file.OSSKey]
+				}
+				if err := db.Model(&model.TaskFile{}).Where("id = ?", file.ID).Update("state", model.TaskFileStateDelivered).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			packageBody, _ := json.Marshal(map[string]any{
+				"schema_version": "1.0",
+				"article": map[string]string{
+					"title": "Server owned draft", "digest": "A deterministic package",
+					"content_path": "output/05-article.html", "content_sha256": fmt.Sprintf("%x", sha256.Sum256(htmlBody)),
+				},
+				"readiness": map[string]any{
+					"status": "ready", "code": tt.code, "evidence_paths": tt.evidencePaths,
+				},
+			})
+			for _, file := range files {
+				if file.FilePath != "output/draft.json" {
+					continue
+				}
+				store.files[file.OSSKey] = packageBody
+				if err := db.Model(&model.TaskFile{}).Where("id = ?", file.ID).Update("file_size", len(packageBody)).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			api := &fakeWechatPublicationAPI{addResponse: &appwechat.DraftAddResponse{MediaID: "must-not-publish"}}
+			logger := zerolog.New(io.Discard)
+			svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger))
+
+			status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != model.TaskExecutionDraftDeliveryFailed || result.Code != "publication_package_invalid" || result.Attempted {
+				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+			if api.addCalls != 0 || api.draftListCalls != 0 {
+				t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+			}
+		})
+	}
+}
+
+func TestCompleteCloudExecutionPublishesReadyArticleExactlyOnce(t *testing.T) {
+	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+	ctx := context.Background()
+	withoutContentImages := false
+	task.ArticleWithContentImages = &withoutContentImages
+	task.SetProjectSnapshot(model.ProjectSnapshot{Author: "Frozen Author", Platform: model.PlatformArticle})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	htmlBody := validTaskDeliveryFixtureBody("output/05-article.html", "text/html")
+	htmlHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	packageBody, _ := json.Marshal(map[string]any{
+		"schema_version": "1.0",
+		"article": map[string]string{
+			"title": "Server owned draft", "digest": "A deterministic package",
+			"content_path": "output/05-article.html", "content_sha256": htmlHash,
+		},
+		"readiness": map[string]any{
+			"status": "ready", "code": "",
+			"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+	})
+	scanBody, _ := json.Marshal(map[string]any{
+		"version": "1.0", "status": "passed", "content_hash": cloudArticleFixtureHash(), "findings": []any{},
+	})
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/draft.json", "application/json", packageBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", tinyImagePNG(t))
+	files, err := repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.FilePath == "output/cover.png" {
+			file.Role = model.FileRoleCover
+			file.MediaID = "cover-media-id"
+			if err := db.Model(&model.TaskFile{}).Where("id = ?", file.ID).Updates(map[string]any{
+				"role": model.FileRoleCover, "media_id": "cover-media-id",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "draft-media-id"},
+	}
+	logger := zerolog.New(io.Discard)
+	publicationSvc := NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger)
+	publicationSvc.now = func() time.Time { return time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC) }
+	svc.SetWechatPublicationService(publicationSvc)
+
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	found, _ := repo.Tasks().FindByID(ctx, task.ID)
+	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationSucceeded ||
+		!found.Outcome.Publication.Attempted {
+		t.Fatalf("publication outcome = %#v", found.Outcome)
+	}
+	if api.addCalls != 1 {
+		t.Fatalf("draft/add calls = %d, want 1", api.addCalls)
+	}
+	publication, err := repo.WechatPublications().FindByTaskID(ctx, task.ID)
+	if err != nil || publication.DraftMediaID != "draft-media-id" || publication.DraftAuthor != "Frozen Author" || publication.DraftThumbMediaID != "cover-media-id" {
+		t.Fatalf("publication = %#v err=%v", publication, err)
+	}
+}
+
+func TestFinalizeCloudDraftDeliveryDoesNotMutateLiveInFlightAttempt(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	ctx := context.Background()
+	evidence := encodedPublicationDeliveryEvidence("create_draft", model.TaskExecutionDraftDeliveryInFlight, "", true, "")
+	if won, err := repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID, "", model.TaskExecutionDraftDeliveryInFlight, evidence); err != nil || !won {
+		t.Fatalf("mark in-flight delivery: won=%v err=%v", won, err)
+	}
+	attemptedAt := time.Now()
+	if err := repo.WechatPublications().Create(ctx, &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, UserID: task.UserID, ProjectID: task.ProjectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+		DraftAddAttemptedAt: &attemptedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.finalizeCloudDraftDelivery(ctx, task, execution, nil); err != nil {
+		t.Fatalf("finalize concurrent in-flight delivery: %v", err)
+	}
+	stored, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryInFlight {
+		t.Fatalf("delivery status = %q, want live in_flight ownership preserved", stored.DraftDeliveryStatus)
 	}
 }
 
@@ -445,10 +823,10 @@ func TestCompleteCloudExecutionDoesNotInferDraftSuccessFromLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryNotRequested {
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryBlocked {
 		t.Fatalf("draft delivery status = %q", foundExecution.DraftDeliveryStatus)
 	}
-	if foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationNotRequested {
+	if foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationBlocked || foundTask.Outcome.Publication.Attempted {
 		t.Fatalf("publication outcome = %#v", foundTask.Outcome)
 	}
 }
@@ -483,6 +861,7 @@ func TestCompleteCloudExecutionDoesNotTrustPublicationForChangedFinalArticle(t *
 		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, UserID: task.UserID, ProjectID: task.ProjectID,
 		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
 		DraftMediaID: "draft-media-id", DraftContentFingerprint: WechatContentFingerprint("<p>different final article</p>"),
+		DraftAddAttemptedAt: func() *time.Time { value := time.Now(); return &value }(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -514,8 +893,8 @@ func TestCompleteCloudExecutionIgnoresDraftPublicationFromEarlierExecution(t *te
 	}
 	foundTask, _ := repo.Tasks().FindByID(ctx, task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(ctx, execution.ID)
-	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryNotRequested ||
-		foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationNotRequested {
+	if foundExecution.DraftDeliveryStatus != model.TaskExecutionDraftDeliveryBlocked ||
+		foundTask.Outcome == nil || foundTask.Outcome.Publication.Status != model.TaskPublicationBlocked || foundTask.Outcome.Publication.Attempted {
 		t.Fatalf("draft=%q outcome=%#v", foundExecution.DraftDeliveryStatus, foundTask.Outcome)
 	}
 }
@@ -534,7 +913,7 @@ func TestCompleteCloudExecutionTreatsMalformedOptionalReportsAsWarnings(t *testi
 	}
 	if found.Status != model.TaskStatusCompleted || found.Outcome == nil ||
 		found.Outcome.Review.Status != model.TaskReviewUnavailable ||
-		found.Outcome.Publication.Status != model.TaskPublicationAmbiguous {
+		found.Outcome.Publication.Status != model.TaskPublicationBlocked || found.Outcome.Publication.Attempted {
 		t.Fatalf("task outcome = %#v", found)
 	}
 }
@@ -547,7 +926,7 @@ func addCloudOutcomeArtifact(t *testing.T, svc *TaskService, repo repository.Rep
 	}
 	key := buildTaskMCPArtifactStoragePrefix(task, execution.ID) + path
 	store.files[key] = append([]byte(nil), body...)
-	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+	if _, err := repo.TaskFiles().Upsert(context.Background(), &model.TaskFile{
 		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStatePending,
 		Role: DetermineTaskFileRole(path, mimeType), FilePath: path, FileName: filepath.Base(path),
 		MimeType: mimeType, FileSize: int64(len(body)), OSSKey: key, OSSURL: store.GetURL(key), StorageProvider: store.Name(),
@@ -925,7 +1304,7 @@ func TestCompleteCloudExecutionConcurrentDuplicate(t *testing.T) {
 	}
 	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 2 {
+	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 6 {
 		t.Fatalf("finalization=%s files=%d", found.FinalizationStatus, len(files))
 	}
 }

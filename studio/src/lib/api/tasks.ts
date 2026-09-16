@@ -61,6 +61,8 @@ export const tasksApi = {
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/retry-publish`)),
   reconcileWechat: (id: string) =>
     unwrap<ReconcileWechatResponse>(http.post(`/tasks/${id}/wechat-publication/reconcile`)),
+  recoverWechatPublication: (id: string) =>
+    unwrap<NonNullable<Task['outcome']>['publication']>(http.post(`/tasks/${id}/wechat-publication/recover`)),
   selectWechatArticle: (id: string, articleId: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/select`, { article_id: articleId })),
 

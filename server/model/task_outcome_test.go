@@ -33,7 +33,7 @@ func TestTaskPublicJSONIncludesTypedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{`"outcome"`, `"core_delivery":{"status":"complete"}`, `"visual":{"status":"partial"}`, `"publication":{"status":"skipped"}`} {
+	for _, fragment := range []string{`"outcome"`, `"core_delivery":{"status":"complete"}`, `"visual":{"status":"partial"}`, `"publication":{"status":"skipped","attempted":false}`} {
 		if !strings.Contains(string(raw), fragment) {
 			t.Fatalf("public task JSON missing %s: %s", fragment, raw)
 		}

@@ -348,7 +348,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"recompute_content_tags":         {RequireTaskID: true, RequireExecution: true},
 	"recompute_agent_feedback":       {RequireTaskID: true, RequireExecution: true},
 	"get_completion_metadata_status": {RequireTaskID: true, RequireExecution: true},
-	"create_draft":                   {RequireProjectID: true, RequireTaskID: true},
+	"create_draft":                   {Denied: true},
 	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"crop_image":                     {RequireTaskID: true},
 	"upload_image":                   {RequireProjectID: true, RequireTaskID: true},
@@ -568,6 +568,11 @@ func getMCPExecutionIdentity(ctx context.Context) (mcpExecutionIdentity, bool) {
 
 func hasMCPTokenInfo(ctx context.Context) bool {
 	return mcpauth.TokenInfoFromContext(ctx) != nil
+}
+
+func hasMCPScope(ctx context.Context, scope string) bool {
+	info := mcpauth.TokenInfoFromContext(ctx)
+	return info != nil && slices.Contains(info.Scopes, strings.TrimSpace(scope))
 }
 
 func getExecutionID(ctx context.Context) string {

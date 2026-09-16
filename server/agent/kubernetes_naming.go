@@ -32,6 +32,14 @@ func kubernetesTaskWorkspacePVCName(taskID string) string {
 	return kubernetesIdentityName(kubernetesWorkspaceNamePrefix, taskID)
 }
 
+func kubernetesExecutionWorkspacePVCName(execution *model.TaskExecution, task *model.Task) string {
+	identity := taskID(task)
+	if execution != nil && execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+		identity += "-publication-recovery-" + executionID(execution)
+	}
+	return kubernetesTaskWorkspacePVCName(identity)
+}
+
 func kubernetesIdentityName(prefix, identity string) string {
 	part := kubernetesSafeNamePart(identity)
 	hash := kubernetesHashSuffix(identity)

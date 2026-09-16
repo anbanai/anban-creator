@@ -365,12 +365,16 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if !swapped {
 			return nil
 		}
+		dispatchTask, err := txRepo.Tasks().FindByIDForUpdate(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("reload claimed task for runtime dispatch: %w", err)
+		}
 
 		attempt, err := txRepo.TaskExecutions().NextAttempt(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("allocate task execution attempt: %w", err)
 		}
-		parent, resumeSessionID, refreshRuntime, err := resumeExecutionLineage(ctx, txRepo, task)
+		parent, resumeSessionID, refreshRuntime, err := resumeExecutionLineage(ctx, txRepo, dispatchTask)
 		if err != nil {
 			return err
 		}
@@ -384,22 +388,22 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				return fmt.Errorf("resume parent execution runtime identity is missing: execution %s", parent.ID)
 			}
 		} else {
-			runtime = s.runtimeDispatcher.ResolveRuntime(task.Type)
+			runtime = s.runtimeDispatcher.ResolveRuntime(dispatchTask.Type)
 			runtime.Profile = strings.TrimSpace(runtime.Profile)
 			runtime.Image = strings.TrimSpace(runtime.Image)
 			if runtime.Profile == "" || runtime.Image == "" {
-				return fmt.Errorf("resolve runtime image for task type %q returned incomplete identity", task.Type)
+				return fmt.Errorf("resolve runtime image for task type %q returned incomplete identity", dispatchTask.Type)
 			}
 		}
 		parentExecutionID := ""
 		if parent != nil {
 			parentExecutionID = parent.ID
 		}
-		profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
+		profiledExecution := model.NewTaskExecutionAgentProfile(dispatchTask.AgentProfileSnapshot, dispatchTask.AgentProfileFingerprint)
 		execution = &profiledExecution
 		if parent == nil || refreshRuntime || !inheritAgentPackIdentity(execution, parent) {
 			resumeSessionID = ""
-			if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+			if err := applyAgentPackIdentity(execution, dispatchTask.Type); err != nil {
 				return err
 			}
 		}
@@ -409,6 +413,10 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		execution.ID = uuid.NewString()
 		execution.TaskID = task.ID
 		execution.Attempt = attempt
+		execution.Purpose = model.TaskExecutionPurposePrimary
+		if taskHasPublicationRecoveryInput(dispatchTask) {
+			execution.Purpose = model.TaskExecutionPurposePublicationRecovery
+		}
 		execution.ParentExecutionID = parentExecutionID
 		execution.ResumeSessionID = resumeSessionID
 		execution.RuntimeImage = runtime.Image
@@ -416,6 +424,17 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		execution.Status = model.TaskExecutionCreated
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
+		}
+		if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+			input := dispatchTask.AgentInput.Data()
+			delete(input, "publication_recovery")
+			delete(input, "source_execution_id")
+			delete(input, "resume_from")
+			dispatchTask.SetAgentInput(input)
+			if err := txRepo.Tasks().Update(ctx, dispatchTask); err != nil {
+				return fmt.Errorf("clear publication recovery controls: %w", err)
+			}
+			task.AgentInput = dispatchTask.AgentInput
 		}
 		updated, err := txRepo.Tasks().SetCurrentExecution(ctx, task.ID, execution.ID)
 		if err != nil {
@@ -472,7 +491,8 @@ func taskUsesFrozenImageCapability(taskType string) bool {
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {
-	if task == nil || task.CurrentExecutionID == nil || !taskHasResumeInput(task) {
+	publicationRecovery := taskHasPublicationRecoveryInput(task)
+	if task == nil || task.CurrentExecutionID == nil || (!taskHasResumeInput(task) && !publicationRecovery) {
 		return nil, "", false, nil
 	}
 	parentID := strings.TrimSpace(*task.CurrentExecutionID)
@@ -485,6 +505,11 @@ func resumeExecutionLineage(ctx context.Context, repo repository.Repository, tas
 	}
 	if parent.TaskID != task.ID || !isTerminalExecution(parent.Status) {
 		return nil, "", false, fmt.Errorf("resume parent execution %s is not a terminal attempt of task %s", parent.ID, task.ID)
+	}
+	if publicationRecovery {
+		// Publication recovery needs the source artifacts but must run the
+		// currently deployed image and Agent Pack without resuming an old session.
+		return parent, "", true, nil
 	}
 	if len(parent.Result) == 0 {
 		return parent, "", false, nil
@@ -513,6 +538,14 @@ func taskHasResumeInput(task *model.Task) bool {
 		}
 	}
 	return false
+}
+
+func taskHasPublicationRecoveryInput(task *model.Task) bool {
+	if task == nil {
+		return false
+	}
+	publicationRecovery, _ := task.AgentInput.Data()["publication_recovery"].(bool)
+	return publicationRecovery
 }
 
 func (s *TaskService) failDispatch(ctx context.Context, task *model.Task, execution *model.TaskExecution, token string, dispatchErr error) error {

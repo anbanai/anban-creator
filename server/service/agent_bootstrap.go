@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type BootstrapFile struct {
 	Path            string `json:"path"`
 	Text            string `json:"text,omitempty"`
 	DownloadURL     string `json:"download_url,omitempty"`
+	ContentSHA256   string `json:"content_sha256,omitempty"`
 	Mode            uint32 `json:"mode"`
 	ExpectedSize    int64  `json:"expected_size,omitempty"`
 	MaxBytes        int64  `json:"max_bytes,omitempty"`
@@ -99,6 +101,30 @@ var (
 	ErrAgentBootstrapConflict    = errors.New("agent bootstrap state conflict")
 	ErrAgentBootstrapUnavailable = errors.New("agent bootstrap dependency unavailable")
 )
+
+type publicationRecoveryArtifactSpec struct {
+	path     string
+	mimeType string
+	maxBytes int64
+	required bool
+}
+
+var publicationRecoveryArtifactSpecs = []publicationRecoveryArtifactSpec{
+	{path: "output/04-article-final.md", mimeType: "text/markdown", maxBytes: 8 << 20, required: true},
+	{path: "output/content-quality-report.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/marketing-scan.json", mimeType: "application/json", maxBytes: 2 << 20},
+	{path: "output/seo-result.md", mimeType: "text/markdown", maxBytes: 2 << 20, required: true},
+	{path: "output/visual-rhythm-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20, required: true},
+	{path: "output/cover-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/cover-prompt.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/image-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/05-article.html", mimeType: "text/html", maxBytes: 8 << 20, required: true},
+	{path: "output/final-review.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/viral-audit.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/draft.json", mimeType: "application/json", maxBytes: 8 << 20},
+}
+
+var lowercaseSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func NewAgentBootstrapService(repo repository.Repository, tokens *auth.ExecutionTokenService, cfg AgentBootstrapConfig, logger zerolog.Logger) *AgentBootstrapService {
 	if cfg.TokenTTL <= 0 {
@@ -308,6 +334,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, montageFiles...)
+	recoveryFiles, err := s.buildPublicationRecoveryFiles(ctx, execution, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, recoveryFiles...)
 	if err := ValidateBootstrapFiles(files); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
@@ -325,6 +356,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
 	})
+	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+		prompt += "\n\n发布恢复模式：\n" +
+			"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的文章、SEO、视觉规划、HTML 和审核产物。\n" +
+			"- 不得重新执行选题、正文创作、SEO 或语义审核，也不得改写已恢复的文章内容。\n" +
+			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；不要调用 create_draft，发布由 Server 完成。"
+	}
 	resumeContextPath := ""
 	for _, attachment := range attachments {
 		if attachment.Role == model.EntryAttachmentRoleResumeLatest {
@@ -364,6 +401,90 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 	}, nil
+}
+
+func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Context, execution *model.TaskExecution, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
+	if execution == nil || execution.Purpose != model.TaskExecutionPurposePublicationRecovery {
+		return nil, nil
+	}
+	if task == nil {
+		return nil, fmt.Errorf("%w: publication recovery task is required", ErrAgentBootstrapConflict)
+	}
+	sourceExecutionID := strings.TrimSpace(execution.ParentExecutionID)
+	if sourceExecutionID == "" || sourceExecutionID != execution.ParentExecutionID || sourceExecutionID == execution.ID {
+		return nil, fmt.Errorf("%w: publication recovery source execution is invalid", ErrAgentBootstrapConflict)
+	}
+	source, err := s.repo.TaskExecutions().FindByID(ctx, sourceExecutionID)
+	if err != nil {
+		return nil, fmt.Errorf("find publication recovery source execution: %w", err)
+	}
+	if source.TaskID != task.ID {
+		return nil, fmt.Errorf("%w: publication recovery source execution is not owned by task", ErrAgentBootstrapConflict)
+	}
+	if !isTerminalExecution(source.Status) {
+		return nil, fmt.Errorf("%w: publication recovery source execution is not terminal", ErrAgentBootstrapConflict)
+	}
+	sourceFiles, err := s.repo.TaskFiles().FindByExecutionID(ctx, source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list publication recovery source artifacts: %w", err)
+	}
+	byPath := make(map[string]*model.TaskFile, len(sourceFiles))
+	for _, file := range sourceFiles {
+		if file == nil || file.TaskID != task.ID || file.ExecutionID != source.ID || file.State != model.TaskFileStateDelivered {
+			continue
+		}
+		if _, allowed := findPublicationRecoveryArtifactSpec(file.FilePath); allowed {
+			byPath[file.FilePath] = file
+		}
+	}
+	expectedStorageProvider := ""
+	if s.cfg.Store != nil {
+		expectedStorageProvider = s.cfg.Store.Name()
+	}
+	expectedPrefix := buildTaskMCPArtifactStoragePrefix(task, source.ID)
+	for _, spec := range publicationRecoveryArtifactSpecs {
+		file := byPath[spec.path]
+		if file == nil {
+			if spec.required {
+				return nil, fmt.Errorf("%w: publication recovery artifact %q is unavailable", ErrAgentBootstrapConflict, spec.path)
+			}
+			continue
+		}
+		validHash := lowercaseSHA256.MatchString(file.ContentHash)
+		validObjectKey := file.OSSKey == expectedPrefix+spec.path
+		if validHash {
+			validObjectKey = validObjectKey || file.OSSKey == buildTaskArtifactFinalStorageKey(task, source.ID, file.ContentHash, spec.path)
+		}
+		if file.MimeType != spec.mimeType || file.FileSize < 0 || file.FileSize > spec.maxBytes ||
+			!validHash || file.StorageProvider != expectedStorageProvider || !validObjectKey {
+			return nil, fmt.Errorf("%w: publication recovery artifact %q is invalid or unavailable", ErrAgentBootstrapConflict, spec.path)
+		}
+	}
+	files := make([]BootstrapFile, 0, len(publicationRecoveryArtifactSpecs))
+	for _, spec := range publicationRecoveryArtifactSpecs {
+		file := byPath[spec.path]
+		if file == nil {
+			continue
+		}
+		signed, err := s.signedBootstrapObjectKey(ctx, file.OSSKey, credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign publication recovery artifact %q: %w", spec.path, err)
+		}
+		files = append(files, BootstrapFile{
+			Path: spec.path, DownloadURL: signed, ContentSHA256: file.ContentHash,
+			Mode: 0644, ExpectedSize: file.FileSize, MaxBytes: spec.maxBytes, ReplaceExisting: true,
+		})
+	}
+	return files, nil
+}
+
+func findPublicationRecoveryArtifactSpec(path string) (publicationRecoveryArtifactSpec, bool) {
+	for _, spec := range publicationRecoveryArtifactSpecs {
+		if spec.path == path {
+			return spec, true
+		}
+	}
+	return publicationRecoveryArtifactSpec{}, false
 }
 
 func (s *AgentBootstrapService) resolveExecutionProfile(execution *model.TaskExecution, task *model.Task) (AgentExecutionProfile, error) {
@@ -614,7 +735,10 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 			}
 		}
 		if file.ReplaceExisting && filepath.ToSlash(clean) != ".anban-creator/settings.json" {
-			return fmt.Errorf("bootstrap file %q cannot replace existing workspace content", clean)
+			_, recoveryArtifact := findPublicationRecoveryArtifactSpec(filepath.ToSlash(clean))
+			if !recoveryArtifact || strings.TrimSpace(file.DownloadURL) == "" || !lowercaseSHA256.MatchString(file.ContentSHA256) {
+				return fmt.Errorf("bootstrap file %q cannot replace existing workspace content", clean)
+			}
 		}
 		portableKey := serveragent.PortableFilenameKey(filepath.ToSlash(clean))
 		if _, exists := seen[portableKey]; exists {
@@ -623,6 +747,9 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 		seen[portableKey] = struct{}{}
 		if (file.Text == "") == (file.DownloadURL == "") {
 			return fmt.Errorf("bootstrap file %q must have exactly one content source", clean)
+		}
+		if file.ContentSHA256 != "" && !lowercaseSHA256.MatchString(file.ContentSHA256) {
+			return fmt.Errorf("bootstrap file %q has invalid content SHA-256", clean)
 		}
 		if file.Mode == 0 || file.Mode&07000 != 0 || file.Mode&0002 != 0 || file.Mode&0111 != 0 {
 			return fmt.Errorf("unsafe bootstrap file mode %#o", file.Mode)
