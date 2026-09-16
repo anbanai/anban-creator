@@ -228,8 +228,9 @@ drops legacy execution columns and cannot be rolled back by enabling old IDs;
 rollback means restoring the maintenance-window backup. Afterward, publish
 catalog `retail-2026-07-30-v7`, mount the new profile config and Secrets, start
 the Server, and verify `/api/v1/agent/execution-profiles` exposes only the three
-new IDs with the expected availability. Then deploy Studio, Miniapp, and the
-TypeScript Agent images, verify Free/Pro/Enterprise creation, retry,
+new IDs with the expected availability. Then deploy Studio and the TypeScript
+Agent images from this repository, deploy Miniapp from its private companion
+repository, verify Free/Pro/Enterprise creation, retry,
 billing detail, and total charge flows, and only then resume schedulers,
 consumers, and user traffic.
 
@@ -243,10 +244,12 @@ agent-ts/     TypeScript Agent runtime used by Docker/Kubernetes and Desktop loc
 app/          Shared Go packages for config, converter, writer, humanizer, image, WeChat draft helpers
 studio/       React Web Studio
 desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)
-miniapp/      WeChat Mini Program parity client
 harness/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
 docs/         Design specs and implementation plans
 ```
+
+The WeChat Mini Program parity client is maintained in the private
+[anbanai/creator-miniapp](https://github.com/anbanai/creator-miniapp) companion repository.
 
 ## Testing
 

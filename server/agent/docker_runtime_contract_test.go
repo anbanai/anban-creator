@@ -614,7 +614,6 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	body := readTextFile(t, filepath.Join(root, ".dockerignore"))
 	for _, want := range []string{
 		"desktop/",
-		"miniapp/",
 		"**/.git",
 		"**/node_modules/",
 		"**/dist/",

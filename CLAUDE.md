@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Client surfaces wrapping the same server API:
 - **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles Node plus the TypeScript Agent runtime to run tasks locally; claims work by polling `POST /api/v1/agent/claim`
-- **Miniapp** (`miniapp/`): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
+- **Miniapp** ([private companion repository](https://github.com/anbanai/creator-miniapp)): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
 
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
@@ -26,7 +26,7 @@ Claude Code and Codex share one repository-owned plugin source at `harness/`. Th
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
-- **Language**: Go 1.26.0 (Server + app library), TypeScript (Agent + Studio + miniapp), Rust (desktop Tauri core)
+- **Language**: Go 1.26.0 (Server + app library), TypeScript (Agent + Studio), Rust (desktop Tauri core)
 - **Logging**: Zerolog for Go components; never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 

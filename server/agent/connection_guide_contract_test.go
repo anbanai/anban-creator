@@ -30,8 +30,6 @@ func TestConnectionGuidesUseFixedPluginEndpoint(t *testing.T) {
 	}{
 		{relPath: "studio/public/claude/index.html", mode: claudePluginUserConfig},
 		{relPath: "studio/public/codex/index.html", mode: codexEnvironment},
-		{relPath: "miniapp/src/pages/connect/claude-code.vue", mode: claudePluginUserConfig},
-		{relPath: "miniapp/src/pages/connect/codex.vue", mode: codexEnvironment},
 	} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(guide.relPath)))
 		for _, problem := range connectionGuideContractProblems(body, guide.mode) {
@@ -394,17 +392,4 @@ func connectionGuideNonnegativeClauses(clauses []string) []string {
 		}
 	}
 	return nonnegative
-}
-
-func TestMiniappRESTAPIBaseRemainsUnchanged(t *testing.T) {
-	path := filepath.Join(repoRoot(t), "miniapp", "src", "api", "api-base.ts")
-	body := readTextFile(t, path)
-	declarationPattern := regexp.MustCompile(`(?m)\bconst\s+DEFAULT_API_BASE_URL\s*=\s*["']https://api\.creator\.anbanai\.com/api/v1["']`)
-	if matches := declarationPattern.FindAllString(body, -1); len(matches) != 1 {
-		t.Fatalf("%s must declare the intentional Miniapp REST API base exactly once", path)
-	}
-	fallbackPattern := regexp.MustCompile(`\benvBase\s*\|\|\s*DEFAULT_API_BASE_URL\b`)
-	if !fallbackPattern.MatchString(body) {
-		t.Fatalf("%s must use DEFAULT_API_BASE_URL as the environment fallback", path)
-	}
 }
