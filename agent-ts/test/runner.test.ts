@@ -114,13 +114,14 @@ function taskHookInput(toolName: "TaskCreate" | "TaskUpdate", toolInput: Record<
   };
 }
 
-function stopHookInput(stopHookActive = false): Parameters<HookCallback>[0] {
+function stopHookInput(stopHookActive = false, backgroundTasks: unknown[] = []): Parameters<HookCallback>[0] {
   return {
     session_id: "session-1",
     transcript_path: "/tmp/transcript.jsonl",
     cwd: "/workspace",
     hook_event_name: "Stop",
     stop_hook_active: stopHookActive,
+    background_tasks: backgroundTasks,
   };
 }
 
@@ -300,6 +301,131 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("enables the bounded read-only worker policy only for Article and Seednote task types", () => {
+    const article = runner.buildQueryOptions(validBootstrap(), "/workspace");
+    const seednote = runner.buildQueryOptions({
+      ...validBootstrap(), task_type: "seednote", agent_pack_id: "seednote", runtime_profile: "seednote", agent_flag: "anban:seednote", resolved_agent_pack: viralAnalysisPack,
+    }, "/workspace");
+    const viral = runner.buildQueryOptions({
+      ...validBootstrap(), task_type: "viral_analysis", agent_pack_id: "seednote", runtime_profile: "seednote", agent_flag: "anban:seednote", resolved_agent_pack: viralAnalysisPack,
+    }, "/workspace");
+
+    for (const options of [article, seednote, viral]) {
+      expect(options.agent).toMatch(/^anban:(article|seednote)$/);
+      expect(options.allowedTools).toContain("Agent");
+      expect(options.disallowedTools).not.toContain("Agent");
+      const worker = options.agents?.["managed-readonly-worker"];
+      expect(worker).toMatchObject({ model: "inherit", maxTurns: 12, background: false });
+      expect(worker?.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "WebSearch", "WebFetch"]));
+      expect(worker?.tools).not.toEqual(expect.arrayContaining([
+        "Write", "Edit", "Bash", "NotebookEdit", "Agent", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "mcp__anban__*",
+      ]));
+    }
+
+    expect(article.agents?.["managed-readonly-worker"]?.tools).toEqual(expect.arrayContaining([
+      "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+    ]));
+    for (const options of [seednote, viral]) {
+      expect(options.agents?.["managed-readonly-worker"]?.tools).toEqual(expect.arrayContaining([
+        "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
+      ]));
+    }
+
+    const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
+    expect(ineligible.agents).toBeUndefined();
+    expect(ineligible.allowedTools).not.toContain("Agent");
+    expect(ineligible.disallowedTools).toContain("Agent");
+  });
+
+  test("adds the managed foreground worker contract only to eligible prompts", () => {
+    expect(runner.buildManagedPrompt(validBootstrap())).toContain("managed-readonly-worker");
+    expect(runner.buildManagedPrompt(validBootstrap())).toContain("run_in_background: false");
+    expect(runner.buildManagedPrompt({ ...validBootstrap(), task_type: "montage" })).not.toContain("managed-readonly-worker");
+  });
+
+  test("rewrites allowed worker invocations to foreground and denies other Agent types", async () => {
+    const eligible = runner.buildQueryOptions(validBootstrap(), "/workspace");
+    const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
+    const eligibleAgentHook = eligible.hooks!.PreToolUse!.find((entry) => entry.matcher === "Agent")!.hooks[0]!;
+    const ineligibleAgentHook = ineligible.hooks!.PreToolUse!.find((entry) => entry.matcher === "Agent")!.hooks[0]!;
+    const agentInput = (subagent_type: string): Parameters<HookCallback>[0] => ({
+      session_id: "session-1",
+      transcript_path: "/tmp/transcript.jsonl",
+      cwd: "/workspace",
+      hook_event_name: "PreToolUse",
+      tool_name: "Agent",
+      tool_input: {
+        description: "Research source material",
+        prompt: "Find relevant sources.",
+        subagent_type,
+        model: "opus",
+        isolation: "worktree",
+        run_in_background: true,
+      },
+      tool_use_id: "agent-tool-1",
+    });
+
+    await expect(eligibleAgentHook(agentInput("managed-readonly-worker"), "agent-tool-1", hookOptions)).resolves.toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: {
+          description: "Research source material",
+          prompt: "Find relevant sources.",
+          subagent_type: "managed-readonly-worker",
+          run_in_background: false,
+        },
+      },
+    });
+    await expect(eligibleAgentHook(agentInput("untrusted-worker"), "agent-tool-1", hookOptions)).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+    await expect(ineligibleAgentHook(agentInput("managed-readonly-worker"), "agent-tool-1", hookOptions)).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+  });
+
+  test("forces managed worker tasks to disable background work after frozen environment values", () => {
+    const options = runner.buildQueryOptions({
+      ...validBootstrap(),
+      execution_profile: { ...validBootstrap().execution_profile, envs: { ...validBootstrap().execution_profile.envs, CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0" } },
+    }, "/workspace");
+    expect(options.env?.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    expect(runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace").env?.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBeUndefined();
+  });
+
+  test("blocks main Stop while managed background tasks remain before completion processing", async () => {
+    const root = await progressWorkspace(true);
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const stop = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {}, stageProgress,
+      })).Stop![0]!.hooks[0]!;
+
+      await expect(stop(stopHookInput(false, [{ task_id: "worker-1" }]), undefined, hookOptions)).resolves.toMatchObject({
+        decision: "block",
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("pending") },
+      });
+      expect(stageProgress).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps completion on main Stop and allows normal Stop continuation", async () => {
+    const root = await progressWorkspace(true);
+    const stageProgress = mock(async (_event: StageProgressEvent) => {});
+    try {
+      const hooks = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {}, stageProgress,
+      }));
+      expect(hooks.SubagentStop).toBeUndefined();
+      await expect(hooks.Stop![0]!.hooks[0]!(stopHookInput(), undefined, hookOptions)).resolves.toEqual({});
+      expect(stageProgress).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("builds the managed prompt with resume context", () => {
     const data = {
       ...validBootstrap(),
@@ -334,7 +460,7 @@ describe("buildQueryOptions", () => {
     expect(options.permissionMode).toBe("default");
     expect(options.allowDangerouslySkipPermissions).toBeUndefined();
     expect(options.allowedTools).toEqual(expect.arrayContaining(["Read", "Write", "Bash", "WebFetch", "mcp__anban__*"]));
-    expect(options.disallowedTools).toEqual(["Agent", "ScheduleWakeup", "AskUserQuestion"]);
+    expect(options.disallowedTools).toEqual(["ScheduleWakeup", "AskUserQuestion"]);
     expect(await options.canUseTool?.("UnknownTool", {}, { signal: new AbortController().signal, toolUseID: "tool-1", requestId: "request-1" })).toEqual({
       behavior: "deny",
       message: 'tool "UnknownTool" is outside the managed Agent SDK allowlist',
@@ -344,7 +470,7 @@ describe("buildQueryOptions", () => {
   test("enforces the MCP boundary and composes the Seednote stop gate for both Seednote task types", async () => {
     const articleOptions = runner.buildQueryOptions(validBootstrap(), "/workspace");
     const articleHooks = articleOptions.hooks as Record<string, Array<{ hooks: Array<(input: unknown, toolUseID: string | undefined, options: { signal: AbortSignal }) => Promise<Record<string, unknown>>> }>>;
-    expect(articleHooks.PreToolUse).toHaveLength(1);
+    expect(articleHooks.PreToolUse).toHaveLength(2);
     expect(articleHooks.PostToolUse).toHaveLength(1);
     expect(articleHooks.PostToolUse[0]).toMatchObject({ matcher: "TaskCreate|TaskUpdate" });
     expect(articleHooks.Stop).toHaveLength(1);
@@ -361,7 +487,7 @@ describe("buildQueryOptions", () => {
     for (const taskType of ["seednote", "viral_analysis"]) {
       const options = runner.buildQueryOptions({ ...validBootstrap(), task_type: taskType }, "/workspace");
       const hooks = options.hooks as Record<string, unknown[]>;
-      expect(hooks.PreToolUse).toHaveLength(1);
+      expect(hooks.PreToolUse).toHaveLength(2);
       expect(hooks.Stop).toHaveLength(1);
       expect((hooks.Stop[0] as { hooks: unknown[] }).hooks).toHaveLength(1);
     }
