@@ -152,6 +152,27 @@ const MANAGED_ALLOWED_TOOLS = [
   "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite",
   "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*",
 ];
+const MANAGED_PARALLEL_TASK_TYPES = new Set(["article", "seednote", "viral_analysis"]);
+const MANAGED_READONLY_WORKER = "managed-readonly-worker";
+const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
+  article: ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles"],
+  seednote: [
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+    "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
+  ],
+  viral_analysis: [
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+    "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
+  ],
+};
+const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
+  article: ["topic-research", "seo-optimization"],
+  seednote: ["seednote-research", "seednote-viral-analysis"],
+  viral_analysis: ["seednote-research", "seednote-viral-analysis"],
+};
+const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect sources and return concise findings to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
+const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. Delegate only when there are at least two independent research, material-analysis, or quality-review tasks. You may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`, with at most three concurrent Workers. Worker results must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
 const EXECUTION_IDENTITY_TOOLS = new Set(["generate_image", "upload_image", "analyze_image", "submit_completion_metadata"]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
@@ -174,8 +195,9 @@ class RuntimeArtifactMaterializationError extends Error {
   }
 }
 
-export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "resume_context_path">): string {
-  return appendResumeContextToPrompt(data.prompt, data.resume_context_path);
+export function buildManagedPrompt(data: Pick<BootstrapResponse, "prompt" | "resume_context_path" | "task_type">): string {
+  const prompt = appendResumeContextToPrompt(data.prompt, data.resume_context_path);
+  return managedParallelWorkersEnabled(data.task_type) ? `${prompt}${MANAGED_PARALLEL_WORKER_CONTRACT}` : prompt;
 }
 
 export async function runClaude(workspace: string, data: ResolvedBootstrapResponse, serverURL: string, token: string, reporter: RunnerReporter, signal: AbortSignal): Promise<ExecutionResult> {
@@ -269,6 +291,7 @@ export function buildQueryOptions(
     void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
   };
   const emitter = new ProgressEmitter(pack, reporter, diagnostic);
+  const managedParallelWorkers = managedParallelWorkersEnabled(data.task_type);
   let stopHook = createManagedProgressStopHook(emitter, cwd);
   if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
     stopHook = createSeednoteProgressStopHook(
@@ -281,6 +304,10 @@ export function buildQueryOptions(
   }
   const completionHook = createCompletionMetadataHook(cwd, data, serverURL, token, pluginRoot);
   const composedStopHook: HookCallback = async (input, toolUseID, hookOptions) => {
+    if (managedParallelWorkers) {
+      const pending = managedBackgroundTaskStopGuard(input);
+      if (pending) return pending;
+    }
     const result = await stopHook(input, toolUseID, hookOptions);
     const specific = "hookSpecificOutput" in result ? result.hookSpecificOutput as { permissionDecision?: string } : undefined;
     if (("decision" in result && result.decision === "block") || specific?.permissionDecision === "deny") return result;
@@ -291,8 +318,8 @@ export function buildQueryOptions(
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
     PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, cwd, diagnostic)] }],
     Stop: [{ hooks: [composedStopHook] }],
-    SubagentStop: [{ hooks: [completionHook] }],
   };
+  hooks.PreToolUse!.push({ matcher: "Agent", hooks: [createManagedAgentBoundaryHook(data.task_type)] });
   return {
     abortController: controller,
     cwd,
@@ -300,8 +327,19 @@ export function buildQueryOptions(
     agent: data.agent_flag,
     resume: data.resume_session_id,
     permissionMode: "default",
-    allowedTools: MANAGED_ALLOWED_TOOLS,
-    disallowedTools: ["Agent", "ScheduleWakeup", "AskUserQuestion"],
+    allowedTools: managedParallelWorkers ? [...MANAGED_ALLOWED_TOOLS, "Agent"] : MANAGED_ALLOWED_TOOLS,
+    disallowedTools: managedParallelWorkers ? ["ScheduleWakeup", "AskUserQuestion"] : ["Agent", "ScheduleWakeup", "AskUserQuestion"],
+    agents: managedParallelWorkers ? {
+      [MANAGED_READONLY_WORKER]: {
+        description: "Read-only research support for the managed main agent.",
+        prompt: MANAGED_READONLY_WORKER_PROMPT,
+        model: "inherit",
+        maxTurns: 12,
+        background: false,
+        tools: [...MANAGED_READONLY_WORKER_TOOLS, ...(MANAGED_READONLY_WORKER_MCP_TOOLS[data.task_type] ?? [])],
+        skills: MANAGED_READONLY_WORKER_SKILLS[data.task_type],
+      },
+    } : undefined,
     canUseTool: async (toolName) => ({ behavior: "deny", message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist` }),
     plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
@@ -325,8 +363,7 @@ export function createCompletionMetadataHook(
   pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai",
 ): HookCallback {
   return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
-    if (input.hook_event_name !== "Stop" && input.hook_event_name !== "SubagentStop") return {};
-    if (input.hook_event_name === "Stop" && input.stop_hook_active) return {};
+    if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
     const script = `${pluginRoot}/hooks/completion-metadata.sh`;
     return await new Promise<HookJSONOutput>((resolve) => {
       const environment = { ...process.env };
@@ -421,6 +458,22 @@ function createManagedProgressStopHook(emitter: ProgressEmitter, workspace: stri
   };
 }
 
+function managedParallelWorkersEnabled(taskType: string): boolean {
+  return MANAGED_PARALLEL_TASK_TYPES.has(taskType);
+}
+
+function managedBackgroundTaskStopGuard(input: Parameters<HookCallback>[0]): HookJSONOutput | undefined {
+  if (input.hook_event_name !== "Stop" || !input.background_tasks?.length) return undefined;
+  return {
+    decision: "block",
+    reason: "Managed completion is blocked while foreground worker tasks are still pending.",
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext: "Managed completion is blocked while foreground worker tasks are still pending. Wait for their results before continuing.",
+    },
+  };
+}
+
 function createSeednoteProgressStopHook(
   emitter: ProgressEmitter,
   pack: AgentPack,
@@ -509,6 +562,33 @@ function createManagedMCPBoundaryHook() {
   };
 }
 
+function createManagedAgentBoundaryHook(taskType: string): HookCallback {
+  return async (input): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Agent") return {};
+    if (!managedParallelWorkersEnabled(taskType)) return denyManagedAgent("Managed workers are not enabled for this task type.");
+    if (!isRecord(input.tool_input)) return denyManagedAgent("Managed worker input must select the approved read-only worker.");
+    if (input.tool_input.subagent_type !== MANAGED_READONLY_WORKER) return denyManagedAgent(`Only ${MANAGED_READONLY_WORKER} is allowed in managed tasks.`);
+
+    const { isolation: _isolation, model: _model, ...foregroundInput } = input.tool_input;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: { ...foregroundInput, run_in_background: false },
+      },
+    };
+  };
+}
+
+function denyManagedAgent(reason: string): HookJSONOutput {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
 export function buildExecutionEnvironment(
   processEnvironment: NodeJS.ProcessEnv,
   data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "task_id" | "execution_id" | "execution_profile">,
@@ -527,6 +607,7 @@ export function buildExecutionEnvironment(
     ANBAN_TASK_TYPE: data.task_type,
     ...data.execution_profile.envs,
   };
+  if (managedParallelWorkersEnabled(data.task_type)) managed.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
   if (data.task_type === "montage") managed.ANBAN_MONTAGE_SUBMODULE_PATH = `${workspace}/openmontage`;
   return managed;
 }
