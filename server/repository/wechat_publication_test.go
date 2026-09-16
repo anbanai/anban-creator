@@ -226,11 +226,14 @@ func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T)
 
 	t.Run("draft recovery records provider media and releases its claim", func(t *testing.T) {
 		claimedAt := time.Now().Add(-time.Minute)
+		retryAuthorizedAt := claimedAt.Add(-time.Minute)
 		publication := &model.WechatPublication{
 			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
 			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
 			LastError: "ambiguous draft/add outcome", ClaimToken: "draft-claim", ClaimedAt: &claimedAt,
-			PublishID: "preserved-publish-id", MsgDataID: "preserved-msg-data-id",
+			DraftRetryAuthorizedAt: &retryAuthorizedAt,
+			WechatStatusCode:       48001,
+			PublishID:              "preserved-publish-id", MsgDataID: "preserved-msg-data-id",
 		}
 		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
 			t.Fatal(err)
@@ -252,8 +255,10 @@ func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T)
 			t.Fatal(err)
 		}
 		if stored.DraftMediaID != "recovered-draft-media" || stored.Status != model.WechatPublicationStatusDrafted || stored.LastError != "" ||
+			stored.WechatStatusCode != 0 ||
 			stored.NextCheckAt == nil || !stored.NextCheckAt.Equal(nextCheckAt) || stored.LastCheckedAt == nil || !stored.LastCheckedAt.Equal(lastCheckedAt) ||
-			stored.ClaimToken != "" || stored.ClaimedAt != nil || stored.PublishID != "preserved-publish-id" || stored.MsgDataID != "preserved-msg-data-id" {
+			stored.ClaimToken != "" || stored.ClaimedAt != nil || stored.DraftRetryAuthorizedAt != nil ||
+			stored.PublishID != "preserved-publish-id" || stored.MsgDataID != "preserved-msg-data-id" {
 			t.Fatalf("stored=%#v", stored)
 		}
 	})
@@ -340,9 +345,40 @@ func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T)
 		}
 		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
 		if err != nil || stored.DraftAddAttemptedAt == nil || !stored.DraftAddAttemptedAt.Equal(attemptedAt) ||
+			stored.DraftAddAttempts != 1 ||
 			stored.NextCheckAt == nil || !stored.NextCheckAt.Equal(nextCheckAt) ||
 			stored.DraftCreatedAt == nil || !stored.DraftCreatedAt.Equal(attemptedAt) {
 			t.Fatalf("write-ahead state = %#v err=%v", stored, err)
+		}
+	})
+
+	t.Run("authorized draft retry preserves the first attempt and is bounded", func(t *testing.T) {
+		firstAttempt := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+		retryAttempt := firstAttempt.Add(time.Hour)
+		publication := &model.WechatPublication{
+			ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
+			DraftAddAttemptedAt: &firstAttempt, DraftAddAttempts: 1, DraftRetryAuthorizedAt: &retryAttempt,
+			ClaimToken: "retry-claim", ClaimedAt: &retryAttempt,
+		}
+		if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+
+		won, err := repo.WechatPublications().MarkDraftAddAttempted(ctx, publication.ID, "retry-claim", retryAttempt, retryAttempt.Add(10*time.Minute))
+		if err != nil || !won {
+			t.Fatalf("MarkDraftAddAttempted retry won=%v err=%v", won, err)
+		}
+		stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.DraftAddAttemptedAt == nil || !stored.DraftAddAttemptedAt.Equal(firstAttempt) || stored.DraftAddAttempts != 2 {
+			t.Fatalf("stored retry evidence = %#v", stored)
+		}
+		won, err = repo.WechatPublications().MarkDraftAddAttempted(ctx, publication.ID, "retry-claim", retryAttempt.Add(time.Minute), retryAttempt.Add(11*time.Minute))
+		if err != nil || won {
+			t.Fatalf("third MarkDraftAddAttempted won=%v err=%v", won, err)
 		}
 	})
 

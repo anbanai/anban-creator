@@ -197,13 +197,15 @@ func (r *wechatPublicationRepository) TransitionDraftRecovered(ctx context.Conte
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND updated_at = ?", id, model.WechatPublicationStatusDrafting, expectedUpdatedAt).
 			Updates(map[string]any{
-				"draft_media_id":  draftMediaID,
-				"status":          model.WechatPublicationStatusDrafted,
-				"last_error":      "",
-				"next_check_at":   nextCheckAt,
-				"last_checked_at": lastCheckedAt,
-				"claim_token":     "",
-				"claimed_at":      nil,
+				"draft_media_id":            draftMediaID,
+				"status":                    model.WechatPublicationStatusDrafted,
+				"wechat_status_code":        0,
+				"last_error":                "",
+				"next_check_at":             nextCheckAt,
+				"last_checked_at":           lastCheckedAt,
+				"claim_token":               "",
+				"claimed_at":                nil,
+				"draft_retry_authorized_at": nil,
 			})
 	})
 	return rows == 1, err
@@ -291,6 +293,7 @@ func (r *wechatPublicationRepository) RetryUnsupportedDraft(ctx context.Context,
 	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND wechat_status_code <> 0 AND updated_at = ? AND draft_media_id = ''", id, model.WechatPublicationStatusUnsupported, expectedUpdatedAt).
+			Where("draft_add_attempts < 2 AND (draft_add_attempted_at IS NULL OR draft_retry_authorized_at IS NOT NULL)").
 			Updates(map[string]any{
 				"status":              model.WechatPublicationStatusDrafting,
 				"wechat_status_code":  0,
@@ -377,11 +380,14 @@ func (r *wechatPublicationRepository) RestoreUnsupportedDraftClaimed(ctx context
 func (r *wechatPublicationRepository) MarkDraftAddAttempted(ctx context.Context, id, claimToken string, attemptedAt, nextCheckAt time.Time) (bool, error) {
 	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
-			Where("id = ? AND status = ? AND claim_token = ? AND draft_media_id = '' AND draft_add_attempted_at IS NULL", id, model.WechatPublicationStatusDrafting, claimToken).
+			Where("id = ? AND status = ? AND claim_token = ? AND draft_media_id = '' AND draft_add_attempts < 2", id, model.WechatPublicationStatusDrafting, claimToken).
+			Where("draft_add_attempted_at IS NULL OR draft_retry_authorized_at IS NOT NULL").
 			Updates(map[string]any{
-				"draft_add_attempted_at": &attemptedAt,
-				"draft_created_at":       &attemptedAt,
-				"next_check_at":          &nextCheckAt,
+				"draft_add_attempted_at":    gorm.Expr("COALESCE(draft_add_attempted_at, ?)", attemptedAt),
+				"draft_add_attempts":        gorm.Expr("draft_add_attempts + 1"),
+				"draft_retry_authorized_at": nil,
+				"draft_created_at":          &attemptedAt,
+				"next_check_at":             &nextCheckAt,
 			})
 	})
 	return rows == 1, err
@@ -392,15 +398,16 @@ func (r *wechatPublicationRepository) UpdateDraftClaimed(ctx context.Context, pu
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND claim_token = ?", publication.ID, model.WechatPublicationStatusDrafting, token).
 			Updates(map[string]any{
-				"draft_media_id":         publication.DraftMediaID,
-				"status":                 publication.Status,
-				"wechat_status_code":     publication.WechatStatusCode,
-				"draft_created_at":       publication.DraftCreatedAt,
-				"next_check_at":          publication.NextCheckAt,
-				"last_error":             publication.LastError,
-				"draft_add_attempted_at": publication.DraftAddAttemptedAt,
-				"claim_token":            "",
-				"claimed_at":             nil,
+				"draft_media_id":            publication.DraftMediaID,
+				"status":                    publication.Status,
+				"wechat_status_code":        publication.WechatStatusCode,
+				"draft_created_at":          publication.DraftCreatedAt,
+				"next_check_at":             publication.NextCheckAt,
+				"last_error":                publication.LastError,
+				"draft_add_attempted_at":    publication.DraftAddAttemptedAt,
+				"draft_retry_authorized_at": publication.DraftRetryAuthorizedAt,
+				"claim_token":               "",
+				"claimed_at":                nil,
 			})
 	})
 	return rows == 1, err

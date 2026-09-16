@@ -329,6 +329,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('region', { name: '任务交付状态' })).toHaveTextContent('视觉部分完成')
     expect(screen.getByText('请求的正文配图未全部生成。')).toBeInTheDocument()
     expect(screen.getByText('文件 output/img_01.png 上传失败：HTTP 503')).toBeInTheDocument()
+    expect(screen.getByText('内容已完成，发布待处理', { selector: '[data-slot="badge"]' })).toBeInTheDocument()
     const provider = screen.getByRole('region', { name: '供应商诊断' })
     expect(provider).toHaveTextContent('deepseek')
     expect(provider).toHaveTextContent('HTTP 400')

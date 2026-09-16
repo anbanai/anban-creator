@@ -164,6 +164,26 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 }
 
+func TestBuildDockerRuntimeSpecUsesFreshWorkspaceVolumeForPublicationRecovery(t *testing.T) {
+	cfg := dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig(), ServerURL: "http://server:8080", ImageID: dockerDispatcherTestImageID, ImageConfig: &containertypes.Config{}}
+	task := dockerDispatcherTestTask()
+	primary := dockerDispatcherTestExecution()
+	recovery := *primary
+	recovery.ID = "publication-recovery-execution"
+	recovery.Attempt = 2
+	recovery.ParentExecutionID = primary.ID
+	recovery.Purpose = model.TaskExecutionPurposePublicationRecovery
+
+	primarySpec := buildDockerRuntimeSpec(cfg, primary, task)
+	recoverySpec := buildDockerRuntimeSpec(cfg, &recovery, task)
+	if recoverySpec.TaskVolume.Name == primarySpec.TaskVolume.Name {
+		t.Fatalf("publication recovery reused original workspace volume %q", primarySpec.TaskVolume.Name)
+	}
+	if recoverySpec.HostConfig.Mounts[0].Source != recoverySpec.TaskVolume.Name {
+		t.Fatalf("recovery workspace mount = %#v, want fresh volume %q", recoverySpec.HostConfig.Mounts[0], recoverySpec.TaskVolume.Name)
+	}
+}
+
 func TestDockerRuntimeSpecEmitsExplicitHTTPBootstrapTrustOnlyForHTTP(t *testing.T) {
 	for _, test := range []struct {
 		name       string

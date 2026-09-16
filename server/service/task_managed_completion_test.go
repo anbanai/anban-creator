@@ -545,7 +545,7 @@ func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t 
 		t.Fatalf("prior published delivery allowed task charge reversal: %v", err)
 	}
 	files, err := billing.repo.TaskFiles().FindByTaskID(ctx, task.ID)
-	if err != nil || len(files) != 3 || files[0].State != model.TaskFileStateDelivered {
+	if err != nil || len(files) != 4 || files[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("prior published delivery=%#v err=%v", files, err)
 	}
 }

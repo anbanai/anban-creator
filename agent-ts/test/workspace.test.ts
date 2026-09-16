@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { chmodSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +11,51 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("materializeBootstrapFiles", () => {
+
+  test("atomically replaces an allowlisted publication recovery artifact after hash verification", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    await mkdir(join(workspace, "output"));
+    await writeFile(join(workspace, "output", "04-article-final.md"), "stale article");
+    const content = "verified source article";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(content, { status: 200 });
+    try {
+      await materializeBootstrapFiles(workspace, [{
+        path: "output/04-article-final.md", download_url: "https://bootstrap.example/source",
+        expected_size: Buffer.byteLength(content), max_bytes: 1024, mode: 0o644, replace_existing: true,
+        content_sha256: createHash("sha256").update(content).digest("hex"),
+      }]);
+      expect(await readFile(join(workspace, "output", "04-article-final.md"), "utf8")).toBe(content);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("rejects a downloaded bootstrap file whose SHA-256 does not match before materializing it", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
+    roots.push(workspace);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("trusted source artifact", { status: 200 });
+    try {
+      await expect(materializeBootstrapFiles(workspace, [{
+        path: "output/04-article-final.md", download_url: "https://bootstrap.example/source",
+        expected_size: 23, max_bytes: 1024, mode: 0o644,
+        content_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+      }] as any)).rejects.toThrow("SHA-256 mismatch");
+      await expect(lstat(join(workspace, "output", "04-article-final.md"))).rejects.toMatchObject({ code: "ENOENT" });
+      const content = "trusted source artifact";
+      await materializeBootstrapFiles(workspace, [{
+        path: "output/04-article-final.md", download_url: "https://bootstrap.example/source",
+        expected_size: Buffer.byteLength(content), max_bytes: 1024, mode: 0o644,
+        content_sha256: createHash("sha256").update(content).digest("hex"),
+      }]);
+      expect(await readFile(join(workspace, "output", "04-article-final.md"), "utf8")).toBe(content);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("atomically writes an inline bootstrap file with its declared mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "anban-ts-workspace-"));
     roots.push(root);

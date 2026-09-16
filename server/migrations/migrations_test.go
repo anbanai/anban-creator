@@ -157,6 +157,42 @@ func TestTaskOutcomeMigrationAddsPublicOutcomeAndExecutionBoundDraftEvidence(t *
 	}
 }
 
+func TestServerOwnedPublicationMigrationRepairsOnlyUnattemptedAmbiguousRows(t *testing.T) {
+	raw, err := os.ReadFile("20260916_server_owned_article_publication.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"ADD COLUMN `purpose` varchar(32) NOT NULL DEFAULT 'primary'",
+		"ADD COLUMN `draft_add_attempts` int NOT NULL DEFAULT 0",
+		"ADD COLUMN `draft_retry_authorized_at` datetime(3) NULL",
+		"SET `draft_add_attempts` = 1",
+		"SET `publication`.`execution_id` = `execution`.`id`",
+		"WHERE `publication`.`execution_id` = ''",
+		"draft_delivery_status` IN ('ambiguous', 'succeeded')",
+		"draft_delivery_status` = 'ambiguous'",
+		"draft_add_attempted_at` IS NOT NULL",
+		"draft_media_id` <> ''",
+		"status` IN ('drafted', 'publish_submitting', 'publishing', 'published', 'needs_selection')",
+		"draft_delivery_status` = 'blocked'",
+		"2e8596be-378c-4671-8701-7d379323f957",
+		"publication_not_attempted",
+		"'retry_visuals'",
+		"'retry_draft'",
+		"JSON_REMOVE",
+		"JSON_SEARCH",
+		"publication_ambiguous",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("migration missing %q", required)
+		}
+	}
+	if strings.Contains(sql, "WHERE `execution`.`draft_delivery_status` = 'blocked'\n  AND JSON_UNQUOTE(JSON_EXTRACT(`execution`.`draft_delivery_result`, '$.code')) = 'publication_not_attempted'\n  AND JSON_SEARCH") {
+		t.Fatal("publication warning cleanup must include true attempted ambiguous rows")
+	}
+}
+
 func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260717_finalized_reference_assets.sql")
 	if err != nil {

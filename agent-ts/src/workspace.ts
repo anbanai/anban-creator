@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -113,6 +114,9 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
         const response = await fetch(file.download_url!, { signal, redirect: "error" });
         if (!response.ok) throw new Error(`download bootstrap file ${file.path} failed: HTTP ${response.status}`);
         contents = await readBoundedBytes(response, Math.min(file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES, MAX_BOOTSTRAP_FILE_BYTES), `bootstrap file ${file.path}`);
+        if (file.content_sha256 !== undefined && createHash("sha256").update(contents).digest("hex") !== file.content_sha256) {
+          throw new Error(`bootstrap file ${file.path} SHA-256 mismatch`);
+        }
       }
       totalBytes += contents.byteLength;
       if (totalBytes > MAX_BOOTSTRAP_TOTAL_BYTES) throw new Error("bootstrap files exceed total size limit");

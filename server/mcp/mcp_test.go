@@ -281,6 +281,7 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 		{name: "prepare upload must name task", toolName: "prepare_file_upload", arguments: `{"project_id":"project-1"}`},
 		{name: "user-wide task enumeration is denied", toolName: "list_tasks", arguments: `{"project_id":"project-1"}`},
 		{name: "user-wide project enumeration is denied", toolName: "list_projects", arguments: `{}`},
+		{name: "managed draft publication is denied", toolName: "create_draft", arguments: `{"project_id":"project-1","task_id":"task-1","articles":[{"title":"Title","content":"<p>Body</p>"}]}`},
 		{name: "unregistered tool is denied", toolName: "scope_probe", arguments: `{"project_id":"project-1","task_id":"task-1","execution_id":"execution-1"}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

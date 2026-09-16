@@ -637,6 +637,33 @@ func TestKubernetesDispatcherResumeRequiresOriginalPersistentState(t *testing.T)
 	}
 }
 
+func TestKubernetesDispatcherPublicationRecoveryUsesIsolatedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	task := testTask()
+	execution := testExecution()
+	execution.Attempt = 2
+	execution.ParentExecutionID = "previous-execution"
+	execution.Purpose = model.TaskExecutionPurposePublicationRecovery
+	client := fake.NewSimpleClientset()
+
+	if _, err := testDispatcher(client).Prepare(ctx, execution, task); err != nil {
+		t.Fatalf("prepare publication recovery: %v", err)
+	}
+	wantClaim := kubernetesTaskWorkspacePVCName(task.ID + "-publication-recovery-" + execution.ID)
+	pvcs, err := client.CoreV1().PersistentVolumeClaims("anban").List(ctx, metav1.ListOptions{})
+	if err != nil || len(pvcs.Items) != 1 || pvcs.Items[0].Name != wantClaim {
+		t.Fatalf("publication recovery PVCs = %#v, err=%v, want isolated claim %q", pvcs.Items, err, wantClaim)
+	}
+	jobs, err := client.BatchV1().Jobs("anban").List(ctx, metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 1 {
+		t.Fatalf("publication recovery jobs = %#v, err=%v", jobs.Items, err)
+	}
+	workspace := requireTestVolume(t, &jobs.Items[0], kubernetesWorkspaceMountName)
+	if workspace.PersistentVolumeClaim == nil || workspace.PersistentVolumeClaim.ClaimName != wantClaim {
+		t.Fatalf("publication recovery workspace = %#v, want isolated claim %q", workspace, wantClaim)
+	}
+}
+
 func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) {
 	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	for _, tc := range []struct {
@@ -1157,17 +1184,41 @@ func TestKubernetesDispatcherDeleteTaskWorkspaceIsGuardedAndIdempotent(t *testin
 	task := testTask()
 	pvc := buildTaskWorkspacePVC(testJobConfig(), task)
 	pvc.UID = types.UID("workspace-uid-1")
-	client := fake.NewSimpleClientset(pvc)
+	recoveryOne := testExecution()
+	recoveryOne.ID = "recovery-execution-1"
+	recoveryOne.Purpose = model.TaskExecutionPurposePublicationRecovery
+	recoveryPVCOne := buildExecutionTaskWorkspacePVC(testJobConfig(), recoveryOne, task)
+	recoveryPVCOne.UID = types.UID("workspace-uid-2")
+	recoveryTwo := testExecution()
+	recoveryTwo.ID = "recovery-execution-2"
+	recoveryTwo.Purpose = model.TaskExecutionPurposePublicationRecovery
+	recoveryPVCTwo := buildExecutionTaskWorkspacePVC(testJobConfig(), recoveryTwo, task)
+	recoveryPVCTwo.UID = types.UID("workspace-uid-3")
+	client := fake.NewSimpleClientset(pvc, recoveryPVCOne, recoveryPVCTwo)
 	d := testDispatcher(client)
 	if err := d.DeleteTaskWorkspace(ctx, task); err != nil {
 		t.Fatalf("DeleteTaskWorkspace: %v", err)
 	}
-	deleteAction, ok := client.Actions()[len(client.Actions())-1].(ktesting.DeleteAction)
-	if !ok {
-		t.Fatalf("last action = %T, want DeleteAction", client.Actions()[len(client.Actions())-1])
+	remaining, err := client.CoreV1().PersistentVolumeClaims("anban").List(ctx, metav1.ListOptions{})
+	if err != nil || len(remaining.Items) != 0 {
+		t.Fatalf("remaining task workspaces = %#v, err=%v", remaining.Items, err)
 	}
-	if got := deleteAction.GetDeleteOptions().Preconditions; got == nil || got.UID == nil || *got.UID != pvc.UID {
-		t.Fatalf("preconditions = %#v, want UID %q", got, pvc.UID)
+	deletedUIDs := map[types.UID]bool{}
+	for _, action := range client.Actions() {
+		deleteAction, ok := action.(ktesting.DeleteAction)
+		if !ok {
+			continue
+		}
+		got := deleteAction.GetDeleteOptions().Preconditions
+		if got == nil || got.UID == nil {
+			t.Fatalf("delete preconditions = %#v, want PVC UID", got)
+		}
+		deletedUIDs[*got.UID] = true
+	}
+	for _, want := range []types.UID{pvc.UID, recoveryPVCOne.UID, recoveryPVCTwo.UID} {
+		if !deletedUIDs[want] {
+			t.Fatalf("deleted UIDs = %v, missing %q", deletedUIDs, want)
+		}
 	}
 	if err := d.DeleteTaskWorkspace(ctx, task); err != nil {
 		t.Fatalf("idempotent DeleteTaskWorkspace: %v", err)
@@ -1176,7 +1227,7 @@ func TestKubernetesDispatcherDeleteTaskWorkspaceIsGuardedAndIdempotent(t *testin
 	mismatch := buildTaskWorkspacePVC(testJobConfig(), task)
 	mismatch.Labels[kubernetesUserIDLabel] = "foreign-user"
 	client = fake.NewSimpleClientset(mismatch)
-	err := testDispatcher(client).DeleteTaskWorkspace(ctx, task)
+	err = testDispatcher(client).DeleteTaskWorkspace(ctx, task)
 	if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 		t.Fatalf("mismatched DeleteTaskWorkspace error = %v, want identity mismatch", err)
 	}

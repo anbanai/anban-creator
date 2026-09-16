@@ -13,6 +13,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
@@ -79,8 +80,8 @@ func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.
 		return nil, fmt.Errorf("prepare Kubernetes project memory: %w", err)
 	}
 
-	allowPVCCreation := execution.ParentExecutionID == ""
-	if err := d.ensurePVC(ctx, buildTaskWorkspacePVC(d.config, task), "task workspace", task.ID, allowPVCCreation); err != nil {
+	allowPVCCreation := execution.Purpose == model.TaskExecutionPurposePublicationRecovery || execution.ParentExecutionID == ""
+	if err := d.ensurePVC(ctx, buildExecutionTaskWorkspacePVC(d.config, execution, task), "task workspace", task.ID, allowPVCCreation); err != nil {
 		return nil, err
 	}
 
@@ -302,21 +303,38 @@ func (d *kubernetesJobDispatcher) DeleteTaskWorkspace(ctx context.Context, task 
 	if task == nil || strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ProjectID) == "" || strings.TrimSpace(task.UserID) == "" {
 		return fmt.Errorf("task identity is required")
 	}
-	name := kubernetesTaskWorkspacePVCName(task.ID)
 	pvcs := d.kube.CoreV1().PersistentVolumeClaims(d.config.Namespace)
-	pvc, err := pvcs.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
+	listed, err := pvcs.List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("get task workspace PVC %q: %w", name, err)
+		return fmt.Errorf("list task workspace PVCs: %w", err)
 	}
-	desired := buildTaskWorkspacePVC(d.config, task)
-	if err := verifyRequiredLabels(pvc.Labels, desired.Labels); err != nil {
-		return fmt.Errorf("task workspace PVC %q identity mismatch: %w", name, err)
+	type deletion struct {
+		name string
+		uid  types.UID
 	}
-	if err := pvcs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pvc.UID}}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete task workspace PVC %q: %w", name, err)
+	deletions := make([]deletion, 0, len(listed.Items))
+	for index := range listed.Items {
+		pvc := &listed.Items[index]
+		if pvc.Labels[kubernetesTaskIDLabel] != task.ID {
+			continue
+		}
+		var execution *model.TaskExecution
+		if executionID := strings.TrimSpace(pvc.Labels[kubernetesExecutionIDLabel]); executionID != "" {
+			execution = &model.TaskExecution{ID: executionID, Purpose: model.TaskExecutionPurposePublicationRecovery}
+		}
+		desired := buildExecutionTaskWorkspacePVC(d.config, execution, task)
+		if pvc.Name != desired.Name {
+			return fmt.Errorf("task workspace PVC %q identity mismatch: name does not match labels", pvc.Name)
+		}
+		if err := verifyPVC(pvc, desired, "task workspace", task.ID); err != nil {
+			return err
+		}
+		deletions = append(deletions, deletion{name: pvc.Name, uid: pvc.UID})
+	}
+	for _, candidate := range deletions {
+		if err := pvcs.Delete(ctx, candidate.name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &candidate.uid}}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete task workspace PVC %q: %w", candidate.name, err)
+		}
 	}
 	return nil
 }

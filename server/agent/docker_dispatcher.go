@@ -13,6 +13,7 @@ import (
 	"time"
 
 	containertypes "github.com/docker/docker/api/types/container"
+	filtertypes "github.com/docker/docker/api/types/filters"
 	imageTypes "github.com/docker/docker/api/types/image"
 	networktypes "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
@@ -36,6 +37,7 @@ const (
 type dockerEngine interface {
 	ImageInspect(context.Context, string, ...dockerclient.ImageInspectOption) (imageTypes.InspectResponse, error)
 	VolumeInspect(context.Context, string) (volume.Volume, error)
+	VolumeList(context.Context, volume.ListOptions) (volume.ListResponse, error)
 	VolumeCreate(context.Context, volume.CreateOptions) (volume.Volume, error)
 	VolumeRemove(context.Context, string, bool) error
 	ContainerInspect(context.Context, string) (containertypes.InspectResponse, error)
@@ -137,7 +139,8 @@ func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExe
 			return nil, err
 		}
 	}
-	allowTaskVolumeCreation := execution.Attempt <= 1 && strings.TrimSpace(execution.ParentExecutionID) == ""
+	allowTaskVolumeCreation := execution.Purpose == model.TaskExecutionPurposePublicationRecovery ||
+		(execution.Attempt <= 1 && strings.TrimSpace(execution.ParentExecutionID) == "")
 	if err := d.ensureVolume(dispatchCtx, spec.TaskVolume, "task workspace", allowTaskVolumeCreation); err != nil {
 		return nil, err
 	}
@@ -522,10 +525,39 @@ func (d *DockerDispatcher) DeleteTaskWorkspace(ctx context.Context, task *model.
 	if err := validateDockerTaskIdentity(task); err != nil {
 		return err
 	}
-	desired := dockerTaskWorkspaceVolume(task)
-	return d.deleteVolume(ctx, desired, func(existing volume.Volume) error {
-		return verifyDockerVolume(existing, desired)
-	})
+	listed, err := d.engine.VolumeList(ctx, volume.ListOptions{Filters: filtertypes.NewArgs(
+		filtertypes.Arg("label", dockerTaskIDLabel+"="+task.ID),
+	)})
+	if err != nil {
+		return fmt.Errorf("list Docker task workspaces: %w", err)
+	}
+	type deletion struct {
+		name string
+	}
+	deletions := make([]deletion, 0, len(listed.Volumes))
+	for _, existing := range listed.Volumes {
+		if existing == nil || existing.Labels[dockerTaskIDLabel] != task.ID {
+			continue
+		}
+		desired := dockerTaskWorkspaceVolume(task)
+		if executionID := strings.TrimSpace(existing.Labels[dockerExecutionIDLabel]); executionID != "" {
+			desired.Name = dockerTaskWorkspaceVolumeName(task.ID + "-publication-recovery-" + executionID)
+			desired.Labels[dockerExecutionIDLabel] = executionID
+		}
+		if existing.Name != desired.Name {
+			return fmt.Errorf("refuse to delete Docker volume %q: task workspace name does not match its identity", existing.Name)
+		}
+		if err := verifyDockerVolume(*existing, desired); err != nil {
+			return fmt.Errorf("refuse to delete Docker volume %q: %w", existing.Name, err)
+		}
+		deletions = append(deletions, deletion{name: existing.Name})
+	}
+	for _, candidate := range deletions {
+		if err := d.engine.VolumeRemove(ctx, candidate.name, false); err != nil && !errdefs.IsNotFound(err) {
+			return fmt.Errorf("remove Docker volume %q: %w", candidate.name, err)
+		}
+	}
+	return nil
 }
 
 func (d *DockerDispatcher) deleteVolume(ctx context.Context, desired volume.CreateOptions, verify func(volume.Volume) error) error {

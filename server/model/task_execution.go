@@ -18,6 +18,7 @@ type TaskExecution struct {
 	ID                string `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID            string `gorm:"type:char(36);uniqueIndex:idx_task_attempt,priority:1;index;not null" json:"task_id"`
 	Attempt           int    `gorm:"uniqueIndex:idx_task_attempt,priority:2;not null" json:"attempt"`
+	Purpose           string `gorm:"type:varchar(32);not null;default:primary;index" json:"purpose"`
 	ParentExecutionID string `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
 	ResumeSessionID   string `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
 	AgentPackID       string `gorm:"type:varchar(80);index" json:"agent_pack_id,omitempty"`
@@ -82,6 +83,9 @@ func NewTaskExecutionAgentProfile(snapshot AgentProfileSnapshot, fingerprint str
 }
 
 const (
+	TaskExecutionPurposePrimary             = "primary"
+	TaskExecutionPurposePublicationRecovery = "publication_recovery"
+
 	TaskExecutionCreated     = "created"
 	TaskExecutionDispatching = "dispatching"
 	TaskExecutionStarting    = "starting"
@@ -114,6 +118,7 @@ const (
 const (
 	TaskExecutionDraftDeliveryInFlight     = "in_flight"
 	TaskExecutionDraftDeliverySucceeded    = "succeeded"
+	TaskExecutionDraftDeliveryBlocked      = "blocked"
 	TaskExecutionDraftDeliverySkipped      = "skipped"
 	TaskExecutionDraftDeliveryFailed       = "failed"
 	TaskExecutionDraftDeliveryAmbiguous    = "ambiguous"

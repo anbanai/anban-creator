@@ -22,9 +22,12 @@ export interface TaskOutcome {
   visual: { status: 'complete' | 'partial' | 'not_requested' }
   review: { status: 'passed' | 'warning' | 'unavailable' }
   publication: {
-    status: 'succeeded' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested'
+    status: 'succeeded' | 'blocked' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested'
     code?: string
     message?: string
+    attempted?: boolean
+    action?: 'retry_visuals' | 'retry_draft' | 'fix_project_config' | 'review_content' | 'check_wechat'
+    occurred_at?: string
   }
   warnings: Array<{ code: string; message: string; stage?: string }>
   diagnostic?: {

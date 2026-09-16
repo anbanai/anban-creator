@@ -240,6 +240,7 @@ func TestWechatPublicationRoutesReplaceLegacyTaskPublicationRoutes(t *testing.T)
 		"POST /api/v1/tasks/:id/wechat-publication/publish":       false,
 		"POST /api/v1/tasks/:id/wechat-publication/retry-publish": false,
 		"POST /api/v1/tasks/:id/wechat-publication/reconcile":     false,
+		"POST /api/v1/tasks/:id/wechat-publication/recover":       false,
 		"POST /api/v1/tasks/:id/wechat-publication/select":        false,
 	}
 	for _, route := range app.GetRoutes() {

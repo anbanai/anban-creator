@@ -70,6 +70,7 @@ type TaskService struct {
 	enqueuer                 TaskEnqueuer
 	store                    storage.Provider
 	publishingSvc            *PublishingService
+	wechatPublicationSvc     *WechatPublicationService
 	taskLogDir               string
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
@@ -200,6 +201,12 @@ func (s *TaskService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
 func (s *TaskService) SetImageCapabilityResolver(resolver *ImageCapabilityResolver) {
 	if s != nil {
 		s.imageCapabilities = resolver
+	}
+}
+
+func (s *TaskService) SetWechatPublicationService(publication *WechatPublicationService) {
+	if s != nil {
+		s.wechatPublicationSvc = publication
 	}
 }
 

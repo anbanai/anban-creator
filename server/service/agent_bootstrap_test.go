@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,174 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+var recoveryBootstrapTestPaths = []string{
+	"output/04-article-final.md",
+	"output/seo-result.md",
+	"output/visual-rhythm-plan.md",
+	"output/05-article.html",
+}
+
+var recoveryBootstrapTestMIMETypes = map[string]string{
+	"output/04-article-final.md":       "text/markdown",
+	"output/content-quality-report.md": "text/markdown",
+	"output/marketing-scan.json":       "application/json",
+	"output/seo-result.md":             "text/markdown",
+	"output/visual-rhythm-plan.md":     "text/markdown",
+	"output/cover-plan.md":             "text/markdown",
+	"output/cover-prompt.md":           "text/markdown",
+	"output/image-plan.md":             "text/markdown",
+	"output/05-article.html":           "text/html",
+	"output/final-review.md":           "text/markdown",
+	"output/viral-audit.md":            "text/markdown",
+	"output/draft.json":                "application/json",
+}
+
+func TestBootstrapPublicationRecoveryHydratesOnlyDeliveredSourceArtifacts(t *testing.T) {
+	_, repo, db, task, source := setupCloudCompletionTestWithDB(t, false)
+	if err := db.Model(&model.TaskExecution{}).Where("id = ?", source.ID).Update("status", model.TaskExecutionSucceeded).Error; err != nil {
+		t.Fatal(err)
+	}
+	source.Status = model.TaskExecutionSucceeded
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+
+	allowed := map[string]string{
+		"output/04-article-final.md":       "article body",
+		"output/content-quality-report.md": "quality report",
+		"output/marketing-scan.json":       `{"status":"passed"}`,
+		"output/seo-result.md":             "seo metadata",
+		"output/visual-rhythm-plan.md":     "visual rhythm plan",
+		"output/cover-plan.md":             "cover plan",
+		"output/cover-prompt.md":           "cover prompt",
+		"output/image-plan.md":             "image plan",
+		"output/05-article.html":           "<p>article</p>",
+		"output/final-review.md":           "final review",
+		"output/viral-audit.md":            "viral audit",
+		"output/draft.json":                `{"schema_version":"1.0"}`,
+	}
+	sourcePrefix := buildTaskMCPArtifactStoragePrefix(task, source.ID)
+	for artifactPath, body := range allowed {
+		digest := sha256.Sum256([]byte(body))
+		contentHash := fmt.Sprintf("%x", digest)
+		objectKey := sourcePrefix + artifactPath
+		if slices.Contains(recoveryBootstrapTestPaths, artifactPath) {
+			objectKey = buildTaskArtifactFinalStorageKey(task, source.ID, contentHash, artifactPath)
+		}
+		if err := repo.TaskFiles().Create(t.Context(), &model.TaskFile{
+			TaskID: task.ID, ExecutionID: source.ID, State: model.TaskFileStateDelivered,
+			Role: model.FileRoleOther, FilePath: artifactPath, FileName: path.Base(artifactPath),
+			MimeType: recoveryBootstrapTestMIMETypes[artifactPath], FileSize: int64(len(body)),
+			ContentHash: contentHash, OSSKey: objectKey, StorageProvider: store.Name(),
+		}); err != nil {
+			t.Fatalf("create source artifact %q: %v", artifactPath, err)
+		}
+	}
+	recovery := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Purpose: model.TaskExecutionPurposePublicationRecovery,
+		ParentExecutionID: source.ID,
+	}
+	response, err := buildBootstrapTestResponse(t, bootstrap, t.Context(), recovery, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("build recovery bootstrap response: %v", err)
+	}
+	for _, instruction := range []string{
+		"发布恢复模式",
+		"从 image_generation 阶段继续",
+		"不得重新执行选题、正文创作、SEO 或语义审核",
+	} {
+		if !strings.Contains(response.Prompt, instruction) {
+			t.Fatalf("recovery prompt = %q, want instruction %q", response.Prompt, instruction)
+		}
+	}
+	got := map[string]BootstrapFile{}
+	for _, file := range response.Files {
+		if strings.HasPrefix(file.Path, "output/") {
+			got[file.Path] = file
+		}
+	}
+	if len(got) != len(allowed) {
+		t.Fatalf("recovery bootstrap output files = %#v, want exactly %#v", got, allowed)
+	}
+	for artifactPath := range allowed {
+		file, ok := got[artifactPath]
+		if !ok || file.DownloadURL == "" || file.ExpectedSize <= 0 || !lowercaseSHA256.MatchString(file.ContentSHA256) || !file.ReplaceExisting {
+			t.Fatalf("recovery bootstrap file %q = %#v", artifactPath, file)
+		}
+	}
+}
+
+func TestBootstrapPublicationRecoveryRejectsInvalidSourceArtifacts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, repo repository.Repository, db *gorm.DB, task *model.Task, source *model.TaskExecution)
+	}{
+		{
+			name: "uppercase hash",
+			setup: func(t *testing.T, repo repository.Repository, _ *gorm.DB, task *model.Task, source *model.TaskExecution) {
+				t.Helper()
+				prefix := buildTaskMCPArtifactStoragePrefix(task, source.ID)
+				for _, artifactPath := range recoveryBootstrapTestPaths {
+					hash := strings.Repeat("a", 64)
+					if artifactPath == "output/04-article-final.md" {
+						hash = strings.ToUpper(hash)
+					}
+					if err := repo.TaskFiles().Create(t.Context(), &model.TaskFile{TaskID: task.ID, ExecutionID: source.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: artifactPath, FileName: path.Base(artifactPath), MimeType: recoveryBootstrapTestMIMETypes[artifactPath], FileSize: 1, ContentHash: hash, OSSKey: prefix + artifactPath, StorageProvider: "fake"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+		{
+			name: "source execution belongs to another task",
+			setup: func(t *testing.T, repo repository.Repository, db *gorm.DB, task *model.Task, source *model.TaskExecution) {
+				t.Helper()
+				if err := repo.Tasks().Create(t.Context(), &model.Task{ID: "foreign-task", UserID: task.UserID, ProjectID: task.ProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Model(&model.TaskExecution{}).Where("id = ?", source.ID).Update("task_id", "foreign-task").Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "source execution is not terminal",
+			setup: func(t *testing.T, _ repository.Repository, db *gorm.DB, _ *model.Task, source *model.TaskExecution) {
+				t.Helper()
+				if err := db.Model(&model.TaskExecution{}).Where("id = ?", source.ID).Update("status", model.TaskExecutionRunning).Error; err != nil {
+					t.Fatal(err)
+				}
+				source.Status = model.TaskExecutionRunning
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo, db, task, source := setupCloudCompletionTestWithDB(t, false)
+			store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+			tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+			bootstrap := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: time.Hour, SignedURLTTL: 60}, zerolog.Nop())
+			if err := db.Model(&model.TaskExecution{}).Where("id = ?", source.ID).Update("status", model.TaskExecutionSucceeded).Error; err != nil {
+				t.Fatal(err)
+			}
+			source.Status = model.TaskExecutionSucceeded
+			tc.setup(t, repo, db, task, source)
+			_, err := buildBootstrapTestResponse(t, bootstrap, t.Context(), &model.TaskExecution{
+				ID: uuid.NewString(), TaskID: task.ID, Purpose: model.TaskExecutionPurposePublicationRecovery,
+				ParentExecutionID: source.ID,
+			}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+			if err == nil {
+				t.Fatal("invalid source artifact accepted")
+			}
+			if len(store.signedKeys) != 0 {
+				t.Fatalf("invalid source artifact reached signer: %#v", store.signedKeys)
+			}
+		})
+	}
+}
 
 type bootstrapSecurityStore struct {
 	*signFakeStore

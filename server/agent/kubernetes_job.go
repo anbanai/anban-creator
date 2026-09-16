@@ -152,7 +152,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						},
 					}},
 					Volumes: []corev1.Volume{
-						{Name: kubernetesWorkspaceMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesTaskWorkspacePVCName(taskID(task))}}},
+						{Name: kubernetesWorkspaceMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: kubernetesExecutionWorkspacePVCName(execution, task)}}},
 						{Name: kubernetesMemoryMountName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ProjectMemoryClaim}}},
 						{Name: kubernetesTmpVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						{Name: kubernetesTokenVolumeName, VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
@@ -234,14 +234,21 @@ func kubernetesResourceList(values map[string]string) corev1.ResourceList {
 }
 
 func buildTaskWorkspacePVC(cfg kubernetesJobConfig, task *model.Task) *corev1.PersistentVolumeClaim {
+	return buildExecutionTaskWorkspacePVC(cfg, nil, task)
+}
+
+func buildExecutionTaskWorkspacePVC(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *corev1.PersistentVolumeClaim {
 	storageClass := cfg.NASStorageClass
 	quantity := resource.MustParse(cfg.TaskWorkspaceSize)
 	labels := kubernetesAgentLabels(task)
 	labels["app.kubernetes.io/component"] = "task-workspace"
+	if execution != nil && execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+		labels[kubernetesExecutionIDLabel] = executionID(execution)
+	}
 	return &corev1.PersistentVolumeClaim{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubernetesTaskWorkspacePVCName(taskID(task)),
+			Name:      kubernetesExecutionWorkspacePVCName(execution, task),
 			Namespace: cfg.Namespace,
 			Labels:    labels,
 		},

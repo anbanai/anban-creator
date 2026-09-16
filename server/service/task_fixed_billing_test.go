@@ -35,6 +35,7 @@ func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *
 	}{
 		{path: "output/04-article-final.md", mimeType: "text/markdown", role: model.FileRoleFinalMarkdown},
 		{path: "output/05-article.html", mimeType: "text/html", role: model.FileRoleHTML},
+		{path: "output/draft.json", mimeType: "application/json", role: model.FileRoleDraftPackage},
 		{path: "output/final-review.md", mimeType: "text/markdown", role: model.FileRoleReview},
 	} {
 		body := validTaskDeliveryFixtureBody(spec.path, spec.mimeType)

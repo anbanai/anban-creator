@@ -109,6 +109,9 @@ func main() {
 		if err := requireTaskDeliverySchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for reliable task delivery")
 		}
+		if err := requireServerOwnedArticlePublicationSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for Server-owned article publication")
+		}
 		if _, err := service.MigrateImageCapabilities(context.Background(), mysqlDB, cfg.ModelRoutes.ImageGeneration.DefaultCapability, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate image capabilities")
 		}
@@ -376,6 +379,8 @@ func main() {
 		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc.SetWechatPublicationService(wechatPublicationSvc)
+		wechatPublicationSvc.SetRecovery(taskSvc.RecoverWechatPublication)
 		referenceAssetSvc = service.NewReferenceAssetService(repo, store, time.Now)
 		planSvc.SetReferenceAssetService(referenceAssetSvc)
 		planSvc.SetAgentProfileRegistry(agentProfiles)
@@ -1029,6 +1034,23 @@ func requireTaskDeliverySchema(db *gorm.DB) error {
 	}
 	if db.Dialector.Name() == "mysql" {
 		return requireMySQLTaskDeliveryConstraints(db)
+	}
+	return nil
+}
+
+func requireServerOwnedArticlePublicationSchema(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	hasExecutions := db.Migrator().HasTable(&model.TaskExecution{})
+	hasPublications := db.Migrator().HasTable(&model.WechatPublication{})
+	if !hasExecutions && !hasPublications {
+		return nil
+	}
+	if !hasExecutions || !db.Migrator().HasColumn(&model.TaskExecution{}, "Purpose") ||
+		!hasPublications || !db.Migrator().HasColumn(&model.WechatPublication{}, "DraftAddAttempts") ||
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftRetryAuthorizedAt") {
+		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql before startup")
 	}
 	return nil
 }

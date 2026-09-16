@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -610,6 +611,32 @@ func validTaskDeliveryFixtureBody(path, mimeType string) []byte {
 		return []byte("# Valid article\n\nThis is a durable delivery fixture.\n")
 	case "text/html":
 		return []byte("<section><p>Valid article delivery.</p></section>\n")
+	case "application/json":
+		if path == "output/draft.json" {
+			html := validTaskDeliveryFixtureBody("output/05-article.html", "text/html")
+			digest := sha256.Sum256(html)
+			body, _ := json.Marshal(map[string]any{
+				"schema_version": "1.0",
+				"article": map[string]any{
+					"title":          "Valid article",
+					"digest":         "Durable delivery fixture",
+					"content_path":   "output/05-article.html",
+					"content_sha256": fmt.Sprintf("%x", digest),
+				},
+				"readiness": map[string]any{
+					"status":         "ready",
+					"code":           "",
+					"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+				},
+			})
+			return body
+		}
+		if path == "output/marketing-scan.json" {
+			markdown := validTaskDeliveryFixtureBody("output/04-article-final.md", "text/markdown")
+			digest := sha256.Sum256(markdown)
+			return []byte(fmt.Sprintf(`{"version":"1.0","status":"passed","content_hash":"%x","findings":[]}`, digest))
+		}
+		return []byte(`{"status":"passed"}`)
 	default:
 		return []byte(path)
 	}

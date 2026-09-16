@@ -128,6 +128,13 @@ export default function WechatAnalyticsPanel({
         queryKey: ["wechat-publication", taskId],
       }),
   });
+  const recover = useMutation({
+    mutationFn: () => api.tasks.recoverWechatPublication(taskId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      void queryClient.invalidateQueries({ queryKey: ["wechat-publication", taskId] });
+    },
+  });
   if (mode === "disabled") return null;
   if (publicationQuery.isLoading)
     return (
@@ -142,7 +149,7 @@ export default function WechatAnalyticsPanel({
     publicationQuery.error as { response?: { status?: number } } | null
   )?.response?.status;
   if (publicationQuery.isError && publicationErrorStatus === 404)
-    return <MissingPublicationState mode={mode} outcome={taskOutcome} />;
+    return <MissingPublicationState outcome={taskOutcome} onRecover={() => recover.mutate()} pending={recover.isPending} failed={recover.isError} />;
   if (publicationQuery.isError)
     return (
       <Card>
@@ -152,17 +159,20 @@ export default function WechatAnalyticsPanel({
       </Card>
     );
   if (!publication)
-    return <MissingPublicationState mode={mode} outcome={taskOutcome} />;
+    return <MissingPublicationState outcome={taskOutcome} onRecover={() => recover.mutate()} pending={recover.isPending} failed={recover.isError} />;
   const mutationFailed = reconcile.isError || publish.isError || retryPublish.isError || select.isError;
   return (
     <div className="space-y-4">
       <PublicationCard
         publication={publication}
         mode={mode}
+        recoveryAction={taskOutcome?.publication.action}
         onReconcile={() => reconcile.mutate()}
         onPublish={() => setConfirmOpen(true)}
         onRetryPublish={() => retryPublish.mutate()}
-        pending={reconcile.isPending || publish.isPending || retryPublish.isPending}
+        onRecover={() => recover.mutate()}
+        pending={reconcile.isPending || publish.isPending || retryPublish.isPending || recover.isPending}
+        recoveryFailed={recover.isError}
       />
       {mutationFailed && (
         <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
@@ -209,11 +219,15 @@ export default function WechatAnalyticsPanel({
 }
 
 function MissingPublicationState({
-  mode,
   outcome,
+  onRecover,
+  pending,
+  failed,
 }: {
-  mode: WechatPublishMode;
   outcome?: TaskOutcome;
+  onRecover: () => void;
+  pending: boolean;
+  failed: boolean;
 }) {
   const status = outcome?.publication.status;
   if (!status || status === "not_requested") {
@@ -228,18 +242,16 @@ function MissingPublicationState({
 
   const ambiguous = status === "ambiguous";
   const succeeded = status === "succeeded";
-  const automatic = mode === "api_confirmed";
+  const requiresWechatCheck = ambiguous || outcome.publication.action === "check_wechat";
   const title = succeeded
-    ? "公众号草稿已创建。"
-    : ambiguous
-    ? "微信是否收到草稿请求暂时无法确认。"
-    : automatic
-      ? "本次未创建公众号草稿，自动发布没有启动。"
-      : "本次未创建公众号草稿。";
+    ? "草稿已进入公众号草稿箱"
+    : requiresWechatCheck
+    ? "草稿状态待核对"
+    : "草稿未创建";
   const detail = succeeded
     ? "草稿详情暂时无法加载，请稍后刷新。"
-    : ambiguous
-    ? "为避免重复投稿，系统不会再次提交；请先到公众号后台核对草稿箱。"
+    : requiresWechatCheck
+    ? "微信是否收到请求暂时无法确认，请先到公众号后台核对草稿箱。"
     : outcome.publication.message || (status === "skipped"
       ? "发布前检查阻止了公众号投递，请根据任务警告修改文章后重新执行。"
       : "请根据任务警告修复问题后重新执行。"
@@ -259,7 +271,7 @@ function MissingPublicationState({
           </CardTitle>
           <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
         </div>
-        {ambiguous && (
+        {requiresWechatCheck && (
           <Button
             size="sm"
             variant="outline"
@@ -270,7 +282,21 @@ function MissingPublicationState({
             打开公众号后台
           </Button>
         )}
+        {!succeeded && !requiresWechatCheck && (outcome.publication.action === "retry_visuals" || outcome.publication.action === "retry_draft") && (
+          <Button size="sm" onClick={onRecover} disabled={pending}>
+            <RefreshCw className={pending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {outcome.publication.action === "retry_visuals" ? "重新生成图片并继续发布" : "重新检查并继续发布"}
+          </Button>
+        )}
       </CardHeader>
+      {failed && (
+        <CardContent className="pt-0">
+          <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            恢复发布失败，请稍后重试。
+          </p>
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -278,17 +304,23 @@ function MissingPublicationState({
 function PublicationCard({
   publication,
   mode,
+  recoveryAction,
   onReconcile,
   onPublish,
   onRetryPublish,
+  onRecover,
   pending,
+  recoveryFailed,
 }: {
   publication: WechatPublication;
   mode: WechatPublishMode;
+  recoveryAction?: TaskOutcome["publication"]["action"];
   onReconcile: () => void;
   onPublish: () => void;
   onRetryPublish: () => void;
+  onRecover: () => void;
   pending: boolean;
+  recoveryFailed: boolean;
 }) {
   const status = publication.status;
   const hasSubmissionEvidence = Boolean(
@@ -302,6 +334,9 @@ function PublicationCard({
     status === "unsupported" &&
     Boolean(publication.wechat_status_code) &&
     Boolean(publication.draft_media_id);
+  const canRecoverDraft =
+    !publication.draft_media_id &&
+    (recoveryAction === "retry_visuals" || recoveryAction === "retry_draft");
   const canReconcile =
     status !== "publishing" && !terminalPublicationStatuses.has(status);
   return (
@@ -385,6 +420,12 @@ function PublicationCard({
               {hasSubmissionEvidence ? "重新检测发布结果" : "重新尝试正式发布"}
             </Button>
           )}
+          {canRecoverDraft && (
+            <Button size="sm" onClick={onRecover} disabled={pending}>
+              <RefreshCw className={pending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              {recoveryAction === "retry_visuals" ? "重新生成图片并继续发布" : "重新检查并继续发布"}
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -421,6 +462,12 @@ function PublicationCard({
             {mode === "manual"
               ? "你可以在这里正式发布，也可以去公众号后台发布；系统会自动识别并开始 30 天数据追踪。"
               : "草稿已就绪，系统正在自动提交正式发布。"}
+          </p>
+        )}
+        {recoveryFailed && (
+          <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            恢复发布失败，请稍后重试。
           </p>
         )}
       </CardContent>

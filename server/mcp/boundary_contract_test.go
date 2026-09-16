@@ -57,7 +57,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"progressUpdateHandler":                   "svcs.TaskSvc.UpdateProgress",
 	"projectGetHandler":                       "svcs.ProjectSvc.Get",
 	"projectListHandler":                      "svcs.ProjectSvc.List",
-	"createDraftHandler":                      "svcs.WechatPublicationSvc.CreateDraft",
+	"createDraftHandler":                      "svcs.WechatPublicationSvc.CreateDraftInteractive",
 	"queryLiveAnalysisTaskHandler":            "svcs.LiveSliceSvc.QueryLiveAnalysisTaskForCaller",
 	"renderTemplateHandler":                   "svcs.ContentRenderSvc.RenderTemplate",
 	"scoreArticleHandler":                     "svcs.ArticleScoreSvc.Score",
@@ -1276,12 +1276,18 @@ func TestRepositoryInstructionsDefineMCPAsCapabilityTransport(t *testing.T) {
 		text := string(data)
 		for _, want := range []string{
 			"MCP is a stateless capability transport",
-			"Agents and Skills own business workflow orchestration",
+			"external side effects",
+			"idempotency",
+			"reconciliation",
 			"one application capability",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q", path, want)
 			}
+		}
+		if !strings.Contains(text, "non-deterministic generation workflows") &&
+			!strings.Contains(text, "非确定性创作流程") {
+			t.Fatalf("%s does not limit Agent orchestration to non-deterministic generation workflows", path)
 		}
 	}
 }

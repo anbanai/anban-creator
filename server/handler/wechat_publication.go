@@ -17,6 +17,7 @@ type WechatPublicationActions interface {
 	RetryPublish(context.Context, string, string) (*model.WechatPublication, error)
 	Reconcile(context.Context, string, string) error
 	Select(context.Context, string, string, string) (*model.WechatPublication, error)
+	Recover(context.Context, string, string) (model.TaskPublicationOutcome, error)
 }
 
 type WechatPublicationHandler struct {
@@ -90,6 +91,18 @@ func (h *WechatPublicationHandler) Reconcile(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"reconciled": true})
 }
 
+func (h *WechatPublicationHandler) Recover(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	outcome, err := h.service.Recover(c.Context(), userID, taskID)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, outcome)
+}
+
 func (h *WechatPublicationHandler) Select(c fiber.Ctx) error {
 	userID, taskID, err := h.requestIdentity(c)
 	if err != nil {
@@ -124,6 +137,8 @@ func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err e
 		return Error(c, fiber.StatusTooManyRequests, service.ErrWechatPublicationRateLimited.Error())
 	case errors.Is(err, service.ErrWechatPublicationSchedulerUnavailable):
 		return Error(c, fiber.StatusServiceUnavailable, service.ErrWechatPublicationSchedulerUnavailable.Error())
+	case errors.Is(err, service.ErrWechatPublicationRecoveryUnavailable):
+		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationRecoveryUnavailable.Error())
 	case errors.Is(err, service.ErrWechatPublicationArticleNotFound):
 		return Error(c, fiber.StatusBadRequest, service.ErrWechatPublicationArticleNotFound.Error())
 	default:

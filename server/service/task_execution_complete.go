@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	appwechat "github.com/anbanai/anban-creator/app/wechat"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -457,29 +459,31 @@ func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *mode
 	}
 	switch latestExecution.DraftDeliveryStatus {
 	case model.TaskExecutionDraftDeliverySucceeded, model.TaskExecutionDraftDeliverySkipped,
-		model.TaskExecutionDraftDeliveryFailed, model.TaskExecutionDraftDeliveryAmbiguous,
+		model.TaskExecutionDraftDeliveryBlocked, model.TaskExecutionDraftDeliveryFailed, model.TaskExecutionDraftDeliveryAmbiguous,
 		model.TaskExecutionDraftDeliveryNotRequested:
 		execution.DraftDeliveryStatus = latestExecution.DraftDeliveryStatus
 		execution.DraftDeliveryResult = latestExecution.DraftDeliveryResult
 		return nil
 	case model.TaskExecutionDraftDeliveryInFlight:
-		evidence := []byte(`{"source":"durable_publication","reason":"completion_observed_in_flight"}`)
-		won, transitionErr := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID,
-			model.TaskExecutionDraftDeliveryInFlight, model.TaskExecutionDraftDeliveryAmbiguous,
-			evidence)
-		if transitionErr != nil {
-			return transitionErr
-		}
-		if !won {
-			return fmt.Errorf("record ambiguous draft delivery: state changed concurrently")
-		}
-		execution.DraftDeliveryStatus = model.TaskExecutionDraftDeliveryAmbiguous
-		execution.DraftDeliveryResult = evidence
+		// The caller that moved the execution to in_flight still owns the
+		// external call. A concurrent finalizer must not steal that ownership;
+		// its completion callback or durable reconciliation will resolve it.
+		execution.DraftDeliveryStatus = latestExecution.DraftDeliveryStatus
+		execution.DraftDeliveryResult = latestExecution.DraftDeliveryResult
 		return nil
 	}
 	status, evidence, err := s.resolveCloudDraftDelivery(ctx, task, execution)
 	if err != nil {
 		return err
+	}
+	latestExecution, err = s.repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		return err
+	}
+	if latestExecution.DraftDeliveryStatus != "" {
+		execution.DraftDeliveryStatus = latestExecution.DraftDeliveryStatus
+		execution.DraftDeliveryResult = latestExecution.DraftDeliveryResult
+		return nil
 	}
 	won, err := s.repo.TaskExecutions().TransitionDraftDelivery(ctx, execution.ID, "", status, evidence)
 	if err != nil {
@@ -499,7 +503,47 @@ type articleStatusArtifact struct {
 	Code        string `json:"code,omitempty"`
 }
 
+type articlePublicationPackage struct {
+	SchemaVersion string `json:"schema_version"`
+	Article       struct {
+		Title         string `json:"title"`
+		Digest        string `json:"digest"`
+		ContentPath   string `json:"content_path"`
+		ContentSHA256 string `json:"content_sha256"`
+	} `json:"article"`
+	Readiness struct {
+		Status        string   `json:"status"`
+		Code          string   `json:"code"`
+		EvidencePaths []string `json:"evidence_paths"`
+	} `json:"readiness"`
+}
+
+type publicationDeliveryResult struct {
+	Source     string `json:"source"`
+	Status     string `json:"status"`
+	Code       string `json:"code,omitempty"`
+	Attempted  bool   `json:"attempted"`
+	Action     string `json:"action,omitempty"`
+	OccurredAt string `json:"occurred_at"`
+}
+
+func publicationDeliveryEvidence(source, status, code string, attempted bool, action string) publicationDeliveryResult {
+	return publicationDeliveryResult{
+		Source: source, Status: status, Code: code, Attempted: attempted, Action: action,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func encodedPublicationDeliveryEvidence(source, status, code string, attempted bool, action string) []byte {
+	evidence, _ := json.Marshal(publicationDeliveryEvidence(source, status, code, attempted, action))
+	return evidence
+}
+
 func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	if execution == nil || execution.Status != model.TaskExecutionSucceeded {
+		return model.TaskExecutionDraftDeliveryNotRequested,
+			encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "execution_not_succeeded", false, ""), nil
+	}
 	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, task.ID)
 	if err == nil && publication.ExecutionID == execution.ID {
 		finalHTML, found, readErr := s.readExecutionArtifact(ctx, execution.ID, "output/05-article.html", maxTaskDeliveryHTMLBytes)
@@ -515,43 +559,185 @@ func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model
 			evidence, _ := json.Marshal(map[string]string{
 				"source": "durable_publication", "status": publication.Status, "reason": reason,
 			})
-			return model.TaskExecutionDraftDeliveryAmbiguous, evidence, nil
+			status := model.TaskExecutionDraftDeliveryFailed
+			if publication.DraftAddAttemptedAt != nil {
+				status = model.TaskExecutionDraftDeliveryAmbiguous
+			}
+			return status, evidence, nil
 		}
-		status := draftDeliveryStatusFromPublication(publication)
-		evidence, _ := json.Marshal(map[string]string{"source": "durable_publication", "status": publication.Status})
-		return status, evidence, nil
+		if !draftRetryEligible(publication) {
+			status := draftDeliveryStatusFromPublication(publication)
+			evidence, _ := json.Marshal(map[string]string{"source": "durable_publication", "status": publication.Status})
+			return status, evidence, nil
+		}
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil, fmt.Errorf("find durable draft publication: %w", err)
 	}
 
-	var draftResult articleStatusArtifact
-	if found, readErr := s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/draft-result.json", &draftResult); readErr != nil {
-		return model.TaskExecutionDraftDeliveryAmbiguous, []byte(`{"source":"draft_result","status":"invalid"}`), nil
-	} else if found {
-		status := model.TaskExecutionDraftDeliveryAmbiguous
-		switch draftResult.Status {
-		case string(model.TaskPublicationSkipped):
-			status = model.TaskExecutionDraftDeliverySkipped
-		case string(model.TaskPublicationFailed):
-			status = model.TaskExecutionDraftDeliveryFailed
-		case string(model.TaskPublicationAmbiguous), string(model.TaskPublicationSucceeded):
-			// Success without the atomic capability's durable record is not trustworthy.
-			status = model.TaskExecutionDraftDeliveryAmbiguous
-		case string(model.TaskPublicationNotRequested):
-			status = model.TaskExecutionDraftDeliveryNotRequested
+	if task.Type != model.PlatformArticle {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("finalizer", model.TaskExecutionDraftDeliveryNotRequested, "", false, ""), nil
+	}
+	return s.finalizeArticlePublication(ctx, task, execution)
+}
+
+func draftRetryEligible(publication *model.WechatPublication) bool {
+	if publication == nil || publication.Status != model.WechatPublicationStatusUnsupported || publication.DraftMediaID != "" ||
+		publication.WechatStatusCode == 0 || publication.DraftAddAttempts >= 2 {
+		return false
+	}
+	return publication.DraftAddAttemptedAt == nil || publication.DraftRetryAuthorizedAt != nil
+}
+
+func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load article publication project: %w", err)
+	}
+	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "publication_disabled", false, ""), nil
+	}
+	block := func(code, action string) (string, []byte, error) {
+		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
+	}
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	byPath := make(map[string]*model.TaskFile, len(files))
+	contentImageURLs := make(map[string]struct{})
+	var coverMediaID string
+	hasContentImage := false
+	for _, file := range files {
+		if file == nil || file.ExecutionID != execution.ID || file.TaskID != task.ID {
+			continue
 		}
-		evidence, _ := json.Marshal(map[string]string{
-			"source": "draft_result", "status": draftResult.Status, "code": strings.TrimSpace(draftResult.Code),
-		})
-		return status, evidence, nil
+		byPath[file.FilePath] = file
+		if file.State == model.TaskFileStateDelivered &&
+			(file.Role == model.FileRoleCover || strings.HasPrefix(strings.ToLower(file.FileName), "cover")) {
+			coverMediaID = strings.TrimSpace(file.MediaID)
+		} else if file.State == model.TaskFileStateDelivered &&
+			(file.Role == model.FileRoleImage || strings.HasPrefix(file.MimeType, "image/")) &&
+			strings.TrimSpace(file.WechatURL) != "" {
+			hasContentImage = true
+			contentImageURLs[strings.TrimSpace(file.WechatURL)] = struct{}{}
+		}
+	}
+	coverRequested := task.ArticleWithCover == nil || *task.ArticleWithCover
+	contentImagesRequested := task.ArticleWithContentImages == nil || *task.ArticleWithContentImages
+	if coverRequested && coverMediaID == "" {
+		return block("cover_media_missing", "retry_visuals")
+	}
+	if contentImagesRequested && !hasContentImage {
+		return block("content_images_missing", "retry_visuals")
 	}
 
-	var scan articleStatusArtifact
-	if found, readErr := s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/marketing-scan.json", &scan); readErr == nil && found && scan.Status == "block_publish" {
-		return model.TaskExecutionDraftDeliverySkipped, []byte(`{"source":"marketing_scan","status":"block_publish"}`), nil
+	packageBody, found, err := s.readExecutionArtifact(ctx, execution.ID, "output/draft.json", maxTaskDeliveryJSONBytes)
+	if err != nil {
+		return "", nil, fmt.Errorf("read article publication package: %w", err)
 	}
-	return model.TaskExecutionDraftDeliveryNotRequested, []byte(`{"source":"finalizer","status":"not_requested"}`), nil
+	if !found {
+		return block("publication_package_missing", "review_content")
+	}
+	var pkg articlePublicationPackage
+	decoder := json.NewDecoder(strings.NewReader(string(packageBody)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&pkg); err != nil {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	if pkg.SchemaVersion != "1.0" || pkg.Article.ContentPath != "output/05-article.html" ||
+		strings.TrimSpace(pkg.Article.Title) == "" || utf8.RuneCountInString(pkg.Article.Title) > 64 ||
+		utf8.RuneCountInString(pkg.Article.Digest) > 120 {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	if pkg.Readiness.Status != "ready" {
+		return block("semantic_review_blocked", "review_content")
+	}
+	if pkg.Readiness.Code != "" || len(pkg.Readiness.EvidencePaths) != 3 {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	requiredEvidence := map[string]bool{
+		"output/marketing-scan.json": false, "output/final-review.md": false, "output/viral-audit.md": false,
+	}
+	for _, path := range pkg.Readiness.EvidencePaths {
+		present, required := requiredEvidence[path]
+		if !required || present {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+		}
+		file := byPath[path]
+		requiredEvidence[path] = file != nil && file.State == model.TaskFileStateDelivered
+	}
+	for _, present := range requiredEvidence {
+		if !present {
+			return block("review_evidence_missing", "review_content")
+		}
+	}
+	htmlBody, found, err := s.readExecutionArtifact(ctx, execution.ID, "output/05-article.html", maxTaskDeliveryHTMLBytes)
+	if err != nil {
+		return "", nil, fmt.Errorf("read final article HTML: %w", err)
+	}
+	if !found {
+		return block("final_html_missing", "review_content")
+	}
+	actualHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	if strings.TrimSpace(pkg.Article.ContentSHA256) != actualHash {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "content_hash_mismatch", false, "review_content"), nil
+	}
+	if err := validateWechatHTMLFragment("output/05-article.html", htmlBody); err != nil {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "unsafe_html", false, "review_content"), nil
+	}
+	imageSources, err := wechatDraftImageSources(string(htmlBody))
+	if err != nil {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "unsafe_html", false, "review_content"), nil
+	}
+	if contentImagesRequested && len(imageSources) == 0 {
+		return block("content_images_missing", "retry_visuals")
+	}
+	for _, source := range imageSources {
+		if _, ok := contentImageURLs[source]; !ok {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "content_image_source_invalid", false, "review_content"), nil
+		}
+	}
+	var scan articleStatusArtifact
+	found, err = s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/marketing-scan.json", &scan)
+	if err != nil || !found {
+		return block("marketing_scan_invalid", "review_content")
+	}
+	if scan.Status == "block_publish" {
+		return block("marketing_scan_blocked", "review_content")
+	}
+	if scan.Status != "passed" && scan.Status != "warning" {
+		return block("marketing_scan_invalid", "review_content")
+	}
+	if s.wechatPublicationSvc == nil {
+		return block("publication_service_unavailable", "retry_draft")
+	}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
+		Title: strings.TrimSpace(pkg.Article.Title), Author: strings.TrimSpace(task.ProjectSnapshot.Data().Author),
+		Digest: strings.TrimSpace(pkg.Article.Digest), Content: string(htmlBody), ThumbMediaID: coverMediaID,
+	}}}
+	publication, createErr := s.wechatPublicationSvc.CreateDraft(ctx, task.UserID, task.ID, task.ProjectID, execution.ID, request)
+	attempted := publication != nil && publication.DraftAddAttemptedAt != nil
+	if createErr == nil && publication != nil && publication.DraftMediaID != "" {
+		return model.TaskExecutionDraftDeliverySucceeded, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliverySucceeded, "", true, ""), nil
+	}
+	if errors.Is(createErr, ErrWechatPublicationPending) && attempted {
+		return model.TaskExecutionDraftDeliveryAmbiguous, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryAmbiguous, "create_draft_pending_reconciliation", true, "check_wechat"), nil
+	}
+	if attempted && (errors.Is(createErr, ErrWechatPublicationDraftRejected) || errors.Is(createErr, ErrWechatPublicationDraftUnsupported)) {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, wechatDraftDeliveryFailureCode(createErr), true, "retry_draft"), nil
+	}
+	if attempted {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, wechatDraftDeliveryFailureCode(createErr), true, "check_wechat"), nil
+	}
+	if errors.Is(createErr, ErrWechatPublicationInvalidPayload) || errors.Is(createErr, ErrWechatPublicationMarketingBlocked) {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, wechatDraftDeliveryFailureCode(createErr), false, "review_content"), nil
+	}
+	return block(wechatDraftDeliveryFailureCode(createErr), "retry_draft")
 }
 
 func draftDeliveryStatusFromPublication(publication *model.WechatPublication) string {
@@ -568,6 +754,9 @@ func draftDeliveryStatusFromPublication(publication *model.WechatPublication) st
 	case model.WechatPublicationStatusUnsupported, model.WechatPublicationStatusPublishFailed:
 		return model.TaskExecutionDraftDeliveryFailed
 	default:
+		if publication.DraftAddAttemptedAt == nil {
+			return model.TaskExecutionDraftDeliveryBlocked
+		}
 		return model.TaskExecutionDraftDeliveryAmbiguous
 	}
 }
@@ -694,23 +883,6 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 		}
 	}
 
-	switch outcome.Publication.Status {
-	case model.TaskPublicationSkipped:
-		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_skipped", Stage: "publication", Message: "公众号草稿创建已跳过。"})
-	case model.TaskPublicationFailed:
-		message := outcome.Publication.Message
-		if message == "" {
-			message = "公众号草稿创建失败，文章交付不受影响。"
-		}
-		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_failed", Stage: "publication", Message: message})
-	case model.TaskPublicationAmbiguous:
-		message := outcome.Publication.Message
-		if message == "" {
-			message = "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"
-		}
-		outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "publication_ambiguous", Stage: "publication", Message: message})
-	}
-
 	if diagnostic := publicExecutionDiagnostic(execution, result); diagnostic != nil {
 		outcome.Diagnostic = diagnostic
 		if result != nil && result.ErrorCode == "provider_policy_rejection" {
@@ -765,6 +937,8 @@ func publicationOutcomeStatus(status string) model.TaskPublicationStatus {
 	switch status {
 	case model.TaskExecutionDraftDeliverySucceeded:
 		return model.TaskPublicationSucceeded
+	case model.TaskExecutionDraftDeliveryBlocked:
+		return model.TaskPublicationBlocked
 	case model.TaskExecutionDraftDeliverySkipped:
 		return model.TaskPublicationSkipped
 	case model.TaskExecutionDraftDeliveryFailed:
@@ -782,13 +956,33 @@ func publicationTaskOutcome(execution *model.TaskExecution) model.TaskPublicatio
 	}
 	outcome := model.TaskPublicationOutcome{Status: publicationOutcomeStatus(execution.DraftDeliveryStatus)}
 	var evidence struct {
-		Code string `json:"code"`
+		Code       string `json:"code"`
+		Attempted  bool   `json:"attempted"`
+		Action     string `json:"action"`
+		OccurredAt string `json:"occurred_at"`
 	}
 	if len(execution.DraftDeliveryResult) > 0 && json.Unmarshal(execution.DraftDeliveryResult, &evidence) == nil {
 		outcome.Code = safePublicationOutcomeCode(evidence.Code)
+		outcome.Attempted = evidence.Attempted
+		outcome.Action = safePublicationOutcomeAction(evidence.Action)
+		if _, err := time.Parse(time.RFC3339, evidence.OccurredAt); err == nil {
+			outcome.OccurredAt = evidence.OccurredAt
+		}
+	}
+	if outcome.Status == model.TaskPublicationSucceeded || outcome.Status == model.TaskPublicationAmbiguous {
+		outcome.Attempted = true
 	}
 	outcome.Message = publicationOutcomeMessage(outcome.Status, outcome.Code)
 	return outcome
+}
+
+func safePublicationOutcomeAction(action string) string {
+	switch strings.TrimSpace(action) {
+	case "retry_visuals", "retry_draft", "fix_project_config", "review_content", "check_wechat":
+		return strings.TrimSpace(action)
+	default:
+		return ""
+	}
 }
 
 func safePublicationOutcomeCode(code string) string {
@@ -806,7 +1000,23 @@ func safePublicationOutcomeCode(code string) string {
 		"create_draft_reconciliation_failed",
 		"create_draft_conflict",
 		"create_draft_pending_reconciliation",
-		"create_draft_provider_failure":
+		"create_draft_provider_failure",
+		"publication_disabled",
+		"execution_not_succeeded",
+		"publication_not_attempted",
+		"publication_package_missing",
+		"publication_package_invalid",
+		"semantic_review_blocked",
+		"review_evidence_missing",
+		"final_html_missing",
+		"content_hash_mismatch",
+		"unsafe_html",
+		"content_image_source_invalid",
+		"marketing_scan_invalid",
+		"marketing_scan_blocked",
+		"cover_media_missing",
+		"content_images_missing",
+		"publication_service_unavailable":
 		return strings.TrimSpace(code)
 	default:
 		return ""
@@ -831,8 +1041,26 @@ func publicationOutcomeMessage(status model.TaskPublicationStatus, code string) 
 		return "该任务已有另一份草稿请求，本次没有重复提交。"
 	case "create_draft_pending_reconciliation":
 		return "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"
-	case "create_draft_provider_failure", "create_draft_reconciliation_failed":
+	case "create_draft_provider_failure":
 		return "创建公众号草稿时服务异常，本次自动发布没有启动。"
+	case "create_draft_reconciliation_failed":
+		return "微信是否收到草稿请求仍无法确认，请到公众号后台核对草稿箱；系统不会重复提交。"
+	case "publication_package_missing":
+		return "发布包缺失，微信尚未收到请求。"
+	case "publication_package_invalid", "content_hash_mismatch", "unsafe_html":
+		return "发布包校验失败，微信尚未收到请求。"
+	case "content_image_source_invalid":
+		return "正文图片不属于当前任务执行，微信尚未收到请求。"
+	case "semantic_review_blocked", "review_evidence_missing", "marketing_scan_invalid", "marketing_scan_blocked":
+		return "发布前审核未通过，微信尚未收到请求。"
+	case "cover_media_missing":
+		return "封面尚未生成或上传完成，微信尚未收到请求。"
+	case "content_images_missing":
+		return "正文配图尚未生成，微信尚未收到请求。"
+	case "publication_service_unavailable":
+		return "公众号发布服务暂时不可用，微信尚未收到请求。"
+	case "execution_not_succeeded":
+		return "内容生成未成功，本次未请求公众号发布。"
 	}
 	if status == model.TaskPublicationAmbiguous {
 		return "微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。"

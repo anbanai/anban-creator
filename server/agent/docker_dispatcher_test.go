@@ -241,6 +241,22 @@ func TestDockerResumeRequiresExistingTaskVolume(t *testing.T) {
 	}
 }
 
+func TestDockerPublicationRecoveryCreatesFreshWorkspaceVolume(t *testing.T) {
+	engine := newFakeDockerEngine()
+	execution := dockerDispatcherTestExecution()
+	execution.Attempt = 2
+	execution.ParentExecutionID = "source-execution"
+	execution.Purpose = model.TaskExecutionPurposePublicationRecovery
+
+	if _, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Prepare(context.Background(), execution, dockerDispatcherTestTask()); err != nil {
+		t.Fatalf("prepare publication recovery: %v", err)
+	}
+	spec := buildDockerRuntimeSpec(dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig(), ServerURL: "http://server:8080"}, execution, dockerDispatcherTestTask())
+	if _, ok := engine.volumes[spec.TaskVolume.Name]; !ok {
+		t.Fatalf("publication recovery did not create fresh workspace volume %q", spec.TaskVolume.Name)
+	}
+}
+
 func TestDockerDispatcherConvertsTrustedOCIImageConfig(t *testing.T) {
 	trusted := dockerDispatcherTestImage().Config
 	converted := dockerContainerConfigFromInspect(trusted)
@@ -606,13 +622,24 @@ func TestDeleteTaskWorkspaceVerifiesOwnership(t *testing.T) {
 	task := dockerDispatcherTestTask()
 	spec := buildDockerRuntimeSpec(dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig(), ServerURL: "http://server:8080"}, dockerDispatcherTestExecution(), task)
 	engine.volumes[spec.TaskVolume.Name] = fakeDockerVolume(spec.TaskVolume)
+	wantRemoved := []string{spec.TaskVolume.Name}
+	for _, id := range []string{"recovery-execution-1", "recovery-execution-2"} {
+		recovery := dockerDispatcherTestExecution()
+		recovery.ID = id
+		recovery.Purpose = model.TaskExecutionPurposePublicationRecovery
+		recoverySpec := buildDockerRuntimeSpec(dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig(), ServerURL: "http://server:8080"}, recovery, task)
+		engine.volumes[recoverySpec.TaskVolume.Name] = fakeDockerVolume(recoverySpec.TaskVolume)
+		wantRemoved = append(wantRemoved, recoverySpec.TaskVolume.Name)
+	}
 	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
 
 	if err := dispatcher.DeleteTaskWorkspace(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(engine.removedVolumes, []string{spec.TaskVolume.Name}) {
-		t.Fatalf("removed volumes = %v", engine.removedVolumes)
+	slices.Sort(engine.removedVolumes)
+	slices.Sort(wantRemoved)
+	if !slices.Equal(engine.removedVolumes, wantRemoved) {
+		t.Fatalf("removed volumes = %v, want %v", engine.removedVolumes, wantRemoved)
 	}
 	if err := dispatcher.DeleteTaskWorkspace(context.Background(), task); err != nil {
 		t.Fatalf("missing task volume delete is not idempotent: %v", err)
@@ -768,6 +795,16 @@ func (e *fakeDockerEngine) VolumeInspect(ctx context.Context, name string) (volu
 		return volume.Volume{}, errdefs.NotFound(errors.New("volume not found"))
 	}
 	return got, nil
+}
+
+func (e *fakeDockerEngine) VolumeList(ctx context.Context, _ volume.ListOptions) (volume.ListResponse, error) {
+	e.record(ctx, "volume-list")
+	listed := make([]*volume.Volume, 0, len(e.volumes))
+	for _, item := range e.volumes {
+		copy := item
+		listed = append(listed, &copy)
+	}
+	return volume.ListResponse{Volumes: listed}, nil
 }
 
 func (e *fakeDockerEngine) VolumeCreate(ctx context.Context, desired volume.CreateOptions) (volume.Volume, error) {
@@ -982,6 +1019,7 @@ func dockerInt32(value int32) *int32 { return &value }
 var _ interface {
 	ImageInspect(context.Context, string, ...dockerclient.ImageInspectOption) (imageTypes.InspectResponse, error)
 	VolumeInspect(context.Context, string) (volume.Volume, error)
+	VolumeList(context.Context, volume.ListOptions) (volume.ListResponse, error)
 	VolumeCreate(context.Context, volume.CreateOptions) (volume.Volume, error)
 	VolumeRemove(context.Context, string, bool) error
 	ContainerInspect(context.Context, string) (containertypes.InspectResponse, error)
