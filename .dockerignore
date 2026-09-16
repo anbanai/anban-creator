@@ -14,12 +14,11 @@
 /coverage/
 *.log
 
-# Frontend, desktop, and mobile sources that are not needed for
+# Frontend and desktop sources that are not needed for
 # building the Server or Agent runtime images. harness/ and agent-ts/ are
 # intentionally kept because the Agent Dockerfiles copy them into the image.
 /studio/
 /desktop/
-/miniapp/
 /wcflink/
 /seednote-workspace/
 /eval-article-viral-strategy/

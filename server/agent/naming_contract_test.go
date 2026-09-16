@@ -28,8 +28,6 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		filepath.Join(root, "studio", "src", "pages", "PluginsPage.tsx"),
 		filepath.Join(root, "studio", "public", "claude", "index.html"),
 		filepath.Join(root, "studio", "public", "codex", "index.html"),
-		filepath.Join(root, "miniapp", "src", "pages", "connect", "claude-code.vue"),
-		filepath.Join(root, "miniapp", "src", "pages", "connect", "codex.vue"),
 		filepath.Join(root, "harness", "README.md"),
 		filepath.Join(root, "harness", "install", "install-subagents.sh"),
 	} {
@@ -400,7 +398,6 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 	addTree(filepath.Join("harness", "skills"))
 	addTree(filepath.Join("harness", "skills"))
 	addTree(filepath.Join("studio", "src", "components", "connect"))
-	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
 	return out
 }
 
