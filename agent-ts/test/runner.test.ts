@@ -316,19 +316,19 @@ describe("buildQueryOptions", () => {
       expect(options.disallowedTools).not.toContain("Agent");
       const worker = options.agents?.["managed-readonly-worker"];
       expect(worker).toMatchObject({ model: "inherit", maxTurns: 12, background: false });
-      expect(worker?.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "WebSearch", "WebFetch"]));
-      expect(worker?.tools).not.toEqual(expect.arrayContaining([
-        "Write", "Edit", "Bash", "NotebookEdit", "Agent", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "mcp__anban__*",
-      ]));
     }
 
-    expect(article.agents?.["managed-readonly-worker"]?.tools).toEqual(expect.arrayContaining([
-      "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
-    ]));
+    const articleWorker = article.agents?.["managed-readonly-worker"];
+    expect(articleWorker?.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__anban__get_project_profile", "mcp__anban__list_project_titles"]);
+    expect(articleWorker?.skills).toEqual(["topic-research", "seo-optimization"]);
     for (const options of [seednote, viral]) {
-      expect(options.agents?.["managed-readonly-worker"]?.tools).toEqual(expect.arrayContaining([
-        "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
-      ]));
+      const worker = options.agents?.["managed-readonly-worker"];
+      expect(worker?.tools).toEqual([
+        "Read", "Glob", "Grep", "WebSearch", "WebFetch",
+        "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+        "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
+      ]);
+      expect(worker?.skills).toEqual(["seednote-research", "seednote-viral-analysis"]);
     }
 
     const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
@@ -340,6 +340,8 @@ describe("buildQueryOptions", () => {
   test("adds the managed foreground worker contract only to eligible prompts", () => {
     expect(runner.buildManagedPrompt(validBootstrap())).toContain("managed-readonly-worker");
     expect(runner.buildManagedPrompt(validBootstrap())).toContain("run_in_background: false");
+    expect(runner.buildManagedPrompt(validBootstrap())).toContain("at least two independent research, material-analysis, or quality-review tasks");
+    expect(runner.buildManagedPrompt(validBootstrap())).toContain("at most three concurrent Workers");
     expect(runner.buildManagedPrompt({ ...validBootstrap(), task_type: "montage" })).not.toContain("managed-readonly-worker");
   });
 
@@ -401,10 +403,12 @@ describe("buildQueryOptions", () => {
         progress: async () => {}, stageProgress,
       })).Stop![0]!.hooks[0]!;
 
-      await expect(stop(stopHookInput(false, [{ task_id: "worker-1" }]), undefined, hookOptions)).resolves.toMatchObject({
-        decision: "block",
-        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("pending") },
-      });
+      for (const stopHookActive of [false, true]) {
+        await expect(stop(stopHookInput(stopHookActive, [{ task_id: "worker-1" }]), undefined, hookOptions)).resolves.toMatchObject({
+          decision: "block",
+          hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("pending") },
+        });
+      }
       expect(stageProgress).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -166,8 +166,13 @@ const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
     "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
   ],
 };
+const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
+  article: ["topic-research", "seo-optimization"],
+  seednote: ["seednote-research", "seednote-viral-analysis"],
+  viral_analysis: ["seednote-research", "seednote-viral-analysis"],
+};
 const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect sources and return concise findings to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
-const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. For bounded research only, you may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`. Its result must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
+const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. Delegate only when there are at least two independent research, material-analysis, or quality-review tasks. You may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`, with at most three concurrent Workers. Worker results must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
 const EXECUTION_IDENTITY_TOOLS = new Set(["generate_image", "upload_image", "analyze_image", "submit_completion_metadata"]);
 
 interface TrackedToolCall { name: string; input: Record<string, unknown>; }
@@ -332,6 +337,7 @@ export function buildQueryOptions(
         maxTurns: 12,
         background: false,
         tools: [...MANAGED_READONLY_WORKER_TOOLS, ...(MANAGED_READONLY_WORKER_MCP_TOOLS[data.task_type] ?? [])],
+        skills: MANAGED_READONLY_WORKER_SKILLS[data.task_type],
       },
     } : undefined,
     canUseTool: async (toolName) => ({ behavior: "deny", message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist` }),
@@ -457,7 +463,7 @@ function managedParallelWorkersEnabled(taskType: string): boolean {
 }
 
 function managedBackgroundTaskStopGuard(input: Parameters<HookCallback>[0]): HookJSONOutput | undefined {
-  if (input.hook_event_name !== "Stop" || input.stop_hook_active || !input.background_tasks?.length) return undefined;
+  if (input.hook_event_name !== "Stop" || !input.background_tasks?.length) return undefined;
   return {
     decision: "block",
     reason: "Managed completion is blocked while foreground worker tasks are still pending.",
