@@ -245,6 +245,9 @@ func (s *TaskService) SyncWechatPublicationLifecycle(ctx context.Context, taskID
 		} else if err != nil {
 			return err
 		}
+		if publication != nil && publication.ExecutionID != executionID {
+			publication = nil
+		}
 
 		now := time.Now().UTC()
 		next := cloneTaskLifecycle(current)

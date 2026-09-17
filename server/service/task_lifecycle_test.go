@@ -226,6 +226,47 @@ func TestSyncWechatPublicationLifecyclePersistsOnlyVisibleChanges(t *testing.T) 
 	}
 }
 
+func TestSyncWechatPublicationLifecycleIgnoresPreviousExecutionPublication(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	if _, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan()); err != nil {
+		t.Fatal(err)
+	}
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, UserID: task.UserID, ProjectID: task.ProjectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusPublished,
+		DraftMediaID: "old-draft", ArticleURL: "https://mp.weixin.qq.com/s/old",
+	}
+	if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+
+	newExecutionID := uuid.NewString()
+	if updated, err := repo.Tasks().SetCurrentExecution(ctx, task.ID, newExecutionID); err != nil || !updated {
+		t.Fatalf("set resumed execution = %v, %v", updated, err)
+	}
+	if err := repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: newExecutionID, TaskID: task.ID, Attempt: 2, Target: "test", Status: model.TaskExecutionRunning, Started: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	planned, err := svc.SetTaskProgressPlan(ctx, task.ID, newExecutionID, validLifecyclePlan())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	synced, err := svc.SyncWechatPublicationLifecycle(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if synced.ExecutionID != newExecutionID || synced.Stages[3].State != model.TaskLifecycleStatePending || synced.Stages[4].State != model.TaskLifecycleStatePending {
+		t.Fatalf("previous execution publication leaked into resumed lifecycle: planned=%#v synced=%#v", planned, synced)
+	}
+}
+
 func TestSetTaskProgressPlanReplansOnlyMutableTail(t *testing.T) {
 	ctx := context.Background()
 	svc, _, task, execution := setupTaskLifecycleTest(t, model.PlatformMoments)
