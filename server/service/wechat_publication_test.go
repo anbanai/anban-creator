@@ -57,6 +57,7 @@ type fakeWechatPublicationAPI struct {
 
 	addCalls, draftListCalls, submitCalls, getCalls, publishedListCalls int
 	addResponse                                                         *appwechat.DraftAddResponse
+	addRequests                                                         []appwechat.DraftAddRequest
 	addError                                                            error
 	draftListResponse                                                   *appwechat.DraftBatchGetResponse
 	draftListResponses                                                  map[int64]*appwechat.DraftBatchGetResponse
@@ -76,9 +77,10 @@ type fakeWechatPublicationAPI struct {
 	onPublishedList                                                     func(int)
 }
 
-func (f *fakeWechatPublicationAPI) AddDraft(context.Context, appwechat.DraftAddRequest) (*appwechat.DraftAddResponse, error) {
+func (f *fakeWechatPublicationAPI) AddDraft(_ context.Context, request appwechat.DraftAddRequest) (*appwechat.DraftAddResponse, error) {
 	f.mu.Lock()
 	f.addCalls++
+	f.addRequests = append(f.addRequests, request)
 	f.mu.Unlock()
 	if f.onAdd != nil {
 		f.onAdd()
@@ -533,7 +535,7 @@ func TestCreateDraftRejectsUnsafeHTMLBeforeProviderCalls(t *testing.T) {
 		{name: "CSS image-set URL", content: `<p style="background-image:image-set(&quot;https://marketing.example/tracker.png&quot; 1x)">正文</p>`},
 		{name: "untrusted HTTPS image", content: `<p>正文</p><img src="https://marketing.example/tracker.png">`},
 		{name: "protocol-relative image", content: `<p>正文</p><img src="//mmbiz.qpic.cn/a.png">`},
-		{name: "insecure HTTP image", content: `<p>正文</p><img src="http://mmbiz.qpic.cn/a.png">`},
+		{name: "untrusted HTTP image", content: `<p>正文</p><img src="http://marketing.example/tracker.png">`},
 		{name: "mailto image", content: `<p>正文</p><img src="mailto:contact@example.com">`},
 		{name: "telephone image", content: `<p>正文</p><img src="tel:13800138000">`},
 	}
@@ -575,6 +577,32 @@ func TestCreateDraftAcceptsBodyImageRegisteredByCurrentExecution(t *testing.T) {
 	}
 	if f.api.addCalls != 1 {
 		t.Fatalf("provider add calls = %d, want 1", f.api.addCalls)
+	}
+}
+
+func TestCreateDraftAcceptsRegisteredHTTPWechatImage(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	const imageURL = "http://mmbiz.qpic.cn/current-image.png"
+	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, State: model.TaskFileStatePending,
+		FilePath: "output/current-image.png", FileName: "current-image.png", MimeType: "image/png",
+		WechatURL: imageURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
+	request := f.draftInput()
+	request.Articles[0].Content = `<p>正文</p><img src="` + imageURL + `">`
+
+	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request); err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if f.api.addCalls != 1 {
+		t.Fatalf("provider add calls = %d, want 1", f.api.addCalls)
+	}
+	if got := f.api.addRequests[0].Articles[0].Content; !strings.Contains(got, `src="`+imageURL+`"`) {
+		t.Fatalf("provider content = %q, want original HTTP image URL %q", got, imageURL)
 	}
 }
 

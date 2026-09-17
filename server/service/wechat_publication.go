@@ -396,9 +396,10 @@ func (s *WechatPublicationService) validateDraftImageSources(ctx context.Context
 
 	for _, source := range sources {
 		parsed, err := url.Parse(source)
-		if err != nil || !parsed.IsAbs() || !strings.EqualFold(parsed.Scheme, "https") ||
+		if err != nil || !parsed.IsAbs() ||
+			(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
 			parsed.Host == "" || parsed.User != nil {
-			return fmt.Errorf("%w: body image source must be an absolute HTTPS URL", ErrWechatPublicationInvalidPayload)
+			return fmt.Errorf("%w: body image source must be an absolute HTTP(S) URL", ErrWechatPublicationInvalidPayload)
 		}
 		trustedCDN := strings.EqualFold(parsed.Hostname(), "mmbiz.qpic.cn") && parsed.Port() == ""
 		_, uploadedByExecution := registered[source]
