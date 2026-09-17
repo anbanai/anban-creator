@@ -96,6 +96,20 @@ function currentStageIndex(stages: TaskLifecycleStage[], status: TaskStatus) {
   return pendingIndex >= 0 ? pendingIndex : Math.max(0, stages.length - 1)
 }
 
+function automaticallyExpandedStageIds(
+  stages: TaskLifecycleStage[],
+  status: TaskStatus,
+  currentStage?: TaskLifecycleStage,
+) {
+  const expanded = stages
+    .filter((stage) => stage.state === 'active' || stage.state === 'blocked' || stage.state === 'failed' || stage.state === 'cancelled')
+    .map((stage) => stage.id)
+  if ((status === 'failed' || status === 'cancelled') && currentStage?.kind === 'work') {
+    expanded.push(currentStage.id)
+  }
+  return new Set(expanded)
+}
+
 function hasSubmissionEvidence(publication?: WechatPublication) {
   return Boolean(
     publication?.submit_attempted_at
@@ -130,7 +144,6 @@ export function TaskExecutionRail({
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
-  const [expandedStages, setExpandedStages] = useState<Set<string>>(() => new Set())
   const [confirmPublish, setConfirmPublish] = useState(false)
   const hasServerPublicationStages = stages.some((stage) => stage.source === 'server')
   const publicationStageSignature = stages
@@ -143,14 +156,10 @@ export function TaskExecutionRail({
   const currentStage = stages[currentIndex]
   const failure = taskFailurePresentation({ error_message: errorMessage })
 
+  const [expandedStages, setExpandedStages] = useState<Set<string>>(() => automaticallyExpandedStageIds(stages, status, currentStage))
+
   useEffect(() => {
-    const automaticallyExpanded = stages
-        .filter((stage) => stage.state === 'active' || stage.state === 'blocked' || stage.state === 'failed' || stage.state === 'cancelled')
-        .map((stage) => stage.id)
-    if ((status === 'failed' || status === 'cancelled') && currentStage?.kind === 'work') {
-      automaticallyExpanded.push(currentStage.id)
-    }
-    setExpandedStages(new Set(automaticallyExpanded))
+    setExpandedStages(automaticallyExpandedStageIds(stages, status, currentStage))
   }, [currentStage?.id, lifecycle?.revision, status])
 
   const publicationQuery = useQuery({
