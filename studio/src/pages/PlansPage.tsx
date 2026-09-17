@@ -107,6 +107,7 @@ export default function PlansPage() {
   const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
   const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
   const [montageUploading, setMontageUploading] = useState(false)
+  const [montageReady, setMontageReady] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const [scheduleValid, setScheduleValid] = useState(true)
   const { submit } = useSubmitLock()
@@ -386,6 +387,7 @@ export default function PlansPage() {
     scheduleManuallyChangedRef.current = false
     setRecommendationUnavailable(false)
     setMontageUploading(false)
+    setMontageReady(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -439,6 +441,7 @@ export default function PlansPage() {
     setRecommendationUnavailable(false)
     setAttachmentSubmitError('')
     setMontageUploading(false)
+    setMontageReady(false)
     form.reset(planToFormValues(plan))
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -460,6 +463,7 @@ export default function PlansPage() {
     setShowDirtyDialog(false)
     setEditingPlan(null)
     setMontageUploading(false)
+    setMontageReady(false)
     setAttachmentSubmitError('')
     attachmentsTouchedRef.current = false
     attachmentHydratingRef.current = true
@@ -544,7 +548,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && montageUploading)) {
+    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -564,6 +568,7 @@ export default function PlansPage() {
       disabled={isSubmitting}
       onValueChange={(id, project) => {
         setMontageUploading(false)
+        setMontageReady(false)
         form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
         if (!id || !isPlanType(project?.platform)) return
         const nextType = project.platform
@@ -596,7 +601,7 @@ export default function PlansPage() {
       placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
-      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker)}
+      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (isMontagePlan && !montageReady)}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -819,6 +824,7 @@ export default function PlansPage() {
                   form={form}
                   fieldRoot="montage_input"
                   onUploadingChange={setMontageUploading}
+                  onReadyChange={setMontageReady}
                   briefField={promptComposer}
                 />
               )}
@@ -1034,7 +1040,7 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
-                || (isMontagePlan && montageUploading)}
+                || (isMontagePlan && (montageUploading || !montageReady))}
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

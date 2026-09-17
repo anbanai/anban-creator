@@ -62,6 +62,9 @@ export const queryKeys = {
   imageCapabilities: {
     all: ['image-capabilities'] as const,
   },
+  montageCapabilities: {
+    all: ['montage-capabilities'] as const,
+  },
   agentProfiles: {
     all: ['agent', 'execution-profiles'] as const,
   },

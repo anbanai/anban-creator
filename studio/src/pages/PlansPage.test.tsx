@@ -102,6 +102,29 @@ vi.mock('@/lib/api', async () => {
           items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }],
         }),
       },
+      montageCapabilities: {
+        ...actual.api.montageCapabilities,
+        list: vi.fn().mockResolvedValue({
+          enabled: true,
+          default_pipeline: 'cinematic',
+          max_duration_seconds: 600,
+          max_assets: 20,
+          items: [
+            {
+              key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
+              best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+              output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
+              recommended_duration_seconds: 30,
+            },
+            {
+              key: 'screen-demo', display_name: '屏幕演示', description: '产品教程、软件操作与终端流程',
+              best_for: ['产品演示', '终端操作'], source_hint: '可上传屏幕录制，或在说明中给出可复现的操作步骤',
+              output_hint: '一条清晰的演示视频', source_requirement: 'optional', output_mode: 'single',
+              recommended_duration_seconds: 60,
+            },
+          ],
+        }),
+      },
       templates: {
         ...actual.api.templates,
         list: vi.fn().mockResolvedValue({
@@ -875,12 +898,12 @@ describe('PlansPage Montage input', () => {
     reference_image_url: '',
     image_ratio: '16:9',
     montage_defaults: {
-      default_pipeline: 'project-pipeline',
+      default_pipeline: 'cinematic',
       preferences: {
         duration_seconds: 45,
         style: 'project style',
         music_prompt: 'project music',
-        subtitle_mode: 'burned-in',
+        subtitle_mode: 'burned_in',
         voiceover_mode: 'narrated',
       },
       asset_guidance: '优先使用实拍素材',
@@ -907,7 +930,7 @@ describe('PlansPage Montage input', () => {
     image_capability_key: 'standard',
     montage_input: {
       brief: '保存的 brief',
-      pipeline_key: 'saved-pipeline',
+      pipeline_key: 'screen-demo',
       source_assets: [],
       preferences: { duration_seconds: 12 },
       delivery_targets: [],
@@ -925,6 +948,26 @@ describe('PlansPage Montage input', () => {
     vi.mocked(api.plans.create).mockResolvedValue(savedMontagePlan)
     vi.mocked(api.plans.update).mockResolvedValue(savedMontagePlan)
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
+    vi.mocked(api.montageCapabilities.list).mockResolvedValue({
+      enabled: true,
+      default_pipeline: 'cinematic',
+      max_duration_seconds: 600,
+      max_assets: 20,
+      items: [
+        {
+          key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
+          best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+          output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
+          recommended_duration_seconds: 30,
+        },
+        {
+          key: 'screen-demo', display_name: '屏幕演示', description: '产品教程、软件操作与终端流程',
+          best_for: ['产品演示', '终端操作'], source_hint: '可上传屏幕录制，或在说明中给出可复现的操作步骤',
+          output_hint: '一条清晰的演示视频', source_requirement: 'optional', output_mode: 'single',
+          recommended_duration_seconds: 60,
+        },
+      ],
+    })
   })
 
   it('uses the preselected project platform when the URL type conflicts', async () => {
@@ -932,7 +975,7 @@ describe('PlansPage Montage input', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    expect(await within(dialog).findByRole('radio', { name: /电影感制作/ })).toBeChecked()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
     const montageParameters = await openPlanParameters(dialog)
 	  expect(within(montageParameters).getByText('视频比例')).toBeInTheDocument()
@@ -948,7 +991,7 @@ describe('PlansPage Montage input', () => {
       type: 'montage',
       montage_input: expect.objectContaining({
         brief: '按项目平台创建',
-        pipeline_key: 'project-pipeline',
+        pipeline_key: 'cinematic',
       }),
     })))
   })
@@ -958,7 +1001,7 @@ describe('PlansPage Montage input', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByDisplayValue('project-pipeline')).toBeInTheDocument()
+    expect(await within(dialog).findByRole('radio', { name: /电影感制作/ })).toBeChecked()
     fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
       target: { value: '无需图片能力的 Montage' },
     })
@@ -978,8 +1021,8 @@ describe('PlansPage Montage input', () => {
     render(<PlansPage />)
 
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    expect(await screen.findByDisplayValue('project-pipeline')).toBeInTheDocument()
-    expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)
+    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
 
     fireEvent.change(screen.getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
@@ -1001,13 +1044,13 @@ describe('PlansPage Montage input', () => {
       project_id: montageProject.id,
       montage_input: expect.objectContaining({
         brief: '每周新品发布短片',
-        pipeline_key: 'project-pipeline',
+        pipeline_key: 'cinematic',
         source_assets: [expect.objectContaining({ type: 'video_url', url: '/source.mp4' })],
         preferences: {
           duration_seconds: 45,
           style: 'project style',
           music_prompt: 'project music',
-          subtitle_mode: 'burned-in',
+          subtitle_mode: 'burned_in',
           voiceover_mode: 'narrated',
         },
         delivery_targets: ['final_video'],
@@ -1021,8 +1064,8 @@ describe('PlansPage Montage input', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(screen.getByDisplayValue('saved-pipeline')).toBeInTheDocument()
-    expect(screen.getByLabelText('时长（秒）')).toHaveValue(12)
+    expect(await screen.findByRole('radio', { name: /屏幕演示/ })).toBeChecked()
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(12)
     const montageParameters = await openPlanParameters(dialog)
     expect(within(montageParameters).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：/ }))
@@ -1036,7 +1079,7 @@ describe('PlansPage Montage input', () => {
         image_ratio: '16:9',
         image_capability_key: 'standard',
         montage_input: expect.objectContaining({
-          pipeline_key: 'saved-pipeline',
+          pipeline_key: 'screen-demo',
           preferences: expect.objectContaining({ duration_seconds: 12 }),
           delivery_targets: [],
         }),
@@ -1056,5 +1099,16 @@ describe('PlansPage Montage input', () => {
     })
 
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+
+  it('blocks Montage plan save when the capability catalog fails to load', async () => {
+    vi.mocked(api.montageCapabilities.list).mockRejectedValueOnce(new Error('catalog unavailable'))
+    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
+
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByText('视频类型加载失败，暂时无法创建视频')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
 })

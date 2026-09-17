@@ -71,7 +71,7 @@ const inputAttachmentSchema = z.object({
 })
 
 const montageAssetSchema = z.object({
-  type: z.enum(["text", "image_url", "video_url", "audio_url", "document_url"]),
+  type: z.enum(["text", "image_url", "video", "video_url", "audio", "audio_url", "document_url"]),
   url: z.string().optional(),
   task_file_id: z.string().optional(),
   text: z.string().optional(),
@@ -81,7 +81,7 @@ const montageAssetSchema = z.object({
 })
 
 const montagePreferencesSchema = z.object({
-  duration_seconds: z.number().int().min(1).max(600).optional(),
+  duration_seconds: z.number().int().min(1).optional(),
   style: z.string().max(1000).optional(),
   music_prompt: z.string().max(1000).optional(),
   subtitle_mode: z.string().optional(),

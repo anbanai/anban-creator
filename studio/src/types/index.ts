@@ -148,8 +148,12 @@ export type { ImageCapabilityFeatures, ImageCapabilityOption, ImageCapabilityLis
 export type {
   MontageAsset,
   MontageAssetType,
+	MontageCapabilityListResponse,
   MontageInput,
+	MontageOutputMode,
+	MontagePipelineCapability,
   MontagePreferences,
+	MontageSourceRequirement,
 } from './montage'
 
 // Topic Pool

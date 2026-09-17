@@ -8,7 +8,7 @@ describe('montage form helpers', () => {
       pipeline_key: '',
       source_assets: [],
       preferences: {
-        duration_seconds: 30,
+        duration_seconds: undefined,
       },
     })
   })

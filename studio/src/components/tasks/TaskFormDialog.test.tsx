@@ -77,7 +77,7 @@ const fixtures = vi.hoisted(() => {
     name: '剪辑项目',
     image_ratio: '9:16',
     montage_defaults: {
-      default_pipeline: 'social-short',
+      default_pipeline: 'cinematic',
       preferences: { duration_seconds: 45, style: 'clean product film' },
       delivery_targets: ['final_video'],
     },
@@ -167,6 +167,10 @@ vi.mock('@/lib/api', async () => {
       },
       imageCapabilities: {
         ...actual.api.imageCapabilities,
+        list: vi.fn(),
+      },
+      montageCapabilities: {
+        ...actual.api.montageCapabilities,
         list: vi.fn(),
       },
     },
@@ -270,6 +274,20 @@ beforeEach(() => {
       { key: 'standard', display_name: '标准图像', min_tier: 'free', enabled: true, price_available: true },
       { key: 'source-capability', display_name: '源图像', min_tier: 'pro', enabled: true, price_available: true },
       { key: 'destination-capability', display_name: '目标图像', min_tier: 'pro', enabled: true, price_available: true },
+    ],
+  })
+  vi.mocked(api.montageCapabilities.list).mockResolvedValue({
+    enabled: true,
+    default_pipeline: 'cinematic',
+    max_duration_seconds: 600,
+    max_assets: 20,
+    items: [
+      {
+        key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
+        best_for: ['品牌发布'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+        output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
+        recommended_duration_seconds: 30,
+      },
     ],
   })
   vi.mocked(api.tasks.create).mockResolvedValue(fixtures.createdTask)
@@ -879,6 +897,15 @@ describe('TaskFormDialog', () => {
     expect(within(montageParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
   })
 
+  it('blocks Montage submission when the video type catalog is unavailable', async () => {
+    vi.mocked(api.montageCapabilities.list).mockRejectedValueOnce(new Error('catalog unavailable'))
+    renderDialog({ initialProjectId: fixtures.montageProject.id, initialType: 'montage' })
+
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    expect(await within(dialog).findByText('视频类型加载失败，暂时无法创建视频')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+
   it('applies destination project defaults when a clone changes project', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
@@ -1031,8 +1058,8 @@ describe('TaskFormDialog', () => {
     fireEvent.click(screen.getByRole('combobox', { name: /^项目：/ }))
     fireEvent.click(await screen.findByRole('option', { name: /剪辑项目/ }))
 
-    expect(await screen.findByDisplayValue('social-short')).toBeInTheDocument()
-    expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)
+    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
     expect(screen.queryByText('正文配图')).not.toBeInTheDocument()
     expect(screen.queryByText('任务参考图')).not.toBeInTheDocument()
   })

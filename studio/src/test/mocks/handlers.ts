@@ -12,6 +12,7 @@ import type {
   PlatformConfig,
   APIKey,
   AgentPackCatalog,
+  MontageCapabilityListResponse,
 } from '@/types'
 
 // --- Mock Data ---
@@ -61,6 +62,59 @@ export const mockBillingTransactions: BillingTransactions = {
   total: 1,
   offset: 0,
   limit: 20,
+}
+
+export const mockMontageCapabilities: MontageCapabilityListResponse = {
+  enabled: true,
+  default_pipeline: 'cinematic',
+  max_duration_seconds: 600,
+  max_assets: 20,
+  items: [
+    {
+      key: 'cinematic',
+      display_name: '电影感制作',
+      description: '品牌片、预告片与情绪叙事',
+      best_for: ['品牌发布', '概念预告', '氛围短片'],
+      source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+      output_hint: '一条完整成片',
+      source_requirement: 'optional',
+      output_mode: 'single',
+      recommended_duration_seconds: 30,
+    },
+    {
+      key: 'talking-head',
+      display_name: '口播精剪',
+      description: '人物讲解、访谈与课程内容',
+      best_for: ['人物口播', '课程讲解', '采访精剪'],
+      source_hint: '需要一段包含人物讲话的原始视频',
+      output_hint: '一条带字幕的精剪视频',
+      source_requirement: 'video',
+      output_mode: 'single',
+      recommended_duration_seconds: 60,
+    },
+    {
+      key: 'screen-demo',
+      display_name: '屏幕演示',
+      description: '产品教程、软件操作与终端流程',
+      best_for: ['产品演示', '使用教程', '终端操作'],
+      source_hint: '可上传屏幕录制，或在说明中给出可复现的操作步骤',
+      output_hint: '一条清晰的演示视频',
+      source_requirement: 'optional',
+      output_mode: 'single',
+      recommended_duration_seconds: 60,
+    },
+    {
+      key: 'clip-factory',
+      display_name: '长视频拆条',
+      description: '从直播、播客或访谈中提炼短视频',
+      best_for: ['直播切片', '播客拆条', '访谈精选'],
+      source_hint: '需要一段长视频或音频作为拆条来源',
+      output_hint: '多条可独立发布的短视频',
+      source_requirement: 'video_or_audio',
+      output_mode: 'multiple',
+      recommended_duration_seconds: 45,
+    },
+  ],
 }
 
 export const mockPlans: PaginatedResponse<Plan> = {
@@ -232,6 +286,7 @@ export const mockAgentPackCatalog: AgentPackCatalog = {
 
 export const handlers = [
   http.get('/api/v1/agent-packs', async () => HttpResponse.json({ code: 0, msg: 'ok', data: mockAgentPackCatalog })),
+  http.get('/api/v1/montage-capabilities', async () => HttpResponse.json({ code: 0, msg: 'ok', data: mockMontageCapabilities })),
   // Auth
   http.post('/api/v1/auth/login', async () => {
     return HttpResponse.json({

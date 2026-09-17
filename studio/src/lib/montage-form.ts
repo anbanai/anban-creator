@@ -16,7 +16,7 @@ export function initialMontageInput(
     pipeline_key: input?.pipeline_key ?? defaults?.default_pipeline ?? '',
     source_assets: input?.source_assets ?? [],
     preferences: {
-      duration_seconds: input?.preferences?.duration_seconds ?? defaults?.preferences?.duration_seconds ?? 30,
+      duration_seconds: input?.preferences?.duration_seconds ?? defaults?.preferences?.duration_seconds,
       style: input?.preferences?.style ?? defaults?.preferences?.style ?? '',
       music_prompt: input?.preferences?.music_prompt ?? defaults?.preferences?.music_prompt ?? '',
       subtitle_mode: input?.preferences?.subtitle_mode ?? defaults?.preferences?.subtitle_mode ?? '',

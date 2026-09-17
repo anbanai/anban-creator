@@ -152,6 +152,29 @@ vi.mock('@/lib/api', async () => {
           ],
         }),
       },
+      montageCapabilities: {
+        ...actual.api.montageCapabilities,
+        list: vi.fn().mockResolvedValue({
+          enabled: true,
+          default_pipeline: 'cinematic',
+          max_duration_seconds: 600,
+          max_assets: 20,
+          items: [
+            {
+              key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
+              best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+              output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
+              recommended_duration_seconds: 30,
+            },
+            {
+              key: 'talking-head', display_name: '口播精剪', description: '人物讲解、访谈与课程内容',
+              best_for: ['人物口播', '采访精剪'], source_hint: '需要一段包含人物讲话的原始视频',
+              output_hint: '一条带字幕的精剪视频', source_requirement: 'video', output_mode: 'single',
+              recommended_duration_seconds: 60,
+            },
+          ],
+        }),
+      },
     },
   }
 })
@@ -622,12 +645,12 @@ describe('TasksPage Montage creation', () => {
     platform: 'montage',
     name: 'Montage 项目',
     montage_defaults: {
-      default_pipeline: 'social-short',
+      default_pipeline: 'cinematic',
       preferences: {
         duration_seconds: 45,
         style: 'clean product film',
         music_prompt: 'minimal electronic',
-        subtitle_mode: 'burned-in',
+        subtitle_mode: 'burned_in',
         voiceover_mode: 'narrated',
       },
       asset_guidance: '优先使用实拍素材',
@@ -655,11 +678,12 @@ describe('TasksPage Montage creation', () => {
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByDisplayValue('social-short')).toBeInTheDocument()
-    expect(screen.getByLabelText('时长（秒）')).toHaveValue(45)
+    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
+    fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
     expect(screen.getByLabelText('音乐提示')).toHaveValue('minimal electronic')
-    expect(screen.getByLabelText('字幕模式')).toHaveValue('burned-in')
-    expect(screen.getByLabelText('配音模式')).toHaveValue('narrated')
+    expect(screen.getByLabelText('字幕')).toHaveValue('burned_in')
+    expect(screen.getByLabelText('配音')).toHaveValue('narrated')
     expect(screen.getByText('final_video')).toBeInTheDocument()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
 
@@ -682,7 +706,7 @@ describe('TasksPage Montage creation', () => {
       project_id: montageProject.id,
       montage_input: {
         brief: '新品发布短片',
-        pipeline_key: 'social-short',
+        pipeline_key: 'cinematic',
         source_assets: [{
           type: 'video_url',
           url: '/source.mp4',
@@ -694,7 +718,7 @@ describe('TasksPage Montage creation', () => {
           duration_seconds: 45,
           style: 'clean product film',
           music_prompt: 'minimal electronic',
-          subtitle_mode: 'burned-in',
+          subtitle_mode: 'burned_in',
           voiceover_mode: 'narrated',
         },
         delivery_targets: ['final_video', 'subtitles'],

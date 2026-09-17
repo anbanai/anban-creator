@@ -77,6 +77,9 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		wechatAnalyticsHandler := handler.NewWechatAnalyticsHandler(wechatTrackingSvc, &logger)
 		channelsAnalyticsHandler := handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
+		montageCapabilityHandler := handler.NewMontageCapabilityHandler(
+			service.NewMontageCapabilityService(cfg.Montage),
+		)
 
 		svcs = &Services{
 			Config:                   cfg,
@@ -94,6 +97,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			WechatAnalyticsHandler:   wechatAnalyticsHandler,
 			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
+			MontageCapabilityHandler: montageCapabilityHandler,
 		}
 	} else {
 		svcs = &Services{

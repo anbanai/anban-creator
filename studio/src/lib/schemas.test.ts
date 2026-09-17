@@ -362,6 +362,25 @@ describe('createTaskSchema', () => {
     }
   })
 
+  it('accepts existing montage media aliases from the API', () => {
+    const result = createTaskSchema.safeParse({
+      project_id: 'project-montage',
+      type: 'montage',
+      montage_input: {
+        brief: '复用历史素材',
+        source_assets: [
+          { type: 'video', task_file_id: 'task-file-video' },
+          { type: 'audio', url: 'https://example.com/source.m4a' },
+        ],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.montage_input?.source_assets.map((asset) => asset.type)).toEqual(['video', 'audio'])
+    }
+  })
+
   it('requires brief for montage tasks', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'project-montage',

@@ -76,6 +76,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
+		montageCapabilities: {
+			...actual.api.montageCapabilities,
+			list: vi.fn(),
+		},
 		agentPacks: {
 			...actual.api.agentPacks,
 			list: vi.fn().mockResolvedValue({ packs: [] }),
@@ -105,6 +109,26 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
+    vi.mocked(api.montageCapabilities.list).mockReset().mockResolvedValue({
+      enabled: true,
+      default_pipeline: 'cinematic',
+      max_duration_seconds: 600,
+      max_assets: 20,
+      items: [
+        {
+          key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
+          best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
+          output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
+          recommended_duration_seconds: 30,
+        },
+        {
+          key: 'talking-head', display_name: '口播精剪', description: '人物讲解、访谈与课程内容',
+          best_for: ['人物口播', '采访精剪'], source_hint: '需要一段包含人物讲话的原始视频',
+          output_hint: '一条带字幕的精剪视频', source_requirement: 'video', output_mode: 'single',
+          recommended_duration_seconds: 60,
+        },
+      ],
+    })
     uploadToOSSMock.mockResolvedValue({
       uploadSessionId: '11111111-1111-4111-8111-111111111111',
       uploadId: 'upload-project-reference',
@@ -151,7 +175,7 @@ describe('ProjectsPage', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
     expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('Montage')
-    expect(within(dialog).getByText('Montage 默认配置')).toBeInTheDocument()
+    expect(within(dialog).getByText('视频默认设置')).toBeInTheDocument()
   })
 
   it('does not ask seednote projects for a publishing author', async () => {
@@ -344,15 +368,15 @@ describe('ProjectsPage', () => {
 
     render(<ProjectsPage />)
 
-    expect(await screen.findByText('Montage 默认配置')).toBeInTheDocument()
+    expect(await screen.findByText('视频默认设置')).toBeInTheDocument()
     expect(screen.getByText('人物参考')).toBeInTheDocument()
     expect(screen.getByText('封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: 'Launch montage' } })
-    fireEvent.change(screen.getByLabelText('默认 Pipeline'), { target: { value: 'social-short' } })
+    fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
     fireEvent.change(screen.getByLabelText('音乐提示'), { target: { value: 'minimal electronic' } })
-    fireEvent.change(screen.getByLabelText('字幕模式'), { target: { value: 'burned-in' } })
-    fireEvent.change(screen.getByLabelText('配音模式'), { target: { value: 'narrated' } })
+    fireEvent.change(screen.getByLabelText('默认字幕'), { target: { value: 'burned_in' } })
+    fireEvent.change(screen.getByLabelText('默认配音'), { target: { value: 'narrated' } })
     fireEvent.change(screen.getByLabelText('素材使用说明'), { target: { value: '优先使用实拍素材' } })
     const deliveryInput = screen.getByPlaceholderText('输入交付目标后按回车')
     fireEvent.change(deliveryInput, { target: { value: 'final_video' } })
@@ -363,11 +387,11 @@ describe('ProjectsPage', () => {
       platform: 'montage',
       name: 'Launch montage',
       montage_defaults: {
-        default_pipeline: 'social-short',
+        default_pipeline: 'talking-head',
         preferences: expect.objectContaining({
           duration_seconds: 45,
           music_prompt: 'minimal electronic',
-          subtitle_mode: 'burned-in',
+          subtitle_mode: 'burned_in',
           voiceover_mode: 'narrated',
         }),
         asset_guidance: '优先使用实拍素材',
@@ -393,7 +417,7 @@ describe('ProjectsPage', () => {
       reference_image: null,
       image_ratio: '16:9',
       montage_defaults: {
-        default_pipeline: 'social-short',
+        default_pipeline: 'cinematic',
         preferences: { duration_seconds: 60, music_prompt: 'cinematic' },
         asset_guidance: '保留品牌标志',
         delivery_targets: ['final_video', 'subtitles'],
@@ -410,7 +434,7 @@ describe('ProjectsPage', () => {
 
     await screen.findByText('Saved montage')
     await clickProjectAction('Saved montage', '编辑项目')
-    expect(await screen.findByLabelText('默认 Pipeline')).toHaveValue('social-short')
+    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
     expect(screen.getByText('默认视频比例')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText('默认时长（秒）')).toHaveValue(60)
@@ -425,11 +449,30 @@ describe('ProjectsPage', () => {
       platform: 'montage',
       image_ratio: '16:9',
       montage_defaults: expect.objectContaining({
-        default_pipeline: 'social-short',
+        default_pipeline: 'cinematic',
         preferences: expect.objectContaining({ duration_seconds: 45, music_prompt: 'cinematic' }),
         asset_guidance: '保留品牌标志',
         delivery_targets: ['final_video', 'subtitles'],
       }),
     })))
+  })
+
+  it('blocks saving a Montage project whose historical pipeline is no longer available', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      ...projectWithReference,
+      id: 'montage-retired',
+      platform: 'montage',
+      name: 'Retired montage',
+      montage_defaults: {
+        default_pipeline: 'retired-pipeline',
+        preferences: { duration_seconds: 30 },
+      },
+    }])
+
+    render(<ProjectsPage />)
+
+    await clickProjectAction('Retired montage', '编辑项目')
+    expect(await screen.findByText('当前视频类型已停用，请重新选择')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更新' })).toBeDisabled()
   })
 })

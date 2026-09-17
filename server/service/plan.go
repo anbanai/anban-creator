@@ -24,11 +24,12 @@ var (
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
-	repo             repository.Repository
-	logger           *zerolog.Logger
-	referenceAssets  *ReferenceAssetService
-	agentProfiles    *AgentProfileRegistry
-	billingWalletSvc *BillingWalletService
+	repo                repository.Repository
+	logger              *zerolog.Logger
+	referenceAssets     *ReferenceAssetService
+	agentProfiles       *AgentProfileRegistry
+	billingWalletSvc    *BillingWalletService
+	montageCapabilities *MontageCapabilityService
 }
 
 // NewPlanService creates a new PlanService.
@@ -51,6 +52,12 @@ func (s *PlanService) SetAgentProfileRegistry(registry *AgentProfileRegistry) {
 func (s *PlanService) SetBillingWalletService(wallet *BillingWalletService) {
 	if s != nil {
 		s.billingWalletSvc = wallet
+	}
+}
+
+func (s *PlanService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
+	if s != nil {
+		s.montageCapabilities = capabilities
 	}
 }
 
@@ -145,6 +152,17 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
 	}
 	if model.IsMontagePlatform(project.Platform) {
+		if s.montageCapabilities != nil {
+			var input *model.MontageInput
+			if p.MontageInput != nil {
+				copy := *p.MontageInput
+				input = &copy
+			}
+			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
+				return nil, err
+			}
+			p.MontageInput = input
+		}
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
@@ -432,6 +450,13 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		}
 		if !model.IsMontagePlatform(project.Platform) {
 			return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
+		}
+		if s.montageCapabilities != nil {
+			copy := *p.MontageInput
+			if err := s.montageCapabilities.NormalizeAndValidateInput(&copy, project.MontageDefaults.Data()); err != nil {
+				return nil, err
+			}
+			p.MontageInput = &copy
 		}
 		if strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)

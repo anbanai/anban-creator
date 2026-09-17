@@ -1,4 +1,4 @@
-export type MontageAssetType = 'text' | 'image_url' | 'video_url' | 'audio_url' | 'document_url'
+export type MontageAssetType = 'text' | 'image_url' | 'video' | 'video_url' | 'audio' | 'audio_url' | 'document_url'
 
 export interface MontageAsset {
   type: MontageAssetType
@@ -25,4 +25,27 @@ export interface MontageInput {
   preferences?: MontagePreferences
   delivery_targets?: string[]
   advanced?: Record<string, unknown>
+}
+
+export type MontageSourceRequirement = 'optional' | 'video' | 'video_or_audio'
+export type MontageOutputMode = 'single' | 'multiple'
+
+export interface MontagePipelineCapability {
+  key: string
+  display_name: string
+  description: string
+  best_for: string[]
+  source_hint: string
+  output_hint: string
+  source_requirement: MontageSourceRequirement
+  output_mode: MontageOutputMode
+  recommended_duration_seconds: number
+}
+
+export interface MontageCapabilityListResponse {
+  enabled: boolean
+  default_pipeline: string
+  max_duration_seconds: number
+  max_assets: number
+  items: MontagePipelineCapability[]
 }

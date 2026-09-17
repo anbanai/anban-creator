@@ -96,6 +96,7 @@ export function TaskFormDialog({
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
   const [montageUploading, setMontageUploading] = useState(false)
+  const [montageReady, setMontageReady] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
@@ -243,6 +244,7 @@ export function TaskFormDialog({
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
+    setMontageReady(false)
     setShowDirtyDialog(false)
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
@@ -296,6 +298,7 @@ export function TaskFormDialog({
     form.reset(createTaskFormDefaults())
     attachmentController.clear()
     setMontageUploading(false)
+    setMontageReady(false)
     setShowDirtyDialog(false)
     onOpenChange(false)
   }
@@ -311,6 +314,7 @@ export function TaskFormDialog({
 
   function changeProject(id: string | null) {
     setMontageUploading(false)
+    setMontageReady(false)
     const project = id ? projectMap.get(id) : undefined
     const current = {
       ...form.getValues(),
@@ -341,7 +345,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -470,7 +474,7 @@ export function TaskFormDialog({
       placeholder="描述创作目标、内容要求和素材使用方式..."
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
-      submitDisabled={Boolean(creationBlocker)}
+      submitDisabled={Boolean(creationBlocker) || (isMontageTask && !montageReady)}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
@@ -489,7 +493,11 @@ export function TaskFormDialog({
           <DialogHeader className="border-b border-border px-4 py-3">
             <DialogTitle>{mode === 'clone' ? '克隆任务' : '新建任务'}</DialogTitle>
             <DialogDescription>
-              {mode === 'clone' ? '编辑完整配置并创建一份新任务。' : '配置内容目标、图片选项和执行方式。'}
+              {mode === 'clone'
+                ? '编辑完整配置并创建一份新任务。'
+                : isMontageTask
+                  ? '配置视频目标、来源素材和成片方式。'
+                  : '配置内容目标、图片选项和执行方式。'}
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -533,13 +541,14 @@ export function TaskFormDialog({
               </div>
 
               <div className="space-y-4 pt-1">
-                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">图片/高级</p> : null}
+                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask ? '视频设置' : '图片/高级'}</p> : null}
 
                 {isMontageTask ? (
                   <MontageCreationPanel
                     form={form}
                     fieldRoot="montage_input"
                     onUploadingChange={setMontageUploading}
+                    onReadyChange={setMontageReady}
                     briefField={promptComposer}
                   />
                 ) : null}
@@ -793,7 +802,7 @@ export function TaskFormDialog({
               type="submit"
               form="task-create-form"
               loading={isSubmitting}
-              disabled={isSubmitting || Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && montageUploading)}
+              disabled={isSubmitting || Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))}
             >
               {submitLabel}
             </Button>

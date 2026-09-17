@@ -357,9 +357,12 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var asynqClient *scheduler.AsynqClient
+	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		projectSvc = service.NewProjectService(repo, log)
+		planSvc.SetMontageCapabilityService(montageCapabilitySvc)
+		projectSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		wechatPublicationSvc = service.NewWechatPublicationService(repo, nil, log)
@@ -391,6 +394,7 @@ func main() {
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		planSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetMontageConfig(cfg.Montage)
+		taskSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		taskSvc.SetExecutorMaxTurns(cfg.Claude.MaxTurns)
 		taskSvc.SetRuntimeDispatcher(runtimeDispatcher)
@@ -513,6 +517,7 @@ func main() {
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
+	var montageCapabilityHandler *handler.MontageCapabilityHandler
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
@@ -609,6 +614,7 @@ func main() {
 		imageCatalog = fixedBilling.Catalog
 	}
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
+	montageCapabilityHandler = handler.NewMontageCapabilityHandler(montageCapabilitySvc)
 	// Wire capability routing + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
 		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
@@ -804,6 +810,7 @@ func main() {
 		AIEntryHandler:           aiEntryHandler,
 		FeedbackHandler:          feedbackHandler,
 		ImageCapabilityHandler:   imageCapabilityHandler,
+		MontageCapabilityHandler: montageCapabilityHandler,
 		TemplateHandler:          templateHandler,
 		ViralAnalysisHandler:     viralAnalysisHandler,
 		PosterHandler:            posterHandler,

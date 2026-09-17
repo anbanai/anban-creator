@@ -75,12 +75,15 @@ func validateProjectWechatCredentials(project *model.Project) error {
 	return nil
 }
 
-func validateProjectMontageDefaults(project *model.Project) error {
+func validateProjectMontageDefaults(project *model.Project, capabilities *MontageCapabilityService) error {
 	if project == nil || !project.MontageDefaultsSet {
 		return nil
 	}
 	if !model.IsMontagePlatform(project.Platform) {
 		return fmt.Errorf("%w: montage_defaults can only be set on montage projects", ErrProjectMontageDefaults)
+	}
+	if capabilities != nil {
+		return capabilities.ValidateProjectDefaults(project.MontageDefaults.Data())
 	}
 	duration := project.MontageDefaults.Data().Preferences.DurationSeconds
 	if duration < 0 || duration > 600 {
@@ -91,10 +94,11 @@ func validateProjectMontageDefaults(project *model.Project) error {
 
 // ProjectService handles project CRUD operations with ownership verification.
 type ProjectService struct {
-	repo        repository.Repository
-	logger      *zerolog.Logger
-	templateSvc *TemplateService
-	memory      ProjectMemoryLifecycle
+	repo                repository.Repository
+	logger              *zerolog.Logger
+	templateSvc         *TemplateService
+	memory              ProjectMemoryLifecycle
+	montageCapabilities *MontageCapabilityService
 }
 
 type ProjectMemoryLifecycle interface {
@@ -115,6 +119,12 @@ func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle
 	s.memory = memory
 }
 
+func (s *ProjectService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
+	if s != nil {
+		s.montageCapabilities = capabilities
+	}
+}
+
 // Create creates a new project for the given user.
 // It sets UserID and Status, validates the platform, then persists via the repository.
 //
@@ -132,7 +142,7 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if ch.Platform == model.PlatformArticle && ch.Config.WechatPublishMode == "" {
 		ch.Config.WechatPublishMode = model.WechatPublishModeManual
 	}
-	if err := validateProjectMontageDefaults(ch); err != nil {
+	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
 		return nil, err
 	}
 	if err := validateProjectAgentConfig(ch); err != nil {
@@ -256,7 +266,7 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.MontageDefaultsSet {
 		candidate := *ch
 		candidate.Platform = effectivePlatform
-		if err := validateProjectMontageDefaults(&candidate); err != nil {
+		if err := validateProjectMontageDefaults(&candidate, s.montageCapabilities); err != nil {
 			return nil, err
 		}
 	}

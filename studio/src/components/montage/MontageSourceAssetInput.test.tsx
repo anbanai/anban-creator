@@ -13,10 +13,14 @@ function ControlledAssets({
   initialValue = [],
   onValueChange,
   onUploadingChange,
+	hint,
+	maxCount,
 }: {
   initialValue?: MontageAsset[]
   onValueChange?: (value: MontageAsset[]) => void
   onUploadingChange?: (uploading: boolean) => void
+	hint?: string
+	maxCount?: number
 }) {
   const [value, setValue] = useState(initialValue)
   return (
@@ -27,6 +31,8 @@ function ControlledAssets({
         onValueChange?.(next)
       }}
       onUploadingChange={onUploadingChange}
+	  hint={hint}
+	  maxCount={maxCount}
     />
   )
 }
@@ -106,5 +112,62 @@ describe('MontageSourceAssetInput', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '删除 文案要求' }))
     expect(onValueChange).toHaveBeenLastCalledWith([])
+  })
+
+  it('uses the selected pipeline hint and server asset limit', () => {
+    render(
+      <ControlledAssets
+        initialValue={[{ type: 'video_url', url: '/source.mp4', file_name: 'source.mp4' }]}
+        hint="需要一段包含人物讲话的原始视频"
+        maxCount={1}
+      />,
+    )
+
+    expect(screen.getByText('需要一段包含人物讲话的原始视频')).toBeInTheDocument()
+    expect(screen.getByText('1/1')).toBeInTheDocument()
+  })
+
+  it('normalizes an existing video alias when another source is uploaded', async () => {
+    vi.mocked(uploadToOSS).mockResolvedValue({
+      uploadSessionId: 'session-new',
+      uploadId: 'upload-new',
+      key: 'uploads/new-source.png',
+      previewUrl: '/new-source.png',
+      publicUrl: '/new-source.png',
+      contentType: 'image/png',
+      size: 42,
+    })
+    const onValueChange = vi.fn()
+    render(
+      <ControlledAssets
+        initialValue={[{
+          type: 'video',
+          url: '/legacy-source.mp4',
+          file_name: 'legacy-source.mp4',
+          mime_type: 'video/mp4',
+        }]}
+        onValueChange={onValueChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('添加参考素材'), {
+      target: { files: [new File(['source'], 'new-source.png', { type: 'image/png' })] },
+    })
+
+    await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
+      {
+        type: 'video_url',
+        url: '/legacy-source.mp4',
+        file_name: 'legacy-source.mp4',
+        mime_type: 'video/mp4',
+      },
+      {
+        type: 'image_url',
+        url: '/new-source.png',
+        file_name: 'new-source.png',
+        mime_type: 'image/png',
+        file_size: 42,
+      },
+    ]))
   })
 })

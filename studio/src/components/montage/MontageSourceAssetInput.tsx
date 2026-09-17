@@ -6,6 +6,8 @@ interface MontageSourceAssetInputProps {
   value: MontageAsset[]
   onChange: (value: MontageAsset[]) => void
   onUploadingChange?: (uploading: boolean) => void
+  hint?: string
+  maxCount?: number
 }
 
 type AdapterAttachment = InputAttachment & {
@@ -14,7 +16,9 @@ type AdapterAttachment = InputAttachment & {
 
 const attachmentTypeByAssetType: Record<MontageAssetType, InputAttachmentType> = {
   image_url: 'image',
+  video: 'video',
   video_url: 'video',
+  audio: 'audio',
   audio_url: 'audio',
   document_url: 'document',
   text: 'text',
@@ -51,15 +55,21 @@ function toMontageAsset(attachment: AdapterAttachment): MontageAsset {
   return asset
 }
 
-export function MontageSourceAssetInput({ value, onChange, onUploadingChange }: MontageSourceAssetInputProps) {
+export function MontageSourceAssetInput({
+  value,
+  onChange,
+  onUploadingChange,
+  hint = '支持图片、视频和音频参考素材。',
+  maxCount = 20,
+}: MontageSourceAssetInputProps) {
   return (
     <ReferenceMaterialInput
       value={value.map(toAttachment)}
       onChange={(attachments) => onChange(attachments.map((attachment) => toMontageAsset(attachment as AdapterAttachment)))}
       allowedTypes={['image', 'video', 'audio']}
-      maxCount={20}
+      maxCount={maxCount}
       compact
-      hint="支持图片、视频和音频参考素材。"
+      hint={hint}
       uploadPurpose="montage_asset"
       onUploadingChange={onUploadingChange}
     />

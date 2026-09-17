@@ -84,7 +84,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   montage_defaults: {
     default_pipeline: '',
     preferences: {
-      duration_seconds: 30,
+      duration_seconds: undefined,
       style: '',
       music_prompt: '',
       subtitle_mode: '',
@@ -165,6 +165,7 @@ export default function ProjectsPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
   const [referenceUploading, setReferenceUploading] = useState(false)
+  const [montageDefaultsReady, setMontageDefaultsReady] = useState(false)
   const [referenceAnalysisUrl, setReferenceAnalysisUrl] = useState('')
   const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
@@ -432,6 +433,7 @@ export default function ProjectsPage() {
     })
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
+    setMontageDefaultsReady(false)
     setModalOpen(true)
   }
 
@@ -445,6 +447,7 @@ export default function ProjectsPage() {
     setProfileFetchHint(null)
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
+    setMontageDefaultsReady(false)
     form.reset(projectToForm(project))
     skipAutoFetchRef.current = true
     setModalOpen(true)
@@ -465,6 +468,7 @@ export default function ProjectsPage() {
     setProfileFetchHint(null)
     setReferenceAnalysisUrl('')
     setReferenceUploading(false)
+    setMontageDefaultsReady(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
@@ -552,7 +556,7 @@ export default function ProjectsPage() {
   }
 
   function handleProjectSubmit(event?: React.BaseSyntheticEvent) {
-    if (referenceUploading) {
+    if (referenceUploading || (isMontage && !montageDefaultsReady)) {
       event?.preventDefault()
       return
     }
@@ -655,6 +659,7 @@ export default function ProjectsPage() {
                     <Select
                       value={field.value}
                       onValueChange={(v) => {
+                        setMontageDefaultsReady(false)
                         field.onChange(v)
                         form.setValue('agent_config', {}, { shouldDirty: true })
                         form.setValue(
@@ -946,7 +951,7 @@ export default function ProjectsPage() {
 				  </FormItem>
 			  )} />
 
-              {isMontage && <MontageProjectDefaultsPanel form={form} />}
+              {isMontage && <MontageProjectDefaultsPanel form={form} onReadyChange={setMontageDefaultsReady} />}
 
               {isEcommerce && (
                 <>
@@ -1042,7 +1047,7 @@ export default function ProjectsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
+            <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading || (isMontage && !montageDefaultsReady)}>
               {editingProject ? '更新' : '创建'}
             </Button>
           </DialogFooter>

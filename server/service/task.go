@@ -76,6 +76,7 @@ type TaskService struct {
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	montageCfg               srvconfig.MontageConfig
+	montageCapabilities      *MontageCapabilityService
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier *IlinkNotifier
@@ -215,6 +216,13 @@ func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 		return
 	}
 	s.montageCfg = cfg
+	s.montageCapabilities = NewMontageCapabilityService(cfg)
+}
+
+func (s *TaskService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
+	if s != nil {
+		s.montageCapabilities = capabilities
+	}
 }
 
 func defaultMontageServiceConfig() srvconfig.MontageConfig {
@@ -615,6 +623,17 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if isMontageTask {
 		quantity = 1
+		if !p.PreserveFrozenConfig && s.montageCapabilities != nil {
+			var input *model.MontageInput
+			if p.MontageInput != nil {
+				copy := *p.MontageInput
+				input = &copy
+			}
+			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
+				return nil, err
+			}
+			p.MontageInput = input
+		}
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
@@ -1000,6 +1019,15 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	montageExecutionTarget := model.ExecutionTargetCloud
 	if isMontageTask {
 		input := plan.MontageInput.Data()
+		if s.montageCapabilities != nil {
+			defaults := model.MontageDefaults{}
+			if project != nil {
+				defaults = project.MontageDefaults.Data()
+			}
+			if err := s.montageCapabilities.NormalizeAndValidateInput(&input, defaults); err != nil {
+				return nil, err
+			}
+		}
 		planMontageInput = &input
 		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
 			Config:          s.montageCfg,
